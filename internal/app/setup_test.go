@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/config"
 )
 
 func setupModel(t *testing.T, a *App, handler http.HandlerFunc) *httptest.Server {

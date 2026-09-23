@@ -18,11 +18,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/diagnostics"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
-	"github.com/shhac/agent-assistant/internal/statepath"
-	"github.com/shhac/agent-assistant/internal/workerbroker"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/statepath"
+	"github.com/shhac/crew-assistant/internal/workerbroker"
 )
 
 type environment struct {

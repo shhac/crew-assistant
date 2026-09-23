@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/config"
 )
 
 func canonicalDirectory(t *testing.T, path string) string {

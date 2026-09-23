@@ -266,7 +266,7 @@ export async function api<T>(
     credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",
-      "X-Requested-With": "agent-assistant",
+      "X-Requested-With": "crew-assistant",
       ...options.headers,
     },
   });

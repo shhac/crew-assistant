@@ -256,7 +256,7 @@ export function ModelSettings({
                 Configuration, login and session data stay here. After saving a
                 new path, sign in with{" "}
                 <code>
-                  agent-assistant model login
+                  crew-assistant model login
                   {group === "worker_model" ? " --profile worker" : ""}
                 </code>
                 .

@@ -147,25 +147,13 @@ func TestLegacyAssistantTokenCapDoesNotChangeWorkerCap(t *testing.T) {
 	}
 }
 
-func TestNamespaceKeepsLegacyConfigAndStateTogether(t *testing.T) {
+func TestPathsUseReverseDNSNamespaceUnderXDGRoots(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
-	fresh, err := Paths()
-	if err != nil || !strings.Contains(fresh.Config, Namespace) || !strings.Contains(fresh.State, Namespace) {
-		t.Fatal(fresh, err)
-	}
-	legacy := filepath.Join(root, "state", "agent-assistant", "state.db")
-	os.MkdirAll(filepath.Dir(legacy), 0700)
-	os.WriteFile(legacy, []byte("state"), 0600)
 	got, err := Paths()
-	if err != nil || got.State != legacy || got.Config != filepath.Join(root, "config", "agent-assistant", "config.json") {
+	if err != nil || got.Config != filepath.Join(root, "config", "app.paulie.crew-assistant", "config.json") || got.State != filepath.Join(root, "state", "app.paulie.crew-assistant", "state.db") {
 		t.Fatal(got, err)
-	}
-	os.MkdirAll(filepath.Dir(fresh.Config), 0700)
-	os.WriteFile(fresh.Config, []byte("{}"), 0600)
-	if _, err = Paths(); err == nil {
-		t.Fatal("ambiguous namespaces accepted")
 	}
 }
 func TestConnectionProfilesAndIdentityValidation(t *testing.T) {

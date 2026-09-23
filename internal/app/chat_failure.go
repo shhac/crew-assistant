@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/shhac/agent-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/lib-agent-harness/completion"
 )
 

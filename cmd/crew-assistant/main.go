@@ -1,6 +1,6 @@
 package main
 
-import "github.com/shhac/agent-assistant/internal/cli"
+import "github.com/shhac/crew-assistant/internal/cli"
 
 var version = "dev"
 

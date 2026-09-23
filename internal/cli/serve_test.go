@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
-	"github.com/shhac/agent-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/config"
 	libcli "github.com/shhac/lib-agent-cli/cli"
 	output "github.com/shhac/lib-agent-output"
 )

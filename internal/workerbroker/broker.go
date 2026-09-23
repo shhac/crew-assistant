@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/shhac/agent-assistant/internal/diagnostics"
-	"github.com/shhac/agent-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/engine"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
 )
 
 type Broker struct {

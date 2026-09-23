@@ -135,7 +135,7 @@ describe("owner dashboard flows", () => {
     });
     expect(submitted[0].options!.headers).toHaveProperty(
       "X-Requested-With",
-      "agent-assistant",
+      "crew-assistant",
     );
     expect(submitted[0].options!.credentials).toBe("same-origin");
   });
@@ -441,7 +441,7 @@ describe("owner dashboard flows", () => {
     render(<App />);
     await screen.findByLabelText("Dashboard access code");
     expect(
-      screen.getByText("agent-assistant dashboard open --print"),
+      screen.getByText("crew-assistant dashboard open --print"),
     ).toBeTruthy();
     expect(
       screen.getByText(/computer hosting your assistant/),

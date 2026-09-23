@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/statepath"
+	"github.com/shhac/crew-assistant/internal/statepath"
 )
 
 // Base images contain only general-purpose tools. No project directory, Docker

@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/diagnostics"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
-	"github.com/shhac/agent-assistant/internal/quota"
-	"github.com/shhac/agent-assistant/internal/workerbroker"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/quota"
+	"github.com/shhac/crew-assistant/internal/workerbroker"
 	"github.com/spf13/cobra"
 )
 
@@ -158,7 +158,7 @@ func registerWorker(root *cobra.Command, o *options) {
 	cmd.Flags().StringVar(&socket, "docker-socket", "", "Local Docker Unix socket (defaults to /var/run/docker.sock)")
 	cmd.Flags().StringVar(&state, "worker-state", "", "Private worker state directory (defaults beside assistant state)")
 	cmd.Flags().StringVar(&addr, "http", "127.0.0.1:8350", "Loopback worker API address")
-	cmd.Flags().StringVar(&tokenEnv, "token-env", "AGENT_ASSISTANT_WORKER_TOKEN", "Environment variable containing the broker API token")
+	cmd.Flags().StringVar(&tokenEnv, "token-env", "CREW_ASSISTANT_WORKER_TOKEN", "Environment variable containing the broker API token")
 	cmd.Flags().StringVar(&model, "model", "", "Worker model (defaults to worker_model.model)")
 	cmd.Flags().StringVar(&engineName, "engine", "", "Worker engine (defaults to worker_model.engine)")
 	cmd.Flags().StringVar(&effort, "effort", "", "Reasoning effort (defaults to worker_model.effort)")

@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/shhac/agent-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/config"
 	"sort"
 	"strings"
 	"sync"

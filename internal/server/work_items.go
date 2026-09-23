@@ -1,8 +1,8 @@
 package server
 
 import (
-	"github.com/shhac/agent-assistant/internal/app"
-	"github.com/shhac/agent-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/app"
+	"github.com/shhac/crew-assistant/internal/core"
 	"net/http"
 )
 

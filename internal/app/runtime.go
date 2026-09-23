@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/core"
-	"github.com/shhac/agent-assistant/internal/diagnostics"
-	linearapi "github.com/shhac/agent-assistant/internal/integrations/linear"
-	slackapi "github.com/shhac/agent-assistant/internal/integrations/slack"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
+	linearapi "github.com/shhac/crew-assistant/internal/integrations/linear"
+	slackapi "github.com/shhac/crew-assistant/internal/integrations/slack"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
 )
 
 // Run owns deterministic supervision. noDispatch is fixed at process boot;

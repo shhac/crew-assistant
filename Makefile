@@ -1,10 +1,10 @@
-BINARY := agent-assistant
+BINARY := crew-assistant
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
 .PHONY: build dashboard test test-race check dev
 build:
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/agent-assistant
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/crew-assistant
 
 dashboard:
 	npm --prefix internal/dashboard/ui run build
@@ -22,7 +22,7 @@ check:
 	npm --prefix internal/dashboard/ui test
 
 dev:
-	go run ./cmd/agent-assistant $(ARGS)
+	go run ./cmd/crew-assistant $(ARGS)
 
 .PHONY: release release-check
 release: release-check

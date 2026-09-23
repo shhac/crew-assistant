@@ -1,6 +1,6 @@
 package workerbroker
 
-import "github.com/shhac/agent-assistant/internal/diagnostics"
+import "github.com/shhac/crew-assistant/internal/diagnostics"
 
 func (b *Broker) reportFailure(id, stage string, err error) {
 	event := diagnostics.Event{Component: "worker", Stage: stage, ProjectID: b.cfg.ProjectID, RunID: id, Engine: b.cfg.Engine}

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/core"
 )
 
 func TestProjectToolsTrackAndRefineDirectoryMetadata(t *testing.T) {

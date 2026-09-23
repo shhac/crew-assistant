@@ -2,8 +2,8 @@ package server
 
 import (
 	"errors"
-	"github.com/shhac/agent-assistant/internal/app"
-	"github.com/shhac/agent-assistant/internal/filesystem"
+	"github.com/shhac/crew-assistant/internal/app"
+	"github.com/shhac/crew-assistant/internal/filesystem"
 	"net/http"
 	"os"
 )

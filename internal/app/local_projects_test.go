@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/core"
-	"github.com/shhac/agent-assistant/internal/engine"
-	"github.com/shhac/agent-assistant/internal/integrations/connections"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/integrations/connections"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
 )
 
 // Exercise the same coordination tools and supervision used by a live daemon:

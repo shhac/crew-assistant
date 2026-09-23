@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/workerbroker"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/workerbroker"
 )
 
 type idleBroker struct {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/core"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
 )
 
 type AgentControls struct {

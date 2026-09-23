@@ -21,7 +21,7 @@ func TestPrivateAPIAndPairing(t *testing.T) {
 		}
 		r := httptest.NewRequest(method, "http://127.0.0.1:8340"+path, strings.NewReader(body))
 		r.RemoteAddr = "127.0.0.1:1234"
-		r.Header.Set("X-Requested-With", "agent-assistant")
+		r.Header.Set("X-Requested-With", "crew-assistant")
 		if origin != "" {
 			r.Header.Set("Origin", origin)
 		}

@@ -34,8 +34,8 @@ jobs:
       contents: write
     secrets: inherit
     with:
-      name: agent-assistant
+      name: crew-assistant
       desc: "Personal AI assistant for coordinating project agents"
-      formula_class: AgentAssistant
+      formula_class: CrewAssistant
       help_match: "A personal assistant that coordinates agents"
       # License is detected from LICENSE by the shared workflow.

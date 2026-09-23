@@ -5,14 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/shhac/agent-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/config"
 	"os"
 	"os/exec"
 	"strings"
 
-	"github.com/shhac/agent-assistant/internal/core"
-	"github.com/shhac/agent-assistant/internal/engine"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
 )
 
 var ErrAssistantBusy = errors.New("assistant reasoning is deferred before inference")

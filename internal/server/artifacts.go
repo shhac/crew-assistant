@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/shhac/agent-assistant/internal/app"
+	"github.com/shhac/crew-assistant/internal/app"
 )
 
 func registerArtifacts(mux *http.ServeMux, a *app.App) {

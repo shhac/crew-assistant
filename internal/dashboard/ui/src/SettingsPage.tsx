@@ -222,7 +222,7 @@ export function Settings({
               <Icon name="Settings" />
               <p>
                 No connections configured. Run{" "}
-                <code>agent-assistant doctor</code> to check setup.
+                <code>crew-assistant doctor</code> to check setup.
               </p>
             </div>
           )}
@@ -433,7 +433,7 @@ function ConfigurationFields({
             </label>
             <p className="field-hint" id="linear-import-hint">
               Optional. Import your assigned issues from the teams below using
-              the direct API. Projects in agent-assistant do not require Linear;
+              the direct API. Projects in crew-assistant do not require Linear;
               keep this off unless you want automatic imports from this account.
               Configured Linear CLI connections take precedence; enable imports
               on those connections instead.

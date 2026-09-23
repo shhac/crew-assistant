@@ -135,7 +135,7 @@ it("keeps new Linear connections as resources until imports are explicitly enabl
     <ConnectionsSettings connections={[]} onChange={changed} />,
   );
   expect(
-    screen.getByText("Your projects live in agent-assistant."),
+    screen.getByText("Your projects live in crew-assistant."),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Add a connection" }));
   const added = changed.mock.calls.at(-1)![0] as Connection[];

@@ -58,7 +58,7 @@ export function ConnectionsSettings({
       </div>
       {!connections.length && (
         <div className="connections-empty">
-          <p>Your projects live in agent-assistant.</p>
+          <p>Your projects live in crew-assistant.</p>
           <span>
             Add existing folders or create projects without connecting any
             service. Personal projects need no Linear workspace. Connect Linear,

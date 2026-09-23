@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/engine"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
 	"github.com/shhac/lib-agent-harness/session"
 )
 

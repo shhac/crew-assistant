@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/app"
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/core"
-	"github.com/shhac/agent-assistant/internal/filesystem"
+	"github.com/shhac/crew-assistant/internal/app"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/filesystem"
 )
 
 func TestFilesystemRequiresOwnerAndReturnsMetadataOnly(t *testing.T) {
@@ -86,7 +86,7 @@ func TestExistingProjectDirectoriesHTTP(t *testing.T) {
 		data, _ := json.Marshal(body)
 		r := httptest.NewRequest(method, "http://127.0.0.1:8340"+path, strings.NewReader(string(data)))
 		r.RemoteAddr = "127.0.0.1:4321"
-		r.Header.Set("X-Requested-With", "agent-assistant")
+		r.Header.Set("X-Requested-With", "crew-assistant")
 		if owner {
 			r.Header.Set("Authorization", "Bearer "+auth.admin)
 		}

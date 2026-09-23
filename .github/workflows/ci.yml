@@ -16,9 +16,9 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test -race ./... -count=1
-      - run: CGO_ENABLED=0 go build ./cmd/agent-assistant
+      - run: CGO_ENABLED=0 go build ./cmd/crew-assistant
       - name: Verify Windows release target compiles
-        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$RUNNER_TEMP/agent-assistant.exe" ./cmd/agent-assistant
+        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$RUNNER_TEMP/crew-assistant.exe" ./cmd/crew-assistant
   dashboard:
     runs-on: ubuntu-latest
     steps:

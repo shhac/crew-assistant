@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/config"
 )
 
 func TestModelLoginUsesConfiguredHomeWithoutChangingProcessEnvironment(t *testing.T) {

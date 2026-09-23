@@ -38,7 +38,7 @@ func Open(path string) (*Store, error) {
 	temporaryState := path == ":memory:"
 	if temporaryState {
 		var err error
-		stateDirectory, err = os.MkdirTemp("", "agent-assistant-state-")
+		stateDirectory, err = os.MkdirTemp("", "crew-assistant-state-")
 		if err != nil {
 			return nil, err
 		}

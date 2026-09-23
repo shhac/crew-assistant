@@ -64,18 +64,28 @@ For this project:
   `app.paulie.agent-slack`. This project's `agent-assistant.paulie.app`, chosen
   on 2026-09-15, was the exception.
 - The owner's live install used the legacy `~/.config/agent-assistant` and
-  `~/.local/state/agent-assistant` pair. Its assistant Codex login lived in
-  `~/.local/state/agent-assistant.paulie.app/codex`. These folders were **not
-  moved in place**, because they store absolute paths: `config.json` holds both
-  `codex_home` values, `state.db` holds project scratch directories and the
-  registered repository path, and the managed-worker JSON holds its own paths.
-  A move would have broken the old binary. The rebuild's migration would import
-  projects, memories, decisions and chat from the old locations into the new
-  namespace, rewriting the paths, and would then leave the old folders to the
-  owner to delete.
-- The registered project's directory pointed at the repository's old checkout
-  path, which the owner renamed to `crew-assistant` on 2026-09-23. The
-  migration should update it too.
+  `~/.local/state/agent-assistant` pair, with its assistant Codex login in
+  `~/.local/state/agent-assistant.paulie.app/codex`. On 2026-09-23 these were
+  moved by hand into `~/.config/app.paulie.crew-assistant` and
+  `~/.local/state/app.paulie.crew-assistant`, with `codex/` inside the state
+  directory. Every stored absolute path was rewritten, because a plain move
+  would have left them pointing at the old locations: both `codex_home` values
+  in `config.json`; the project's scratch directory, artifact paths and
+  registered repository path in `state.db`; and the managed-worker and
+  context-checkpoint JSON. The project's title changed to `crew-assistant`.
+  Chat and activity history kept the old name as it was written. A tarball of
+  the edited files, before the rewrite, went to
+  `backups/pre-crew-rename-20260923/`.
+- The code made a clean break: it dropped the legacy-pair fallback and has no
+  knowledge of either former namespace. The owner confirmed it had only ever
+  run locally, so no other installs needed a migration path.
+- **Runtime identifiers kept the old name on purpose:** the Colima profile
+  `agent-assistant` (a running VM, and a socket path recorded in the worker
+  environment), the worker image tag, container names and labels, the
+  in-container `/opt/agent-assistant/gomod` mount, and the setup-container
+  prefix. Renaming them would have orphaned the VM and failed the broker's
+  container-name check for the stored run. They belong to the worker broker,
+  which the rebuild would retire.
 - Shell completions, the README and `AGENTS.md`.
 
 Renaming `agent-code-review` would be the same checklist, carried out in that

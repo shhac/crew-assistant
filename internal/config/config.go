@@ -16,7 +16,7 @@ import (
 	"strings"
 )
 
-const Namespace = "agent-assistant.paulie.app"
+const Namespace = "app.paulie.crew-assistant"
 const DefaultAssistantName = "Milo"
 
 type Config struct {
@@ -199,35 +199,7 @@ func Paths() (FilePaths, error) {
 	if stateRoot == "" {
 		stateRoot = filepath.Join(home, ".local", "state")
 	}
-	current := FilePaths{Config: filepath.Join(configRoot, Namespace, "config.json"), State: filepath.Join(stateRoot, Namespace, "state.db")}
-	legacy := FilePaths{Config: filepath.Join(configRoot, "agent-assistant", "config.json"), State: filepath.Join(stateRoot, "agent-assistant", "state.db")}
-	has := func(p FilePaths) (bool, error) {
-		found := false
-		for _, path := range []string{p.Config, p.State} {
-			_, e := os.Stat(path)
-			if e == nil {
-				found = true
-			} else if !errors.Is(e, os.ErrNotExist) {
-				return false, e
-			}
-		}
-		return found, nil
-	}
-	old, err := has(legacy)
-	if err != nil {
-		return FilePaths{}, err
-	}
-	fresh, err := has(current)
-	if err != nil {
-		return FilePaths{}, err
-	}
-	if old && fresh {
-		return FilePaths{}, errors.New("both legacy and reverse-DNS config/state exist; choose explicit --config and --state paths to avoid splitting assistant history")
-	}
-	if old {
-		return legacy, nil
-	}
-	return current, nil
+	return FilePaths{Config: filepath.Join(configRoot, Namespace, "config.json"), State: filepath.Join(stateRoot, Namespace, "state.db")}, nil
 }
 func Load(path string) (Config, error) {
 	c := Default()

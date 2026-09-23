@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/core"
-	"github.com/shhac/agent-assistant/internal/diagnostics"
-	"github.com/shhac/agent-assistant/internal/engine"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
-	"github.com/shhac/agent-assistant/internal/managedworkers"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/managedworkers"
 )
 
 type managedWorkerService interface {

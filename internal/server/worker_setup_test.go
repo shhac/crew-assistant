@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/app"
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/core"
-	"github.com/shhac/agent-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/app"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/engine"
 )
 
 func TestCoordinateAsksForOutcomeAndKeepsProjectName(t *testing.T) {
@@ -55,7 +55,7 @@ func TestCoordinateAsksForOutcomeAndKeepsProjectName(t *testing.T) {
 	call := func(path, body string, authorized bool) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "http://127.0.0.1:8340"+path, strings.NewReader(body))
 		r.RemoteAddr = "127.0.0.1:4321"
-		r.Header.Set("X-Requested-With", "agent-assistant")
+		r.Header.Set("X-Requested-With", "crew-assistant")
 		if authorized {
 			r.Header.Set("Authorization", "Bearer "+auth.admin)
 		}

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
-	"github.com/shhac/agent-assistant/internal/quota"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/quota"
 )
 
 var errWorkerUsageHeld = errors.New("worker work held by subscription usage policy")

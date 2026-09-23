@@ -2,7 +2,7 @@ package core
 
 import (
 	"context"
-	"github.com/shhac/agent-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/config"
 	"path/filepath"
 	"strings"
 	"sync"

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/lib-agent-harness/completion"
 )
 

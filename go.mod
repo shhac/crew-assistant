@@ -1,4 +1,4 @@
-module github.com/shhac/agent-assistant
+module github.com/shhac/crew-assistant
 
 go 1.26.4
 

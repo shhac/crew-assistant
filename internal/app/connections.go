@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/shhac/agent-assistant/internal/core"
-	"github.com/shhac/agent-assistant/internal/integrations/connections"
+	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/integrations/connections"
 )
 
 func (a *App) DiscoverConnectionProfiles(ctx context.Context, tool string) (connections.Discovery, error) {

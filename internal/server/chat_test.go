@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/app"
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/app"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/core"
 )
 
 func TestChatQueueRoutesAuthenticateValidateAndRetryIdempotently(t *testing.T) {
@@ -37,7 +37,7 @@ func TestChatQueueRoutesAuthenticateValidateAndRetryIdempotently(t *testing.T) {
 			r.Header.Set("Authorization", "Bearer "+auth.admin)
 		}
 		if csrf {
-			r.Header.Set("X-Requested-With", "agent-assistant")
+			r.Header.Set("X-Requested-With", "crew-assistant")
 		}
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
@@ -114,7 +114,7 @@ func TestChatQueueHoldEditAndReorder(t *testing.T) {
 		r := httptest.NewRequest(method, "http://127.0.0.1:8340"+path, strings.NewReader(body))
 		r.RemoteAddr = "127.0.0.1:4321"
 		r.Header.Set("Authorization", "Bearer "+auth.admin)
-		r.Header.Set("X-Requested-With", "agent-assistant")
+		r.Header.Set("X-Requested-With", "crew-assistant")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		return w

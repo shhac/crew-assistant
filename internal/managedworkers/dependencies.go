@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/statepath"
-	"github.com/shhac/agent-assistant/internal/workerbroker"
+	"github.com/shhac/crew-assistant/internal/statepath"
+	"github.com/shhac/crew-assistant/internal/workerbroker"
 )
 
 type dependencyPlan struct {

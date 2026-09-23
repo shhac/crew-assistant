@@ -6,7 +6,7 @@
 dist
 node_modules
 release
-/agent-assistant
+/crew-assistant
 
 # local
 .cache

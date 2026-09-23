@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/engine"
 )
 
 func TestLoadingCaptionUsesSmallCLIWithOnlyRecentContext(t *testing.T) {

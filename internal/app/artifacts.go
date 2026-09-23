@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/shhac/agent-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/core"
 )
 
 // Artifacts are files a worker attempt preserved. The dashboard needs to hand

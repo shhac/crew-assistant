@@ -7,8 +7,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/engine"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
 )
 
 // reserveWorkerModelCall is the one place a worker's model work is authorized.

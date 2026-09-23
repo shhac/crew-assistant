@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/shhac/agent-assistant/internal/statepath"
+	"github.com/shhac/crew-assistant/internal/statepath"
 )
 
 // StateDirectory is derived from the actual opened database, not config defaults.

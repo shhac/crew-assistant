@@ -61,7 +61,7 @@ export function Login({
               Run this on the computer hosting your assistant to get a code:
             </p>
             <pre>
-              <code>agent-assistant dashboard open --print</code>
+              <code>crew-assistant dashboard open --print</code>
             </pre>
             <p>
               The code expires after five minutes and works once. It is issued

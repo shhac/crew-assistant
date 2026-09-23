@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/app"
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/app"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/core"
 )
 
 func TestWorkerDetailsRouteReturnsNamesAndRejectsCredentialEdits(t *testing.T) {

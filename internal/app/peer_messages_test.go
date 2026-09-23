@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/core"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
 )
 
 func startPeer(t *testing.T, a *App, ag core.Agent) core.Agent {

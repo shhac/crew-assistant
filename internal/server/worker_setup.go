@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/app"
-	"github.com/shhac/agent-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/app"
+	"github.com/shhac/crew-assistant/internal/core"
 )
 
 func registerWorkerSetup(mux *http.ServeMux, a *app.App) {

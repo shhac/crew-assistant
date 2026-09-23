@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/shhac/agent-assistant/internal/core"
-	"github.com/shhac/agent-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/engine"
 )
 
 type reasoningScope interface {

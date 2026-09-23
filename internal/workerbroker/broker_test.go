@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
 )
 
 const fixtureImage = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

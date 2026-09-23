@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -159,7 +159,7 @@ func TestGeneratedShellCompletionSyntax(t *testing.T) {
 			if err := root.Execute(); err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(output.String(), "agent-assistant") || output.Len() < 100 {
+			if !strings.Contains(output.String(), "crew-assistant") || output.Len() < 100 {
 				t.Fatal("missing generated completion script")
 			}
 			binary, err := exec.LookPath(shell)

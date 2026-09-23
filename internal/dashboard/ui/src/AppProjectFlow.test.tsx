@@ -224,7 +224,7 @@ describe("project context and next outcome", () => {
       description: "Coordination dashboard",
       status: "active",
       acceptance_criteria: ["Reviewed"],
-      directories: ["/home/agent-assistant"],
+      directories: ["/home/crew-assistant"],
     };
     const state = normalizeState({
       assistant: { name: "Iris", personality: "" },

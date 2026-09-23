@@ -16,10 +16,10 @@ Known sensitive files and directories are excluded from the source copy: `.env*`
 
 Configure the independent `worker_model` profile in Settings or with `config set worker_model.<field>`. Fresh worker profiles use `codex / gpt-5.6-terra / high` with the login in `worker_model.codex_home`. `--engine`, `--model` and `--effort` override that profile for this broker process. Implementation workers require a local Codex or Claude CLI. Codex uses `worker_model.codex_bin`; Claude uses `worker_model.claude_bin` and `worker_model.claude_home` with its native CLI login. An API model profile cannot run an implementation worker. Changing the PA's model does not change a running worker broker.
 
-Set an independently generated broker API token in the environment variable `AGENT_ASSISTANT_WORKER_TOKEN` in both the broker and assistant processes. Select the worker login with `worker_model.codex_home` or `worker_model.claude_home`; an existing authenticated CLI home can be shared. Use `agent-assistant model login --profile worker` if that selected profile needs login. Codex shares file-backed login material into a private per-assignment runtime home; Claude uses the selected native login directly in restricted mode. Neither engine inherits the selected home’s project instructions, hooks, plugins or unrelated MCP tools. Keep actual tokens out of configuration files, command arguments and version control.
+Set an independently generated broker API token in the environment variable `CREW_ASSISTANT_WORKER_TOKEN` in both the broker and assistant processes. Select the worker login with `worker_model.codex_home` or `worker_model.claude_home`; an existing authenticated CLI home can be shared. Use `crew-assistant model login --profile worker` if that selected profile needs login. Codex shares file-backed login material into a private per-assignment runtime home; Claude uses the selected native login directly in restricted mode. Neither engine inherits the selected home’s project instructions, hooks, plugins or unrelated MCP tools. Keep actual tokens out of configuration files, command arguments and version control.
 
 ```sh
-agent-assistant worker serve \
+crew-assistant worker serve \
   --workspace /path/to/dedicated-source \
   --project <assistant-project-id> \
   --image <locally-installed-image@sha256:digest> \
@@ -38,12 +38,12 @@ Register the endpoint as a worker profile in the assistant configuration, preser
   "name": "Isolated builder",
   "project_id": "<assistant-project-id>",
   "endpoint": "http://127.0.0.1:8350",
-  "api_key_env": "AGENT_ASSISTANT_WORKER_TOKEN",
+  "api_key_env": "CREW_ASSISTANT_WORKER_TOKEN",
   "capabilities": ["implement", "review"]
 }
 ```
 
-The profile lives in the configuration's `workers` array. Its broker accepts only the exact `--project` ID. Use a separate broker/state directory for another project. `agent-assistant status` includes project IDs. The PA can then commission a direct worker when you ask it to coordinate that project.
+The profile lives in the configuration's `workers` array. Its broker accepts only the exact `--project` ID. Use a separate broker/state directory for another project. `crew-assistant status` includes project IDs. The PA can then commission a direct worker when you ask it to coordinate that project.
 
 ## What is isolated
 

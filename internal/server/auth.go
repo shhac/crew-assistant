@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/config"
 )
 
 type Auth struct {
@@ -125,7 +125,7 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Cache-Control", "no-store")
 			if r.Method != "GET" && r.Method != "HEAD" {
-				if !a.sameOrigin(r) || r.Header.Get("X-Requested-With") != "agent-assistant" {
+				if !a.sameOrigin(r) || r.Header.Get("X-Requested-With") != "crew-assistant" {
 					fail(w, 403, "request must come from this dashboard")
 					return
 				}
@@ -135,7 +135,7 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 				return
 			}
 			if !a.recognized(r) {
-				fail(w, 401, "sign in with a code from agent-assistant dashboard open")
+				fail(w, 401, "sign in with a code from crew-assistant dashboard open")
 				return
 			}
 		}

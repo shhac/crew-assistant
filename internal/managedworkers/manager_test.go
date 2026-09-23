@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
-	"github.com/shhac/agent-assistant/internal/workerbroker"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/workerbroker"
 )
 
 const testImage = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

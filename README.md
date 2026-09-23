@@ -1,37 +1,37 @@
-# agent-assistant
+# crew-assistant
 
 A personal AI assistant that remembers context, coordinates project agents, follows up on stalled work, and brings its owner prepared decisions. A Go daemon and CLI with an embedded, dark-mode-first dashboard. Private Tailscale access is optional.
 
 ## Install
 
 ```sh
-brew install shhac/tap/agent-assistant
+brew install shhac/tap/crew-assistant
 ```
 
-Homebrew installs Bash, Zsh, and Fish completions automatically. Standalone binaries for macOS, Linux, and Windows are available on the [releases page](https://github.com/shhac/agent-assistant/releases).
+Homebrew installs Bash, Zsh, and Fish completions automatically. Standalone binaries for macOS, Linux, and Windows are available on the [releases page](https://github.com/shhac/crew-assistant/releases).
 
 For a source build or standalone binary, enable completions in your shell:
 
 ```sh
 # Bash: add to ~/.bashrc (requires bash-completion).
-source <(agent-assistant completion bash)
+source <(crew-assistant completion bash)
 
 # Zsh: after compinit in ~/.zshrc.
-source <(agent-assistant completion zsh)
+source <(crew-assistant completion zsh)
 
 # Fish: run once.
-agent-assistant completion fish > ~/.config/fish/completions/agent-assistant.fish
+crew-assistant completion fish > ~/.config/fish/completions/crew-assistant.fish
 ```
 
-Create Fish's completions directory first if needed. PowerShell scripts are also available with `agent-assistant completion powershell`. Completions suggest config keys and supported values, assistant/worker login profiles, and configured worker projects/models. They only read local configuration; they never contact the daemon, integrations, or model providers.
+Create Fish's completions directory first if needed. PowerShell scripts are also available with `crew-assistant completion powershell`. Completions suggest config keys and supported values, assistant/worker login profiles, and configured worker projects/models. They only read local configuration; they never contact the daemon, integrations, or model providers.
 
 ## Run it
 
-Building requires Go 1.26.4 or newer. `make build` writes the gitignored `./agent-assistant` binary. Node is only needed when developing or rebuilding the dashboard; its compiled assets are included in the repository. The default model engine requires a compatible Codex CLI installed and logged in on the daemon host.
+Building requires Go 1.26.4 or newer. `make build` writes the gitignored `./crew-assistant` binary. Node is only needed when developing or rebuilding the dashboard; its compiled assets are included in the repository. The default model engine requires a compatible Codex CLI installed and logged in on the daemon host.
 
 ```sh
 make build
-./agent-assistant serve --demo --open
+./crew-assistant serve --demo --open
 ```
 
 Demo mode uses fictional data and disables external integrations. Without an explicit `--state`, its temporary state is removed on exit. It is useful for trying projects, decisions, memory, navigation, and the dashboard; it does not simulate an AI response.
@@ -39,29 +39,29 @@ Demo mode uses fictional data and disables external integrations. Without an exp
 For your own assistant:
 
 ```sh
-./agent-assistant init
-./agent-assistant model login
-./agent-assistant config set assistant.name Quill
+./crew-assistant init
+./crew-assistant model login
+./crew-assistant config set assistant.name Quill
 # Fresh configuration defaults to codex / gpt-6-astra / high.
-./agent-assistant doctor
-./agent-assistant serve --open
+./crew-assistant doctor
+./crew-assistant serve --open
 ```
 
 Choose engine, model and reasoning effort from the installed CLI’s live catalog in **Settings → Assistant and worker models**, independently for the assistant (`model`) and local coding workers (`worker_model`). The assistant defaults to `codex / gpt-6-astra / high`; the built-in specialist worker defaults to `codex / gpt-5.6-terra / high`. External manager brokers own their model selection. Explicit saved profiles are preserved when defaults change.
 
 ```sh
-./agent-assistant config set model.engine codex
-./agent-assistant config set model.model gpt-6-astra
-./agent-assistant config set model.effort high
+./crew-assistant config set model.engine codex
+./crew-assistant config set model.model gpt-6-astra
+./crew-assistant config set model.effort high
 # Worker settings are independent:
-./agent-assistant config set worker_model.engine codex
-./agent-assistant config set worker_model.model gpt-5.6-terra
-./agent-assistant config set worker_model.effort high
+./crew-assistant config set worker_model.engine codex
+./crew-assistant config set worker_model.model gpt-5.6-terra
+./crew-assistant config set worker_model.effort high
 ```
 
-The `codex` engine uses each profile's `codex_bin` and `codex_home`. Both homes default to `~/.local/state/agent-assistant.paulie.app/codex` (respecting `XDG_STATE_HOME`). Set `model.codex_home` or `worker_model.codex_home` to an absolute path to use an existing dedicated login or separate accounts. Explicit configuration wins over the shell's `CODEX_HOME`: the daemon sets that variable only in each child process, never globally. You do not need to export it before starting the daemon or broker.
+The `codex` engine uses each profile's `codex_bin` and `codex_home`. Both homes default to `~/.local/state/app.paulie.crew-assistant/codex` (respecting `XDG_STATE_HOME`). Set `model.codex_home` or `worker_model.codex_home` to an absolute path to use an existing dedicated login or separate accounts. Explicit configuration wins over the shell's `CODEX_HOME`: the daemon sets that variable only in each child process, never globally. You do not need to export it before starting the daemon or broker.
 
-`agent-assistant model login` creates the configured directory privately and runs the selected CLI’s own interactive login. Use `--profile worker` for a separate worker home. Codex owns credential storage and refresh; this command never copies tokens. The same account and subscription can be used for both profiles. Login is an owner-invoked CLI command, not a model tool.
+`crew-assistant model login` creates the configured directory privately and runs the selected CLI’s own interactive login. Use `--profile worker` for a separate worker home. Codex owns credential storage and refresh; this command never copies tokens. The same account and subscription can be used for both profiles. Login is an owner-invoked CLI command, not a model tool.
 
 Codex currently loads global `AGENTS.md` / `AGENTS.override.md` even when project instructions are disabled. For the assistant, the adapter refuses a home containing those instructions before inference. This is instruction isolation, not a requirement for a second account. The assistant's Codex proposes structured actions with its built-in tools disabled; Go authorizes and executes permitted coordination tools.
 
@@ -79,15 +79,15 @@ Reasoning effort is separate from execution limits. API engines enforce `max_tok
 
 Existing configuration with a `model` section but no `engine` keeps the previous API engine and provider. A missing `worker_model` in that legacy configuration inherits its previous assistant API profile once on load. To switch an existing setup, set the engine/model/effort explicitly using the commands above. Changes to the assistant profile apply to subsequent requests; restart a running worker broker to use its changed profile.
 
-Configuration defaults to `~/.config/agent-assistant.paulie.app/config.json`; state defaults to `~/.local/state/agent-assistant.paulie.app/state.db`. XDG overrides and explicit `--config` / `--state` flags are supported. Existing installations keep their legacy `agent-assistant` config/state pair when only that namespace exists; mixed namespaces are reported rather than silently combining or moving files. `config path` shows the selected location. Configuration contains credential **environment variable names**, never secret values. Run `config show` to inspect all effective defaults.
+Configuration defaults to `~/.config/app.paulie.crew-assistant/config.json`; state defaults to `~/.local/state/app.paulie.crew-assistant/state.db`. XDG overrides and explicit `--config` / `--state` flags are supported. `config path` shows the selected location. Configuration contains credential **environment variable names**, never secret values. Run `config show` to inspect all effective defaults.
 
 ```sh
-./agent-assistant chat 'What projects need my attention?'
-./agent-assistant chat 'Please coordinate the export project against its acceptance criteria.'
-./agent-assistant status
-./agent-assistant pause
-./agent-assistant resume
-./agent-assistant dashboard open
+./crew-assistant chat 'What projects need my attention?'
+./crew-assistant chat 'Please coordinate the export project against its acceptance criteria.'
+./crew-assistant status
+./crew-assistant pause
+./crew-assistant resume
+./crew-assistant dashboard open
 ```
 
 Only one daemon can own a state file. `serve --no-dispatch` is a fixed boot-time control for observing without starting or resuming workers. Pause stops new coordination actions; it does not terminate already-running external work. Ctrl-C or SIGTERM shuts down the local daemon; saved worker identities are reconciled on the next start.
@@ -132,9 +132,9 @@ The config keys are `chat.loading_phrases.enabled`, `chat.loading_phrases.model`
 Install and log into Tailscale on the existing daemon host, and enable HTTPS for its tailnet. Configure the exact owner identities permitted to open the dashboard:
 
 ```sh
-./agent-assistant model login # Once, if not already signed in.
-./agent-assistant config set dashboard.allowed_users '["owner@example.test"]'
-./agent-assistant serve --http 127.0.0.1:8340 --tailscale serve --tailscale-port 8443 --open
+./crew-assistant model login # Once, if not already signed in.
+./crew-assistant config set dashboard.allowed_users '["owner@example.test"]'
+./crew-assistant serve --http 127.0.0.1:8340 --tailscale serve --tailscale-port 8443 --open
 ```
 
 Port **8443 is the private Tailscale HTTPS port**; local HTTP remains on **127.0.0.1:8340**. Use your actual Tailscale login in `allowed_users`. The daemon prints the resulting `https://<machine>.<tailnet>.ts.net:8443` address.
@@ -145,7 +145,7 @@ To make Serve persistent configuration, set `dashboard.tailscale` to `serve`. Ne
 
 ## Connect your work
 
-Projects live in agent-assistant's local state. Linear, Notion, Slack and other connections are optional resources, not the project registry. To manage a local codebase, choose **Add project → Existing folder**, select its directory, and ask the assistant to coordinate it. No Linear account, issue, or project is required. Worker execution still requires an approved broker. A connected work account does not make it relevant to a personal project; the assistant should use only resources you requested or linked to that project's context.
+Projects live in crew-assistant's local state. Linear, Notion, Slack and other connections are optional resources, not the project registry. To manage a local codebase, choose **Add project → Existing folder**, select its directory, and ask the assistant to coordinate it. No Linear account, issue, or project is required. Worker execution still requires an approved broker. A connected work account does not make it relevant to a personal project; the assistant should use only resources you requested or linked to that project's context.
 
 **Optional Linear imports:** connecting `lin` enables read-only queries without importing projects. Enable **Import assigned issues as projects** on a specific connection only if you want that account's assignments enrolled automatically (`"import_assignments": true`; default `false`). Split work and personal accounts into separate named connections when only one should import. Disabling import stops future polling/imports and preserves projects already recorded. Explicit assignment queries never enroll projects by themselves.
 
@@ -273,11 +273,11 @@ for exact bounds and the distinction from native CLI session compaction.
 
 ## Worker diagnostics
 
-`agent-assistant serve` and `agent-assistant worker serve` write structured NDJSON
+`crew-assistant serve` and `crew-assistant worker serve` write structured NDJSON
 errors to stderr through `lib-agent-output`. Each record includes the failing
 stage, project/run IDs where available, engine, diagnostic code, observed exit
 status, model-call count, context bytes, and any scheduled retry time. Capture
-stderr alongside your usual launch command with `2>agent-assistant-errors.ndjson`.
+stderr alongside your usual launch command with `2>crew-assistant-errors.ndjson`.
 No debug flag is needed. Supervision, persistence, container startup/cleanup and
 artifact collection failures also emit diagnostics; a stopped supervision loop
 causes the daemon to shut down rather than leave a connected but idle dashboard.

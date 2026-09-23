@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/lib-agent-harness/session"
 )
 

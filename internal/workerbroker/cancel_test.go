@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
 )
 
 func TestActiveCancellationWaitsForCleanup(t *testing.T) {

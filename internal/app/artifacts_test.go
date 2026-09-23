@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/core"
 )
 
 func artifactFixture(t *testing.T) (*App, string) {

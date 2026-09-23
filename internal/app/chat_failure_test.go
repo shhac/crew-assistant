@@ -2,7 +2,7 @@ package app
 
 import (
 	"errors"
-	"github.com/shhac/agent-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/engine"
 	"strings"
 	"testing"
 )

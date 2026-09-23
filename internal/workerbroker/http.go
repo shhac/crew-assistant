@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
 )
 
 func (b *Broker) Handler() http.Handler {

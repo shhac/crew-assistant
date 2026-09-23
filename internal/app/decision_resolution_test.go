@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/shhac/agent-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/core"
 )
 
 func TestDismissedWorkerDecisionIsNeverDeliveredAsAnswer(t *testing.T) {

@@ -16,12 +16,12 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
-	"github.com/shhac/agent-assistant/internal/access"
-	"github.com/shhac/agent-assistant/internal/app"
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/core"
-	"github.com/shhac/agent-assistant/internal/diagnostics"
-	"github.com/shhac/agent-assistant/internal/server"
+	"github.com/shhac/crew-assistant/internal/access"
+	"github.com/shhac/crew-assistant/internal/app"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/server"
 	"github.com/spf13/cobra"
 )
 
@@ -46,7 +46,7 @@ func registerServe(root *cobra.Command, o *options) {
 		if demo {
 			cfg.Dashboard.Tailscale = "off"
 			if !cmd.Flags().Changed("state") && !root.PersistentFlags().Changed("state") {
-				dir, err := os.MkdirTemp("", "agent-assistant-demo-")
+				dir, err := os.MkdirTemp("", "crew-assistant-demo-")
 				if err != nil {
 					return err
 				}
@@ -157,7 +157,7 @@ func serve(ctx context.Context, o *options, cfg config.Config, demo, open, noDis
 		a.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "supervision_loop"}, err)
 		loopErrors <- err
 	}()
-	_ = o.emit(map[string]any{"url": url, "state": o.statePath, "demo": demo, "login": "agent-assistant --state " + o.statePath + " dashboard open"})
+	_ = o.emit(map[string]any{"url": url, "state": o.statePath, "demo": demo, "login": "crew-assistant --state " + o.statePath + " dashboard open"})
 	if open {
 		if err := openDashboard(o, false); err != nil {
 			fmt.Fprintln(os.Stderr, "Dashboard open:", err)

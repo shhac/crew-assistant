@@ -3,7 +3,7 @@ package server
 import (
 	"net/http"
 
-	"github.com/shhac/agent-assistant/internal/app"
+	"github.com/shhac/crew-assistant/internal/app"
 )
 
 func workerDetailRoutes(mux *http.ServeMux, a *app.App) {

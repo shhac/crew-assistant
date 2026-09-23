@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/diagnostics"
-	"github.com/shhac/agent-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/engine"
 	libcli "github.com/shhac/lib-agent-cli/cli"
 	_ "github.com/shhac/lib-agent-cli/yaml"
 	output "github.com/shhac/lib-agent-output"
@@ -40,7 +40,7 @@ func NewRoot(version string) *cobra.Command {
 		paths.State = "state.db"
 	}
 	o := &options{configPath: paths.Config, statePath: paths.State, globals: &libcli.Globals{}}
-	root := libcli.NewRoot(libcli.Options{Use: "agent-assistant", Short: "A personal assistant that coordinates agents and brings clear decisions", Version: version, Globals: o.globals, DefaultFormat: output.FormatNDJSON})
+	root := libcli.NewRoot(libcli.Options{Use: "crew-assistant", Short: "A personal assistant that coordinates agents and brings clear decisions", Version: version, Globals: o.globals, DefaultFormat: output.FormatNDJSON})
 	pathErr := err
 	before := root.PersistentPreRunE
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
@@ -63,7 +63,7 @@ func NewRoot(version string) *cobra.Command {
 		if err := config.Save(o.configPath, config.Default()); err != nil {
 			return err
 		}
-		return o.emit(map[string]string{"config": o.configPath, "next": "Run agent-assistant model login, then agent-assistant serve --open; defaults are codex/gpt-6-astra/high"})
+		return o.emit(map[string]string{"config": o.configPath, "next": "Run crew-assistant model login, then crew-assistant serve --open; defaults are codex/gpt-6-astra/high"})
 	}}
 	root.AddCommand(init)
 	root.AddCommand(&cobra.Command{Use: "status", Short: "Read daemon state", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
@@ -170,7 +170,7 @@ func NewRoot(version string) *cobra.Command {
 		}
 		if cfg.Model.Engine == "codex" {
 			isolationErr := engine.ValidateCodexHome(cfg.Model.CodexHome)
-			isolationHint := "Run agent-assistant model login to sign into the configured model.codex_home."
+			isolationHint := "Run crew-assistant model login to sign into the configured model.codex_home."
 			if isolationErr != nil {
 				isolationHint = isolationErr.Error()
 			}
@@ -190,7 +190,7 @@ func NewRoot(version string) *cobra.Command {
 				probe.Stdout, probe.Stderr = io.Discard, io.Discard
 				loginErr := probe.Run()
 				cancel()
-				checks = append(checks, map[string]any{"name": "codex login", "ok": loginErr == nil, "hint": "run agent-assistant model login; no inference was invoked"})
+				checks = append(checks, map[string]any{"name": "codex login", "ok": loginErr == nil, "hint": "run crew-assistant model login; no inference was invoked"})
 			}
 		} else if cfg.Model.Engine == "claude" {
 			binary, lookupErr := exec.LookPath(cfg.Model.ClaudeBin)
@@ -206,7 +206,7 @@ func NewRoot(version string) *cobra.Command {
 				probe.Stdout, probe.Stderr = io.Discard, io.Discard
 				loginErr := probe.Run()
 				cancel()
-				checks = append(checks, map[string]any{"name": "claude login", "ok": loginErr == nil, "hint": "Sign in once with agent-assistant model login; workers using this CLI home share the login."})
+				checks = append(checks, map[string]any{"name": "claude login", "ok": loginErr == nil, "hint": "Sign in once with crew-assistant model login; workers using this CLI home share the login."})
 			}
 		} else {
 			refs = append(refs, cfg.Model.APIKeyEnv)
@@ -260,7 +260,7 @@ func (o *options) runtime() (runtimeInfo, error) {
 	var info runtimeInfo
 	b, err := os.ReadFile(filepath.Join(o.runtimeDir(), "daemon.json"))
 	if err != nil {
-		return info, errors.New("daemon is not running for this state file; start agent-assistant serve")
+		return info, errors.New("daemon is not running for this state file; start crew-assistant serve")
 	}
 	if err = json.Unmarshal(b, &info); err != nil {
 		return info, err
@@ -289,12 +289,12 @@ func (o *options) request(method, path string, value any) (any, error) {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+string(token))
-	req.Header.Set("X-Requested-With", "agent-assistant")
+	req.Header.Set("X-Requested-With", "crew-assistant")
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, errors.New("could not reach daemon; check agent-assistant serve and the selected --state path")
+		return nil, errors.New("could not reach daemon; check crew-assistant serve and the selected --state path")
 	}
 	defer resp.Body.Close()
 	var result any

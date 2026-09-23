@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shhac/agent-assistant/internal/diagnostics"
-	"github.com/shhac/agent-assistant/internal/integrations/worker"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/integrations/worker"
 	"github.com/shhac/lib-agent-harness/session"
 )
 

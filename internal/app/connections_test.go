@@ -3,8 +3,8 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"github.com/shhac/agent-assistant/internal/config"
-	"github.com/shhac/agent-assistant/internal/integrations/connections"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/integrations/connections"
 	"strings"
 	"testing"
 )

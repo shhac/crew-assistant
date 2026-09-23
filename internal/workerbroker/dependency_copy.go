@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/shhac/agent-assistant/internal/statepath"
+	"github.com/shhac/crew-assistant/internal/statepath"
 )
 
 // npm tools commonly write transient data inside node_modules (for example
