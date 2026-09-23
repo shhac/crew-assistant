@@ -89,7 +89,7 @@ func (m *Meter) Forget() {
 
 // Threshold reports the configured percentage for an engine. Supported is false
 // for engines whose subscription allowance cannot be inspected locally.
-func Threshold(policy config.WorkerUsage, engine string) (percent int, supported bool) {
+func Threshold(policy config.RoleUsage, engine string) (percent int, supported bool) {
 	switch engine {
 	case "codex":
 		return policy.CodexMaxUsedPercent, true

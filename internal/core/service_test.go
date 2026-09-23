@@ -21,7 +21,6 @@ func fixture(t *testing.T) (*Service, config.Config) {
 	}
 	t.Cleanup(func() { st.Close() })
 	c := config.Default()
-	c.Workers = []config.Worker{{ID: "test", Name: "Test worker", Endpoint: "http://127.0.0.1:9999", Capabilities: []string{"coordinate", "implement", "review"}}}
 	s := NewService(st, c)
 	s.now = func() time.Time { return time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC) }
 	return s, c

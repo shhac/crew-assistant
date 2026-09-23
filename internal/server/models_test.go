@@ -17,24 +17,23 @@ import (
 func TestModelEndpointUsesSavedProfileAndCaches(t *testing.T) {
 	cfg := config.Default()
 	cfg.Model.CodexHome = "/test/assistant-login"
-	cfg.WorkerModel.CodexHome = "/test/worker-login"
 	a := app.New(nil, cfg, filepath.Join(t.TempDir(), "config.json"), false)
 	calls := 0
 	handler := modelHandler(a, func(_ context.Context, c engine.Config) ([]engine.ModelOption, error) {
 		calls++
-		if c.CodexHome != cfg.WorkerModel.CodexHome {
+		if c.CodexHome != cfg.Model.CodexHome {
 			t.Fatal("wrong profile", c.CodexHome)
 		}
 		return []engine.ModelOption{{ID: "test", Name: "Test model", DefaultEffort: "high"}}, nil
 	})
 	for i := 0; i < 2; i++ {
 		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/models?profile=worker", nil))
+		handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/models?profile=assistant", nil))
 		var result modelCatalog
 		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 			t.Fatal(err)
 		}
-		if !result.Available || result.Profile != "worker" || result.Current.Model != cfg.WorkerModel.Model || result.Default.Model != config.Default().WorkerModel.Model || len(result.Models) != 1 {
+		if !result.Available || result.Profile != "assistant" || result.Current.Model != cfg.Model.Model || result.Default.Model != config.Default().Model.Model || len(result.Models) != 1 {
 			t.Fatal(w.Body.String())
 		}
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/media/localdocs"
+	"github.com/shhac/crew-assistant/internal/quota"
 	"github.com/shhac/crew-assistant/internal/roles"
 )
 
@@ -170,6 +171,9 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, docs local
 	if err := docs.Reset(t.ID, last); err != nil {
 		return err
 	}
+	if held, err := a.holdForUsage(ctx, t, writers[0]); held || err != nil {
+		return err
+	}
 	spec := a.roleSpec(writers[0], docs.Workspace(), true, writerPrompt(p, t))
 	spec.Resume = t.WriterSession
 	result, err := a.runner.Run(ctx, spec)
@@ -201,6 +205,9 @@ func (a *App) review(ctx context.Context, p core.Project, t core.Task, docs loca
 	for _, reviewer := range roleOf(t, core.RoleReviewer) {
 		if judged(t, reviewer.Name, r.N, p.Brief.Version) {
 			continue
+		}
+		if held, err := a.holdForUsage(ctx, t, reviewer); held || err != nil {
+			return err
 		}
 		verdict, err := a.runReviewer(ctx, p, t, r, reviewer, docs)
 		if err != nil {
@@ -491,4 +498,37 @@ func (a *App) deliver(ctx context.Context, p core.Project, t core.Task) error {
 		return t.Objective + ": " + t.Detail, nil
 	})
 	return err
+}
+
+// holdForUsage waits a task out while the role's subscription is past the
+// owner's threshold. A hold is a wait, not a failure: nothing is retried or
+// counted against the task, and it resumes by itself when the window resets
+// or the threshold is raised.
+func (a *App) holdForUsage(ctx context.Context, t core.Task, r core.Role) (bool, error) {
+	cfg := a.Config()
+	threshold, supported := quota.Threshold(cfg.Limits.RoleUsage, r.Engine)
+	if !supported || threshold == 0 {
+		return false, nil
+	}
+	model := cfg.Model
+	model.Engine, model.Model = r.Engine, r.Model
+	now := time.Now()
+	verdict := quota.Evaluate(a.meter.Read(ctx, model), model, threshold, now)
+	wait, detail := time.Time{}, ""
+	switch {
+	case verdict.Held:
+		wait, detail = verdict.ResetsAt, fmt.Sprintf("Waiting for %s subscription headroom (%s)", r.Engine, verdict.Detail)
+		if !wait.After(now) {
+			wait = now.Add(10 * time.Minute)
+		}
+	case !verdict.Known && cfg.Limits.RoleUsage.OnUnavailable == "pause":
+		wait, detail = now.Add(5*time.Minute), "Waiting until "+r.Engine+" usage can be checked"
+	default:
+		return false, nil
+	}
+	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		t.RetryAt, t.Detail = wait, detail
+		return "", nil
+	})
+	return true, err
 }

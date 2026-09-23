@@ -103,7 +103,7 @@ func TestIdentityInterviewPreviewsThenAppliesOnlyAcceptedRecommendation(t *testi
 	}
 	// Applying a draft must preserve settings edited since the recommendation.
 	cfg := a.Config()
-	cfg.Limits.MaxAgents = 7
+	cfg.Limits.MaxModelTurns = 7
 	if err = a.UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestIdentityInterviewPreviewsThenAppliesOnlyAcceptedRecommendation(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identity.Name != "Juniper" || identity.Avatar.Shape != "leaf" || a.Config().Limits.MaxAgents != 7 {
+	if identity.Name != "Juniper" || identity.Avatar.Shape != "leaf" || a.Config().Limits.MaxModelTurns != 7 {
 		t.Fatal(identity)
 	}
 	persisted, err := config.Load(a.configPath)

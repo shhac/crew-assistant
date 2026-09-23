@@ -54,7 +54,6 @@ func TestConfigCompletionsMatchSetTraversal(t *testing.T) {
 		key, prefix string
 		want        []string
 	}{
-		{"worker_model.engine", "", []string{"claude", "codex", "openai-compatible"}},
 		{"model.effort", "m", []string{"max", "medium", "minimal"}},
 		{"dashboard.tailscale", "", []string{"off", "serve"}},
 		{"assistant.theme", "ink", []string{"ink-blue"}},
@@ -81,11 +80,11 @@ func TestCompletionProtocolDoesNotCreateConfigOrState(t *testing.T) {
 	var output bytes.Buffer
 	root.SetOut(&output)
 	root.SetErr(&bytes.Buffer{})
-	root.SetArgs([]string{"__complete", "model", "login", "--profile", ""})
+	root.SetArgs([]string{"__complete", "model", "login", "--engine", ""})
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "assistant\nworker\n:4") {
+	if !strings.Contains(output.String(), "claude\ncodex\n:4") {
 		t.Fatalf("completion output: %q", output.String())
 	}
 	for _, path := range []string{filepath.Dir(paths.Config), filepath.Dir(paths.State)} {

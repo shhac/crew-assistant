@@ -102,7 +102,7 @@ func TestModelScopes(t *testing.T) {
 }
 
 func TestThresholdSupportedEngines(t *testing.T) {
-	policy := config.WorkerUsage{CodexMaxUsedPercent: 90, ClaudeMaxUsedPercent: 75}
+	policy := config.RoleUsage{CodexMaxUsedPercent: 90, ClaudeMaxUsedPercent: 75}
 	if p, ok := Threshold(policy, "codex"); p != 90 || !ok {
 		t.Fatal("codex threshold", p, ok)
 	}
@@ -120,7 +120,7 @@ func TestCacheUsesEngineBinaryAndHomeNotModel(t *testing.T) {
 		options = append(options, o)
 		return session.Inspection{Quota: fixture(90)}, errors.New("account unavailable but quota succeeded")
 	}}
-	m := config.Default().WorkerModel
+	m := config.Default().Model
 	for i := 0; i < 2; i++ {
 		if !meter.Read(context.Background(), m).Known() {
 			t.Fatal("partial inspection discarded quota")
@@ -150,7 +150,7 @@ func TestRefreshDoesNotRetainFailedTelemetry(t *testing.T) {
 		}
 		return session.Inspection{}, errors.New("failed refresh")
 	}}
-	model := config.Default().WorkerModel
+	model := config.Default().Model
 	if !meter.Read(context.Background(), model).Known() {
 		t.Fatal("initial quota absent")
 	}

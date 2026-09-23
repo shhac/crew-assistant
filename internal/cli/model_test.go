@@ -62,7 +62,7 @@ func TestModelLoginRejectsGlobalInstructionsInConfiguredHome(t *testing.T) {
 func TestClaudeLoginUsesConfiguredHomeAndSubscription(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "must-not-be-forwarded")
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
-	profile := config.Default().WorkerModel
+	profile := config.Default().Model
 	profile.Engine = "claude"
 	profile.ClaudeHome = filepath.Join(t.TempDir(), "worker-login")
 	profile.ClaudeBin, _ = os.Executable()

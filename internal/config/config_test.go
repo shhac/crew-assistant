@@ -25,17 +25,17 @@ func TestConfigAtomicPrivateRoundTrip(t *testing.T) {
 	if err != nil || got.Assistant.Name != "Juniper" {
 		t.Fatal(got, err)
 	}
-	c.Limits.MaxAgents = 0
+	c.Limits.MaxModelTurns = 0
 	if err = Save(p, c); err == nil {
 		t.Fatal("invalid replacement accepted")
 	}
 	got, err = Load(p)
-	if err != nil || got.Limits.MaxAgents != 4 {
+	if err != nil || got.Limits.MaxModelTurns != 8 {
 		t.Fatal("invalid save changed file")
 	}
 }
 func TestUnknownFieldsAndTrailingJSONRejected(t *testing.T) {
-	for _, body := range []string{`{"unexpected":true}`, `{} {}`, `{"limits":{"max_agents":0}}`} {
+	for _, body := range []string{`{"unexpected":true}`, `{} {}`, `{"limits":{"max_agents":4}}`, `{"workers":[]}`, `{"worker_model":{}}`} {
 		p := filepath.Join(t.TempDir(), "config.json")
 		os.WriteFile(p, []byte(body), 0600)
 		if _, err := Load(p); err == nil {
@@ -44,9 +44,7 @@ func TestUnknownFieldsAndTrailingJSONRejected(t *testing.T) {
 	}
 }
 func TestBoundariesCannotBeConfiguredAway(t *testing.T) {
-	for _, mutate := range []func(*Config){func(c *Config) { c.Dashboard.Addr = "0.0.0.0:8340" }, func(c *Config) { c.Dashboard.Tailscale = "funnel" }, func(c *Config) { c.Dashboard.Tailscale = "serve" }, func(c *Config) { c.Model.BaseURL = "https://secret:password@example.com" }, func(c *Config) { c.Model.BaseURL = "http://example.com" }, func(c *Config) { c.Model.APIKeyEnv = "raw token!" }, func(c *Config) {
-		c.Workers = []Worker{{ID: "bad", Endpoint: "https://example.com", Capabilities: []string{"purchase"}}}
-	}} {
+	for _, mutate := range []func(*Config){func(c *Config) { c.Dashboard.Addr = "0.0.0.0:8340" }, func(c *Config) { c.Dashboard.Tailscale = "funnel" }, func(c *Config) { c.Dashboard.Tailscale = "serve" }, func(c *Config) { c.Model.BaseURL = "https://secret:password@example.com" }, func(c *Config) { c.Model.BaseURL = "http://example.com" }, func(c *Config) { c.Model.APIKeyEnv = "raw token!" }} {
 		c := Default()
 		mutate(&c)
 		if err := c.Validate(); err == nil {
@@ -67,27 +65,6 @@ func TestXDGPaths(t *testing.T) {
 	}
 }
 
-func TestModelDefaultsAndIndependentProfiles(t *testing.T) {
-	c := Default()
-	for name, profile := range map[string]Model{"assistant": c.Model, "worker": c.WorkerModel} {
-		if profile.Engine != "codex" || profile.Model != map[string]string{"assistant": "gpt-6-astra", "worker": "gpt-5.6-terra"}[name] || profile.Effort != "high" || profile.CodexBin != "codex" {
-			t.Fatalf("%s defaults: %+v", name, profile)
-		}
-	}
-	c.WorkerModel.Model = "worker-model"
-	c.WorkerModel.Effort = "low"
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := Save(path, c); err != nil {
-		t.Fatal(err)
-	}
-	got, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Model != c.Model || got.WorkerModel != c.WorkerModel {
-		t.Fatalf("profiles lost independence: %+v", got)
-	}
-}
 func TestLegacyAPIConfigRetainsProviderAndBillingPath(t *testing.T) {
 	for _, body := range []string{`{"model":{"model":"existing-model","base_url":"https://provider.example/v1","api_key_env":"EXISTING_KEY"}}`, `{"model":{}}`} {
 		path := filepath.Join(t.TempDir(), "config.json")
@@ -98,7 +75,7 @@ func TestLegacyAPIConfigRetainsProviderAndBillingPath(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Model.Engine != "openai-compatible" || got.Model.Effort != "" || got.WorkerModel != got.Model {
+		if got.Model.Engine != "openai-compatible" || got.Model.Effort != "" {
 			t.Fatalf("legacy profile unexpectedly migrated: %+v", got)
 		}
 		if strings.Contains(body, "existing-model") && (got.Model.Model != "existing-model" || got.Model.APIKeyEnv != "EXISTING_KEY" || got.Model.BaseURL != "https://provider.example/v1") {
@@ -121,8 +98,6 @@ func TestInvalidEngineAndEffortRejected(t *testing.T) {
 	for _, mutate := range []func(*Config){
 		func(c *Config) { c.Model.Engine = "unknown" },
 		func(c *Config) { c.Model.Effort = "maximumish" },
-		func(c *Config) { c.WorkerModel.Engine = "unknown" },
-		func(c *Config) { c.WorkerModel.Effort = "maximumish" },
 		func(c *Config) { c.Model.CodexBin = "" },
 	} {
 		c := Default()
@@ -130,20 +105,6 @@ func TestInvalidEngineAndEffortRejected(t *testing.T) {
 		if err := c.Validate(); err == nil {
 			t.Fatal("invalid engine configuration accepted")
 		}
-	}
-}
-
-func TestLegacyAssistantTokenCapDoesNotChangeWorkerCap(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"model":{"model":"existing-model","max_tokens":65536}}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	got, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Model.MaxTokens != 65536 || got.WorkerModel.MaxTokens != 4096 {
-		t.Fatalf("legacy limits changed: %+v", got)
 	}
 }
 
@@ -178,17 +139,16 @@ func TestConfiguredCodexHomesDefaultWithoutAmbientEnvironment(t *testing.T) {
 	t.Setenv("CODEX_HOME", filepath.Join(root, "unrelated-codex"))
 	c := Default()
 	want := filepath.Join(root, Namespace, "codex")
-	if c.Model.CodexHome != want || c.WorkerModel.CodexHome != want {
-		t.Fatal(c.Model.CodexHome, c.WorkerModel.CodexHome)
+	if c.Model.CodexHome != want {
+		t.Fatal(c.Model.CodexHome)
 	}
 	c.Model.CodexHome = filepath.Join(root, "assistant")
-	c.WorkerModel.CodexHome = filepath.Join(root, "worker")
 	path := filepath.Join(root, "config.json")
 	if err := Save(path, c); err != nil {
 		t.Fatal(err)
 	}
 	got, err := Load(path)
-	if err != nil || got.Model.CodexHome != c.Model.CodexHome || got.WorkerModel.CodexHome != c.WorkerModel.CodexHome {
+	if err != nil || got.Model.CodexHome != c.Model.CodexHome {
 		t.Fatal(got, err)
 	}
 	c.Model.CodexHome = "relative/path"
@@ -247,25 +207,6 @@ func TestAssignmentImportOptInDefaultsAndRoundTrip(t *testing.T) {
 		cfg.Connections[0].Tool = tool
 		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "assignment import") {
 			t.Fatalf("unsupported import %s: %v", tool, err)
-		}
-	}
-}
-
-func TestManagedWorkerScopesAndSharedCLIHomes(t *testing.T) {
-	c := Default()
-	if c.Model.CodexHome != c.WorkerModel.CodexHome || c.Model.ClaudeHome != c.WorkerModel.ClaudeHome {
-		t.Fatal("default worker login is not shared")
-	}
-	c.Workers = []Worker{{ID: "worker", Name: "Project worker", Managed: true, ProjectID: "project", Workspace: t.TempDir(), Capabilities: []string{"implement", "review"}}}
-	if err := c.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	for _, mutate := range []func(*Worker){func(w *Worker) { w.ProjectID = "" }, func(w *Worker) { w.Endpoint = "https://example.test" }, func(w *Worker) { w.APIKeyEnv = "TOKEN" }, func(w *Worker) { w.Capabilities = []string{"coordinate"} }, func(w *Worker) { w.Workspace = "relative" }} {
-		bad := c
-		bad.Workers = append([]Worker{}, c.Workers...)
-		mutate(&bad.Workers[0])
-		if err := bad.Validate(); err == nil {
-			t.Fatal("invalid managed authority accepted")
 		}
 	}
 }

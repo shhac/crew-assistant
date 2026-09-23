@@ -24,11 +24,9 @@ type Config struct {
 	Assistant   Assistant    `json:"assistant"`
 	Dashboard   Dashboard    `json:"dashboard"`
 	Model       Model        `json:"model"`
-	WorkerModel Model        `json:"worker_model"`
 	Slack       Slack        `json:"slack"`
 	Linear      Linear       `json:"linear"`
 	Limits      Limits       `json:"limits"`
-	Workers     []Worker     `json:"workers"`
 	Connections []Connection `json:"connections"`
 }
 type Chat struct {
@@ -104,41 +102,23 @@ type Linear struct {
 	TeamIDs           []string `json:"team_ids"`
 }
 type Limits struct {
-	WorkerUsage WorkerUsage `json:"worker_usage"`
-	// WorkerTokenBudget caps the tokens one worker assignment may consume,
-	// counted from the provider's own reported usage across its whole life,
-	// including context summaries and resumes. Zero disables it. This is a
-	// per-assignment budget, not the shared-account headroom in WorkerUsage.
-	WorkerTokenBudget   int64 `json:"worker_token_budget"`
-	MaxModelCallsPerDay int   `json:"max_model_calls_per_day"`
+	// RoleUsage holds team roles back while their subscription is nearly used.
+	RoleUsage RoleUsage `json:"role_usage"`
 	// MaxModelTurns and MaxModelCallsPerDay bound the assistant's own
-	// conversation and tool loop. They are not worker lifetime budgets.
-	MaxModelTurns  int `json:"max_model_turns"`
-	MaxAgents      int `json:"max_agents"`
-	MaxDepth       int `json:"max_depth"`
-	MaxRecoveries  int `json:"max_recoveries"`
-	CheckInMinutes int `json:"check_in_minutes"`
+	// conversation and tool loop.
+	MaxModelCallsPerDay int `json:"max_model_calls_per_day"`
+	MaxModelTurns       int `json:"max_model_turns"`
 }
 
-// WorkerUsage controls admission of new work against native CLI subscription quotas.
+// RoleUsage holds team-role turns while a native CLI subscription is nearly
+// used up.
 // A zero threshold disables that engine's usage gate.
-type WorkerUsage struct {
+type RoleUsage struct {
 	CodexMaxUsedPercent  int    `json:"codex_max_used_percent"`
 	ClaudeMaxUsedPercent int    `json:"claude_max_used_percent"`
 	OnUnavailable        string `json:"on_unavailable"`
 }
 
-type Worker struct {
-	ModelProfile *Model   `json:"model_profile,omitempty"`
-	Managed      bool     `json:"managed,omitempty"`
-	Workspace    string   `json:"workspace,omitempty"`
-	ProjectID    string   `json:"project_id,omitempty"`
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Endpoint     string   `json:"endpoint"`
-	APIKeyEnv    string   `json:"api_key_env"`
-	Capabilities []string `json:"capabilities"`
-}
 type FilePaths struct {
 	Config string
 	State  string
@@ -150,11 +130,10 @@ func Default() Config {
 		Assistant:   Assistant{Name: DefaultAssistantName, Personality: "Calm, concise and proactive. Bring clear recommendations and evidence; handle the chasing.", Theme: "graphite-sage", Avatar: Avatar{Shape: "orb", Background: "#16211e", Accent: "#a8c5a8"}},
 		Dashboard:   Dashboard{Addr: "127.0.0.1:8340", Tailscale: "off", TailscalePort: 8443, AllowedUsers: []string{}},
 		Model:       defaultModel(),
-		WorkerModel: defaultWorkerModel(),
 		Connections: []Connection{},
 		Slack:       Slack{BotTokenEnv: "SLACK_BOT_TOKEN", AppTokenEnv: "SLACK_APP_TOKEN"},
 		Linear:      Linear{APIKeyEnv: "LINEAR_API_KEY", TeamIDs: []string{}},
-		Limits:      Limits{WorkerUsage: WorkerUsage{CodexMaxUsedPercent: 90, ClaudeMaxUsedPercent: 90, OnUnavailable: "allow"}, MaxModelCallsPerDay: 100, MaxModelTurns: 8, MaxAgents: 4, MaxDepth: 3, MaxRecoveries: 2, CheckInMinutes: 30}, Workers: []Worker{},
+		Limits:      Limits{RoleUsage: RoleUsage{CodexMaxUsedPercent: 90, ClaudeMaxUsedPercent: 90, OnUnavailable: "allow"}, MaxModelCallsPerDay: 100, MaxModelTurns: 8},
 	}
 }
 
@@ -178,12 +157,6 @@ func DefaultCodexHome() string {
 func DefaultClaudeHome() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".claude")
-}
-
-func defaultWorkerModel() Model {
-	m := defaultModel()
-	m.Model = "gpt-5.6-terra"
-	return m
 }
 
 func Paths() (FilePaths, error) {
@@ -236,10 +209,6 @@ func Load(path string) (Config, error) {
 	}
 	if err = dec.Decode(new(any)); err != io.EOF {
 		return c, errors.New("config must contain one JSON object")
-	}
-	if _, exists := sections["worker_model"]; legacyModel && !exists {
-		c.WorkerModel = c.Model
-		c.WorkerModel.MaxTokens = 4096 // Historical worker flag default, independent of the PA cap.
 	}
 	return c, c.Validate()
 }
@@ -336,80 +305,19 @@ func (c Config) Validate() error {
 	if c.Limits.MaxModelTurns < 1 || c.Limits.MaxModelTurns > 32 {
 		return errors.New("limits.max_model_turns must be between 1 and 32")
 	}
-	if c.Limits.WorkerTokenBudget < 0 || (c.Limits.WorkerTokenBudget > 0 && c.Limits.WorkerTokenBudget < 1000) || c.Limits.WorkerTokenBudget > 1_000_000_000_000 {
-		return errors.New("worker token budget must be 0 to disable it, or at least 1000 tokens")
+	if c.Limits.RoleUsage.CodexMaxUsedPercent < 0 || c.Limits.RoleUsage.CodexMaxUsedPercent > 100 {
+		return errors.New("limits.role_usage.codex_max_used_percent must be between 0 and 100; 0 disables the limit")
 	}
-	if c.Limits.MaxAgents < 1 || c.Limits.MaxAgents > 64 {
-		return errors.New("limits.max_agents must be between 1 and 64")
+	if c.Limits.RoleUsage.ClaudeMaxUsedPercent < 0 || c.Limits.RoleUsage.ClaudeMaxUsedPercent > 100 {
+		return errors.New("limits.role_usage.claude_max_used_percent must be between 0 and 100; 0 disables the limit")
 	}
-	if c.Limits.MaxDepth < 1 || c.Limits.MaxDepth > 10 {
-		return errors.New("limits.max_depth must be between 1 and 10")
-	}
-	if c.Limits.MaxRecoveries < 0 || c.Limits.MaxRecoveries > 10 {
-		return errors.New("limits.max_recoveries must be between 0 and 10")
-	}
-	if c.Limits.CheckInMinutes < 1 || c.Limits.CheckInMinutes > 1440 {
-		return errors.New("limits.check_in_minutes must be between 1 and 1440")
-	}
-	if c.Limits.WorkerUsage.CodexMaxUsedPercent < 0 || c.Limits.WorkerUsage.CodexMaxUsedPercent > 100 {
-		return errors.New("limits.worker_usage.codex_max_used_percent must be between 0 and 100; 0 disables the limit")
-	}
-	if c.Limits.WorkerUsage.ClaudeMaxUsedPercent < 0 || c.Limits.WorkerUsage.ClaudeMaxUsedPercent > 100 {
-		return errors.New("limits.worker_usage.claude_max_used_percent must be between 0 and 100; 0 disables the limit")
-	}
-	if c.Limits.WorkerUsage.OnUnavailable != "allow" && c.Limits.WorkerUsage.OnUnavailable != "pause" {
-		return errors.New("limits.worker_usage.on_unavailable must be allow or pause")
+	if c.Limits.RoleUsage.OnUnavailable != "allow" && c.Limits.RoleUsage.OnUnavailable != "pause" {
+		return errors.New("limits.role_usage.on_unavailable must be allow or pause")
 	}
 	if err := c.Model.Validate(); err != nil {
 		return fmt.Errorf("model: %w", err)
 	}
-	if err := c.WorkerModel.Validate(); err != nil {
-		return fmt.Errorf("worker_model: %w", err)
-	}
-	if c.WorkerModel.MaxTokens > 32768 {
-		return errors.New("worker_model.max_tokens must not exceed the worker broker limit of 32768")
-	}
-	envs := []string{c.Model.APIKeyEnv, c.WorkerModel.APIKeyEnv, c.Slack.BotTokenEnv, c.Slack.AppTokenEnv, c.Linear.APIKeyEnv}
-	ids := map[string]bool{}
-	for _, w := range c.Workers {
-		if w.ID == "" || ids[w.ID] {
-			return errors.New("workers must have unique nonempty IDs")
-		}
-		ids[w.ID] = true
-		if w.ModelProfile != nil {
-			if !w.Managed {
-				return errors.New("model_profile applies only to managed workers")
-			}
-			if err := w.ModelProfile.Validate(); err != nil {
-				return fmt.Errorf("worker model profile: %w", err)
-			}
-			if w.ModelProfile.MaxTokens > 32768 {
-				return errors.New("worker model output limit exceeds 32768")
-			}
-			envs = append(envs, w.ModelProfile.APIKeyEnv)
-		}
-		if w.Managed {
-			if w.ProjectID == "" || !filepath.IsAbs(w.Workspace) || w.Endpoint != "" || w.APIKeyEnv != "" {
-				return errors.New("managed workers require a project and absolute workspace; endpoints and credentials are automatic")
-			}
-			if len(w.Capabilities) == 0 {
-				return errors.New("managed workers need implementation or review capability")
-			}
-			for _, cap := range w.Capabilities {
-				if cap != "implement" && cap != "review" {
-					return errors.New("managed workers only implement or review")
-				}
-			}
-		} else if err = validateEndpoint(w.Endpoint); err != nil {
-			return fmt.Errorf("worker %s endpoint: %w", w.ID, err)
-		}
-		for _, cap := range w.Capabilities {
-			if cap != "coordinate" && cap != "implement" && cap != "review" && cap != "research" {
-				return fmt.Errorf("worker %s has prohibited or unknown capability %q", w.ID, cap)
-			}
-		}
-		envs = append(envs, w.APIKeyEnv)
-	}
+	envs := []string{c.Model.APIKeyEnv, c.Slack.BotTokenEnv, c.Slack.AppTokenEnv, c.Linear.APIKeyEnv}
 	for _, e := range envs {
 		if e != "" && !envName.MatchString(e) {
 			return errors.New("credential references must be environment variable names")

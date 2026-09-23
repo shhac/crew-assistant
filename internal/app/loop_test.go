@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/quota"
 	"github.com/shhac/crew-assistant/internal/roles"
 	"github.com/shhac/lib-agent-harness/session"
 )
@@ -66,6 +67,8 @@ func loopApp(t *testing.T, runner *scriptedRunner, deliverTo string) (*App, core
 	t.Helper()
 	a := testApp(t)
 	a.runner = runner
+	// No real account is ever read from a test; an empty reading is unknown.
+	a.meter = &quota.Meter{Inspect: func(context.Context, session.Options) (session.Inspection, error) { return session.Inspection{}, nil }}
 	ctx := context.Background()
 	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Thanks", Template: "draft", Brief: core.BriefInput{Goal: "Thank the team", Criteria: []string{"Warm tone"}}})
 	if err != nil {
@@ -282,5 +285,26 @@ func TestParseVerdictRejectsUnusableReviews(t *testing.T) {
 		if _, err := parseVerdict(bad); err == nil {
 			t.Errorf("accepted %q", bad)
 		}
+	}
+}
+
+func TestNearlyUsedSubscriptionHoldsTheRoleWithoutFailing(t *testing.T) {
+	runner := &scriptedRunner{reviews: []string{pass}}
+	a, _, _ := loopApp(t, runner, "")
+	used := 95.0
+	resets := time.Now().Add(2 * time.Hour)
+	observation := session.Observation{Quality: session.Measured, ObservedAt: time.Now()}
+	a.meter = &quota.Meter{Inspect: func(_ context.Context, o session.Options) (session.Inspection, error) {
+		if o.Engine != session.Codex {
+			return session.Inspection{}, nil
+		}
+		return session.Inspection{Quota: session.QuotaSnapshot{Observation: observation, Complete: true, Windows: []session.QuotaWindow{{Observation: observation, ID: "codex/primary", Scope: "codex", UsedPercent: &used, ResetsAt: &resets}}}}, nil
+	}}
+	task := settle(t, a)
+	if task.Status != core.TaskReviewing || task.Failures != 0 || !task.RetryAt.Equal(resets.UTC()) || !strings.Contains(task.Detail, "headroom") {
+		t.Fatalf("expected the codex reviewer to wait for its window: %+v", task)
+	}
+	if len(runner.seen) != 1 || !runner.seen[0].Write {
+		t.Fatalf("only the claude writer should have run: %d turns", len(runner.seen))
 	}
 }

@@ -211,6 +211,7 @@ func NewRoot(version string) *cobra.Command {
 		} else {
 			refs = append(refs, cfg.Model.APIKeyEnv)
 		}
+		checks = append(checks, roleSandboxChecks(cmd.Context(), cfg, o.statePath)...)
 		for _, ref := range refs {
 			if ref != "" {
 				checks = append(checks, map[string]any{"name": ref, "ok": os.Getenv(ref) != "", "hint": "set in the daemon environment if using this integration"})

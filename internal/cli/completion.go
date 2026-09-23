@@ -31,11 +31,11 @@ func registerCompletions(root *cobra.Command, o *options) {
 		case 0:
 			return completionValues(keys, prefix)
 		case 1:
-			if args[0] == "model.codex_home" || args[0] == "worker_model.codex_home" {
+			if args[0] == "model.codex_home" {
 				return nil, cobra.ShellCompDirectiveFilterDirs
 			}
 			values := completionConfigValues(args[0])
-			if args[0] == "model.model" || args[0] == "worker_model.model" {
+			if args[0] == "model.model" {
 				values = configuredModels(o)
 			}
 			return completionValues(values, prefix)
@@ -48,29 +48,7 @@ func registerCompletions(root *cobra.Command, o *options) {
 	_ = serve.RegisterFlagCompletionFunc("tailscale-port", completeStatic(completionConfigValues("dashboard.tailscale_port")))
 	_ = serve.RegisterFlagCompletionFunc("http", completeStatic(nil))
 	login, _, _ := root.Find([]string{"model", "login"})
-	_ = login.RegisterFlagCompletionFunc("profile", completeStatic([]string{"assistant", "worker"}))
-	worker, _, _ := root.Find([]string{"worker", "serve"})
-	_ = worker.RegisterFlagCompletionFunc("engine", completeStatic(completionConfigValues("worker_model.engine")))
-	_ = worker.RegisterFlagCompletionFunc("effort", completeStatic(completionConfigValues("worker_model.effort")))
-	_ = worker.RegisterFlagCompletionFunc("model", func(_ *cobra.Command, _ []string, prefix string) ([]string, cobra.ShellCompDirective) {
-		return completionValues(configuredModels(o), prefix)
-	})
-	_ = worker.RegisterFlagCompletionFunc("project", func(_ *cobra.Command, _ []string, prefix string) ([]string, cobra.ShellCompDirective) {
-		cfg, err := config.Load(o.configPath)
-		if err != nil {
-			return completionValues(nil, prefix)
-		}
-		var projects []string
-		for _, profile := range cfg.Workers {
-			projects = append(projects, profile.ProjectID)
-		}
-		return completionValues(projects, prefix)
-	})
-	for _, flag := range []string{"image", "http", "token-env"} {
-		_ = worker.RegisterFlagCompletionFunc(flag, completeStatic(nil))
-	}
-	_ = worker.MarkFlagDirname("workspace")
-	_ = worker.MarkFlagDirname("worker-state")
+	_ = login.RegisterFlagCompletionFunc("engine", completeStatic([]string{"codex", "claude"}))
 }
 
 func completeStatic(values []string) cobra.CompletionFunc {
@@ -124,9 +102,9 @@ func completionConfigValues(key string) []string {
 		return []string{"off", "serve"}
 	case "dashboard.tailscale_port":
 		return []string{"443", "8443", "10000"}
-	case "model.engine", "worker_model.engine":
+	case "model.engine":
 		return []string{"codex", "claude", "openai-compatible"}
-	case "model.effort", "worker_model.effort", "chat.loading_phrases.effort":
+	case "model.effort", "chat.loading_phrases.effort":
 		return []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
 	}
 	return nil
@@ -137,5 +115,5 @@ func configuredModels(o *options) []string {
 	if err != nil {
 		return nil
 	}
-	return []string{cfg.Model.Model, cfg.WorkerModel.Model}
+	return []string{cfg.Model.Model}
 }

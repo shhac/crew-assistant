@@ -14,20 +14,22 @@ import (
 )
 
 func registerModel(root *cobra.Command, o *options) {
-	var profile string
+	var engineName string
 	models := &cobra.Command{Use: "model", Short: "Manage the configured model runtime"}
 	login := &cobra.Command{Use: "login", Short: "Sign in using the configured runtime home", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		cfg, err := config.Load(o.configPath)
 		if err != nil {
 			return err
 		}
+		// Team roles use the same CLI homes as the assistant, one per engine, so
+		// signing in to an engine's home serves both.
 		selected := cfg.Model
-		switch profile {
-		case "assistant":
-		case "worker":
-			selected = cfg.WorkerModel
+		switch engineName {
+		case "":
+		case "codex", "claude":
+			selected.Engine = engineName
 		default:
-			return errors.New("profile must be assistant or worker")
+			return errors.New("engine must be codex or claude")
 		}
 		child, err := prepareModelLogin(cmd.Context(), selected)
 		if err != nil {
@@ -44,7 +46,7 @@ func registerModel(root *cobra.Command, o *options) {
 		}
 		return nil
 	}}
-	login.Flags().StringVar(&profile, "profile", "assistant", "Model profile: assistant or worker")
+	login.Flags().StringVar(&engineName, "engine", "", "Sign in to this engine's home instead of the assistant's: codex or claude")
 	models.AddCommand(login)
 	root.AddCommand(models)
 }
