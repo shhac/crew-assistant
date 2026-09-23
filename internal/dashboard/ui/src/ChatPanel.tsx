@@ -199,14 +199,18 @@ export function ChatPanel({
   const [dragging, setDragging] = useState(false);
   async function addFiles(files: File[]) {
     if (!files.length) return;
+    // Old refusals clear only when no other files are still being read;
+    // a slow read finishing later must not erase a refusal that came after it.
+    if (!readingRef.current) setAssetErrors([]);
     readingRef.current += files.length;
     setReading(readingRef.current);
     const results = await Promise.all(files.map(readAsset));
     readingRef.current -= files.length;
     setReading(readingRef.current);
     const added = results.flatMap((r) => ("asset" in r ? [r.asset] : []));
+    const refused = results.flatMap((r) => ("error" in r ? [r.error] : []));
     setAssets((current) => [...current, ...added]);
-    setAssetErrors(results.flatMap((r) => ("error" in r ? [r.error] : [])));
+    setAssetErrors((current) => [...current, ...refused]);
   }
   const [turns, setTurns] = useState<VisibleTurn[]>([]);
   const [error, setError] = useState("");
@@ -613,8 +617,8 @@ export function ChatPanel({
         />
         {assetErrors.length > 0 && (
           <div className="error-notice composer-asset-errors" role="alert">
-            {assetErrors.map((text) => (
-              <p key={text}>{text}</p>
+            {assetErrors.map((text, i) => (
+              <p key={`${i}:${text}`}>{text}</p>
             ))}
           </div>
         )}

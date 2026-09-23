@@ -644,6 +644,39 @@ describe("composer attachments", () => {
     await tick(0);
     expect(server.posts()).toHaveLength(1);
   });
+  it("keeps a refusal when an earlier, slower read finishes after it", async () => {
+    backend();
+    render(panel());
+    const slow = textFile("Slow notes", "slow.txt");
+    let finish!: () => void;
+    const contents = await slow.arrayBuffer();
+    Object.defineProperty(slow, "arrayBuffer", {
+      value: () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          finish = () => resolve(contents);
+        }),
+    });
+    drop([slow]);
+    await tick(0);
+    expect(screen.getByText("Reading files…")).toBeTruthy();
+    drop([
+      new File([new Uint8Array([137])], "chart.png", { type: "image/png" }),
+    ]);
+    await tick(0);
+    expect(screen.getByRole("alert").textContent).toContain(
+      "chart.png can't be attached",
+    );
+    await act(async () => finish());
+    await tick(0);
+    expect(within(attachments()!).getByText("slow.txt")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "chart.png can't be attached",
+    );
+    // A new batch, once nothing is being read, starts with a clean slate.
+    drop([textFile("fresh", "fresh.txt")]);
+    await tick(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
   it("restores a refused message's attachments to the composer", async () => {
     const server = backend();
     const original = server.fetch.getMockImplementation()!;
