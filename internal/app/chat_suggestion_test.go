@@ -121,6 +121,35 @@ func TestSuggestionEscalatesWhenNoApprovedModelIsAvailable(t *testing.T) {
 	}
 }
 
+func TestSuggestionEscalatesWhenALoadingCaptionFoundNoApprovedModelFirst(t *testing.T) {
+	a, f := suggestionApp(t, "codex")
+	f.offered["codex"] = f.offered["codex"][:2]
+	f.offered["claude"] = f.offered["claude"][:1]
+	ctx := context.Background()
+	if _, err := a.Core.EnqueueChat(ctx, "one", "Plan the garden"); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := a.Core.StartNextChat(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The loading caption meets the missing models first and fails quietly.
+	a.startChatLoading(ctx, turn.ID, turn.Message, nil)
+	if err = a.Core.FinishChat(ctx, turn.ID, "completed", "Here is a plan.", ""); err != nil {
+		t.Fatal(err)
+	}
+	turns, _ := a.Core.ChatTurns(ctx)
+	before := f.calls()
+	if before == 0 || turns[0].LoadingPhrase != "" {
+		t.Fatal("loading caption did not try the CLIs", before, turns[0].LoadingPhrase)
+	}
+	// The suggestion that follows still tells the owner, without asking again.
+	_, err = a.SuggestNextMessage(ctx, turns[0].AssistantMessageID)
+	if !errors.Is(err, ErrSuggestionUnavailable) || !strings.Contains(err.Error(), "gpt-6-luna is not offered to the codex login") || f.calls() != before {
+		t.Fatal(err, f.calls()-before)
+	}
+}
+
 func TestSuggestionOnlyWhenTheConversationHasSettled(t *testing.T) {
 	a, f := suggestionApp(t, "claude")
 	ctx := context.Background()

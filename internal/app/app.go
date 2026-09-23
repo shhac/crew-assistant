@@ -43,7 +43,7 @@ type App struct {
 }
 
 func New(s *core.Service, cfg config.Config, path string, demo bool) *App {
-	return &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), statuses: map[string]core.Integration{}, runner: roles.Native{}, meter: &quota.Meter{}, loopWake: make(chan struct{}, 1), small: newSmallModels(s.StateDirectory())}
+	return &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), statuses: map[string]core.Integration{}, runner: roles.Native{}, meter: &quota.Meter{}, loopWake: make(chan struct{}, 1), small: newSmallModels(func() string { return s.StateDirectory() })}
 }
 func (a *App) Config() config.Config { a.mu.RLock(); defer a.mu.RUnlock(); return a.cfg }
 func (a *App) UpdateConfig(cfg config.Config) error {

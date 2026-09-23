@@ -23,16 +23,24 @@ type smallDiscovery func(context.Context, engine.Config) ([]engine.ModelOption, 
 type smallModels struct {
 	discover smallDiscovery
 	complete smallCompletion
-	workDir  string
+	workDir  func() string // Resolved per call; the service may be absent.
 	attempt  time.Duration // Bound on one engine's discovery and reply.
 	rest     time.Duration // How long a failed engine is skipped.
 	now      func() time.Time
 	mu       sync.Mutex
-	resting  map[string]time.Time
+	resting  map[string]restingEngine
 }
 
-func newSmallModels(workDir string) *smallModels {
-	return &smallModels{discover: engine.DiscoverModels, complete: engine.Complete, workDir: workDir, attempt: 8 * time.Second, rest: 10 * time.Minute, now: time.Now, resting: map[string]time.Time{}}
+// restingEngine keeps why an engine failed, so a skip during its rest reports
+// the same cause: a model the login does not offer stays a mapping problem the
+// owner is told about, whichever feature found it.
+type restingEngine struct {
+	until time.Time
+	cause error
+}
+
+func newSmallModels(workDir func() string) *smallModels {
+	return &smallModels{discover: engine.DiscoverModels, complete: engine.Complete, workDir: workDir, attempt: 8 * time.Second, rest: 10 * time.Minute, now: time.Now, resting: map[string]restingEngine{}}
 }
 
 // notOfferedError means the approved model, at its approved effort, is not
@@ -80,8 +88,8 @@ func (s *smallModels) ask(ctx context.Context, models []config.Model, prompt []e
 			failure.attempts = append(failure.attempts, fmt.Errorf("%s on %s is not an approved small model", m.Model, m.Engine))
 			continue
 		}
-		if s.isResting(m.Engine) {
-			failure.attempts = append(failure.attempts, fmt.Errorf("the %s CLI is skipped after a recent failure", m.Engine))
+		if cause := s.restingCause(m.Engine); cause != nil {
+			failure.attempts = append(failure.attempts, fmt.Errorf("the %s CLI is skipped after a recent failure: %w", m.Engine, cause))
 			continue
 		}
 		reply, err := s.try(ctx, m, prompt, reserve)
@@ -90,10 +98,10 @@ func (s *smallModels) ask(ctx context.Context, models []config.Model, prompt []e
 			return engine.Message{}, ctx.Err()
 		}
 		if err == nil {
-			s.setResting(m.Engine, time.Time{})
+			s.setResting(m.Engine, restingEngine{})
 			return reply, nil
 		}
-		s.setResting(m.Engine, s.now().Add(s.rest))
+		s.setResting(m.Engine, restingEngine{until: s.now().Add(s.rest), cause: err})
 		failure.attempts = append(failure.attempts, err)
 	}
 	return engine.Message{}, failure
@@ -114,7 +122,7 @@ func (s *smallModels) try(ctx context.Context, m config.Model, prompt []engine.M
 // inference. It never substitutes another model or raises the effort: a model
 // with effort levels but not the approved one is treated as not offered.
 func (s *smallModels) verify(ctx context.Context, m config.Model, reserve func(context.Context) error) (engine.Config, error) {
-	ec := engine.Config{WorkDirRoot: s.workDir, Engine: m.Engine, Model: m.Model, CodexBin: m.CodexBin, CodexHome: m.CodexHome, ClaudeBin: m.ClaudeBin, ClaudeHome: m.ClaudeHome, MaxOutputTokens: 128, MaxContextBytes: 8192, Timeout: s.attempt, Retry: &engine.RetryPolicy{MaxRetries: 0}, BeforeRequest: reserve}
+	ec := engine.Config{WorkDirRoot: s.workDir(), Engine: m.Engine, Model: m.Model, CodexBin: m.CodexBin, CodexHome: m.CodexHome, ClaudeBin: m.ClaudeBin, ClaudeHome: m.ClaudeHome, MaxOutputTokens: 128, MaxContextBytes: 8192, Timeout: s.attempt, Retry: &engine.RetryPolicy{MaxRetries: 0}, BeforeRequest: reserve}
 	models, err := s.discover(ctx, ec)
 	if err != nil {
 		return engine.Config{}, err
@@ -137,14 +145,19 @@ func (s *smallModels) verify(ctx context.Context, m config.Model, reserve func(c
 	return engine.Config{}, &notOfferedError{engine: m.Engine, model: m.Model}
 }
 
-func (s *smallModels) isResting(engineName string) bool {
+// restingCause is why the engine last failed while it is still resting, or nil
+// when it may be tried.
+func (s *smallModels) restingCause(engineName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.now().Before(s.resting[engineName])
+	if r := s.resting[engineName]; s.now().Before(r.until) {
+		return r.cause
+	}
+	return nil
 }
 
-func (s *smallModels) setResting(engineName string, until time.Time) {
+func (s *smallModels) setResting(engineName string, r restingEngine) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.resting[engineName] = until
+	s.resting[engineName] = r
 }

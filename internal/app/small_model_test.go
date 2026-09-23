@@ -41,7 +41,8 @@ func newFakeCLIs(t *testing.T) *fakeCLIs {
 }
 
 func (f *fakeCLIs) models() *smallModels {
-	s := newSmallModels(f.t.TempDir())
+	dir := f.t.TempDir()
+	s := newSmallModels(func() string { return dir })
 	s.now = func() time.Time { f.mu.Lock(); defer f.mu.Unlock(); return f.clock }
 	s.discover = func(_ context.Context, c engine.Config) ([]engine.ModelOption, error) {
 		f.mu.Lock()
@@ -228,10 +229,18 @@ func TestSmallModelsReportWhenNeitherLoginOffersItsApprovedModel(t *testing.T) {
 	f := newFakeCLIs(t)
 	f.offered["codex"] = f.offered["codex"][:2]
 	f.offered["claude"] = f.offered["claude"][:1]
-	_, err := f.models().ask(context.Background(), smallModelsFor(t, "codex"), nil, nil)
+	s := f.models()
+	_, err := s.ask(context.Background(), smallModelsFor(t, "codex"), nil, nil)
 	var failure *smallModelFailure
 	if !errors.As(err, &failure) || !failure.notOffered() || len(f.completed) != 0 {
 		t.Fatal(err, f.completed)
+	}
+	// While both rest, the skip keeps its cause: still a mapping problem, found
+	// without asking either CLI again.
+	before := f.calls()
+	_, err = s.ask(context.Background(), smallModelsFor(t, "claude"), nil, nil)
+	if !errors.As(err, &failure) || !failure.notOffered() || f.calls() != before {
+		t.Fatal(err, f.calls()-before)
 	}
 	// One outage alongside one refusal is a passing problem, not a mapping one.
 	f = newFakeCLIs(t)
@@ -262,7 +271,7 @@ func TestSmallModelsDoNotBlameAnEngineWhenTheCallerStops(t *testing.T) {
 	if _, err := s.ask(ctx, smallModelsFor(t, "codex"), nil, nil); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
 	}
-	if s.isResting("codex") || s.isResting("claude") || len(f.completed) != 1 {
+	if s.restingCause("codex") != nil || s.restingCause("claude") != nil || len(f.completed) != 1 {
 		t.Fatal("caller cancellation rested an engine", len(f.completed))
 	}
 }
