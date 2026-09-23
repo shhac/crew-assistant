@@ -1,15 +1,7 @@
-import { ProjectDirectories } from "./ProjectForms";
-import { ActivityList, ProjectRow } from "./OverviewPage";
-import { DecisionCard } from "./DecisionCard";
-import {
-  CriteriaList,
-  Empty,
-  humanStatus,
-  Icon,
-  PageHeading,
-  Status,
-} from "./ui";
-import { pendingDecisions, type State } from "./api";
+import { ProjectRow } from "./OverviewPage";
+import { ProjectDetail } from "./ProjectDetail";
+import { Empty, Icon, PageHeading } from "./ui";
+import type { State } from "./api";
 
 export function Projects({
   state,
@@ -25,91 +17,15 @@ export function Projects({
   refresh: () => Promise<void>;
 }) {
   const project = state.projects.find((p) => p.id === selected);
-  if (project) {
-    const projectState = {
-      ...state,
-      activity: state.activity.filter((a) => a.project_id === project.id),
-    };
-    const decisions = pendingDecisions(state.decisions).filter(
-      (d) => d.project_id === project.id,
-    );
+  if (project)
     return (
-      <section>
-        <button
-          className="text-button back-link"
-          onClick={() => onSelect(null)}
-        >
-          ← All projects
-        </button>
-        <PageHeading
-          eyebrow="PROJECT CONTEXT"
-          title={project.title}
-          description={project.description}
-          action={<Status>{humanStatus(project.status)}</Status>}
-        />
-        <p className="section-description">
-          Team work for this project will appear here.
-        </p>
-        {decisions.length > 0 && (
-          <section
-            className="section-block"
-            aria-label="Decisions for this project"
-          >
-            <div className="section-heading">
-              <h2>
-                Decisions <span>{decisions.length}</span>
-              </h2>
-            </div>
-            <div className="decision-list">
-              {decisions.map((decision) => (
-                <DecisionCard
-                  key={decision.id}
-                  decision={decision}
-                  projects={state.projects}
-                  refresh={refresh}
-                  compact
-                />
-              ))}
-            </div>
-          </section>
-        )}
-        <section className="detail-section">
-          <p className="eyebrow">WHAT DONE LOOKS LIKE</p>
-          <CriteriaList
-            criteria={project.acceptance_criteria}
-            empty="No acceptance criteria recorded."
-            marker
-          />
-        </section>
-        <ProjectDirectories
-          key={project.id}
-          project={project}
-          refresh={refresh}
-        />
-        <details className="project-setup-details">
-          <summary>Technical identifiers</summary>
-          <label htmlFor="project-setup-id">
-            Project ID
-            <input
-              id="project-setup-id"
-              value={project.id}
-              readOnly
-              onFocus={(e) => e.target.select()}
-            />
-          </label>
-          <p className="field-hint">
-            For diagnostics and external integrations.
-          </p>
-        </details>
-        <section className="section-block">
-          <div className="section-heading">
-            <h2>Activity</h2>
-          </div>
-          <ActivityList state={projectState} />
-        </section>
-      </section>
+      <ProjectDetail
+        project={project}
+        state={state}
+        onBack={() => onSelect(null)}
+        refresh={refresh}
+      />
     );
-  }
   return (
     <section>
       <PageHeading
@@ -144,8 +60,8 @@ export function Projects({
             </button>
           }
         >
-          Give the work a name, describe the outcome, and define how you'll know
-          it's complete.
+          Give the work a name and say what it is for. Then ask for what you
+          need, and approve it when it's right.
         </Empty>
       )}
     </section>

@@ -186,6 +186,9 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, docs local
 		return a.roleFailed(ctx, t, writers[0].Name, fmt.Errorf("the draft could not be recorded: %w", err))
 	}
 	_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
+		if t.Status == core.TaskStopped {
+			return "", nil
+		}
 		t.Revisions = append(t.Revisions, core.Revision{N: n, BriefVersion: p.Brief.Version, Files: files, Summary: clip(result.Text, 2000), At: time.Now().UTC()})
 		t.WriterSession = result.Session
 		t.Failures, t.RetryAt = 0, time.Time{}
@@ -214,6 +217,9 @@ func (a *App) review(ctx context.Context, p core.Project, t core.Task, docs loca
 			return a.roleFailed(ctx, t, reviewer.Name, err)
 		}
 		_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
+			if t.Status == core.TaskStopped {
+				return "", nil
+			}
 			verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, reviewer.Name, p.Brief.Version, time.Now().UTC()
 			t.Verdicts = append(t.Verdicts, verdict)
 			t.Failures, t.RetryAt = 0, time.Time{}
@@ -311,6 +317,9 @@ func (a *App) decide(ctx context.Context, p core.Project, t core.Task) error {
 		return err
 	default:
 		_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+			if t.Status == core.TaskStopped {
+				return "", nil
+			}
 			t.Round++
 			t.Status, t.Detail = core.TaskWriting, fmt.Sprintf("Revising (round %d of %d)", t.Round, t.MaxRounds)
 			return fmt.Sprintf("Round %d of %s: revising after review", t.Round, t.Objective), nil
@@ -336,7 +345,7 @@ func (a *App) askForDelivery(ctx context.Context, p core.Project, t core.Task, r
 		where = "Approving copies it into " + p.Playbook.DeliverTo + "."
 	}
 	_, err := a.Core.OpenTaskDecision(ctx, t.ID, decisionDelivery, core.DecisionInput{
-		Title:          fmt.Sprintf("Draft %d of %s is ready", r.N, t.Objective),
+		Title:          fmt.Sprintf("Ready to approve: %s (draft %d)", t.Objective, r.N),
 		Context:        clip(r.Summary, 600) + "\n\nReviews:\n" + reviewDigest(verdicts) + "\n\n" + where,
 		Recommendation: choiceApprove,
 		Choices:        []string{choiceApprove, choiceChanges},
@@ -351,6 +360,9 @@ func (a *App) roleFailed(ctx context.Context, t core.Task, role string, cause er
 	permanent := roles.Permanent(cause)
 	var failures int
 	updated, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.Status == core.TaskStopped {
+			return "", nil
+		}
 		t.Failures++
 		failures = t.Failures
 		if permanent || t.Failures > roleRetries {
@@ -368,6 +380,9 @@ func (a *App) roleFailed(ctx context.Context, t core.Task, role string, cause er
 		return nil
 	}
 	if _, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.Status == core.TaskStopped {
+			return "", nil
+		}
 		t.ResumeStatus = t.Status
 		return "", nil
 	}); err != nil {
@@ -384,6 +399,9 @@ func (a *App) roleFailed(ctx context.Context, t core.Task, role string, cause er
 
 func (a *App) setStatus(ctx context.Context, id, status, detail string) error {
 	_, err := a.Core.UpdateTask(ctx, id, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.Status == core.TaskStopped {
+			return "", nil
+		}
 		t.Status, t.Detail = status, detail
 		return "", nil
 	})
@@ -392,6 +410,9 @@ func (a *App) setStatus(ctx context.Context, id, status, detail string) error {
 
 func (a *App) stopTask(ctx context.Context, t core.Task, reason string) error {
 	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.Status == core.TaskStopped {
+			return "", nil
+		}
 		t.Status, t.Detail = core.TaskStopped, reason
 		return t.Objective + " stopped: " + reason, nil
 	})
@@ -432,6 +453,9 @@ func (a *App) applyAnswer(ctx context.Context, p core.Project, t core.Task, d co
 		return a.deliver(ctx, p, t)
 	case d.Kind == decisionFailure && strings.EqualFold(answer, choiceTryAgain):
 		_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+			if t.Status == core.TaskStopped {
+				return "", nil
+			}
 			t.Status, t.ResumeStatus = t.ResumeStatus, ""
 			if t.Status == "" {
 				t.Status = core.TaskWriting
@@ -444,6 +468,9 @@ func (a *App) applyAnswer(ctx context.Context, p core.Project, t core.Task, d co
 	// Anything else is direction for another round: the owner asked for
 	// changes, answered a reviewer's question or wants one more attempt.
 	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.Status == core.TaskStopped {
+			return "", nil
+		}
 		switch {
 		case d.Kind == decisionQuestion:
 			t.Direction = append(t.Direction, "Answer to a reviewer's question ("+clip(d.Context, 300)+"): "+answer)
@@ -475,6 +502,9 @@ func (a *App) deliver(ctx context.Context, p core.Project, t core.Task) error {
 		}
 		if target, err = docs.Deliver(t.ID, r.N, p.Playbook.DeliverTo, t.Objective); err != nil {
 			if _, updateErr := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+				if t.Status == core.TaskStopped {
+					return "", nil
+				}
 				t.ResumeStatus = resumeDelivery
 				return "", nil
 			}); updateErr != nil {
@@ -490,6 +520,9 @@ func (a *App) deliver(ctx context.Context, p core.Project, t core.Task) error {
 		}
 	}
 	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.Status == core.TaskStopped {
+			return "", nil
+		}
 		t.Status, t.DecisionID, t.DeliveredTo = core.TaskDelivered, "", target
 		t.Detail = fmt.Sprintf("Draft %d approved", r.N)
 		if target != "" {
@@ -527,8 +560,39 @@ func (a *App) holdForUsage(ctx context.Context, t core.Task, r core.Role) (bool,
 		return false, nil
 	}
 	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.Status == core.TaskStopped {
+			return "", nil
+		}
 		t.RetryAt, t.Detail = wait, detail
 		return "", nil
 	})
 	return true, err
+}
+
+// StopTask ends a task at the owner's request. A turn already running
+// finishes, but nothing it reports can restart the task, and any decision the
+// task was waiting on is closed as no longer needed.
+func (a *App) StopTask(ctx context.Context, projectID, taskID string) (core.Task, error) {
+	var decisionID string
+	stopped, err := a.Core.UpdateTask(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.ProjectID != projectID {
+			return "", core.ErrNotFound
+		}
+		if t.Status == core.TaskDelivered || t.Status == core.TaskStopped {
+			return "", fmt.Errorf("this task has already finished: %w", core.ErrConflict)
+		}
+		decisionID = t.DecisionID
+		t.Status, t.DecisionID, t.Detail = core.TaskStopped, "", "the owner stopped it"
+		return t.Objective + " stopped by the owner", nil
+	})
+	if err != nil {
+		return stopped, err
+	}
+	if decisionID != "" {
+		if _, dismissErr := a.Core.DismissDecision(ctx, decisionID, "The task was stopped"); dismissErr != nil && !errors.Is(dismissErr, core.ErrConflict) {
+			return stopped, dismissErr
+		}
+	}
+	a.nudgeLoop()
+	return stopped, nil
 }

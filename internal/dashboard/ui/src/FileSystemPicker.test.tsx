@@ -198,6 +198,7 @@ it("adds an existing folder without requiring an outcome or starting coordinatio
   respond = () => listing("/home/existing-repo");
   const created = vi.fn(async () => {});
   render(<NewProject onClose={vi.fn()} onCreated={created} />);
+  fireEvent.click(screen.getByRole("button", { name: "Just track it" }));
   fireEvent.click(screen.getByRole("button", { name: "Choose folders" }));
   fireEvent.click(
     await screen.findByRole("button", {
@@ -209,16 +210,16 @@ it("adds an existing folder without requiring an outcome or starting coordinatio
     "value",
     "existing-repo",
   );
-  fireEvent.click(screen.getByRole("button", { name: "Add project" }));
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
   await waitFor(() => expect(created).toHaveBeenCalled());
   expect(writes).toEqual([
     {
       path: "/api/projects",
       body: {
         title: "existing-repo",
-        description: "",
-        acceptance_criteria: "",
         directories: ["/home/existing-repo"],
+        brief: { goal: "", audience: "", constraints: "", criteria: [] },
+        template: "",
       },
     },
   ]);
@@ -230,9 +231,8 @@ it("keeps attached-directory edits until explicit save", async () => {
       project={{
         id: "project-1",
         title: "Existing work",
-        description: "",
-        acceptance_criteria: [],
         status: "tracking",
+        brief: { version: 0, goal: "", criteria: [] },
         directories: ["/home/work"],
         scratch_directory: "/state/scratch/project-1",
       }}
@@ -299,7 +299,7 @@ it("supports arrow-key folder expansion without selecting an entry", async () =>
     true,
   );
 });
-it("keeps a folder and a name the whole requirement for tracking existing work", async () => {
+it("needs only a name to track a project, and a goal for written work", async () => {
   respond = () => listing("/home/existing-repo");
   render(<NewProject onClose={vi.fn()} onCreated={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Choose folders" }));
@@ -309,17 +309,18 @@ it("keeps a folder and a name the whole requirement for tracking existing work",
     }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Use selection" }));
-  // The outcome and acceptance fields are optional here and stay out of the
-  // way until the owner asks for them.
-  const brief = screen.getByText("Add a brief (optional)");
-  expect((brief.parentElement as HTMLDetailsElement).open).toBe(false);
-  expect(
-    (screen.getByLabelText("Desired outcome") as HTMLTextAreaElement).required,
-  ).toBe(false);
-  expect(screen.getByRole("button", { name: "Add project" })).toHaveProperty(
-    "disabled",
+  const create = screen.getByRole("button", { name: "Create project" });
+  expect(create).toHaveProperty("disabled", true);
+  expect(screen.getByLabelText("Goal")).toHaveProperty("required", true);
+  fireEvent.click(screen.getByRole("button", { name: "Just track it" }));
+  expect(create).toHaveProperty("disabled", false);
+  expect(screen.getByLabelText("Goal (optional)")).toHaveProperty(
+    "required",
     false,
   );
+  // The rest of the brief stays out of the way until the owner asks for it.
+  const more = screen.getByText("More about the brief (optional)");
+  expect((more.parentElement as HTMLDetailsElement).open).toBe(false);
 });
 it("says plainly that clicking opens a folder and the button selects it", async () => {
   respond = () => listing("/home", [entry("/home/work")]);

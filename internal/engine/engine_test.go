@@ -133,7 +133,7 @@ func TestRejectsCredentialBearingEndpointsAndRedirect(t *testing.T) {
 	}
 }
 func TestToolSchemaContainsOnlyCoordinationSurface(t *testing.T) {
-	required := map[string]bool{"read_state": true, "create_project": true, "update_brief": true, "set_team": true, "queue_task": true, "resolve_decision": true, "ask_decision": true, "remember_preference": true, "report_status": true, "list_connections": true, "query_connection": true}
+	required := map[string]bool{"read_state": true, "create_project": true, "update_brief": true, "set_team": true, "queue_task": true, "resolve_decision": true, "stop_task": true, "ask_decision": true, "remember_preference": true, "report_status": true, "list_connections": true, "query_connection": true}
 	for _, tool := range Tools() {
 		if !required[tool.Function.Name] {
 			t.Errorf("unexpected tool: %s", tool.Function.Name)

@@ -21,9 +21,8 @@ describe("project context", () => {
     const project = {
       id: "project-internal-42",
       title: "Garden planner",
-      description: "A personal planning tool",
       status: "active",
-      acceptance_criteria: [],
+      brief: { version: 1, goal: "A personal planning tool", criteria: [] },
       directories: [],
     };
     const state = normalizeState({
@@ -77,7 +76,7 @@ describe("project context", () => {
     fireEvent.click(
       within(activity).getByRole("link", { name: "Garden planner" }),
     );
-    await screen.findByText("Team work for this project will appear here.");
+    await screen.findByRole("region", { name: "Brief" });
     expect(window.location.hash).toBe("#/projects/project-internal-42");
     expect(
       within(
@@ -92,12 +91,10 @@ describe("project context", () => {
     fireEvent.click(
       within(operations).getByRole("link", { name: "Garden planner" }),
     );
-    await screen.findByText("Team work for this project will appear here.");
+    await screen.findByRole("region", { name: "Brief" });
     fireEvent.click(screen.getByRole("button", { name: /All projects/ }));
     expect(window.location.hash).toBe("");
-    expect(
-      screen.queryByText("Team work for this project will appear here."),
-    ).toBeNull();
+    expect(screen.queryByRole("region", { name: "Brief" })).toBeNull();
   });
 
   it("counts decisions and interrupted operations together on the overview", async () => {
@@ -160,9 +157,12 @@ describe("project context", () => {
     const project = {
       id: "project-order",
       title: "Release checklist",
-      description: "Make releases routine",
       status: "active",
-      acceptance_criteria: ["Reviewed"],
+      brief: {
+        version: 2,
+        goal: "Make releases routine",
+        criteria: ["Reviewed"],
+      },
       directories: ["/home/crew-assistant"],
     };
     const state = normalizeState({
@@ -180,8 +180,9 @@ describe("project context", () => {
     window.history.replaceState(null, "", "/#/projects/project-order");
     render(<App />);
 
-    await screen.findByText("Team work for this project will appear here.");
+    await screen.findByRole("region", { name: "Brief" });
     expect(screen.getByText("Reviewed")).toBeTruthy();
+    expect(screen.getByText(/Version 2/)).toBeTruthy();
     expect(
       screen.getAllByText(/\/home\/crew-assistant/).length,
     ).toBeGreaterThan(0);

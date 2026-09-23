@@ -99,7 +99,7 @@ func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (Project, 
 		return Project{}, err
 	}
 	now := s.now().UTC()
-	out := Project{ID: uid(), Title: in.Title, Status: "active", Directories: directories, SourceID: in.SourceID, SourceDescription: in.SourceDescription, UpdatedAt: now}
+	out := Project{ID: uid(), Title: in.Title, Status: "active", Brief: Brief{Criteria: []string{}}, Directories: directories, SourceID: in.SourceID, SourceDescription: in.SourceDescription, UpdatedAt: now}
 	if required(in.Brief.Goal) {
 		out.Brief = Brief{Version: 1, Goal: strings.TrimSpace(in.Brief.Goal), Audience: strings.TrimSpace(in.Brief.Audience), Constraints: strings.TrimSpace(in.Brief.Constraints), Criteria: cleanList(in.Brief.Criteria), UpdatedAt: now}
 	}

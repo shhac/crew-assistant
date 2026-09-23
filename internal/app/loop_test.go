@@ -308,3 +308,36 @@ func TestNearlyUsedSubscriptionHoldsTheRoleWithoutFailing(t *testing.T) {
 		t.Fatalf("only the claude writer should have run: %d turns", len(runner.seen))
 	}
 }
+
+func TestStoppingATaskSticksEvenMidTurn(t *testing.T) {
+	runner := &scriptedRunner{reviews: []string{pass}}
+	var a *App
+	var taskID, projectID string
+	// The owner stops the task while the writer's turn is still running.
+	runner.onWriter = func(string) {
+		if _, err := a.StopTask(context.Background(), projectID, taskID); err != nil {
+			panic(err)
+		}
+	}
+	a, p, task := loopApp(t, runner, "")
+	taskID, projectID = task.ID, p.ID
+	task = settle(t, a)
+	if task.Status != core.TaskStopped || len(task.Revisions) != 0 || len(runner.seen) != 1 {
+		t.Fatalf("the finished turn restarted a stopped task: %+v", task)
+	}
+
+	runner = &scriptedRunner{reviews: []string{pass}}
+	a, p, _ = loopApp(t, runner, "")
+	task = settle(t, a)
+	d := openDecision(t, a, task)
+	if task, _ = a.StopTask(context.Background(), p.ID, task.ID); task.Status != core.TaskStopped {
+		t.Fatalf("stop %+v", task)
+	}
+	snap, _ := a.Core.Snapshot(context.Background())
+	if closed, _ := findDecision(snap, d.ID); closed.Status != "dismissed" {
+		t.Fatalf("the waiting decision stayed open: %+v", closed)
+	}
+	if _, err := a.StopTask(context.Background(), p.ID, task.ID); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("stopping twice: %v", err)
+	}
+}

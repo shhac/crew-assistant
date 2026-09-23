@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { api, errorText, type Project } from "./api";
+import {
+  api,
+  createProject,
+  criteriaLines,
+  errorText,
+  type Project,
+} from "./api";
 import { FileSystemPicker } from "./FileSystemPicker";
 
 function directoryName(path: string) {
@@ -37,6 +43,8 @@ function DirectoryList({
     </ul>
   );
 }
+type ProjectKind = "draft" | "track";
+
 export function NewProject({
   onClose,
   onCreated,
@@ -44,9 +52,11 @@ export function NewProject({
   onClose: () => void;
   onCreated: () => Promise<void>;
 }) {
-  const [mode, setMode] = useState<"existing" | "new">("existing");
+  const [kind, setKind] = useState<ProjectKind>("draft");
   const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
+  const [goal, setGoal] = useState("");
+  const [audience, setAudience] = useState("");
+  const [constraints, setConstraints] = useState("");
   const [criteria, setCriteria] = useState("");
   const [directories, setDirectories] = useState<string[]>([]);
   const [picking, setPicking] = useState(false);
@@ -63,14 +73,16 @@ export function NewProject({
     setBusy(true);
     setError("");
     try {
-      await api("/api/projects", {
-        method: "POST",
-        body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim(),
-          acceptance_criteria: criteria.trim(),
-          directories: mode === "existing" ? directories : [],
-        }),
+      await createProject({
+        title: title.trim(),
+        directories,
+        brief: {
+          goal: goal.trim(),
+          audience: audience.trim(),
+          constraints: constraints.trim(),
+          criteria: criteriaLines(criteria),
+        },
+        template: kind === "draft" ? "draft" : "",
       });
       await onCreated();
     } catch (error) {
@@ -79,6 +91,7 @@ export function NewProject({
       setBusy(false);
     }
   }
+  const goalRequired = kind === "draft";
   return (
     <>
       <dialog
@@ -106,53 +119,29 @@ export function NewProject({
         <div
           className="project-mode"
           role="group"
-          aria-label="Project starting point"
+          aria-label="How the work gets done"
         >
           <button
             type="button"
-            aria-pressed={mode === "existing"}
-            onClick={() => setMode("existing")}
+            aria-pressed={kind === "draft"}
+            onClick={() => setKind("draft")}
           >
-            Existing folders
+            Written work (writer + reviewer)
           </button>
           <button
             type="button"
-            aria-pressed={mode === "new"}
-            onClick={() => setMode("new")}
+            aria-pressed={kind === "track"}
+            onClick={() => setKind("track")}
           >
-            New project
+            Just track it
           </button>
         </div>
         <p className="dialog-description">
-          {mode === "existing"
-            ? "Connect work already on the daemon’s computer. Your assistant can keep track while you decide what comes next."
-            : "Describe the outcome. Your assistant can help organize a new piece of work."}
+          {kind === "draft"
+            ? "A writer drafts what you ask for and a reviewer checks it against the brief. Nothing leaves the project until you approve it."
+            : "Keep the project and its folders in view. You can choose a team later."}
         </p>
         <form onSubmit={create}>
-          {mode === "existing" && (
-            <section className="project-folder-choice">
-              <strong>Project folders</strong>
-              <DirectoryList
-                paths={directories}
-                onRemove={(path) =>
-                  setDirectories((paths) =>
-                    paths.filter((value) => value !== path),
-                  )
-                }
-              />
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => setPicking(true)}
-              >
-                Choose folders
-              </button>
-              <p className="field-hint">
-                These are references to existing folders. Adding them does not
-                start any work or modify their contents.
-              </p>
-            </section>
-          )}
           <label htmlFor="project-title">
             Project name
             <input
@@ -164,66 +153,52 @@ export function NewProject({
               required
             />
           </label>
-          {mode === "existing" ? (
-            <details className="project-brief">
-              <summary>Add a brief (optional)</summary>
-              <p className="field-hint">
-                Your assistant can help establish the outcome and acceptance
-                criteria later. Tracking a folder does not need them.
-              </p>
-            <label htmlFor="project-description">
-              Desired outcome
-              <textarea
-                id="project-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="What should change, and why does it matter?"
-                rows={2}
-                maxLength={20000}
-                required={false}
-              />
-            </label>
-            <label htmlFor="project-criteria">
-              What does done look like?
-              <textarea
-                id="project-criteria"
-                value={criteria}
-                onChange={(e) => setCriteria(e.target.value)}
-                placeholder="One acceptance criterion per line"
-                rows={2}
-                maxLength={20000}
-                required={false}
-              />
-            </label>
-            </details>
-          ) : (
-            <>
-            <label htmlFor="project-description">
-              Desired outcome
-              <textarea
-                id="project-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="What should change, and why does it matter?"
-                rows={2}
-                maxLength={20000}
-                required={true}
-              />
-            </label>
-            <label htmlFor="project-criteria">
-              What does done look like?
-              <textarea
-                id="project-criteria"
-                value={criteria}
-                onChange={(e) => setCriteria(e.target.value)}
-                placeholder="One acceptance criterion per line"
-                rows={2}
-                maxLength={20000}
-                required={true}
-              />
-            </label>
-            </>
-          )}
+          <label htmlFor="project-goal">
+            {goalRequired ? "Goal" : "Goal (optional)"}
+            <textarea
+              id="project-goal"
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              placeholder="What is this project for?"
+              rows={2}
+              maxLength={20000}
+              required={goalRequired}
+            />
+          </label>
+          <details className="project-brief">
+            <summary>More about the brief (optional)</summary>
+            <BriefFields
+              idPrefix="project"
+              audience={audience}
+              constraints={constraints}
+              criteria={criteria}
+              onAudience={setAudience}
+              onConstraints={setConstraints}
+              onCriteria={setCriteria}
+            />
+          </details>
+          <section className="project-folder-choice">
+            <strong>Project folders (optional)</strong>
+            <DirectoryList
+              paths={directories}
+              onRemove={(path) =>
+                setDirectories((paths) =>
+                  paths.filter((value) => value !== path),
+                )
+              }
+            />
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => setPicking(true)}
+            >
+              Choose folders
+            </button>
+            <p className="field-hint">
+              References to existing folders. Adding them does not start any
+              work or modify their contents.
+            </p>
+          </section>
           {error && (
             <div className="error-notice" role="alert">
               {error}
@@ -231,25 +206,14 @@ export function NewProject({
           )}
           <div className="dialog-footer">
             <p>
-              {mode === "existing"
-                ? "You can track existing work now. Before delegation, your assistant will help establish the outcome and acceptance criteria."
-                : "Creating a project records the outcome. Ask your assistant to begin coordination."}
+              Creating a project starts no work. Ask for something on its page
+              when you are ready.
             </p>
             <button
               className="button primary"
-              disabled={
-                busy ||
-                !title.trim() ||
-                (mode === "existing"
-                  ? !directories.length
-                  : !description.trim() || !criteria.trim())
-              }
+              disabled={busy || !title.trim() || (goalRequired && !goal.trim())}
             >
-              {busy
-                ? "Adding…"
-                : mode === "existing"
-                  ? "Add project"
-                  : "Create project"}
+              {busy ? "Adding…" : "Create project"}
             </button>
           </div>
         </form>
@@ -268,6 +232,63 @@ export function NewProject({
           }}
         />
       )}
+    </>
+  );
+}
+
+/** The optional parts of a brief, shared by the new-project form and the brief editor. */
+export function BriefFields({
+  idPrefix,
+  audience,
+  constraints,
+  criteria,
+  onAudience,
+  onConstraints,
+  onCriteria,
+}: {
+  idPrefix: string;
+  audience: string;
+  constraints: string;
+  criteria: string;
+  onAudience: (value: string) => void;
+  onConstraints: (value: string) => void;
+  onCriteria: (value: string) => void;
+}) {
+  return (
+    <>
+      <label htmlFor={`${idPrefix}-audience`}>
+        Audience
+        <textarea
+          id={`${idPrefix}-audience`}
+          value={audience}
+          onChange={(e) => onAudience(e.target.value)}
+          placeholder="Who is it for?"
+          rows={2}
+          maxLength={20000}
+        />
+      </label>
+      <label htmlFor={`${idPrefix}-constraints`}>
+        Constraints
+        <textarea
+          id={`${idPrefix}-constraints`}
+          value={constraints}
+          onChange={(e) => onConstraints(e.target.value)}
+          placeholder="Length, tone, anything to avoid"
+          rows={2}
+          maxLength={20000}
+        />
+      </label>
+      <label htmlFor={`${idPrefix}-criteria`}>
+        What does done look like?
+        <textarea
+          id={`${idPrefix}-criteria`}
+          value={criteria}
+          onChange={(e) => onCriteria(e.target.value)}
+          placeholder="One criterion per line"
+          rows={3}
+          maxLength={20000}
+        />
+      </label>
     </>
   );
 }

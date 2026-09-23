@@ -3,6 +3,20 @@ import { ProjectLink } from "./ProjectLink";
 import { ErrorNotice, Icon } from "./ui";
 import { api, errorText, type Decision, type Project } from "./api";
 
+/**
+ * A choice that only makes sense with the owner's words attached: picking it
+ * opens the answer form, and the words are sent as the answer.
+ */
+const choicesNeedingWords: Partial<
+  Record<string, { choice: string; prompt: string; submit: string }>
+> = {
+  delivery: {
+    choice: "Request changes",
+    prompt: "What should change?",
+    submit: "Send changes",
+  },
+};
+
 export function DecisionCard({
   decision,
   projects,
@@ -46,8 +60,17 @@ export function DecisionCard({
     }
   }
   const project = projects.find((p) => p.id === decision.project_id);
+  const needsWords = choicesNeedingWords[decision.kind ?? ""];
+  const openAnswer = () => {
+    setMode("answer");
+    setDraft("");
+    setError("");
+  };
   return (
-    <article className={`decision-card ${compact ? "compact" : ""}`}>
+    <article
+      id={`decision-${decision.id}`}
+      className={`decision-card ${compact ? "compact" : ""}`}
+    >
       <div className="decision-topline">
         <span className="eyebrow">YOUR DECISION</span>
         {project && <ProjectLink project={project} />}
@@ -69,7 +92,9 @@ export function DecisionCard({
             className={`button ${index === 0 ? "warm" : "secondary"}`}
             disabled={!!busy}
             key={choice}
-            onClick={() => void choose(choice)}
+            onClick={() =>
+              choice === needsWords?.choice ? openAnswer() : void choose(choice)
+            }
           >
             {busy === choice ? "Recording…" : choice}
             {index === 0 && <Icon name="Arrow" size={14} />}
@@ -82,17 +107,17 @@ export function DecisionCard({
         )}
       </div>
       <div className="decision-actions">
-        <button
-          className="button secondary"
-          disabled={!!busy}
-          onClick={() => {
-            setMode("answer");
-            setDraft("");
-            setError("");
-          }}
-        >
-          Give a different answer
-        </button>
+        {!needsWords && (
+          <button
+            className="button secondary"
+            disabled={!!busy}
+            onClick={openAnswer}
+          >
+            {decision.kind === "question"
+              ? "Answer in your own words"
+              : "Give a different answer"}
+          </button>
+        )}
         <button
           className="button secondary"
           disabled={!!busy}
@@ -115,7 +140,7 @@ export function DecisionCard({
           <label>
             {mode === "dismiss"
               ? "Why is this no longer needed?"
-              : "Your answer"}
+              : (needsWords?.prompt ?? "Your answer")}
             <textarea
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
@@ -141,7 +166,7 @@ export function DecisionCard({
                 ? "Recording…"
                 : mode === "dismiss"
                   ? "Dismiss decision"
-                  : "Record answer"}
+                  : (needsWords?.submit ?? "Record answer")}
             </button>
             <button
               className="button secondary"

@@ -2,7 +2,8 @@ import { useState } from "react";
 import { ProjectLink } from "./ProjectLink";
 import { DecisionCard } from "./DecisionCard";
 import { groupActivity } from "./activity";
-import { dateLabel, Empty, humanStatus, Icon, PageHeading, Status } from "./ui";
+import { dateLabel, Empty, Icon, PageHeading, Status } from "./ui";
+import { projectStatusLine } from "./taskStatus";
 import { pendingDecisions, type Project, type State } from "./api";
 import type { Page } from "./navigation";
 
@@ -100,7 +101,7 @@ export function Overview({
           >
             {state.projects.length
               ? "Your active project list is clear. Completed work remains in Projects."
-              : "Describe what should be achieved and what success looks like. Your assistant keeps the context together."}
+              : "Say what the project is for, then ask for what you need. Your assistant keeps the context together."}
           </Empty>
         )}
       </section>
@@ -137,6 +138,7 @@ export function ProjectRow({
   const decisions = pendingDecisions(state.decisions).filter(
     (d) => d.project_id === project.id,
   );
+  const status = projectStatusLine(project, state.tasks);
   return (
     <button className="project-row" onClick={onSelect}>
       <span className="project-symbol">
@@ -144,10 +146,7 @@ export function ProjectRow({
       </span>
       <span className="project-info">
         <strong>{project.title}</strong>
-        <span>
-          {project.description ||
-            "Open to review the desired outcome and acceptance criteria."}
-        </span>
+        <span>{project.brief.goal || "No brief yet."}</span>
         <span className="project-meta">
           {folders
             ? `${folders} linked ${folders === 1 ? "folder" : "folders"}`
@@ -161,17 +160,7 @@ export function ProjectRow({
         </span>
       </span>
       <span className="project-states">
-        <Status
-          tone={
-            decisions.length
-              ? "amber"
-              : project.status === "completed"
-                ? "green"
-                : ""
-          }
-        >
-          {humanStatus(project.status)}
-        </Status>
+        <Status tone={status.tone}>{status.label}</Status>
       </span>
       <Icon name="Chevron" size={15} />
     </button>

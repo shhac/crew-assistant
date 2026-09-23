@@ -8,9 +8,8 @@ const projects: Project[] = [
   {
     id: "project-1",
     title: "Garden planner",
-    description: "",
-    acceptance_criteria: [],
     status: "active",
+    brief: { version: 0, goal: "", criteria: [] },
   },
 ];
 
@@ -72,9 +71,7 @@ describe("decision history", () => {
       screen.getByText(/The controls question predated the current dashboard./),
     ).toBeTruthy();
     expect(
-      screen.getByText(
-        /did not approve or restart any work/,
-      ),
+      screen.getByText(/did not approve or restart any work/),
     ).toBeTruthy();
   });
 

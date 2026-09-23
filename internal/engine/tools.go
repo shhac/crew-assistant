@@ -32,6 +32,10 @@ type QueueTaskArgs struct {
 	Objective string   `json:"objective"`
 	Criteria  []string `json:"criteria"`
 }
+type StopTaskArgs struct {
+	ProjectID string `json:"project_id"`
+	TaskID    string `json:"task_id"`
+}
 type ResolveDecisionArgs struct {
 	DecisionID string `json:"decision_id"`
 	Answer     string `json:"answer"`
@@ -68,6 +72,7 @@ func Tools() []Tool {
 		tool("update_brief", "Replace a project's brief with a new version: its goal, audience, constraints and criteria. Work already done is re-checked against the new version before delivery.", []string{"project_id", "goal", "audience", "constraints"}, []string{"criteria"}),
 		tool("set_team", "Choose how a project's work gets done. template \"draft\" is a writer and a reviewer. writer_engine and reviewer_engine are codex or claude, or empty for the template's choice; different engines give a more independent review. max_rounds is how many revise-and-review rounds to try before bringing the owner a decision, or empty for the default. deliver_to is an optional absolute folder the approved draft is copied to. Tasks already under way keep their team.", []string{"project_id", "template", "writer_engine", "reviewer_engine", "max_rounds", "deliver_to"}, nil),
 		tool("queue_task", "Ask the project's team for one outcome. The writer drafts it, reviewers check it against the brief, and the owner approves delivery. Criteria are specific to this task and add to the brief's.", []string{"project_id", "objective"}, []string{"criteria"}),
+		tool("stop_task", "Stop a queued or running task when the owner asks. A turn already under way finishes but changes nothing; any decision it was waiting on is closed.", []string{"project_id", "task_id"}, nil),
 		tool("resolve_decision", "Answer an open decision with the owner's choice, in their words. Use it only when the owner has just given that answer in this conversation.", []string{"decision_id", "answer"}, nil),
 		tool("ask_decision", "Prepare an unresolved owner decision. Include recommendation, viable alternatives, consequences and evidence.", []string{"project_id", "question", "recommendation", "why"}, []string{"options", "evidence"}),
 		tool("remember_preference", "Remember an owner preference. This cannot grant permissions or change budgets.", []string{"key", "value"}, nil),

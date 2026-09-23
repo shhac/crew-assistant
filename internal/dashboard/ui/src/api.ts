@@ -1,18 +1,120 @@
 import type { Connection } from "./ConnectionsSettings";
 import type { AvatarSpec } from "./Identity";
+export interface Brief {
+  version: number;
+  goal: string;
+  audience?: string;
+  constraints?: string;
+  criteria: string[] | null;
+  updated_at?: string;
+}
+export interface BriefInput {
+  goal: string;
+  audience: string;
+  constraints: string;
+  criteria: string[];
+}
+export interface Role {
+  name: string;
+  kind: "implementer" | "reviewer" | (string & {});
+  engine: string;
+  model?: string;
+  effort?: string;
+  instructions?: string;
+}
+export interface Playbook {
+  template: string;
+  medium: string;
+  roles: Role[];
+  max_rounds: number;
+  deliver: string;
+  deliver_to?: string;
+}
 export interface Project {
   id: string;
   title: string;
-  description: string;
-  acceptance_criteria: string[] | string;
   status: string;
+  brief: Brief;
+  playbook?: Playbook;
   directories?: string[];
   scratch_directory?: string;
-  contract_defined?: boolean;
   source_id?: string;
   source_description?: string;
   updated_at?: string;
 }
+export interface ProjectInput {
+  title: string;
+  directories: string[];
+  brief: BriefInput;
+  template: string;
+}
+export interface TeamInput {
+  template: string;
+  writer_engine: string;
+  reviewer_engine: string;
+  max_rounds: string;
+  deliver_to: string;
+}
+export interface TaskInput {
+  objective: string;
+  criteria: string[];
+}
+export type TaskStatus =
+  | "queued"
+  | "writing"
+  | "reviewing"
+  | "deciding"
+  | "waiting"
+  | "delivered"
+  | "stopped";
+export interface Revision {
+  n: number;
+  brief_version: number;
+  files: string[] | null;
+  summary?: string;
+  at?: string;
+}
+export interface Finding {
+  criterion?: string;
+  note: string;
+}
+export interface Verdict {
+  revision: number;
+  role: string;
+  brief_version: number;
+  outcome: "pass" | "revise" | "question" | (string & {});
+  summary: string;
+  findings?: Finding[];
+  question?: string;
+  at?: string;
+}
+export interface Task {
+  id: string;
+  project_id: string;
+  objective: string;
+  criteria: string[] | null;
+  status: TaskStatus;
+  detail?: string;
+  roles?: Role[];
+  max_rounds?: number;
+  round: number;
+  direction?: string[];
+  revisions: Revision[] | null;
+  verdicts: Verdict[] | null;
+  decision_id?: string;
+  delivered_to?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+export interface RevisionFile {
+  path: string;
+  content?: string;
+  binary?: boolean;
+  truncated?: boolean;
+  size: number;
+}
+export type DecisionKind =
+  "choice" | "delivery" | "question" | "escalation" | "failure";
 export interface Decision {
   answer?: string;
   disposition?: "choice" | "custom" | "dismissed";
@@ -20,6 +122,8 @@ export interface Decision {
   resolved_at?: string;
   id: string;
   project_id?: string;
+  task_id?: string;
+  kind?: DecisionKind | (string & {});
   title: string;
   context: string;
   recommendation: string;
@@ -96,6 +200,7 @@ export interface State {
     avatar?: AvatarSpec;
   };
   projects: Project[];
+  tasks: Task[];
   decisions: Decision[];
   messages: Message[];
   memories: Memory[];
@@ -153,6 +258,7 @@ export function normalizeState(raw: Partial<State>): State {
     assistant: raw.assistant ?? { name: "", personality: "" },
     pending_operations: raw.pending_operations ?? [],
     projects: raw.projects ?? [],
+    tasks: raw.tasks ?? [],
     decisions: raw.decisions ?? [],
     messages: raw.messages ?? [],
     memories: raw.memories ?? [],
@@ -175,12 +281,56 @@ export function errorText(error: unknown) {
     ? error.message
     : "Something went wrong. Please try again.";
 }
-export function criteriaLines(
-  criteria: Project["acceptance_criteria"],
-): string[] {
+export function criteriaLines(criteria: string[] | string | null): string[] {
   return (Array.isArray(criteria) ? criteria : (criteria || "").split("\n"))
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+const projectPath = (projectID: string) =>
+  `/api/projects/${encodeURIComponent(projectID)}`;
+
+export function createProject(input: ProjectInput) {
+  return api<Project>("/api/projects", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+export function updateBrief(projectID: string, input: BriefInput) {
+  return api<Project>(`${projectPath(projectID)}/brief`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+export function setTeam(projectID: string, input: TeamInput) {
+  return api<Project>(`${projectPath(projectID)}/team`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+export function askForTask(projectID: string, input: TaskInput) {
+  return api<Task>(`${projectPath(projectID)}/tasks`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+export function stopTask(projectID: string, taskID: string) {
+  return api<Task>(
+    `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/stop`,
+    { method: "POST", body: "{}" },
+  );
+}
+export async function revisionFiles(
+  projectID: string,
+  taskID: string,
+  n: number,
+  signal?: AbortSignal,
+) {
+  const body = await api<{ files: RevisionFile[] | null }>(
+    `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/revisions/${n}`,
+    { signal },
+  );
+  return body.files ?? [];
 }
 
 let pairingRequest: Promise<void> | null = null;

@@ -206,6 +206,12 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 		queued, err := a.Core.QueueTask(ctx, in.ProjectID, core.TaskInput{Objective: in.Objective, Criteria: in.Criteria})
 		a.nudgeLoop()
 		return queued, err
+	case "stop_task":
+		var in engine.StopTaskArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		return a.StopTask(ctx, in.ProjectID, in.TaskID)
 	case "resolve_decision":
 		var in engine.ResolveDecisionArgs
 		if err := args(raw, &in); err != nil {

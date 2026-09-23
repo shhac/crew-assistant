@@ -162,25 +162,29 @@ describe("owner dashboard flows", () => {
     expect(field).toHaveProperty("value", "");
     expect(screen.queryByText("Iris is working through it…")).toBeNull();
   });
-  it("records acceptance criteria as text without silently starting project work", async () => {
+  it("creates a written-work project with its brief without starting work", async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Add project" }));
-    fireEvent.click(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "New project",
-      }),
-    );
+    const dialog = screen.getByRole("dialog");
+    expect(
+      within(dialog)
+        .getByRole("button", { name: "Written work (writer + reviewer)" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
     fireEvent.change(screen.getByLabelText("Project name"), {
-      target: { value: "A useful dashboard" },
+      target: { value: "Launch note" },
     });
-    fireEvent.change(screen.getByLabelText("Desired outcome"), {
-      target: { value: "Make pending decisions easy to find." },
+    expect(
+      screen.getByRole("button", { name: "Create project" }),
+    ).toHaveProperty("disabled", true);
+    fireEvent.change(screen.getByLabelText("Goal"), {
+      target: { value: "Tell customers what changed." },
+    });
+    fireEvent.change(screen.getByLabelText("Audience"), {
+      target: { value: "Existing customers" },
     });
     fireEvent.change(screen.getByLabelText("What does done look like?"), {
-      target: {
-        value:
-          "Decision context is visible\nError responses preserve the draft",
-      },
+      target: { value: "Under 300 words\n\n Links to the changelog " },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     await waitFor(() =>
@@ -189,10 +193,18 @@ describe("owner dashboard flows", () => {
     const body = JSON.parse(
       calls.find((c) => c.path === "/api/projects")!.options!.body as string,
     );
-    expect(body.acceptance_criteria).toBe(
-      "Decision context is visible\nError responses preserve the draft",
-    );
-    expect(calls.some((c) => c.path.endsWith("/coordinate"))).toBe(false);
+    expect(body).toEqual({
+      title: "Launch note",
+      directories: [],
+      brief: {
+        goal: "Tell customers what changed.",
+        audience: "Existing customers",
+        constraints: "",
+        criteria: ["Under 300 words", "Links to the changelog"],
+      },
+      template: "draft",
+    });
+    expect(calls.some((c) => c.path.endsWith("/tasks"))).toBe(false);
   });
   it("preserves unrelated configuration when changing the assistant name", async () => {
     const config = {
@@ -290,7 +302,10 @@ describe("owner dashboard flows", () => {
         (c) => c.path === "/api/config" && c.options?.method === "PUT",
       )!.options!.body as string,
     );
-    expect(saved.model).toEqual({ ...model, codex_home: "/fixture/other-login" });
+    expect(saved.model).toEqual({
+      ...model,
+      codex_home: "/fixture/other-login",
+    });
     // Configuration the dashboard no longer edits is saved back untouched.
     expect(saved.worker_model).toEqual(config.worker_model);
   });
@@ -368,9 +383,7 @@ describe("owner dashboard flows", () => {
     expect(
       screen.getByText("crew-assistant dashboard open --print"),
     ).toBeTruthy();
-    expect(
-      screen.getByText(/computer hosting your assistant/),
-    ).toBeTruthy();
+    expect(screen.getByText(/computer hosting your assistant/)).toBeTruthy();
     expect(screen.getByText(/expires after five minutes/)).toBeTruthy();
     expect(screen.getByText(/works once/)).toBeTruthy();
     const input = screen.getByLabelText(
@@ -589,7 +602,9 @@ describe("decision alternatives", () => {
       expect(calls.some((c) => c.path === "/api/memories")).toBe(true),
     );
     expect(
-      JSON.parse(String(calls.find((c) => c.path === "/api/memories")!.options?.body)),
+      JSON.parse(
+        String(calls.find((c) => c.path === "/api/memories")!.options?.body),
+      ),
     ).toEqual({
       content: "Bring a recommendation with each decision.",
       kind: "observation",
