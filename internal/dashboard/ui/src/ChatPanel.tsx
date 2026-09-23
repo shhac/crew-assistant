@@ -23,6 +23,13 @@ type VisibleTurn = Omit<ChatTurn, "status"> & {
 const turnReplied = (turn?: VisibleTurn) => !!turn?.assistant_message_id;
 const active = (turn: VisibleTurn) =>
   ["waiting", "sending", "queued", "running"].includes(turn.status);
+// A turn in any of these states means the conversation is not waiting on the
+// owner: a message is on its way, being answered, or needs their recovery.
+const unsettled = (turn: VisibleTurn) =>
+  active(turn) || turn.status === "unconfirmed" || turn.status === "rejected";
+// How long the conversation must stay settled before a next message is
+// suggested, so a reply that has only just landed is not raced.
+export const SUGGESTION_DELAY = 1200;
 function chronological(a: { created_at?: string }, b: { created_at?: string }) {
   return (
     (Date.parse(a.created_at || "") || 0) -
@@ -166,6 +173,7 @@ export function ChatPanel({
   expanded,
   onExpand,
   onProjectOpen,
+  view,
 }: {
   state: State;
   refresh: () => Promise<void>;
@@ -173,12 +181,24 @@ export function ChatPanel({
   expanded: boolean;
   onExpand: () => void;
   onProjectOpen?: (id: string) => void;
+  /** Where the owner is in the dashboard; a change discards any suggestion. */
+  view?: string;
 }) {
   const [message, setMessage] = useState("");
   const draftRef = useRef("");
+  const [suggestion, setSuggestion] = useState<{
+    after: string;
+    text: string;
+  } | null>(null);
+  const [suggestionsOff, setSuggestionsOff] = useState("");
+  // Replies a suggestion was already asked for, dismissed or discarded. Each
+  // reply gets at most one, so a dismissed suggestion does not come back.
+  const suggested = useRef(new Set<string>());
   function setDraft(value: string) {
     draftRef.current = value;
     setMessage(value);
+    // The owner's own words always replace a suggestion.
+    if (value) setSuggestion(null);
   }
   const [turns, setTurns] = useState<VisibleTurn[]>([]);
   const [error, setError] = useState("");
@@ -222,6 +242,70 @@ export function ChatPanel({
     turns.map((t) => [t.user_message_id || t.id, t]),
   );
   const running = turns.find((t) => t.status === "running");
+  // Settled: the newest message is the assistant's reply and nothing is being
+  // sent, queued or answered. Only then is a next message suggested, and only
+  // while the draft is empty.
+  const newest = messages[messages.length - 1];
+  const settledOn =
+    newest?.role === "assistant" && !turns.some(unsettled) ? newest.id : "";
+  const draftEmpty = !message;
+  const shownSuggestion =
+    suggestion && suggestion.after === settledOn && draftEmpty
+      ? suggestion.text
+      : "";
+  const shownView = useRef(view);
+  // Declared before the request effect so its cleanup has aborted any request
+  // before this marks the reply as done.
+  useEffect(() => {
+    if (shownView.current === view) return;
+    shownView.current = view;
+    if (settledOn) suggested.current.add(settledOn);
+    setSuggestion(null);
+  }, [view]);
+  useEffect(() => {
+    if (
+      !settledOn ||
+      !draftEmpty ||
+      suggestionsOff ||
+      suggested.current.has(settledOn)
+    )
+      return;
+    const after = settledOn;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      suggested.current.add(after);
+      api<{ after: string; suggestion: string }>("/api/chat/suggestion", {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({ after }),
+      })
+        .then((reply) => {
+          // A reply for a conversation that has since moved on, or that
+          // arrives after the owner started typing, is dropped.
+          if (
+            !controller.signal.aborted &&
+            reply.after === after &&
+            reply.suggestion &&
+            !draftRef.current
+          )
+            setSuggestion({ after, text: reply.suggestion });
+        })
+        .catch((err) => {
+          // A failed suggestion leaves the composer as it was. Only a model
+          // that cannot be used as approved is worth telling the owner about.
+          if (
+            !controller.signal.aborted &&
+            err instanceof APIError &&
+            err.status === 503
+          )
+            setSuggestionsOff(errorText(err));
+        });
+    }, SUGGESTION_DELAY);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [settledOn, draftEmpty, suggestionsOff, view]);
   const eventSignature = turns
     .map(
       (t) =>
@@ -570,10 +654,28 @@ export function ChatPanel({
             id="chat-message"
             value={message}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder={`Ask ${name}, or hand over an outcome…`}
+            // A suggestion is shown, never committed: the draft stays empty
+            // and Send stays disabled until the owner takes it.
+            placeholder={
+              shownSuggestion || `Ask ${name}, or hand over an outcome…`
+            }
+            className={shownSuggestion ? "has-suggestion" : undefined}
             rows={3}
             maxLength={20000}
             onKeyDown={(e) => {
+              if (
+                e.key === "Tab" &&
+                shownSuggestion &&
+                !e.shiftKey &&
+                !e.altKey &&
+                !e.ctrlKey &&
+                !e.metaKey
+              ) {
+                // Accepting makes it an ordinary draft to edit; it is not sent.
+                e.preventDefault();
+                setDraft(shownSuggestion);
+                return;
+              }
               if (
                 e.key === "Enter" &&
                 !e.shiftKey &&
@@ -586,7 +688,11 @@ export function ChatPanel({
             }}
           />
           <div className="composer-footer">
-            <span>Enter to send · Shift + Enter for a new line</span>
+            <span>
+              {shownSuggestion
+                ? "Tab to use the suggestion · or type your own"
+                : "Enter to send · Shift + Enter for a new line"}
+            </span>
             <button
               className="send-button"
               type="submit"
@@ -597,6 +703,11 @@ export function ChatPanel({
             </button>
           </div>
         </form>
+        {suggestionsOff && (
+          <p className="chat-suggestions-off" role="status">
+            {suggestionsOff}
+          </p>
+        )}
         <p className="chat-footnote">One conversation across your projects.</p>
       </div>
     </>

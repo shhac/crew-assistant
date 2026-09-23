@@ -8,7 +8,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import { ChatPanel } from "./ChatPanel";
+import { ChatPanel, SUGGESTION_DELAY } from "./ChatPanel";
 import { ConversationMarkdown } from "./ConversationMarkdown";
 import { normalizeState, type ChatTurn, type State } from "./api";
 beforeEach(() => vi.useFakeTimers());
@@ -19,7 +19,11 @@ afterEach(() => {
 });
 const initial = () =>
   normalizeState({ assistant: { name: "Iris", personality: "" } });
-function panel(state = initial(), refresh = vi.fn(async () => {})) {
+function panel(
+  state = initial(),
+  refresh = vi.fn(async () => {}),
+  view = "Overview",
+) {
   return (
     <ChatPanel
       state={state}
@@ -27,6 +31,7 @@ function panel(state = initial(), refresh = vi.fn(async () => {})) {
       expanded={false}
       onExpand={() => {}}
       onClose={() => {}}
+      view={view}
     />
   );
 }
@@ -46,11 +51,18 @@ const tick = async (ms = 3000) => {
     await vi.advanceTimersByTimeAsync(ms);
   });
 };
-function backend(seed: ChatTurn[] = []) {
+type Reply = { ok: boolean; status: number; json: () => Promise<unknown> };
+function backend(
+  seed: ChatTurn[] = [],
+  suggest: (after: string) => Reply | Promise<Reply> = (after) =>
+    result({ after, suggestion: "" }),
+) {
   const turns = [...seed];
   const fetch = vi.fn(async (path: string, options?: RequestInit) => {
     if (path === "/api/chat/turns")
       return result({ turns: turns.map((t) => ({ ...t })) });
+    if (path === "/api/chat/suggestion")
+      return suggest(JSON.parse(options!.body as string).after);
     if (options?.method === "POST") {
       const body = JSON.parse(options.body as string);
       let turn = turns.find((t) => t.id === body.id);
@@ -79,7 +91,12 @@ function backend(seed: ChatTurn[] = []) {
   return {
     turns,
     fetch,
-    posts: () => fetch.mock.calls.filter(([, o]) => o?.method === "POST"),
+    posts: () =>
+      fetch.mock.calls.filter(
+        ([p, o]) => o?.method === "POST" && p === "/api/chat/messages",
+      ),
+    suggestions: () =>
+      fetch.mock.calls.filter(([p]) => p === "/api/chat/suggestion"),
   };
 }
 const savedTurn = (overrides: Partial<ChatTurn> = {}): ChatTurn => ({
@@ -505,5 +522,239 @@ describe("conversation", () => {
     );
     fireEvent.click(screen.getByRole("link", { name: "Garden planner" }));
     expect(open).toHaveBeenCalledWith("proj-123");
+  });
+});
+describe("next-message suggestions", () => {
+  const defaultPlaceholder = "Ask Iris, or hand over an outcome…";
+  // A conversation that has settled on the assistant's reply `reply-1`.
+  function settled(extra: State["messages"] = []) {
+    const state = initial();
+    state.messages = [
+      {
+        id: "user-1",
+        role: "user",
+        content: "Plan the garden",
+        created_at: "2026-09-16T12:00:00Z",
+      },
+      {
+        id: "reply-1",
+        role: "assistant",
+        content: "Here is a planting plan.",
+        created_at: "2026-09-16T12:00:05Z",
+      },
+      ...extra,
+    ];
+    return state;
+  }
+  const offering = (text: string) => (after: string) =>
+    result({ after, suggestion: text });
+  function deferred() {
+    let resolve!: (reply: Reply) => void;
+    const promise = new Promise<Reply>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+  const input = () => screen.getByRole("textbox") as HTMLTextAreaElement;
+
+  it("waits for the conversation to settle, then shows an uncommitted suggestion that Tab accepts without sending", async () => {
+    const server = backend([], offering("What should I plant first?"));
+    render(panel(settled()));
+    await tick(SUGGESTION_DELAY - 100);
+    expect(server.suggestions()).toHaveLength(0);
+    await tick(100);
+    expect(server.suggestions()).toHaveLength(1);
+    expect(JSON.parse(server.suggestions()[0][1]!.body as string)).toEqual({
+      after: "reply-1",
+    });
+    expect(input().placeholder).toBe("What should I plant first?");
+    expect(input().value).toBe("");
+    expect(screen.getByText(/Tab to use the suggestion/)).toBeTruthy();
+    // Enter on an empty draft never sends the suggestion.
+    fireEvent.keyDown(input(), { key: "Enter" });
+    await tick(0);
+    expect(server.posts()).toHaveLength(0);
+    // Tab accepts it into an editable draft, still unsent.
+    expect(fireEvent.keyDown(input(), { key: "Tab" })).toBe(false);
+    expect(input().value).toBe("What should I plant first?");
+    expect(input().placeholder).toBe(defaultPlaceholder);
+    await tick(0);
+    expect(server.posts()).toHaveLength(0);
+    fireEvent.change(input(), {
+      target: { value: "What should I plant first? Tomatoes?" },
+    });
+    fireEvent.keyDown(input(), { key: "Enter" });
+    await tick(0);
+    expect(JSON.parse(server.posts()[0][1]!.body as string).message).toBe(
+      "What should I plant first? Tomatoes?",
+    );
+  });
+
+  it("dismisses the suggestion when the owner types and does not bring it back", async () => {
+    const server = backend([], offering("What should I plant first?"));
+    render(panel(settled()));
+    await tick(SUGGESTION_DELAY);
+    expect(input().placeholder).toBe("What should I plant first?");
+    fireEvent.change(input(), { target: { value: "M" } });
+    expect(input().value).toBe("M");
+    expect(input().placeholder).toBe(defaultPlaceholder);
+    fireEvent.change(input(), { target: { value: "" } });
+    await tick(SUGGESTION_DELAY * 3);
+    expect(input().placeholder).toBe(defaultPlaceholder);
+    expect(server.suggestions()).toHaveLength(1);
+  });
+
+  it("leaves Tab to normal focus navigation when there is no suggestion", async () => {
+    backend();
+    render(panel(settled()));
+    await tick(SUGGESTION_DELAY);
+    expect(input().placeholder).toBe(defaultPlaceholder);
+    expect(fireEvent.keyDown(input(), { key: "Tab" })).toBe(true);
+    expect(input().value).toBe("");
+    // With a draft, Tab is never taken either.
+    fireEvent.change(input(), { target: { value: "My own words" } });
+    expect(fireEvent.keyDown(input(), { key: "Tab" })).toBe(true);
+    expect(input().value).toBe("My own words");
+  });
+
+  it("never asks while a reply is pending or being written, then asks about the new reply", async () => {
+    const running = savedTurn({ id: "turn-2", user_message_id: "user-2" });
+    const server = backend([running], offering("Thanks, what next?"));
+    const pending = settled([
+      {
+        id: "user-2",
+        role: "user",
+        content: "Prepare the project",
+        created_at: "2026-09-16T12:01:00Z",
+      },
+    ]);
+    const view = render(panel(pending));
+    await tick(SUGGESTION_DELAY * 5);
+    expect(server.suggestions()).toHaveLength(0);
+    // The reply is in the thread but its turn has not yet been seen to finish.
+    const answered = settled([
+      ...pending.messages.slice(2),
+      {
+        id: "reply-2",
+        role: "assistant",
+        content: "Prepared.",
+        created_at: "2026-09-16T12:01:30Z",
+      },
+    ]);
+    view.rerender(panel(answered));
+    await tick(SUGGESTION_DELAY);
+    expect(server.suggestions()).toHaveLength(0);
+    server.turns[0].status = "completed";
+    server.turns[0].assistant_message_id = "reply-2";
+    await tick(3000);
+    await tick(SUGGESTION_DELAY);
+    expect(server.suggestions()).toHaveLength(1);
+    expect(JSON.parse(server.suggestions()[0][1]!.body as string).after).toBe(
+      "reply-2",
+    );
+    expect(input().placeholder).toBe("Thanks, what next?");
+    // Sending a message unsettles the conversation and discards it.
+    fireEvent.keyDown(input(), { key: "Tab" });
+    fireEvent.keyDown(input(), { key: "Enter" });
+    expect(input().value).toBe("");
+    expect(input().placeholder).toBe(defaultPlaceholder);
+  });
+
+  it("never overwrites a draft typed while the suggestion was being written", async () => {
+    const reply = deferred();
+    backend([], () => reply.promise);
+    render(panel(settled()));
+    await tick(SUGGESTION_DELAY);
+    fireEvent.change(input(), { target: { value: "My own idea" } });
+    reply.resolve(result({ after: "reply-1", suggestion: "Something else" }));
+    await tick(0);
+    expect(input().value).toBe("My own idea");
+    fireEvent.change(input(), { target: { value: "" } });
+    await tick(0);
+    expect(input().placeholder).toBe(defaultPlaceholder);
+  });
+
+  it("drops a suggestion that arrives after the conversation changed", async () => {
+    const reply = deferred();
+    const server = backend([], () => reply.promise);
+    const view = render(panel(settled()));
+    await tick(SUGGESTION_DELAY);
+    expect(server.suggestions()).toHaveLength(1);
+    // A newer reply lands (for example from Slack) before the answer returns.
+    view.rerender(
+      panel(
+        settled([
+          {
+            id: "reply-2",
+            role: "assistant",
+            content: "One more thing.",
+            created_at: "2026-09-16T12:02:00Z",
+          },
+        ]),
+      ),
+    );
+    reply.resolve(result({ after: "reply-1", suggestion: "Stale idea" }));
+    await tick(0);
+    expect(input().placeholder).toBe(defaultPlaceholder);
+  });
+
+  it("discards a visible suggestion on navigation without asking again", async () => {
+    const server = backend([], offering("What should I plant first?"));
+    const refresh = vi.fn(async () => {});
+    const view = render(panel(settled(), refresh, "Overview"));
+    await tick(SUGGESTION_DELAY);
+    expect(input().placeholder).toBe("What should I plant first?");
+    view.rerender(panel(settled(), refresh, "Projects"));
+    expect(input().placeholder).toBe(defaultPlaceholder);
+    expect(fireEvent.keyDown(input(), { key: "Tab" })).toBe(true);
+    await tick(SUGGESTION_DELAY * 3);
+    expect(server.suggestions()).toHaveLength(1);
+    expect(input().placeholder).toBe(defaultPlaceholder);
+  });
+
+  it("keeps the composer usable when generation fails", async () => {
+    const server = backend([], () => ({
+      ok: false,
+      status: 502,
+      json: async () => ({ error: "No suggestion this time." }),
+    }));
+    render(panel(settled()));
+    await tick(SUGGESTION_DELAY);
+    expect(server.suggestions()).toHaveLength(1);
+    expect(input().placeholder).toBe(defaultPlaceholder);
+    expect(screen.queryByText("No suggestion this time.")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    typeAndSend("Carry on");
+    await tick(0);
+    expect(server.posts()).toHaveLength(1);
+  });
+
+  it("tells the owner when the approved model is unavailable and stops asking", async () => {
+    const server = backend([], () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({
+        error:
+          "next-message suggestions are off: model unavailable: gpt-5.6-luna is not offered to the codex login",
+      }),
+    }));
+    const view = render(panel(settled()));
+    await tick(SUGGESTION_DELAY);
+    expect(
+      screen.getByText(/gpt-5.6-luna is not offered to the codex login/),
+    ).toBeTruthy();
+    view.rerender(
+      panel(
+        settled([
+          {
+            id: "reply-2",
+            role: "assistant",
+            content: "One more thing.",
+            created_at: "2026-09-16T12:02:00Z",
+          },
+        ]),
+      ),
+    );
+    await tick(SUGGESTION_DELAY * 3);
+    expect(server.suggestions()).toHaveLength(1);
+    expect(input().placeholder).toBe(defaultPlaceholder);
   });
 });

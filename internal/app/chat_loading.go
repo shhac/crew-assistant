@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -59,33 +60,9 @@ func generateLoadingPhrase(ctx context.Context, cfg config.Config, message strin
 	if !enabled {
 		return "", errors.New("loading generation is disabled")
 	}
-	ec := engine.Config{Engine: model.Engine, Model: model.Model, Effort: model.Effort, CodexBin: model.CodexBin, CodexHome: model.CodexHome, ClaudeBin: model.ClaudeBin, ClaudeHome: model.ClaudeHome, MaxOutputTokens: 128, MaxContextBytes: 8192, Timeout: 20 * time.Second, BeforeRequest: reserve}
-	models, err := discover(ctx, ec)
+	ec, err := smallModelConfig(ctx, model, discover, reserve)
 	if err != nil {
 		return "", err
-	}
-	found := false
-	for _, option := range models {
-		if option.ID != model.Model {
-			continue
-		}
-		found = true
-		// Some small models have no effort dial (including some Haiku versions).
-		// Use their native default instead of passing an unsupported flag.
-		ec.Effort = ""
-		for _, effort := range option.Efforts {
-			if effort.ID == model.Effort {
-				ec.Effort = model.Effort
-				break
-			}
-		}
-		if model.Effort != "" && len(option.Efforts) > 0 && ec.Effort == "" {
-			return "", errors.New("requested loading effort is unavailable")
-		}
-		break
-	}
-	if !found {
-		return "", errors.New("loading model unavailable")
 	}
 	recent := []string{}
 	for i := len(history) - 1; i >= 0; i-- {
@@ -117,6 +94,37 @@ func generateLoadingPhrase(ctx context.Context, cfg config.Config, message strin
 	}
 	return phrase, nil
 }
+
+// smallModelConfig confirms the exact model is offered to the shared CLI login
+// before any inference; it never substitutes another model or raises effort.
+func smallModelConfig(ctx context.Context, model config.Model, discover loadingDiscovery, reserve func(context.Context) error) (engine.Config, error) {
+	ec := engine.Config{Engine: model.Engine, Model: model.Model, Effort: model.Effort, CodexBin: model.CodexBin, CodexHome: model.CodexHome, ClaudeBin: model.ClaudeBin, ClaudeHome: model.ClaudeHome, MaxOutputTokens: 128, MaxContextBytes: 8192, Timeout: 20 * time.Second, BeforeRequest: reserve}
+	models, err := discover(ctx, ec)
+	if err != nil {
+		return engine.Config{}, err
+	}
+	for _, option := range models {
+		if option.ID != model.Model {
+			continue
+		}
+		// Some small models have no effort dial (including some Haiku versions).
+		// Use their native default instead of passing an unsupported flag.
+		ec.Effort = ""
+		for _, effort := range option.Efforts {
+			if effort.ID == model.Effort {
+				ec.Effort = model.Effort
+				break
+			}
+		}
+		if model.Effort != "" && len(option.Efforts) > 0 && ec.Effort == "" {
+			return engine.Config{}, fmt.Errorf("%w: %s does not offer %s effort", errSmallModelUnavailable, model.Model, model.Effort)
+		}
+		return ec, nil
+	}
+	return engine.Config{}, fmt.Errorf("%w: %s is not offered to the %s login", errSmallModelUnavailable, model.Model, model.Engine)
+}
+
+var errSmallModelUnavailable = errors.New("model unavailable")
 
 func clipLoadingContext(value string) string {
 	chars := []rune(value)

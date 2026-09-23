@@ -211,6 +211,26 @@ func TestAssignmentImportOptInDefaultsAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSuggestionModelRoutesByEngineWithoutSubstitution(t *testing.T) {
+	c := Default()
+	c.Model.CodexHome = "/synthetic/account"
+	// The loading model is owner-configurable; suggestions must not follow it.
+	c.Chat.LoadingPhrases.Model = "chosen-small-model"
+	m, err := c.SuggestionModel()
+	if err != nil || m.Engine != "codex" || m.Model != "gpt-5.6-luna" || m.Effort != "low" || m.CodexHome != c.Model.CodexHome {
+		t.Fatal(m, err)
+	}
+	c.Model.Engine = "claude"
+	m, err = c.SuggestionModel()
+	if err != nil || m.Engine != "claude" || m.Model != "haiku" || m.ClaudeHome != c.Model.ClaudeHome {
+		t.Fatal(m, err)
+	}
+	c.Model.Engine = "openai-compatible"
+	if m, err = c.SuggestionModel(); err == nil || m.Model != "" {
+		t.Fatal("unmapped engine was given a suggestion model", m)
+	}
+}
+
 func TestLoadingModelInheritsCLIAccountAndCanBeDisabled(t *testing.T) {
 	c := Default()
 	c.Model.CodexHome = "/synthetic/account"

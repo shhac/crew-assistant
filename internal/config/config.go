@@ -55,6 +55,23 @@ func (c Config) LoadingModel() (Model, bool) {
 	return m, true
 }
 
+// suggestionModels is the approved small model for next-message suggestions on
+// each CLI engine. There is no setting and no fallback: an engine without an
+// entry gets no suggestions rather than a guessed model.
+var suggestionModels = map[string]string{"codex": "gpt-5.6-luna", "claude": "haiku"}
+
+// SuggestionModel shares the assistant's selected CLI login, as LoadingModel
+// does. It reports why suggestions are off instead of substituting a model.
+func (c Config) SuggestionModel() (Model, error) {
+	m := c.Model
+	model, ok := suggestionModels[m.Engine]
+	if !ok {
+		return Model{}, fmt.Errorf("no approved suggestion model for the %s engine", m.Engine)
+	}
+	m.Model, m.Effort, m.MaxTokens = model, "low", 128
+	return m, nil
+}
+
 type Assistant struct {
 	Name        string `json:"name"`
 	Personality string `json:"personality"`

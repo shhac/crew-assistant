@@ -41,6 +41,9 @@ type App struct {
 	runner           roles.Runner
 	meter            *quota.Meter
 	loopWake         chan struct{}
+	// suggestionComplete and suggestionDiscover replace the CLI in tests.
+	suggestionComplete func(context.Context, engine.Config, []engine.Message, []engine.Tool) (engine.Message, engine.Usage, error)
+	suggestionDiscover func(context.Context, engine.Config) ([]engine.ModelOption, error)
 }
 
 func New(s *core.Service, cfg config.Config, path string, demo bool) *App {

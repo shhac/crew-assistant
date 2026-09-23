@@ -416,6 +416,7 @@ export function App() {
       >
         <ChatPanel
           onProjectOpen={openProject}
+          view={selectedProject ? `${page}/${selectedProject}` : page}
           state={state}
           refresh={refresh}
           onClose={() => setChatOpen(false)}
