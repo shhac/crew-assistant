@@ -94,6 +94,51 @@ describe("owner dashboard flows", () => {
     );
     expect(field).toHaveProperty("value", "Keep this context.");
   });
+  it("accepts a suggestion with Tab inside the mobile conversation without sending or moving focus", async () => {
+    // jsdom lays nothing out; give controls a box so the focus trap runs and
+    // sees the empty draft as the last enabled control, as a browser does.
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([
+      {},
+    ] as unknown as DOMRectList);
+    state.messages = [
+      { id: "user-1", role: "user", content: "Plan the garden" },
+      { id: "reply-1", role: "assistant", content: "Here is a plan." },
+    ];
+    respond = (path, options) => {
+      if (path === "/api/chat/suggestion")
+        return {
+          body: {
+            after: JSON.parse(options!.body as string).after,
+            suggestion: "What should I plant first?",
+          },
+        };
+      if (path === "/api/chat/turns") return { body: { turns: [] } };
+      return { body: path === "/api/state" ? state : {} };
+    };
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open conversation" }),
+    );
+    const field = screen.getByLabelText("Message Iris") as HTMLTextAreaElement;
+    field.focus();
+    await waitFor(
+      () => expect(field.placeholder).toBe("What should I plant first?"),
+      { timeout: 3000 },
+    );
+    fireEvent.keyDown(field, { key: "Tab" });
+    expect(field.value).toBe("What should I plant first?");
+    expect(document.activeElement).toBe(field);
+    expect(
+      calls.filter(
+        (c) => c.path === "/api/chat/messages" && c.options?.method === "POST",
+      ),
+    ).toHaveLength(0);
+    // Plain Tab from the last control still wraps focus within the dialog.
+    fireEvent.change(field, { target: { value: "" } });
+    fireEvent.keyDown(field, { key: "Tab" });
+    expect(document.activeElement).not.toBe(field);
+    vi.restoreAllMocks();
+  });
   it("keeps a failed decision visible and exposes the actionable error", async () => {
     state.decisions = [
       {
