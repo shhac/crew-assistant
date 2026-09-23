@@ -1,30 +1,10 @@
 import type { Activity } from "./api";
-import { stateLabel } from "./states";
 
 /**
- * Readable descriptions for recorded activity kinds. The daemon also records a
- * dynamic `agent.<status>` family, so unknown kinds fall back to a readable
- * phrase rather than leaking the internal identifier into the workspace.
+ * Readable descriptions for recorded activity kinds. Unknown kinds fall back to
+ * a readable phrase rather than leaking the internal identifier.
  */
 const labels: Record<string, string> = {
-  "agent.blocked": "Worker blocked",
-  "agent.cancelled": "Worker stopped",
-  "agent.completed": "Worker reported complete",
-  "agent.control": "Worker control requested",
-  "agent.dispatching": "Worker starting up",
-  "agent.interrupted": "Worker interrupted",
-  "agent.missed_check_in": "Worker missed a check-in",
-  "agent.paused": "Worker paused",
-  "agent.pause_requested": "Pause requested",
-  "agent.queued": "Worker queued",
-  "agent.reconciling": "Checking worker state",
-  "agent.recovery": "Worker recovery",
-  "agent.retry_wait": "Waiting for the model provider",
-  "agent.running": "Worker running",
-  "agent.started": "Worker started",
-  "agent.stop_requested": "Stop requested",
-  "agent.usage_wait": "Waiting for worker resources",
-  "agent.waiting": "Worker waiting",
   "assistant.review": "Assistant review",
   "assistant.theme": "Workspace palette changed",
   "assistant.update": "Assistant update",
@@ -44,33 +24,22 @@ const labels: Record<string, string> = {
   "project.directories_updated": "Project folders updated",
   "project.refined": "Project brief refined",
   "recovery.pending": "Recovery needs attention",
-  "work_item.accepted": "Outcome accepted",
-  "work_item.created": "Outcome recorded",
-  "work_item.queue_coordinated": "Queued outcome commissioned",
-  "work_item.queued": "Outcome queued",
-  "work_item.review_ready": "Outcome ready for review",
-  "work_item.steered": "Direction recorded",
-  "work_item.unqueued": "Outcome removed from the queue",
-  "worker.prepared": "Worker prepared",
 };
 
+/**
+ * Families recorded by the retired delegation model. Older workspaces still
+ * hold these entries, and their internal names are not owner vocabulary.
+ */
+const retiredFamilies = new Set(["agent", "work_item", "worker"]);
+
 /** Kinds that report routine runtime progress rather than a change of state. */
-const routine = new Set([
-  "agent.dispatching",
-  "agent.queued",
-  "agent.running",
-  "agent.waiting",
-  "assistant.update",
-]);
+const routine = new Set(["assistant.update"]);
 
 export function activityLabel(kind?: string): string {
   if (!kind) return "Workspace";
   const known = labels[kind];
   if (known) return known;
-  const separator = kind.indexOf(".");
-  const rest = separator < 0 ? "" : kind.slice(separator + 1);
-  if (kind.slice(0, separator) === "agent" && rest)
-    return "Worker " + stateLabel(rest);
+  if (retiredFamilies.has(kind.split(".")[0])) return "Earlier work update";
   return kind.replaceAll("_", " ").replaceAll(".", " ");
 }
 
@@ -90,7 +59,10 @@ export interface ActivityGroup {
  * single row. Entries are expected newest first; the newest entry of a run
  * represents it, so the count never implies a fresher event than was recorded.
  */
-export function groupActivity(entries: Activity[], limit?: number): ActivityGroup[] {
+export function groupActivity(
+  entries: Activity[],
+  limit?: number,
+): ActivityGroup[] {
   const groups: ActivityGroup[] = [];
   for (const entry of entries) {
     const previous = groups[groups.length - 1];

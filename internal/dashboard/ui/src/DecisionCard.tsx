@@ -128,7 +128,7 @@ export function DecisionCard({
           {mode === "dismiss" && (
             <p className="muted">
               Closes this question and records your reason. It does not approve
-              work or resume a waiting worker.
+              or restart any work.
             </p>
           )}
           <div className="decision-actions">

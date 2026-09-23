@@ -157,11 +157,6 @@ func (s *Service) RefineProjectWithDirectories(ctx context.Context, id, descript
 		if p.Status != "ready" {
 			return errors.New("only an uncommissioned ready project can be refined")
 		}
-		for _, a := range v.Agents {
-			if a.ProjectID == id {
-				return errors.New("acceptance contract is frozen after work is commissioned")
-			}
-		}
 		if directories != nil {
 			p.Directories = normalized
 		}

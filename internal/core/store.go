@@ -14,6 +14,14 @@ import (
 
 // Store serializes mutations in-process and uses BEGIN IMMEDIATE to serialize
 // other processes. Each mutation atomically records entities and audit events.
+// stateSchema is the version of the state model this build reads and writes.
+// Version 2 is the project-teams model; version 1 (unversioned) was the worker
+// model it replaced.
+const stateSchema = 2
+
+// ErrStateSchema means the state file was written for a different model.
+var ErrStateSchema = errors.New("state file was written by an incompatible version; convert it before starting")
+
 type Store struct {
 	db             *sql.DB
 	mu             sync.Mutex
@@ -21,16 +29,17 @@ type Store struct {
 	temporaryState bool
 }
 type diskState struct {
-	ChatCheckpoint       ChatCheckpoint           `json:"chat_checkpoint,omitempty"`
-	ConversationDropped  map[string]bool          `json:"conversation_dropped,omitempty"`
-	AgentConversation    []AgentConversationEntry `json:"agent_conversation,omitempty"`
-	ConversationSequence int64                    `json:"conversation_sequence,omitempty"`
-	ChatTurns            []ChatTurn               `json:"chat_turns,omitempty"`
-	ChatHold             *ChatHold                `json:"chat_hold,omitempty"`
-	ChatQueueRevision    int                      `json:"chat_queue_revision,omitempty"`
-	Events               map[string]bool          `json:"events"`
-	Snapshot             Snapshot                 `json:"snapshot"`
-	ModelCalls           map[string]int           `json:"model_calls"`
+	// Schema names the state model that wrote this document. There is no reader
+	// for another model: state from before a clean break is converted once,
+	// outside the daemon, rather than silently reinterpreted.
+	Schema            int             `json:"schema"`
+	ChatCheckpoint    ChatCheckpoint  `json:"chat_checkpoint,omitempty"`
+	ChatTurns         []ChatTurn      `json:"chat_turns,omitempty"`
+	ChatHold          *ChatHold       `json:"chat_hold,omitempty"`
+	ChatQueueRevision int             `json:"chat_queue_revision,omitempty"`
+	Events            map[string]bool `json:"events"`
+	Snapshot          Snapshot        `json:"snapshot"`
+	ModelCalls        map[string]int  `json:"model_calls"`
 }
 
 func Open(path string) (*Store, error) {
@@ -109,7 +118,7 @@ func (s *Store) Close() error {
 	return err
 }
 func emptyState() Snapshot {
-	return Snapshot{WorkItems: []WorkItem{}, Steering: []SteeringMessage{}, SteeringReceipts: []SteeringReceipt{}, Projects: []Project{}, Agents: []Agent{}, Decisions: []Decision{}, Messages: []Message{}, Memories: []Memory{}, Activity: []Activity{}, Integrations: []Integration{}, Events: map[string]bool{}, ModelCalls: map[string]int{}}
+	return Snapshot{Projects: []Project{}, Decisions: []Decision{}, Messages: []Message{}, Memories: []Memory{}, Activity: []Activity{}, Integrations: []Integration{}, Events: map[string]bool{}, ModelCalls: map[string]int{}}
 }
 func readState(ctx context.Context, conn *sql.Conn) (Snapshot, error) {
 	var data string
@@ -124,13 +133,13 @@ func readState(ctx context.Context, conn *sql.Conn) (Snapshot, error) {
 	if err = json.Unmarshal([]byte(data), &d); err != nil {
 		return Snapshot{}, fmt.Errorf("decode durable state: %w", err)
 	}
+	if d.Schema != stateSchema {
+		return Snapshot{}, fmt.Errorf("%w: found schema %d, this build reads %d", ErrStateSchema, d.Schema, stateSchema)
+	}
 	d.Snapshot.ChatCheckpoint = d.ChatCheckpoint
 	d.Snapshot.ChatTurns = d.ChatTurns
 	d.Snapshot.ChatHold = d.ChatHold
 	d.Snapshot.ChatQueueRevision = d.ChatQueueRevision
-	d.Snapshot.AgentConversation = d.AgentConversation
-	d.Snapshot.ConversationDropped = d.ConversationDropped
-	d.Snapshot.ConversationSequence = d.ConversationSequence
 	d.Snapshot.Events = d.Events
 	if d.Snapshot.Events == nil {
 		d.Snapshot.Events = map[string]bool{}
@@ -139,8 +148,6 @@ func readState(ctx context.Context, conn *sql.Conn) (Snapshot, error) {
 	if d.Snapshot.ModelCalls == nil {
 		d.Snapshot.ModelCalls = map[string]int{}
 	}
-	migrateWorkItems(&d.Snapshot)
-	refreshWorkItems(&d.Snapshot)
 	return d.Snapshot, nil
 }
 func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
@@ -170,8 +177,7 @@ func (s *Store) update(ctx context.Context, fn func(*Snapshot) error) error {
 	if err = fn(&state); err != nil {
 		return err
 	}
-	refreshWorkItems(&state)
-	data, err := json.Marshal(diskState{ChatCheckpoint: state.ChatCheckpoint, ConversationDropped: state.ConversationDropped, AgentConversation: state.AgentConversation, ConversationSequence: state.ConversationSequence, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: state, ModelCalls: state.ModelCalls, Events: state.Events})
+	data, err := json.Marshal(diskState{Schema: stateSchema, ChatCheckpoint: state.ChatCheckpoint, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: state, ModelCalls: state.ModelCalls, Events: state.Events})
 	if err != nil {
 		return err
 	}

@@ -84,7 +84,7 @@ function backend(seed: ChatTurn[] = []) {
 }
 const savedTurn = (overrides: Partial<ChatTurn> = {}): ChatTurn => ({
   id: "turn-1",
-  message: "Prepare a worker",
+  message: "Prepare the project",
   status: "running",
   created_at: "2026-09-16T12:00:00Z",
   user_message_id: "user-1",
@@ -200,8 +200,8 @@ describe("conversation", () => {
         events: [
           {
             id: "event-1",
-            tool: "prepare_worker",
-            label: "Preparing worker",
+            tool: "create_project",
+            label: "Creating project",
             status: "running",
             started_at: "2026-09-16T12:00:01Z",
           },
@@ -214,7 +214,7 @@ describe("conversation", () => {
     const activity = screen.getByRole("group", {
       name: "Assistant tool activity",
     });
-    expect(within(activity).getByText("Preparing worker")).toBeTruthy();
+    expect(within(activity).getByText("Creating project")).toBeTruthy();
     expect(within(activity).getByText("In progress")).toBeTruthy();
     expect(screen.getByText("Gathering the threads…")).toBeTruthy();
     server.turns[0] = {
@@ -242,8 +242,8 @@ describe("conversation", () => {
         events: [
           {
             id: "event-1",
-            tool: "prepare_worker",
-            label: "Preparing worker",
+            tool: "create_project",
+            label: "Creating project",
             status: "failed",
             started_at: "2026-09-16T12:00:01Z",
           },
@@ -255,13 +255,13 @@ describe("conversation", () => {
       {
         id: "old-unrelated-message",
         role: "user",
-        content: "Prepare a worker",
+        content: "Prepare the project",
       },
     ];
     render(panel(state));
     await tick(0);
     expect(
-      within(screen.getByRole("log")).getAllByText("Prepare a worker"),
+      within(screen.getByRole("log")).getAllByText("Prepare the project"),
     ).toHaveLength(2);
     expect(
       screen.getByText("Reply interrupted · not automatically retried"),
@@ -325,7 +325,7 @@ describe("conversation", () => {
     await tick();
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Cancel queued message: Prepare a worker",
+        name: "Cancel queued message: Prepare the project",
       }),
     );
     await tick(0);
@@ -435,8 +435,8 @@ describe("conversation", () => {
         events: [
           {
             id: "tool-1",
-            tool: "prepare_worker",
-            label: "Preparing worker",
+            tool: "create_project",
+            label: "Creating project",
             status: "interrupted",
             started_at: "2026-09-16T12:00:01Z",
           },
@@ -505,43 +505,5 @@ describe("conversation", () => {
     );
     fireEvent.click(screen.getByRole("link", { name: "Garden planner" }));
     expect(open).toHaveBeenCalledWith("proj-123");
-  });
-
-  it("shows current worker state so an older reply is not the only status", async () => {
-    backend([]);
-    const state = initial();
-    render(
-      panel(
-        {
-          ...state,
-          messages: [
-            {
-              id: "m1",
-              role: "assistant",
-              content: "The worker is running again after the resume.",
-              created_at: "2026-09-16T16:10:00Z",
-            },
-          ],
-          attention: [
-            {
-              project_id: "p1",
-              execution: "blocked",
-              next_action: "owner",
-              open_decisions: 0,
-              pending_operations: 0,
-            },
-          ],
-        },
-        vi.fn(async () => {}),
-      ),
-    );
-    await tick(0);
-    expect(
-      screen.getByText(/Live status: 1 outcome is not moving/),
-    ).toBeTruthy();
-    // The historical reply is preserved, not rewritten.
-    expect(
-      screen.getByText("The worker is running again after the resume."),
-    ).toBeTruthy();
   });
 });

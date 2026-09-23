@@ -18,31 +18,17 @@ func New(a *app.App, auth *Auth) http.Handler {
 	mux := http.NewServeMux()
 	registerFilesystem(mux, a)
 	registerModels(mux, a)
-	registerWorkerSetup(mux, a)
-	workerDetailRoutes(mux, a)
 	registerChatQueue(mux, a)
-	registerArtifacts(mux, a)
-	registerWorkItems(mux, a)
-	registerAgentControls(mux, a)
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
 		s, err := a.Snapshot(r.Context())
 		if err != nil {
 			problem(w, err)
 			return
 		}
-		// Attention is derived per request from the snapshot the owner is
-		// already being shown, so it cannot disagree with it or outlive it.
-		artifacts, err := a.ArtifactLinks(s)
-		if err != nil {
-			problem(w, err)
-			return
-		}
 		respond(w, 200, struct {
 			core.Snapshot
-			Attention []core.ProjectAttention `json:"attention"`
-			Artifacts map[string]string       `json:"artifacts"`
-			Demo      bool                    `json:"demo"`
-		}{s, core.DeriveAttention(s), artifacts, a.Demo})
+			Demo bool `json:"demo"`
+		}{s, a.Demo})
 	})
 	mux.HandleFunc("POST /api/operations/{id}/acknowledge", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

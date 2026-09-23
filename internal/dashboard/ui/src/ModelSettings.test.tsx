@@ -1,11 +1,5 @@
 // @vitest-environment jsdom
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ModelSettings } from "./ModelSettings";
 import type { Config } from "./api";
@@ -50,14 +44,7 @@ function mockCatalog(data: unknown) {
 it("uses discovered friendly models and only their supported efforts", async () => {
   mockCatalog(catalog);
   const changed = vi.fn();
-  render(
-    <ModelSettings
-      config={config}
-      group="model"
-      title="Assistant"
-      onChange={changed}
-    />,
-  );
+  render(<ModelSettings config={config} onChange={changed} />);
   await screen.findByRole("option", { name: "Test Thinker — recommended" });
   expect(screen.getByLabelText("Assistant model").tagName).toBe("SELECT");
   expect(screen.queryByRole("option", { name: "ultra" })).toBeNull();
@@ -79,14 +66,7 @@ it("preserves a saved custom model and effort when discovery is unavailable", as
     models: [],
   });
   const changed = vi.fn();
-  render(
-    <ModelSettings
-      config={config}
-      group="model"
-      title="Assistant"
-      onChange={changed}
-    />,
-  );
+  render(<ModelSettings config={config} onChange={changed} />);
   await screen.findByText("Login unavailable; saved settings unchanged");
   expect(
     (screen.getByLabelText("Assistant model") as HTMLSelectElement).value,
@@ -104,36 +84,12 @@ it("keeps unknown saved model after successful discovery until an explicit selec
     ...config,
     model: { ...model, model: "custom-model", effort: "ultra" },
   };
-  render(
-    <ModelSettings
-      config={custom}
-      group="model"
-      title="Assistant"
-      onChange={changed}
-    />,
-  );
+  render(<ModelSettings config={custom} onChange={changed} />);
   await screen.findByText(/Your saved model is not in this catalog/);
   expect(
     (screen.getByLabelText("Assistant model") as HTMLSelectElement).value,
   ).toBe("custom-model");
   expect(changed).not.toHaveBeenCalled();
-});
-it("asks for the worker profile catalog without sending secrets or overrides", async () => {
-  mockCatalog(catalog);
-  render(
-    <ModelSettings
-      config={{ worker_model: config.model } as Config}
-      group="worker_model"
-      title="Worker"
-      onChange={() => {}}
-    />,
-  );
-  await waitFor(() =>
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/models?profile=worker&engine=codex",
-      expect.anything(),
-    ),
-  );
 });
 it("lists Claude models and effort choices from CLI initialization", async () => {
   mockCatalog({
@@ -154,8 +110,6 @@ it("lists Claude models and effort choices from CLI initialization", async () =>
       config={
         { model: { ...model, engine: "claude", model: "opus" } } as Config
       }
-      group="model"
-      title="Assistant"
       onChange={changed}
     />,
   );
@@ -171,14 +125,7 @@ it("lists Claude models and effort choices from CLI initialization", async () =>
 it("switches CLI engines without retaining an incompatible model identifier", async () => {
   mockCatalog(catalog);
   const changed = vi.fn();
-  render(
-    <ModelSettings
-      config={config}
-      group="model"
-      title="Assistant"
-      onChange={changed}
-    />,
-  );
+  render(<ModelSettings config={config} onChange={changed} />);
   await screen.findByRole("option", { name: "Test Thinker — recommended" });
   fireEvent.change(screen.getByLabelText("Assistant engine"), {
     target: { value: "claude" },

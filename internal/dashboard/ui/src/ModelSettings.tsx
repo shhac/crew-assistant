@@ -18,19 +18,15 @@ export type Catalog = {
   default: { model: string; effort: string };
 };
 
+const group = "model";
+const title = "Assistant";
+
 export function ModelSettings({
   config,
   onChange,
-  group,
-  title,
-  legend,
 }: {
   config: Config;
   onChange: (value: Config) => void;
-  group: "model" | "worker_model";
-  title: string;
-  /** Group heading, when the owner-facing name differs from the field prefix. */
-  legend?: string;
 }) {
   const model = (config[group] || {}) as Record<string, unknown>;
   const value = (key: string) => String(model[key] ?? "");
@@ -53,10 +49,9 @@ export function ModelSettings({
     setLoading(true);
     setError("");
     setCatalog(null);
-    api<Catalog>(
-      `/api/models?profile=${group === "model" ? "assistant" : "worker"}&engine=${value("engine")}`,
-      { signal: controller.signal },
-    )
+    api<Catalog>(`/api/models?profile=assistant&engine=${value("engine")}`, {
+      signal: controller.signal,
+    })
       .then((data) => {
         if (active) setCatalog(data);
       })
@@ -73,7 +68,7 @@ export function ModelSettings({
       active = false;
       controller.abort();
     };
-  }, [codex, claude, group, revision]);
+  }, [codex, claude, revision]);
   const options =
     catalog?.available && catalog.engine === value("engine")
       ? catalog.models
@@ -88,11 +83,10 @@ export function ModelSettings({
   };
   return (
     <fieldset className="config-field-group">
-      <legend>{legend || `${title} model`}</legend>
+      <legend>{title} model</legend>
       <p className="field-hint">
-        {group === "model"
-          ? "Used for conversation, coordination and acceptance reviews. The recommended selection is ready to use."
-          : "Used for delegated work. The assistant manages worker setup; model choices are optional."}
+        Used for conversation and coordination. The recommended selection is
+        ready to use.
       </p>
       <label htmlFor={`${group}-engine`}>
         {title} engine
@@ -254,12 +248,7 @@ export function ModelSettings({
               />
               <span className="field-hint">
                 Configuration, login and session data stay here. After saving a
-                new path, sign in with{" "}
-                <code>
-                  crew-assistant model login
-                  {group === "worker_model" ? " --profile worker" : ""}
-                </code>
-                .
+                new path, sign in with <code>crew-assistant model login</code>.
               </span>
             </label>
             <p className="field-hint">
@@ -286,8 +275,7 @@ export function ModelSettings({
                 autoComplete="off"
               />
               <span className="field-hint">
-                Uses the existing Claude CLI login. Leave the default to share
-                that login with workers.
+                Uses the existing Claude CLI login.
               </span>
             </label>
           </>
@@ -320,7 +308,7 @@ export function ModelSettings({
               <input
                 type="number"
                 min={128}
-                max={group === "worker_model" ? 32768 : 131072}
+                max={131072}
                 id={`${group}-max_tokens`}
                 value={value("max_tokens")}
                 onChange={(e) => change("max_tokens", Number(e.target.value))}

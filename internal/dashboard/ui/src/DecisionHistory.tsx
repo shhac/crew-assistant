@@ -67,8 +67,8 @@ export function DecisionHistory({
                   )}
                   {dismissed && (
                     <p className="field-hint">
-                      Dismissal closed this question. It did not approve work or
-                      resume a waiting worker.
+                      Dismissal closed this question. It did not approve or
+                      restart any work.
                     </p>
                   )}
                 </details>

@@ -73,23 +73,6 @@ func TestChatModelUsesConfiguredNameAndPersistsToolEffects(t *testing.T) {
 		t.Fatalf("lost model effects: %+v", snapshot)
 	}
 }
-func TestWorkerTriggeredReasoningCannotCrossProjectOrChangeMemory(t *testing.T) {
-	a := testApp(t)
-	ctx := context.Background()
-	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Allowed", AcceptanceCriteria: "Evidence"})
-	other, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Other", AcceptanceCriteria: "Evidence"})
-	scope := projectExecutor{app: a, projectID: p.ID}
-	if _, err := scope.Execute(ctx, "remember_preference", json.RawMessage(`{"key":"authority","value":"all"}`)); err == nil {
-		t.Fatal("worker changed global memory")
-	}
-	raw, _ := json.Marshal(map[string]any{"project_id": other.ID, "evidence": []string{"done"}})
-	if _, err := scope.Execute(ctx, "complete_project", raw); err == nil {
-		t.Fatal("worker closed unrelated project")
-	}
-	if _, err := a.Execute(ctx, "run_shell", json.RawMessage(`{"command":"anything"}`)); err == nil {
-		t.Fatal("PA acquired shell")
-	}
-}
 func TestDemoCannotCallModel(t *testing.T) {
 	a := testApp(t)
 	a.Demo = true

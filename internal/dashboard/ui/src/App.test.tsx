@@ -237,62 +237,7 @@ describe("owner dashboard flows", () => {
       assistant: { ...config.assistant, name: "Fern" },
     });
   });
-  it("binds a worker to its approved project without discarding other configuration", async () => {
-    const config = {
-      assistant: state.assistant,
-      model: { model: "kept-model" },
-      workers: [
-        {
-          id: "local",
-          name: "Local broker",
-          endpoint: "http://127.0.0.1:8350",
-          api_key_env: "WORKER_TOKEN",
-          capabilities: ["implement"],
-          project_id: "prior-project",
-          future_option: "preserved",
-        },
-      ],
-    };
-    state.projects = [
-      {
-        id: "approved-project",
-        title: "Approved project",
-        description: "",
-        acceptance_criteria: "",
-        status: "ready",
-      },
-    ];
-    respond = (path) => ({ body: path === "/api/config" ? config : state });
-    render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: /^Settings$/ }));
-    const project = await screen.findByLabelText(/^Project$/);
-    fireEvent.change(project, { target: { value: "approved-project" } });
-    fireEvent.click(screen.getByLabelText("review"));
-    fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
-    await waitFor(() =>
-      expect(
-        calls.some(
-          (c) => c.path === "/api/config" && c.options?.method === "PUT",
-        ),
-      ).toBe(true),
-    );
-    const saved = JSON.parse(
-      calls.find(
-        (c) => c.path === "/api/config" && c.options?.method === "PUT",
-      )!.options!.body as string,
-    );
-    expect(saved.model).toEqual(config.model);
-    expect(saved.workers).toEqual([
-      {
-        ...config.workers[0],
-        project_id: "approved-project",
-        capabilities: ["implement", "review"],
-      },
-    ]);
-    expect(saved.workers[0].capabilities).not.toContain("coordinate");
-    expect(saved.workers[0].api_key_env).toBe("WORKER_TOKEN");
-  });
-  it("saves independent engine and effort profiles without changing provider credentials", async () => {
+  it("saves the assistant model without changing provider credentials or other profiles", async () => {
     const model = {
       engine: "codex",
       model: "gpt-6-astra",
@@ -329,24 +274,9 @@ describe("owner dashboard flows", () => {
       "value",
       "/fixture/assistant-login",
     );
-    fireEvent.change(screen.getByLabelText(/^Worker Codex home/), {
-      target: { value: "/fixture/worker-login" },
+    fireEvent.change(screen.getByLabelText(/^Assistant Codex home/), {
+      target: { value: "/fixture/other-login" },
     });
-    fireEvent.change(screen.getByLabelText("Worker engine"), {
-      target: { value: "openai-compatible" },
-    });
-    fireEvent.change(screen.getByLabelText(/^Worker custom model identifier/), {
-      target: { value: "provider-model" },
-    });
-    fireEvent.change(screen.getByLabelText(/^Worker custom reasoning effort/), {
-      target: { value: "low" },
-    });
-    expect(
-      screen.getByLabelText(/^Worker API key environment variable/),
-    ).toHaveProperty("value", "WORKER_KEY");
-    expect(
-      screen.getByLabelText(/^Worker maximum output tokens per call/),
-    ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
     await waitFor(() =>
       expect(
@@ -360,20 +290,15 @@ describe("owner dashboard flows", () => {
         (c) => c.path === "/api/config" && c.options?.method === "PUT",
       )!.options!.body as string,
     );
-    expect(saved.model).toEqual(model);
-    expect(saved.worker_model).toEqual({
-      ...config.worker_model,
-      codex_home: "/fixture/worker-login",
-      engine: "openai-compatible",
-      model: "provider-model",
-      effort: "low",
-    });
+    expect(saved.model).toEqual({ ...model, codex_home: "/fixture/other-login" });
+    // Configuration the dashboard no longer edits is saved back untouched.
+    expect(saved.worker_model).toEqual(config.worker_model);
   });
   it("requires an inspection note, preserves it after failure, and never retries interrupted work", async () => {
     state.pending_operations = [
       {
         id: "uncertain-operation",
-        summary: "A worker dispatch result is unknown.",
+        summary: "A dispatch result is unknown.",
       },
     ];
     let fail = true;
@@ -521,7 +446,7 @@ describe("decision alternatives", () => {
       answer: "Use the existing setup",
     });
   });
-  it("requires a reason for dismissal and does not request worker controls", async () => {
+  it("requires a reason for dismissal and does not request any controls", async () => {
     state.decisions = [decision];
     respond = (path) => {
       if (path.endsWith("/dismiss")) {
@@ -547,7 +472,7 @@ describe("decision alternatives", () => {
       screen.getByRole("button", { name: "Dismiss decision" }),
     ).toHaveProperty("disabled", true);
     expect(
-      screen.getByText(/does not approve work or resume a waiting worker/),
+      screen.getByText(/does not approve or restart any work/),
     ).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Why is this no longer needed?"), {
       target: { value: "Already configured" },
@@ -560,51 +485,6 @@ describe("decision alternatives", () => {
     expect(JSON.parse(writes[0].options!.body as string)).toEqual({
       reason: "Already configured",
     });
-  });
-
-  it("names the worker model setting as a default and shows project overrides", async () => {
-    const config = {
-      assistant: { name: "Iris", personality: "" },
-      worker_model: { engine: "codex", model: "gpt-5.6-terra", effort: "high" },
-      workers: [
-        {
-          id: "managed-p1",
-          managed: true,
-          project_id: "project-1",
-          name: "Garden builder",
-          model_profile: {
-            engine: "claude",
-            model: "opus-5",
-            effort: "high",
-          },
-        },
-      ],
-    };
-    state.projects = [
-      {
-        id: "project-1",
-        title: "Garden planner",
-        description: "",
-        acceptance_criteria: [],
-        status: "active",
-      },
-    ];
-    respond = (path) => ({ body: path === "/api/config" ? config : state });
-    render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: /^Settings$/ }));
-    // The global value is a default, not the model every worker uses.
-    expect(
-      await screen.findByText("Default model for new workers"),
-    ).toBeTruthy();
-    // Settings and a project page previously looked as though they disagreed.
-    const overrides = await screen.findByText(
-      "Project workers with their own model",
-    );
-    const block = overrides.closest("div") as HTMLElement;
-    expect(block.textContent).toContain("Garden planner");
-    expect(block.textContent).toContain("claude · opus-5 · high effort");
-    expect(block.textContent).toContain("codex · gpt-5.6-terra · high effort");
-    state.projects = [];
   });
 
   it("separates Slack reading from Slack bot messaging", async () => {

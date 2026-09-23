@@ -2,9 +2,10 @@ package app
 
 import (
 	"errors"
-	"github.com/shhac/crew-assistant/internal/engine"
 	"strings"
 	"testing"
+
+	"github.com/shhac/crew-assistant/internal/engine"
 )
 
 func TestChatFailureGivesSafeNextStep(t *testing.T) {

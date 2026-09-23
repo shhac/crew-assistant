@@ -98,17 +98,6 @@ func serve(ctx context.Context, o *options, cfg config.Config, demo, open, noDis
 	}
 	defer store.Close()
 	service := core.NewService(store, cfg)
-	if demo {
-		snap, err := service.Snapshot(ctx)
-		if err != nil {
-			return err
-		}
-		if len(snap.Projects) == 0 {
-			if err = service.SeedDemo(ctx); err != nil {
-				return err
-			}
-		}
-	}
 	appConfigPath := o.configPath
 	if demo {
 		appConfigPath = filepath.Join(o.runtimeDir(), "demo-config.json")

@@ -31,10 +31,6 @@ export function App() {
   const [newProject, setNewProject] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatExpanded, setChatExpanded] = useState(false);
-  const [chatPrefill, setChatPrefill] = useState<{
-    text: string;
-    nonce: number;
-  } | null>(null);
   const [controlBusy, setControlBusy] = useState(false);
   const [controlError, setControlError] = useState("");
   const request = useRef(0);
@@ -73,7 +69,7 @@ export function App() {
   useEffect(() => {
     document.title = state?.assistant.name
       ? `${page} · ${state.assistant.name}`
-      : "Agent Assistant";
+      : "Crew Assistant";
   }, [page, state?.assistant.name]);
   useEffect(() => {
     if (!chatOpen) return;
@@ -156,12 +152,6 @@ export function App() {
     setPage(next);
     setSelectedProject(null);
   }
-  // Hands a question to the conversation. It proposes a message and never
-  // resumes, retries or otherwise touches the worker.
-  function askAssistant(text: string) {
-    setChatPrefill({ text, nonce: Date.now() });
-    setChatOpen(true);
-  }
   async function togglePause() {
     if (!state) return;
     setControlBusy(true);
@@ -184,7 +174,7 @@ export function App() {
     return (
       <div className="loading-screen">
         <Mark />
-        <h1>Agent Assistant</h1>
+        <h1>Crew Assistant</h1>
         <p role="status">
           {connectionError
             ? "The daemon is unavailable."
@@ -306,7 +296,7 @@ export function App() {
         </header>
         {state.demo && (
           <div className="demo-banner">
-            Preview mode · Sample projects and agents. No live work is running.
+            Preview mode · Sample projects. No live work is running.
           </div>
         )}
         {connectionError && (
@@ -327,7 +317,6 @@ export function App() {
           )}
           {page === "Projects" && (
             <Projects
-              onInvestigate={askAssistant}
               state={state}
               selected={selectedProject}
               onSelect={(id) => (id ? openProject(id) : navigate("Projects"))}
@@ -417,7 +406,6 @@ export function App() {
         aria-label={`Conversation with ${name}`}
       >
         <ChatPanel
-          prefill={chatPrefill}
           onProjectOpen={openProject}
           state={state}
           refresh={refresh}

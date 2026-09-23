@@ -73,7 +73,7 @@ describe("decision history", () => {
     ).toBeTruthy();
     expect(
       screen.getByText(
-        /did not approve work or resume a waiting worker/,
+        /did not approve or restart any work/,
       ),
     ).toBeTruthy();
   });

@@ -79,7 +79,7 @@ export function Login({
           </button>
         </form>
         <span className="login-private">
-          <Icon name="Lock" size={13} /> Agent Assistant · Owner access
+          <Icon name="Lock" size={13} /> Crew Assistant · Owner access
         </span>
       </main>
     </div>

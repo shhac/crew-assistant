@@ -118,31 +118,3 @@ func TestModelDiscoveryRequiresOwnerAuthentication(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
-
-func TestModelEndpointUsesWorkerOverrideAndPreviewEngine(t *testing.T) {
-	cfg := config.Default()
-	override := cfg.WorkerModel
-	override.ClaudeHome = "/fixture/alternate-login"
-	cfg.Workers = []config.Worker{{ID: "profile", ProjectID: "project", Managed: true, ModelProfile: &override}}
-	a := app.New(nil, cfg, "", false)
-	calls := 0
-	handler := modelHandler(a, func(_ context.Context, c engine.Config) ([]engine.ModelOption, error) {
-		calls++
-		if c.ClaudeHome != override.ClaudeHome || c.Engine != "claude" {
-			t.Fatal(c)
-		}
-		return []engine.ModelOption{{ID: "opus", Name: "Opus"}}, nil
-	})
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/models?profile=worker&worker_profile=profile&engine=claude", nil))
-	if w.Code != 200 || calls != 1 {
-		t.Fatal(w.Code, w.Body.String())
-	}
-	for _, url := range []string{"/api/models?worker_profile=profile", "/api/models?profile=worker&worker_profile=missing"} {
-		w = httptest.NewRecorder()
-		handler.ServeHTTP(w, httptest.NewRequest("GET", url, nil))
-		if w.Code < 400 || calls != 1 {
-			t.Fatal(w.Code, w.Body.String())
-		}
-	}
-}

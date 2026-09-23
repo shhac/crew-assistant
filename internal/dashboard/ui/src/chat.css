@@ -213,14 +213,6 @@
   padding: 0;
   list-style: none;
 }
-.chat-live-status {
-  margin: 0 0 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--orange);
-  border-radius: 8px;
-  font-size: 11px;
-  color: var(--text-soft);
-}
 
 /* The queue of messages waiting to run, and the controls for changing it. */
 .chat-queue {

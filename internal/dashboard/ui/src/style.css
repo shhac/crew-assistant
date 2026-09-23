@@ -1064,67 +1064,6 @@ nav {
   border-radius: 3px;
   margin-top: 5px;
 }
-.attention-work {
-  margin-bottom: 18px;
-}
-.attention-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-}
-.attention-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  text-align: left;
-  padding: 16px 18px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--orange);
-  border-radius: 9px;
-}
-.attention-row:hover {
-  background: var(--surface-raised);
-}
-.attention-row-main {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-.attention-row-main > strong {
-  font-size: 13px;
-}
-.attention-detail {
-  font-size: 12px;
-  color: var(--text-soft);
-  overflow-wrap: anywhere;
-}
-.attention-meta {
-  font-size: 11px;
-  color: var(--muted);
-}
-.attention-row-state {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-  color: var(--muted);
-}
-@media (max-width: 700px) {
-  .attention-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
-  }
-  .attention-row-state {
-    justify-content: space-between;
-    width: 100%;
-  }
-}
 .history-row {
   display: flex;
   justify-content: space-between;
@@ -1990,48 +1929,6 @@ code {
     transition: none !important;
   }
 }
-.coordinate-project {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 14px;
-  padding: 18px 20px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface);
-  margin-bottom: 24px;
-}
-.coordinate-project label {
-  font-size: 14px;
-  font-weight: 550;
-  color: var(--text);
-}
-.coordinate-project textarea {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 100px;
-  resize: vertical;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--surface-raised);
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.7;
-}
-.coordinate-project textarea:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.coordinate-project textarea::placeholder {
-  color: var(--muted);
-}
-.coordinate-project textarea:disabled {
-  opacity: 0.65;
-}
-.coordinate-project > .button {
-  justify-self: start;
-}
 .project-name-link {
   color: var(--accent);
   text-decoration: underline;
@@ -2040,21 +1937,6 @@ code {
 }
 .project-name-link:hover {
   color: var(--text);
-}
-.coordinate-project p {
-  font-size: 12px;
-  color: var(--text-soft);
-}
-.coordinate-project span {
-  display: block;
-  font-size: 10px;
-  color: var(--muted);
-  margin-top: 4px;
-  line-height: 1.6;
-}
-.coordinate-project > .error-notice,
-.coordinate-project > .coordinate-sent {
-  width: 100%;
 }
 .configuration-fields {
   margin-top: 25px;
@@ -2120,79 +2002,12 @@ code {
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .coordinate-project > .button {
-    width: 100%;
-  }
 }
-.worker-settings {
-  padding: 18px 0;
-  border-bottom: 1px solid var(--line);
-}
-.worker-settings > summary,
 .project-setup-details > summary,
 .operation-inspection > details > summary {
   cursor: pointer;
   color: var(--text-soft);
   font-size: 12px;
-}
-.worker-settings > summary > span {
-  color: var(--muted);
-  margin-left: 6px;
-}
-.worker-settings > .field-hint {
-  margin-top: 14px;
-}
-.worker-settings > .button {
-  margin-top: 18px;
-}
-.worker-profile {
-  margin: 20px 0;
-  padding: 20px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  min-width: 0;
-}
-.worker-profile > legend {
-  font-size: 12px;
-  color: var(--text-soft);
-  padding: 0 7px;
-  overflow-wrap: anywhere;
-}
-.worker-profile > label {
-  font-size: 11px;
-  font-weight: 400;
-  margin-bottom: 16px;
-}
-.worker-profile .field-hint {
-  display: block;
-  margin-top: 6px;
-}
-.worker-capabilities {
-  border: 0;
-  padding: 0;
-  margin: 4px 0 18px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 20px;
-}
-.worker-capabilities legend {
-  font-size: 11px;
-  color: var(--text-soft);
-  margin-bottom: 13px;
-}
-.worker-capabilities > label {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 11px;
-  margin: 0;
-  line-height: 1.5;
-}
-.worker-capabilities input {
-  width: 15px;
-  height: 15px;
-  margin: 0;
-  accent-color: var(--accent);
 }
 .project-setup-details {
   margin: -8px 0 24px;
@@ -3166,21 +2981,6 @@ textarea {
   gap: 8px;
   flex-shrink: 0;
 }
-.project-reference {
-  margin: 18px 0;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 14px 18px;
-  background: var(--surface);
-}
-.project-reference > summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 12px;
-}
-.project-reference[open] > summary {
-  margin-bottom: 10px;
-}
 .settings-group {
   border-top: 1px solid var(--line);
   padding: 14px 0;
@@ -3189,31 +2989,6 @@ textarea {
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
-}
-.worker-overrides {
-  margin-top: 18px;
-}
-.worker-overrides h3 {
-  font-size: 12px;
-  margin: 0 0 4px;
-}
-.worker-overrides dl {
-  margin: 10px 0 0;
-  display: grid;
-  gap: 6px;
-  font-size: 12px;
-}
-.worker-overrides dl > div {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
-}
-.worker-overrides dt {
-  color: var(--muted);
-}
-.worker-overrides dd {
-  margin: 0;
-  overflow-wrap: anywhere;
 }
 .memory-kind {
   margin-top: 12px;
@@ -3250,22 +3025,4 @@ textarea {
 }
 .filesystem-current-row .field-hint {
   margin: 0;
-}
-.usage-hold {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  margin: 14px 0;
-  padding: 14px 16px;
-  border: 1px solid var(--orange);
-  border-radius: 9px;
-  background: var(--surface);
-}
-.usage-hold strong {
-  font-size: 13px;
-}
-.usage-hold p {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: var(--text-soft);
 }

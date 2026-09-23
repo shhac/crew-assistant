@@ -72,59 +72,6 @@ func TestConfigCompletionsMatchSetTraversal(t *testing.T) {
 	}
 }
 
-func TestCompletionUsesSelectedConfigWithoutCallingTools(t *testing.T) {
-	root := completionRoot(t)
-	cfg := config.Default()
-	cfg.Model.Model, cfg.WorkerModel.Model = "custom-assistant", "custom-worker"
-	cfg.Workers = []config.Worker{
-		{ID: "one", ProjectID: "project-z", Endpoint: "http://127.0.0.1:8350"},
-		{ID: "two", ProjectID: "project-a", Endpoint: "http://127.0.0.1:8351"},
-		{ID: "duplicate", ProjectID: "project-a", Endpoint: "http://127.0.0.1:8352"},
-		{ID: "control", ProjectID: "project-b\n:0", Endpoint: "http://127.0.0.1:8353"},
-	}
-	path := filepath.Join(t.TempDir(), "selected.json")
-	if err := config.Save(path, cfg); err != nil {
-		t.Fatal(err)
-	}
-	if err := root.PersistentFlags().Set("config", path); err != nil {
-		t.Fatal(err)
-	}
-	// No executable is available, including model/account CLIs and Docker.
-	t.Setenv("PATH", t.TempDir())
-	worker, _, _ := root.Find([]string{"worker", "serve"})
-	for _, tc := range []struct {
-		flag string
-		want []string
-	}{
-		{"project", []string{"project-a", "project-z"}},
-		{"model", []string{"custom-assistant", "custom-worker"}},
-		{"engine", []string{"claude", "codex", "openai-compatible"}},
-	} {
-		f, ok := worker.GetFlagCompletionFunc(tc.flag)
-		if !ok {
-			t.Fatalf("missing --%s completion", tc.flag)
-		}
-		got, directive := f(worker, nil, "")
-		if !reflect.DeepEqual(got, tc.want) || directive != cobra.ShellCompDirectiveNoFileComp {
-			t.Errorf("--%s = %v, %v", tc.flag, got, directive)
-		}
-	}
-	login, _, _ := root.Find([]string{"model", "login"})
-	f, _ := login.GetFlagCompletionFunc("profile")
-	got, _ := f(login, nil, "w")
-	if !reflect.DeepEqual(got, []string{"worker"}) {
-		t.Fatalf("profile = %v", got)
-	}
-	if err := os.WriteFile(path, []byte("invalid config"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	f, _ = worker.GetFlagCompletionFunc("project")
-	got, directive := f(worker, nil, "")
-	if len(got) != 0 || directive != cobra.ShellCompDirectiveNoFileComp {
-		t.Fatal("bad config must fail quietly")
-	}
-}
-
 func TestCompletionProtocolDoesNotCreateConfigOrState(t *testing.T) {
 	root := completionRoot(t)
 	paths, err := config.Paths()

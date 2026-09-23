@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { ProjectLink } from "./ProjectLink";
-import { AttentionSummary } from "./AttentionSummary";
 import { DecisionCard } from "./DecisionCard";
 import { groupActivity } from "./activity";
-import { attentionHeldUp, stateLabel } from "./states";
 import { dateLabel, Empty, humanStatus, Icon, PageHeading, Status } from "./ui";
 import { pendingDecisions, type Project, type State } from "./api";
 import type { Page } from "./navigation";
@@ -43,13 +41,10 @@ export function Overview({
           </button>
         }
       />
-      <AttentionSummary
-        attention={state.attention}
-        projects={state.projects}
-        decisionCount={decisions.length}
-        onOpen={onProject}
+      <NeedsYou
+        decisions={decisions.length}
+        operations={state.pending_operations.length}
         onReview={() => onNavigate("Decisions")}
-        hasProjects={state.projects.length > 0}
       />
       {decisions.length > 0 && (
         <div className="overview-decision">
@@ -138,14 +133,10 @@ export function ProjectRow({
   state: State;
   onSelect: () => void;
 }) {
-  const agents = state.agents.filter((a) => a.project_id === project.id);
+  const folders = project.directories?.length ?? 0;
   const decisions = pendingDecisions(state.decisions).filter(
     (d) => d.project_id === project.id,
   );
-  // Lifecycle and execution health are separate facts: an active project can
-  // hold blocked work, and only the second is a reason to look now.
-  const health = state.attention.find((a) => a.project_id === project.id);
-  const heldUp = health && attentionHeldUp(health);
   return (
     <button className="project-row" onClick={onSelect}>
       <span className="project-symbol">
@@ -158,9 +149,9 @@ export function ProjectRow({
             "Open to review the desired outcome and acceptance criteria."}
         </span>
         <span className="project-meta">
-          {agents.length
-            ? `${agents.length} ${agents.length === 1 ? "agent" : "agents"}`
-            : "No agents assigned"}
+          {folders
+            ? `${folders} linked ${folders === 1 ? "folder" : "folders"}`
+            : "No folders linked"}
           {decisions.length > 0 && (
             <span className="decision-meta">
               {" "}
@@ -170,7 +161,6 @@ export function ProjectRow({
         </span>
       </span>
       <span className="project-states">
-        {heldUp && <Status tone="amber">{stateLabel(health.execution)}</Status>}
         <Status
           tone={
             decisions.length
@@ -202,7 +192,7 @@ export function ActivityList({
         <span className="activity-line" />
         <p>
           No activity yet.
-          <span>Updates and completion evidence will appear here.</span>
+          <span>Updates will appear here.</span>
         </p>
       </div>
     );
@@ -241,33 +231,43 @@ export function ActivityList({
   );
 }
 
-/**
- * A capacity hold is the reason work is not moving, so it belongs beside the
- * work rather than only in Settings. Unrelated configuration stays out of this
- * flow, and no account identifier or credential is shown.
- */
-export function WorkerUsageHold({
-  project,
-  integrations,
+function NeedsYou({
+  decisions,
+  operations,
+  onReview,
 }: {
-  project: Project;
-  integrations: State["integrations"];
+  decisions: number;
+  operations: number;
+  onReview: () => void;
 }) {
-  const usage = integrations.find(
-    (i) => i.project_id === project.id && i.id.startsWith("worker-usage:"),
-  );
-  if (!usage || !["paused", "unavailable"].includes(usage.status)) return null;
+  const waiting = decisions + operations;
+  const parts = [
+    decisions && `${decisions} decision${decisions === 1 ? "" : "s"}`,
+    operations &&
+      `${operations} interrupted operation${operations === 1 ? "" : "s"}`,
+  ].filter(Boolean);
   return (
-    <div className="usage-hold" role="status">
-      <Icon name="Clock" size={16} />
+    <div className={`attention-banner ${waiting ? "needs-attention" : ""}`}>
+      <span className="attention-symbol">
+        <Icon name={waiting ? "Decisions" : "Check"} size={23} />
+      </span>
       <div>
-        <strong>
-          {usage.status === "paused"
-            ? "New work is held by a usage limit"
-            : "Subscription usage could not be read"}
-        </strong>
-        <p>{usage.detail || "No further detail was recorded."}</p>
+        <h2>
+          {waiting
+            ? `${parts.join(" and ")} waiting on you`
+            : "Nothing needs you right now"}
+        </h2>
+        <p>
+          {waiting
+            ? "Each one comes with context and a recommendation."
+            : "When your judgment is needed, it will appear here first."}
+        </p>
       </div>
+      {waiting > 0 && (
+        <button className="text-button" onClick={onReview}>
+          Review <Icon name="Arrow" size={16} />
+        </button>
+      )}
     </div>
   );
 }

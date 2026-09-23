@@ -149,7 +149,7 @@ export function NewProject({
               </button>
               <p className="field-hint">
                 These are references to existing folders. Adding them does not
-                start an agent or modify their contents.
+                start any work or modify their contents.
               </p>
             </section>
           )}

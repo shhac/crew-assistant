@@ -241,7 +241,6 @@ func NewRoot(version string) *cobra.Command {
 	root.AddCommand(doctor)
 	registerServe(root, o)
 	registerDashboard(root, o)
-	registerWorker(root, o)
 	registerModel(root, o)
 	registerCompletions(root, o)
 	return root

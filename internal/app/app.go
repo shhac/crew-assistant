@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -17,19 +16,12 @@ import (
 	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/integrations/connections"
-	"github.com/shhac/crew-assistant/internal/quota"
 )
 
 type App struct {
 	Diagnostics      *diagnostics.Logger // Set before starting the daemon.
-	workerDiscover   func(context.Context, engine.Config) ([]engine.ModelOption, error)
-	workerUsage      quota.Meter
 	loadingComplete  func(context.Context, engine.Config, []engine.Message, []engine.Tool) (engine.Message, engine.Usage, error)
 	loadingDiscover  func(context.Context, engine.Config) ([]engine.ModelOption, error)
-	workerPreflight  func(context.Context, config.Model) error
-	managedMu        sync.Mutex
-	managed          managedWorkerService
-	prepareMu        sync.Mutex
 	connectionClient connections.Client
 	dispatchDisabled atomic.Bool
 	Core             *core.Service
@@ -44,7 +36,6 @@ type App struct {
 	chatWaiters      sync.Map
 	chatInvoker      func(context.Context, engine.Config, engine.Request, engine.ToolExecutor) (engine.Result, error)
 	statuses         map[string]core.Integration
-	artifactKey      artifactSecret
 }
 
 func New(s *core.Service, cfg config.Config, path string, demo bool) *App {
@@ -89,14 +80,10 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 		return s, err
 	}
 	cfg := a.Config()
-	s.Integrations = []core.Integration{{ID: "model", Name: "Assistant model", Status: "not_configured", Detail: "Choose a model in Settings"}, {ID: "slack", Name: "Slack bot messaging", Status: "not_configured", Detail: "Sends and receives owner direct messages. Configure owner identity and Socket Mode credentials"}, {ID: "workers", Name: "Worker runtimes", Status: "not_configured", Detail: "Ask your assistant to prepare a worker for a project"}}
+	s.Integrations = []core.Integration{{ID: "model", Name: "Assistant model", Status: "not_configured", Detail: "Choose a model in Settings"}, {ID: "slack", Name: "Slack bot messaging", Status: "not_configured", Detail: "Sends and receives owner direct messages. Configure owner identity and Socket Mode credentials"}}
 	if cfg.Model.Model != "" {
 		s.Integrations[0].Status = "configured"
 		s.Integrations[0].Detail = strings.Join([]string{cfg.Model.Engine, cfg.Model.Model, cfg.Model.Effort}, " / ")
-	}
-	if len(cfg.Workers) > 0 {
-		s.Integrations[2].Status = "configured"
-		s.Integrations[2].Detail = fmt.Sprintf("%d approved profiles", len(cfg.Workers))
 	}
 	ignoreLive := map[string]bool{}
 	if cfg.LegacyLinearImportEnabled() {
@@ -121,12 +108,6 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 	defer a.mu.RUnlock()
 	if status, ok := a.statuses["chat"]; ok {
 		s.Integrations = append(s.Integrations, status)
-	}
-	for _, profile := range cfg.Workers {
-		if status, ok := a.statuses["worker-usage:"+profile.ID]; ok {
-			status.ProjectID = profile.ProjectID
-			s.Integrations = append(s.Integrations, status)
-		}
 	}
 	for i, st := range s.Integrations {
 		if live, ok := a.statuses[st.ID]; ok && !ignoreLive[st.ID] {
@@ -160,18 +141,12 @@ func (a *App) chatContext(ctx context.Context, currentMessageID string) (json.Ra
 	if len(s.Activity) > 40 {
 		s.Activity = s.Activity[len(s.Activity)-40:]
 	}
-	profiles := []WorkerDetail{}
 	cfg := a.Config()
-	for _, p := range cfg.Workers {
-		profiles = append(profiles, workerDetail(cfg, p, projectWorkerBusy(s, p.ProjectID), a.Demo))
-	}
 	raw, err := json.Marshal(struct {
 		State               core.Snapshot       `json:"state"`
-		Profiles            []WorkerDetail      `json:"worker_profiles"`
-		Authority           ExecutionAuthority  `json:"execution_authority"`
 		Connections         []config.Connection `json:"connections"`
 		ConversationSummary core.ChatCheckpoint `json:"conversation_summary_untrusted"`
-	}{s, profiles, a.executionAuthority(s.Paused), cfg.Connections, s.ChatCheckpoint})
+	}{s, cfg.Connections, s.ChatCheckpoint})
 	return raw, history, err
 }
 func args(raw json.RawMessage, v any) error {
@@ -187,74 +162,8 @@ func args(raw json.RawMessage, v any) error {
 }
 func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (any, error) {
 	switch name {
-	case "prepare_worker":
-		var in struct {
-			ProjectID string `json:"project_id"`
-			Workspace string `json:"workspace"`
-		}
-		if err := args(raw, &in); err != nil {
-			return nil, err
-		}
-		profile, err := a.PrepareWorker(ctx, in.ProjectID, in.Workspace)
-		if err != nil {
-			return nil, err
-		}
-		snapshot, err := a.Core.Snapshot(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return workerDetail(a.Config(), profile, projectWorkerBusy(snapshot, profile.ProjectID), a.Demo), nil
-	case "list_worker_models":
-		var in struct {
-			WorkerProfile string `json:"worker_profile"`
-			Engine        string `json:"engine"`
-		}
-		if err := args(raw, &in); err != nil {
-			return nil, err
-		}
-		return a.listWorkerModels(ctx, in.WorkerProfile, in.Engine)
-	case "configure_worker":
-		var in struct {
-			ProjectID     string `json:"project_id"`
-			WorkerProfile string `json:"worker_profile"`
-			Name          string `json:"name"`
-			Engine        string `json:"engine"`
-			Model         string `json:"model"`
-			Effort        string `json:"effort"`
-		}
-		if err := args(raw, &in); err != nil {
-			return nil, err
-		}
-		return a.UpdateWorker(ctx, in.ProjectID, in.WorkerProfile, WorkerUpdate{Name: in.Name, Engine: in.Engine, Model: in.Model, Effort: in.Effort})
 	case "list_connections", "query_connection":
 		return a.runConnectionTool(ctx, name, raw)
-	case "control_agent":
-		return nil, errors.New("worker controls require the current owner conversation")
-	case "inspect_agent":
-		var in engine.InspectAgentArgs
-		if err := args(raw, &in); err != nil {
-			return nil, err
-		}
-		return a.InspectAgent(ctx, in.AgentID)
-	case "message_agent":
-		var in struct {
-			AgentID string `json:"agent_id"`
-			Message string `json:"message"`
-		}
-		if err := args(raw, &in); err != nil {
-			return nil, err
-		}
-		snap, err := a.Core.Snapshot(ctx)
-		if err != nil {
-			return nil, err
-		}
-		for _, agent := range snap.Agents {
-			if agent.ID == in.AgentID {
-				return a.SendAgent(ctx, agent, in.Message)
-			}
-		}
-		return nil, core.ErrNotFound
-
 	case "read_state":
 		if err := args(raw, &struct{}{}); err != nil {
 			return nil, err
@@ -276,14 +185,6 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 			return nil, err
 		}
 		return a.Core.RefineProjectWithDirectories(ctx, in.ProjectID, in.Objective, strings.Join(in.AcceptanceCriteria, "\n"), in.Directories)
-	case "create_work_item", "queue_work_item", "unqueue_work_item", "steer_work_item", "accept_work_item":
-		return a.workItemTool(ctx, name, raw)
-	case "delegate":
-		var in engine.DelegateArgs
-		if err := args(raw, &in); err != nil {
-			return nil, err
-		}
-		return a.commissionWorker(ctx, core.DelegateInput{WorkItemID: in.WorkItemID, ProjectID: in.ProjectID, ParentID: in.ParentID, ProfileID: in.WorkerProfile, Role: in.Role, Task: in.Objective, AcceptanceCriteria: strings.Join(in.AcceptanceCriteria, "\n")})
 	case "ask_decision":
 		var in engine.DecisionArgs
 		if err := args(raw, &in); err != nil {
@@ -293,7 +194,7 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 		if len(in.Evidence) > 0 {
 			why += "\nEvidence: " + strings.Join(in.Evidence, "; ")
 		}
-		return a.Core.CreateDecision(ctx, core.DecisionInput{WorkItemID: in.WorkItemID, ProjectID: in.ProjectID, Title: in.Question, Context: why, Recommendation: in.Recommendation, Choices: in.Options})
+		return a.Core.CreateDecision(ctx, core.DecisionInput{ProjectID: in.ProjectID, Title: in.Question, Context: why, Recommendation: in.Recommendation, Choices: in.Options})
 	case "remember_preference":
 		var in engine.PreferenceArgs
 		if err := args(raw, &in); err != nil {
@@ -306,15 +207,6 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 			return nil, err
 		}
 		return map[string]bool{"recorded": true}, a.Core.RecordActivity(ctx, in.ProjectID, "assistant.update", in.Summary+evidenceText(in.Evidence))
-	case "complete_project":
-		var in struct {
-			ProjectID string   `json:"project_id"`
-			Evidence  []string `json:"evidence"`
-		}
-		if err := args(raw, &in); err != nil {
-			return nil, err
-		}
-		return map[string]bool{"completed": true}, a.Core.CompleteProject(ctx, in.ProjectID, in.Evidence)
 	default:
 		return nil, errors.New("unavailable coordination action")
 	}

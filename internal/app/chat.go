@@ -233,7 +233,7 @@ func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Resul
 	}
 	go a.startChatLoading(ctx, turn.ID, turn.Message, history)
 	req := engine.Request{Message: turn.Message, History: history, Context: raw}
-	executor := ownerChatExecutor{app: a, turnID: turn.ID}
+	executor := a
 	if a.chatInvoker != nil {
 		return a.chatInvoker(ctx, ec, req, executor)
 	}

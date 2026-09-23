@@ -3,8 +3,6 @@ import { AssistantSetup } from "./AssistantSetup";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { ChatSettings } from "./ChatSettings";
 import { ModelSettings } from "./ModelSettings";
-import { WorkerUsageSettings } from "./WorkerUsageSettings";
-import { WorkerSettings } from "./WorkerSettings";
 import { ThemePicker } from "./Identity";
 import {
   ErrorNotice,
@@ -14,14 +12,7 @@ import {
   PageHeading,
   Status,
 } from "./ui";
-import {
-  api,
-  errorText,
-  type Config,
-  type ModelProfile,
-  type Project,
-  type State,
-} from "./api";
+import { api, errorText, type Config, type State } from "./api";
 
 export function Settings({
   state,
@@ -161,20 +152,9 @@ export function Settings({
         )}
         {config && (
           <ConfigurationFields
-            projects={state.projects}
             config={config}
             onChange={(next) => {
               setConfig(next);
-              setSaved(false);
-            }}
-          />
-        )}
-        {config && (
-          <WorkerSettings
-            projects={state.projects}
-            workers={config.workers || []}
-            onChange={(workers) => {
-              setConfig({ ...config, workers });
               setSaved(false);
             }}
           />
@@ -233,8 +213,8 @@ export function Settings({
           <h2>Dispatch control</h2>
         </div>
         <p className="section-description">
-          Pausing stops new work from being dispatched. Existing agent runs may
-          continue.
+          Pausing stops new work from being dispatched. Work already underway
+          may continue.
         </p>
         {control}
       </section>
@@ -243,7 +223,7 @@ export function Settings({
         <div>
           <h3>Built-in boundaries</h3>
           <p>
-            The assistant coordinates approved agents. It cannot write project
+            The assistant coordinates your projects. It cannot write project
             code, deploy, access production data, or buy things. A personality
             change cannot override these boundaries.
           </p>
@@ -253,62 +233,12 @@ export function Settings({
   );
 }
 
-/**
- * The global setting is a default for workers created later; a project worker
- * can carry its own model. Showing both prevents the settings page and a
- * project page from looking as though they disagree.
- */
-function WorkerModelOverrides({
-  config,
-  projects,
-}: {
-  config: Config;
-  projects: Project[];
-}) {
-  const fallback = (config.worker_model || {}) as ModelProfile;
-  const overridden = (config.workers || []).filter(
-    (worker) => worker.managed === true && !!worker.model_profile,
-  );
-  if (!overridden.length) return null;
-  const describe = (model: ModelProfile) =>
-    [model.engine, model.model, model.effort && `${model.effort} effort`]
-      .filter(Boolean)
-      .join(" · ");
-  return (
-    <div className="worker-overrides">
-      <h3>Project workers with their own model</h3>
-      <p className="field-hint">
-        These projects do not use the default above. The effective model is what
-        their next assignment will run.
-      </p>
-      <dl>
-        {overridden.map((worker) => (
-          <div key={worker.id}>
-            <dt>
-              {projects.find((p) => p.id === worker.project_id)?.title ||
-                worker.name ||
-                worker.id}
-            </dt>
-            <dd>{describe(worker.model_profile || {}) || "Not recorded"}</dd>
-          </div>
-        ))}
-        <div>
-          <dt>Default for new workers</dt>
-          <dd>{describe(fallback) || "Not recorded"}</dd>
-        </div>
-      </dl>
-    </div>
-  );
-}
-
 function ConfigurationFields({
   config,
   onChange,
-  projects,
 }: {
   config: Config;
   onChange: (value: Config) => void;
-  projects: Project[];
 }) {
   const [listDrafts, setListDrafts] = useState<Record<string, string>>({});
   const linear = (config.linear || {}) as Record<string, unknown>;
@@ -373,25 +303,12 @@ function ConfigurationFields({
   return (
     <div className="configuration-fields">
       <details className="settings-group" open>
-        <summary>Models and worker defaults</summary>
+        <summary>Model</summary>
         <p className="field-hint">
           Enter environment variable names for credentials. Never paste a token
           or API key. Connection changes may require restarting the daemon.
         </p>
-        <ModelSettings
-          config={config}
-          onChange={onChange}
-          group="model"
-          title="Assistant"
-        />
-        <ModelSettings
-          config={config}
-          onChange={onChange}
-          group="worker_model"
-          title="Worker"
-          legend="Default model for new workers"
-        />
-        <WorkerModelOverrides config={config} projects={projects} />
+        <ModelSettings config={config} onChange={onChange} />
       </details>
       <details className="settings-group">
         <summary>Advanced</summary>
@@ -449,22 +366,11 @@ function ConfigurationFields({
         </details>
       </details>
       <details className="settings-group">
-        <summary>Capacity and recovery</summary>
+        <summary>Limits</summary>
         <p className="field-hint">
-          These limits apply across coordinated work. Model call counts are an
-          operating limit, not a dollar budget.
+          Model call counts are an operating limit, not a dollar budget.
         </p>
         <div className="config-field-group">
-          {field("limits", "max_agents", "Maximum active agents", {
-            type: "number",
-            min: 1,
-            max: 64,
-          })}
-          {field("limits", "max_depth", "Maximum delegation depth", {
-            type: "number",
-            min: 1,
-            max: 10,
-          })}
           {field(
             "limits",
             "max_model_calls_per_day",
@@ -477,19 +383,7 @@ function ConfigurationFields({
             "Maximum model turns per request",
             { type: "number", min: 1, max: 32 },
           )}
-          {field(
-            "limits",
-            "check_in_minutes",
-            "Expected agent check-in (minutes)",
-            { type: "number", min: 1, max: 1440 },
-          )}
-          {field("limits", "max_recoveries", "Maximum recovery attempts", {
-            type: "number",
-            min: 0,
-            max: 10,
-          })}
         </div>
-        <WorkerUsageSettings config={config} onChange={onChange} />
       </details>
     </div>
   );

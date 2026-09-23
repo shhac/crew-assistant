@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/config"
@@ -18,51 +17,6 @@ func canonicalDirectory(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return value
-}
-
-func TestExistingProjectTracksDirectoriesAndRequiresContract(t *testing.T) {
-	s, _ := fixture(t)
-	repository := t.TempDir()
-	marker := filepath.Join(repository, "source.txt")
-	if err := os.WriteFile(marker, []byte("owner content"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	p, err := s.CreateProject(testContext, ProjectInput{Title: "Existing project", Directories: []string{repository, filepath.Join(repository, ".")}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.ContractDefined || p.Status != "ready" || !reflect.DeepEqual(p.Directories, []string{canonicalDirectory(t, repository)}) {
-		t.Fatalf("project=%+v", p)
-	}
-	if p.ScratchDirectory != filepath.Join(s.StateDirectory(), "projects", p.ID) {
-		t.Fatalf("scratch outside selected state: %q", p.ScratchDirectory)
-	}
-	info, err := os.Stat(p.ScratchDirectory)
-	if err != nil || !info.IsDir() {
-		t.Fatalf("scratch: %v %v", info, err)
-	}
-	if runtime.GOOS != "windows" && info.Mode().Perm() != 0700 {
-		t.Fatalf("scratch permissions %v", info.Mode())
-	}
-	in := DelegateInput{ProjectID: p.ID, ProfileID: "test", Role: "worker", Task: "Implement scoped change", AcceptanceCriteria: "Evidence reviewed"}
-	if _, err = s.Delegate(testContext, in); err == nil || !strings.Contains(err.Error(), "acceptance") {
-		t.Fatalf("draft was commissioned: %v", err)
-	}
-	p, err = s.RefineProject(testContext, p.ID, "Implement the requested change", "Tests demonstrate requested behavior")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.Delegate(testContext, in); err != nil {
-		t.Fatal(err)
-	}
-	entries, err := os.ReadDir(repository)
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("linked repository changed: %v %v", entries, err)
-	}
-	content, _ := os.ReadFile(marker)
-	if string(content) != "owner content" {
-		t.Fatal("source contents changed")
-	}
 }
 
 func TestProjectDirectoriesPersistenceAndCanonicalDatabaseLocation(t *testing.T) {
