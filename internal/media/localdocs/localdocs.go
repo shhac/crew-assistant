@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/shhac/crew-assistant/internal/media"
 )
 
 const (
@@ -97,13 +99,7 @@ func (d Docs) ReviewCopy(taskID string, n int) (string, func(), error) {
 }
 
 // File is one file of a revision as shown to the owner.
-type File struct {
-	Path      string `json:"path"`
-	Content   string `json:"content,omitempty"`
-	Binary    bool   `json:"binary,omitempty"`
-	Truncated bool   `json:"truncated,omitempty"`
-	Size      int64  `json:"size"`
-}
+type File = media.File
 
 // Preview returns revision n's files, each cut at limit bytes.
 func (d Docs) Preview(taskID string, n int, limit int) ([]File, error) {

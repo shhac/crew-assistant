@@ -26,6 +26,11 @@ type SetTeamArgs struct {
 	ReviewerEngine string `json:"reviewer_engine"`
 	MaxRounds      string `json:"max_rounds"`
 	DeliverTo      string `json:"deliver_to"`
+	// Code teams only.
+	Repo         string   `json:"repo"`
+	BranchPrefix string   `json:"branch_prefix"`
+	Check        string   `json:"check"`
+	Prepare      []string `json:"prepare"`
 }
 type QueueTaskArgs struct {
 	ProjectID string   `json:"project_id"`
@@ -70,7 +75,7 @@ func Tools() []Tool {
 		tool("read_state", "Read current projects with their briefs and teams, tasks with their revisions and reviews, decisions, preferences and recent activity.", nil, nil),
 		tool("create_project", "Start tracking a project of any kind — writing, email, research, code — in local state. A brief (goal, audience, constraints, criteria) says what it is for; leave fields empty when unknown. template \"draft\" gives it a writer and a reviewer for written work; empty sets no team yet. Directories are optional existing absolute paths; linking them grants nothing. No Linear issue, external tracker, or connection is required.", []string{"title", "goal", "audience", "constraints", "template"}, []string{"criteria"}),
 		tool("update_brief", "Replace a project's brief with a new version: its goal, audience, constraints and criteria. Work already done is re-checked against the new version before delivery.", []string{"project_id", "goal", "audience", "constraints"}, []string{"criteria"}),
-		tool("set_team", "Choose how a project's work gets done. template \"draft\" is a writer and a reviewer. writer_engine and reviewer_engine are codex or claude, or empty for the template's choice; different engines give a more independent review. max_rounds is how many revise-and-review rounds to try before bringing the owner a decision, or empty for the default. deliver_to is an optional absolute folder the approved draft is copied to. Tasks already under way keep their team.", []string{"project_id", "template", "writer_engine", "reviewer_engine", "max_rounds", "deliver_to"}, nil),
+		tool("set_team", "Choose how a project's work gets done. template \"draft\" is a writer and a reviewer for written work. template \"code\" is for a project with a linked git repository: an implementer works in a private clone, a reviewer reads the change, QA runs the check command, and approval creates a local branch in the repository; nothing is pushed. writer_engine and reviewer_engine are codex or claude, or empty for the template's choice. max_rounds is how many revise-and-check rounds to try before bringing the owner a decision, or empty for the default. deliver_to is an optional absolute folder approved drafts are copied to (written work). For code: repo is the linked repository (empty for the project's first folder), branch_prefix names delivered branches (empty for crew/), check is the command QA runs (such as make check), and prepare lists ignored dependency folders to copy into the clone (such as node_modules paths). Use empty values for settings that do not apply. Tasks already under way keep their team.", []string{"project_id", "template", "writer_engine", "reviewer_engine", "max_rounds", "deliver_to", "repo", "branch_prefix", "check"}, []string{"prepare"}),
 		tool("queue_task", "Ask the project's team for one outcome. The writer drafts it, reviewers check it against the brief, and the owner approves delivery. Criteria are specific to this task and add to the brief's.", []string{"project_id", "objective"}, []string{"criteria"}),
 		tool("stop_task", "Stop a queued or running task when the owner asks. A turn already under way finishes but changes nothing; any decision it was waiting on is closed.", []string{"project_id", "task_id"}, nil),
 		tool("resolve_decision", "Answer an open decision with the owner's choice, in their words. Use it only when the owner has just given that answer in this conversation.", []string{"decision_id", "answer"}, nil),

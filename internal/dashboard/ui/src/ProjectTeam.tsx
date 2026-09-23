@@ -67,6 +67,7 @@ export function TeamCard({
 }
 
 function TeamView({ playbook }: { playbook: Playbook }) {
+  const rounds = `Up to ${playbook.max_rounds} ${playbook.max_rounds === 1 ? "round" : "rounds"} before checking with you.`;
   return (
     <>
       <ul className="team-roles">
@@ -77,14 +78,21 @@ function TeamView({ playbook }: { playbook: Playbook }) {
           </li>
         ))}
       </ul>
-      <p className="field-hint">
-        Up to {playbook.max_rounds}{" "}
-        {playbook.max_rounds === 1 ? "round" : "rounds"} before checking with
-        you.{" "}
-        {playbook.deliver_to
-          ? `Approved deliverables are copied to ${playbook.deliver_to}.`
-          : "Approved deliverables stay on this page."}
-      </p>
+      {playbook.medium === "git" ? (
+        <p className="field-hint">
+          Works in a private copy of <code>{playbook.repo}</code>; QA runs{" "}
+          <code>{playbook.check}</code>. {rounds} Approved changes become a
+          local branch starting <code>{playbook.branch_prefix}</code>, and
+          nothing is pushed.
+        </p>
+      ) : (
+        <p className="field-hint">
+          {rounds}{" "}
+          {playbook.deliver_to
+            ? `Approved deliverables are copied to ${playbook.deliver_to}.`
+            : "Approved deliverables stay on this page."}
+        </p>
+      )}
     </>
   );
 }
@@ -105,6 +113,15 @@ function TeamEditor({
   refresh: () => Promise<void>;
 }) {
   const playbook = project.playbook;
+  const folders = project.directories ?? [];
+  const [template, setTemplate] = useState(playbook?.template ?? "draft");
+  const code = template === "code";
+  const [repo, setRepo] = useState(playbook?.repo ?? folders[0] ?? "");
+  const [branchPrefix, setBranchPrefix] = useState(
+    playbook?.branch_prefix ?? "crew/",
+  );
+  const [check, setCheck] = useState(playbook?.check ?? "");
+  const [prepare, setPrepare] = useState((playbook?.prepare ?? []).join(", "));
   const [writer, setWriter] = useState(
     firstEngine(playbook?.roles, "implementer", "claude"),
   );
@@ -122,11 +139,22 @@ function TeamEditor({
     setError("");
     try {
       await setTeam(project.id, {
-        template: "draft",
+        template,
         writer_engine: writer,
         reviewer_engine: reviewer,
         max_rounds: rounds,
-        deliver_to: deliverTo,
+        ...(code
+          ? {
+              deliver_to: "",
+              repo,
+              branch_prefix: branchPrefix.trim(),
+              check: check.trim(),
+              prepare: prepare
+                .split(/[,\n]/)
+                .map((p) => p.trim())
+                .filter(Boolean),
+            }
+          : { deliver_to: deliverTo }),
       });
       await refresh();
       onDone();
@@ -139,14 +167,28 @@ function TeamEditor({
   return (
     <>
       <form className="project-card-form" onSubmit={save}>
+        {folders.length > 0 && (
+          <label htmlFor="team-kind">
+            Kind of work
+            <select
+              id="team-kind"
+              value={template}
+              onChange={(e) => setTemplate(e.target.value)}
+            >
+              <option value="draft">Writing</option>
+              <option value="code">Code in a linked folder</option>
+            </select>
+          </label>
+        )}
         <p className="field-hint">
-          Written work: a writer drafts and a reviewer checks each draft against
-          the brief. Work already under way keeps the team it started with.
+          {code
+            ? "An implementer changes a private copy of the repository, a reviewer reads the change, and QA runs your check. Work already under way keeps the team it started with."
+            : "A writer drafts and a reviewer checks each draft against the brief. Work already under way keeps the team it started with."}
         </p>
         <div className="team-fields">
           <EngineSelect
             id="team-writer"
-            label="Writer"
+            label={code ? "Implementer" : "Writer"}
             value={writer}
             onChange={setWriter}
           />
@@ -169,30 +211,77 @@ function TeamEditor({
             />
           </label>
         </div>
-        <div className="team-delivery">
-          <span>Deliver approved work to</span>
-          <code>{deliverTo || "Nowhere; keep it on this page"}</code>
-          <div className="form-actions">
-            <button
-              type="button"
-              className="button secondary"
-              disabled={busy}
-              onClick={() => setPicking(true)}
-            >
-              Choose folder
-            </button>
-            {deliverTo && (
+        {code ? (
+          <div className="team-fields">
+            <label htmlFor="team-repo">
+              Repository
+              <select
+                id="team-repo"
+                value={repo}
+                onChange={(e) => setRepo(e.target.value)}
+              >
+                {folders.map((folder) => (
+                  <option key={folder} value={folder}>
+                    {folder}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label htmlFor="team-check">
+              Check QA runs
+              <input
+                id="team-check"
+                value={check}
+                placeholder="make check"
+                onChange={(e) => setCheck(e.target.value)}
+                required
+              />
+            </label>
+            <label htmlFor="team-prefix">
+              Branch prefix
+              <input
+                id="team-prefix"
+                value={branchPrefix}
+                onChange={(e) => setBranchPrefix(e.target.value)}
+                required
+              />
+            </label>
+            <label htmlFor="team-prepare">
+              Ignored folders to copy in (optional)
+              <input
+                id="team-prepare"
+                value={prepare}
+                placeholder="node_modules"
+                onChange={(e) => setPrepare(e.target.value)}
+              />
+            </label>
+          </div>
+        ) : (
+          <div className="team-delivery">
+            <span>Deliver approved work to</span>
+            <code>{deliverTo || "Nowhere; keep it on this page"}</code>
+            <div className="form-actions">
               <button
                 type="button"
-                className="text-button"
+                className="button secondary"
                 disabled={busy}
-                onClick={() => setDeliverTo("")}
+                onClick={() => setPicking(true)}
               >
-                Clear
+                Choose folder
               </button>
-            )}
+              {deliverTo && (
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={busy}
+                  onClick={() => setDeliverTo("")}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
         <ErrorNotice error={error} />
         <div className="form-actions">
           <button className="button primary" type="submit" disabled={busy}>

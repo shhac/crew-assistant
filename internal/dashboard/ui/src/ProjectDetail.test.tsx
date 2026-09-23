@@ -204,6 +204,82 @@ describe("project page", () => {
     ]);
   });
 
+  it("sets up a code team on one of the project's folders", async () => {
+    show(
+      project({
+        playbook: undefined,
+        directories: ["/work/service", "/work/notes"],
+      }),
+    );
+    const team = screen.getByRole("region", { name: "Team" });
+    fireEvent.click(
+      within(team).getByRole("button", { name: "Choose a team" }),
+    );
+    expect(within(team).queryByLabelText("Repository")).toBeNull();
+    fireEvent.change(within(team).getByLabelText("Kind of work"), {
+      target: { value: "code" },
+    });
+    expect(within(team).getByLabelText("Implementer")).toBeTruthy();
+    expect(within(team).queryByText("Deliver approved work to")).toBeNull();
+    fireEvent.change(within(team).getByLabelText("Repository"), {
+      target: { value: "/work/service" },
+    });
+    fireEvent.change(within(team).getByLabelText("Check QA runs"), {
+      target: { value: "make check" },
+    });
+    fireEvent.change(within(team).getByLabelText("Branch prefix"), {
+      target: { value: "paul/" },
+    });
+    fireEvent.change(
+      within(team).getByLabelText("Ignored folders to copy in (optional)"),
+      { target: { value: "ui/node_modules, vendor" } },
+    );
+    fireEvent.click(within(team).getByRole("button", { name: "Save team" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/team",
+        method: "PUT",
+        body: {
+          template: "code",
+          writer_engine: "claude",
+          reviewer_engine: "codex",
+          max_rounds: "3",
+          deliver_to: "",
+          repo: "/work/service",
+          branch_prefix: "paul/",
+          check: "make check",
+          prepare: ["ui/node_modules", "vendor"],
+        },
+      },
+    ]);
+  });
+
+  it("describes a code team by where it works and what it delivers", () => {
+    show(
+      project({
+        playbook: {
+          template: "code",
+          medium: "git",
+          roles: [
+            { name: "Implementer", kind: "implementer", engine: "claude" },
+            { name: "Reviewer", kind: "reviewer", engine: "codex" },
+            { name: "QA", kind: "qa", engine: "codex" },
+          ],
+          max_rounds: 3,
+          deliver: "approve",
+          repo: "/work/service",
+          branch_prefix: "paul/",
+          check: "make check",
+        },
+      }),
+    );
+    const team = screen.getByRole("region", { name: "Team" });
+    expect(within(team).getByText("/work/service")).toBeTruthy();
+    expect(within(team).getByText("make check")).toBeTruthy();
+    expect(within(team).getByText(/nothing is pushed/)).toBeTruthy();
+  });
+
   it("explains why it can't take requests without a brief", () => {
     show(project({ brief: { version: 0, goal: "", criteria: null } }));
     expect(screen.getByText(/Write the brief first/)).toBeTruthy();

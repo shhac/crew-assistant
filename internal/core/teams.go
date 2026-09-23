@@ -43,6 +43,9 @@ type Role struct {
 const (
 	RoleImplementer = "implementer"
 	RoleReviewer    = "reviewer"
+	// RoleQA runs the playbook's check command against a revision and reports
+	// what failed. It may write while it runs; the medium discards it after.
+	RoleQA = "qa"
 )
 
 // Playbook is how a project's work gets done. It is data with a small fixed
@@ -58,9 +61,20 @@ type Playbook struct {
 	Deliver string `json:"deliver"`
 	// DeliverTo is an optional absolute folder a delivered draft is copied to.
 	DeliverTo string `json:"deliver_to,omitempty"`
+	// Repo, BranchPrefix, Check and Prepare belong to the git medium: the
+	// repository to clone (one of the project's folders), the prefix for
+	// delivered branches, the command QA runs, and ignored dependency paths to
+	// copy into the clone.
+	Repo         string   `json:"repo,omitempty"`
+	BranchPrefix string   `json:"branch_prefix,omitempty"`
+	Check        string   `json:"check,omitempty"`
+	Prepare      []string `json:"prepare,omitempty"`
 }
 
-const MediumDocuments = "documents"
+const (
+	MediumDocuments = "documents"
+	MediumGit       = "git"
+)
 
 // Templates are the playbooks the assistant starts a project from.
 var Templates = map[string]Playbook{
@@ -74,10 +88,36 @@ var Templates = map[string]Playbook{
 		MaxRounds: 3,
 		Deliver:   "owner",
 	},
+	"code": {
+		Template: "code",
+		Medium:   MediumGit,
+		Roles: []Role{
+			{Name: "Implementer", Kind: RoleImplementer, Engine: "claude", Model: "opus", Instructions: "Implement the task in this repository with tests, following the repository's own conventions and instructions."},
+			{Name: "Reviewer", Kind: RoleReviewer, Engine: "codex", Instructions: "Review the change against the brief and the task's criteria, as a careful senior engineer: correctness first, then design and tests."},
+			{Name: "QA", Kind: RoleQA, Engine: "codex", Instructions: "Run the project's check exactly as given and report what failed."},
+		},
+		MaxRounds:    3,
+		Deliver:      "owner",
+		BranchPrefix: "crew/",
+	},
 }
 
 func (p Playbook) Validate() error {
-	if p.Medium != MediumDocuments {
+	switch p.Medium {
+	case MediumDocuments:
+	case MediumGit:
+		if !filepath.IsAbs(p.Repo) {
+			return errors.New("a code team needs the repository it works on")
+		}
+		if p.BranchPrefix == "" || strings.ContainsAny(p.BranchPrefix, " ~^:?*[\\") || strings.Contains(p.BranchPrefix, "..") {
+			return errors.New("branch_prefix must be a simple branch-name prefix, such as crew/")
+		}
+		for _, rel := range p.Prepare {
+			if filepath.IsAbs(rel) || strings.HasPrefix(filepath.Clean(rel), "..") {
+				return fmt.Errorf("prepare path %q must be inside the repository", rel)
+			}
+		}
+	default:
 		return fmt.Errorf("unsupported medium %q", p.Medium)
 	}
 	if p.MaxRounds < 1 || p.MaxRounds > 10 {
@@ -104,8 +144,12 @@ func (p Playbook) Validate() error {
 			implementers++
 		case RoleReviewer:
 			reviewers++
+		case RoleQA:
+			if strings.TrimSpace(p.Check) == "" {
+				return fmt.Errorf("role %s runs the check, but the team has no check command", r.Name)
+			}
 		default:
-			return fmt.Errorf("role %s: kind must be implementer or reviewer", r.Name)
+			return fmt.Errorf("role %s: kind must be implementer, reviewer or qa", r.Name)
 		}
 	}
 	if implementers != 1 || reviewers < 1 {
@@ -125,8 +169,11 @@ type Task struct {
 	Status    string   `json:"status"`
 	Detail    string   `json:"detail,omitempty"`
 	Roles     []Role   `json:"roles,omitempty"`
-	MaxRounds int      `json:"max_rounds,omitempty"`
-	Round     int      `json:"round"`
+	// Playbook is the team's setup as it was when the task started: its
+	// medium and, for code, the repository, check and branch prefix.
+	Playbook  *Playbook `json:"playbook,omitempty"`
+	MaxRounds int       `json:"max_rounds,omitempty"`
+	Round     int       `json:"round"`
 	// Direction is what the owner asked for along the way, in their words.
 	Direction []string   `json:"direction,omitempty"`
 	Revisions []Revision `json:"revisions"`
@@ -140,9 +187,14 @@ type Task struct {
 	ResumeStatus string    `json:"resume_status,omitempty"`
 	RetryAt      time.Time `json:"retry_at,omitempty"`
 	DecisionID   string    `json:"decision_id,omitempty"`
-	DeliveredTo  string    `json:"delivered_to,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	// Base, From and Branch record the commit a code task started from, the
+	// owner's branch it was on, and the branch its revisions are committed to.
+	Base        string    `json:"base,omitempty"`
+	From        string    `json:"from,omitempty"`
+	Branch      string    `json:"branch,omitempty"`
+	DeliveredTo string    `json:"delivered_to,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Task statuses. Writing, reviewing and deciding are the loop's own; waiting
@@ -163,11 +215,13 @@ func (t Task) Active() bool {
 
 // Revision is one snapshot of the artifact, stamped with the brief it answers.
 type Revision struct {
-	N            int       `json:"n"`
-	BriefVersion int       `json:"brief_version"`
-	Files        []string  `json:"files"`
-	Summary      string    `json:"summary,omitempty"`
-	At           time.Time `json:"at"`
+	N            int      `json:"n"`
+	BriefVersion int      `json:"brief_version"`
+	Files        []string `json:"files"`
+	// Ref identifies the revision in its medium, such as a commit.
+	Ref     string    `json:"ref,omitempty"`
+	Summary string    `json:"summary,omitempty"`
+	At      time.Time `json:"at"`
 }
 
 // Verdict is one reviewer's judgement of one revision.
@@ -315,6 +369,10 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 				continue
 			}
 			now := s.now().UTC()
+			pinned := *p.Playbook
+			pinned.Roles = append([]Role(nil), p.Playbook.Roles...)
+			pinned.Prepare = append([]string(nil), p.Playbook.Prepare...)
+			t.Playbook = &pinned
 			t.Roles = append([]Role(nil), p.Playbook.Roles...)
 			t.MaxRounds = p.Playbook.MaxRounds
 			t.Round = 1

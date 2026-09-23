@@ -38,13 +38,21 @@ func briefText(p core.Project, t core.Task) string {
 // writerPrompt stands on its own, so a fresh session can pick the work up if
 // the previous one cannot be resumed.
 func writerPrompt(p core.Project, t core.Task) string {
+	code := isCode(p, t)
 	var b strings.Builder
 	b.WriteString(briefText(p, t))
 	last := len(t.Revisions)
-	if last == 0 {
+	switch {
+	case last == 0 && code:
+		b.WriteString("\nYou are in a clone of the repository, on a branch for this task. " + repoInstructions + " Make the change, with tests, following those conventions. Run the relevant tests yourself before you finish.\n")
+	case last == 0:
 		b.WriteString("\nWrite the deliverable as one or more files in the current working directory. Markdown is preferred for prose.\n")
-	} else {
-		fmt.Fprintf(&b, "\nThe working directory holds draft %d. Revise it in place. The reviewers said:\n", last)
+	default:
+		if code {
+			fmt.Fprintf(&b, "\nThe repository holds your previous attempt (draft %d). %s Improve it in place. The checks said:\n", last, repoInstructions)
+		} else {
+			fmt.Fprintf(&b, "\nThe working directory holds draft %d. Revise it in place. The reviewers said:\n", last)
+		}
 		for _, v := range t.Verdicts {
 			if v.Revision != last || v.Outcome == core.VerdictPass {
 				continue
@@ -62,8 +70,51 @@ func writerPrompt(p core.Project, t core.Task) string {
 			b.WriteString("\nThe brief has changed since that draft. Make sure the revision meets the brief above.\n")
 		}
 	}
-	b.WriteString("\nOnly change files in the working directory. Do not send, publish or deliver anything anywhere; the owner approves delivery.\nEnd your reply with two sentences on what you wrote or changed.")
+	if code {
+		b.WriteString("\nOnly change files in this repository. Do not commit, push, create branches or touch .git; your changes are recorded for you. Nothing you run can reach the network.\nEnd your reply with two sentences on what you changed.")
+	} else {
+		b.WriteString("\nOnly change files in the working directory. Do not send, publish or deliver anything anywhere; the owner approves delivery.\nEnd your reply with two sentences on what you wrote or changed.")
+	}
 	return b.String()
+}
+
+// repoInstructions is needed because roles run with no instruction files
+// loaded, the repository's own included.
+const repoInstructions = "First read the repository's own instructions for contributors, such as AGENTS.md, CLAUDE.md, CONTRIBUTING.md and the README, wherever they apply."
+
+func isCode(p core.Project, t core.Task) bool {
+	playbook := taskPlaybook(p, t)
+	return playbook != nil && playbook.Medium == core.MediumGit
+}
+
+const verdictFormat = `
+Reply with only this JSON object:
+{"outcome": "pass" | "revise" | "question", "summary": "one or two sentences", "findings": [{"criterion": "...", "note": "..."}], "question": "only for outcome question, else empty"}`
+
+// checkerPrompt asks a reviewer to judge a revision, or QA to run the check.
+func checkerPrompt(p core.Project, t core.Task, r core.Revision, checker core.Role, playbook *core.Playbook) string {
+	if checker.Kind == core.RoleQA && playbook != nil {
+		var b strings.Builder
+		fmt.Fprintf(&b, "This repository holds a proposed change for: %s\n\nRun exactly this from the repository root, once:\n\n    %s\n\n", t.Objective, playbook.Check)
+		b.WriteString(`Do not change, fix or commit anything; only run the check and read its output.
+Use "pass" if it exits successfully. Otherwise use "revise", with one finding per failing test, build error or check, quoting the key lines of output in the note.
+Use "question" only if the check cannot run at all for a reason the implementer cannot fix (for example a missing tool), and say what is missing.`)
+		b.WriteString(verdictFormat)
+		return b.String()
+	}
+	if isCode(p, t) {
+		var b strings.Builder
+		b.WriteString(briefText(p, t))
+		fmt.Fprintf(&b, "\nThis repository holds a proposed change for this task: the commits between %s and HEAD (run `git diff %s..HEAD` and read whatever else you need). %s Do not modify anything.\n", t.Base, t.Base, repoInstructions)
+		b.WriteString(`
+Review it as a careful senior engineer, against the task and every criterion above: correctness first, then tests, then design and fit with the repository's conventions. Use:
+- "pass" only when you would merge it as it is;
+- "revise" when something should change, with one finding per issue, naming the criterion or file it concerns;
+- "question" only when the task is genuinely ambiguous and you cannot judge without the owner.`)
+		b.WriteString(verdictFormat)
+		return b.String()
+	}
+	return reviewerPrompt(p, t, r)
 }
 
 func reviewerPrompt(p core.Project, t core.Task, r core.Revision) string {

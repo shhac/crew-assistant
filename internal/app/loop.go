@@ -10,7 +10,6 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
-	"github.com/shhac/crew-assistant/internal/media/localdocs"
 	"github.com/shhac/crew-assistant/internal/quota"
 	"github.com/shhac/crew-assistant/internal/roles"
 )
@@ -104,15 +103,15 @@ func (a *App) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 	if !ok {
 		return false, core.ErrNotFound
 	}
-	docs, err := localdocs.Open(p.ScratchDirectory)
+	m, err := a.mediumFor(ctx, p, taskPlaybook(p, t))
 	if err != nil {
-		return false, err
+		return true, a.roleFailed(ctx, t, "The workspace", err)
 	}
 	switch t.Status {
 	case core.TaskWriting:
-		return true, a.write(ctx, p, t, docs)
+		return true, a.write(ctx, p, t, m)
 	case core.TaskReviewing:
-		return true, a.review(ctx, p, t, docs)
+		return true, a.review(ctx, p, t, m)
 	case core.TaskDeciding:
 		return true, a.decide(ctx, p, t)
 	}
@@ -147,9 +146,18 @@ func roleOf(t core.Task, kind string) []core.Role {
 	return out
 }
 
-func (a *App) roleSpec(r core.Role, workDir string, write bool, prompt string) roles.Spec {
+// taskPlaybook is the setup a task runs under: the one pinned when it
+// started, or the project's current one for a task that has not started.
+func taskPlaybook(p core.Project, t core.Task) *core.Playbook {
+	if t.Playbook != nil {
+		return t.Playbook
+	}
+	return p.Playbook
+}
+
+func (a *App) roleSpec(r core.Role, workDir string, write bool, env []string, prompt string) roles.Spec {
 	cfg := a.Config()
-	spec := roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Write: write, Instructions: r.Instructions, Prompt: prompt}
+	spec := roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Write: write, Env: env, Instructions: r.Instructions, Prompt: prompt}
 	if r.Engine == "codex" {
 		spec.Binary, spec.Home = cfg.Model.CodexBin, cfg.Model.CodexHome
 		spec.RuntimeHome = filepath.Join(a.Core.StateDirectory(), "roles", "codex")
@@ -162,34 +170,48 @@ func (a *App) roleSpec(r core.Role, workDir string, write bool, prompt string) r
 // write runs the implementer for this round and records what it produced.
 // The workspace is first reset to the last revision, so nothing a crashed or
 // failed turn left behind is ever mistaken for a draft.
-func (a *App) write(ctx context.Context, p core.Project, t core.Task, docs localdocs.Docs) error {
+func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) error {
 	writers := roleOf(t, core.RoleImplementer)
 	if len(writers) != 1 {
 		return a.stopTask(ctx, t, "This task's team has no writer")
 	}
-	last := len(t.Revisions)
-	if err := docs.Reset(t.ID, last); err != nil {
-		return err
+	if len(t.Revisions) == 0 {
+		started, err := m.begin(ctx, t)
+		if err != nil {
+			return a.roleFailed(ctx, t, "The workspace", err)
+		}
+		if started.Base != t.Base || started.Branch != t.Branch {
+			if t, err = a.Core.UpdateTask(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
+				task.Base, task.From, task.Branch = started.Base, started.From, started.Branch
+				return "", nil
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	if err := m.reset(ctx, t); err != nil {
+		return a.roleFailed(ctx, t, "The workspace", err)
 	}
 	if held, err := a.holdForUsage(ctx, t, writers[0]); held || err != nil {
 		return err
 	}
-	spec := a.roleSpec(writers[0], docs.Workspace(), true, writerPrompt(p, t))
+	spec := a.roleSpec(writers[0], m.workspace(), true, m.env(), writerPrompt(p, t))
 	spec.Resume = t.WriterSession
 	result, err := a.runner.Run(ctx, spec)
 	if err != nil {
 		return a.roleFailed(ctx, t, writers[0].Name, err)
 	}
-	n := last + 1
-	files, err := docs.Snapshot(t.ID, n)
+	n := len(t.Revisions) + 1
+	revision, err := m.snapshot(ctx, t, n)
 	if err != nil {
-		return a.roleFailed(ctx, t, writers[0].Name, fmt.Errorf("the draft could not be recorded: %w", err))
+		return a.roleFailed(ctx, t, writers[0].Name, fmt.Errorf("the work could not be recorded: %w", err))
 	}
 	_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 		if t.Status == core.TaskStopped {
 			return "", nil
 		}
-		t.Revisions = append(t.Revisions, core.Revision{N: n, BriefVersion: p.Brief.Version, Files: files, Summary: clip(result.Text, 2000), At: time.Now().UTC()})
+		revision.BriefVersion, revision.Summary, revision.At = p.Brief.Version, clip(result.Text, 2000), time.Now().UTC()
+		t.Revisions = append(t.Revisions, revision)
 		t.WriterSession = result.Session
 		t.Failures, t.RetryAt = 0, time.Time{}
 		t.Status, t.Detail = core.TaskReviewing, fmt.Sprintf("Draft %d written; reviewing", n)
@@ -198,36 +220,36 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, docs local
 	return err
 }
 
-// review runs each reviewer that has not yet judged the latest revision
-// against the current brief, one per step.
-func (a *App) review(ctx context.Context, p core.Project, t core.Task, docs localdocs.Docs) error {
+// review runs each checking role that has not yet judged the latest revision
+// against the current brief, one per step: reviewers first, then QA.
+func (a *App) review(ctx context.Context, p core.Project, t core.Task, m medium) error {
 	if len(t.Revisions) == 0 {
 		return a.setStatus(ctx, t.ID, core.TaskWriting, "")
 	}
 	r := t.Revisions[len(t.Revisions)-1]
-	for _, reviewer := range roleOf(t, core.RoleReviewer) {
-		if judged(t, reviewer.Name, r.N, p.Brief.Version) {
+	for _, checker := range append(roleOf(t, core.RoleReviewer), roleOf(t, core.RoleQA)...) {
+		if judged(t, checker.Name, r.N, p.Brief.Version) {
 			continue
 		}
-		if held, err := a.holdForUsage(ctx, t, reviewer); held || err != nil {
+		if held, err := a.holdForUsage(ctx, t, checker); held || err != nil {
 			return err
 		}
-		verdict, err := a.runReviewer(ctx, p, t, r, reviewer, docs)
+		verdict, err := a.runChecker(ctx, p, t, r, checker, m)
 		if err != nil {
-			return a.roleFailed(ctx, t, reviewer.Name, err)
+			return a.roleFailed(ctx, t, checker.Name, err)
 		}
 		_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 			if t.Status == core.TaskStopped {
 				return "", nil
 			}
-			verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, reviewer.Name, p.Brief.Version, time.Now().UTC()
+			verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, checker.Name, p.Brief.Version, time.Now().UTC()
 			t.Verdicts = append(t.Verdicts, verdict)
 			t.Failures, t.RetryAt = 0, time.Time{}
-			return fmt.Sprintf("%s reviewed draft %d: %s", reviewer.Name, r.N, verdict.Outcome), nil
+			return fmt.Sprintf("%s checked draft %d: %s", checker.Name, r.N, verdict.Outcome), nil
 		})
 		return err
 	}
-	return a.setStatus(ctx, t.ID, core.TaskDeciding, "Reviews are in")
+	return a.setStatus(ctx, t.ID, core.TaskDeciding, "Checks are in")
 }
 
 func judged(t core.Task, role string, revision, briefVersion int) bool {
@@ -239,18 +261,21 @@ func judged(t core.Task, role string, revision, briefVersion int) bool {
 	return false
 }
 
-// runReviewer gives a fresh reviewer session its own read-only copy of the
-// revision. A reply that is not a usable verdict gets one plain retry.
-func (a *App) runReviewer(ctx context.Context, p core.Project, t core.Task, r core.Revision, reviewer core.Role, docs localdocs.Docs) (core.Verdict, error) {
-	dir, cleanup, err := docs.ReviewCopy(t.ID, r.N)
+// runChecker gives a fresh checking session the revision to judge. Only QA
+// may write, to run the check; the medium discards whatever it wrote. A reply
+// that is not a usable verdict gets one plain retry.
+func (a *App) runChecker(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium) (core.Verdict, error) {
+	dir, cleanup, err := m.checkDir(ctx, t, r)
 	if err != nil {
 		return core.Verdict{}, err
 	}
 	defer cleanup()
-	prompt := reviewerPrompt(p, t, r)
+	playbook := taskPlaybook(p, t)
+	base := checkerPrompt(p, t, r, checker, playbook)
+	prompt := base
 	var parseErr error
 	for attempt := 0; attempt < 2; attempt++ {
-		result, err := a.runner.Run(ctx, a.roleSpec(reviewer, dir, false, prompt))
+		result, err := a.runner.Run(ctx, a.roleSpec(checker, dir, checker.Kind == core.RoleQA, m.env(), prompt))
 		if err != nil {
 			return core.Verdict{}, err
 		}
@@ -259,7 +284,7 @@ func (a *App) runReviewer(ctx context.Context, p core.Project, t core.Task, r co
 			return verdict, nil
 		}
 		parseErr = err
-		prompt = reviewerPrompt(p, t, r) + "\n\nYour previous reply could not be used (" + err.Error() + "). Reply with only the JSON object."
+		prompt = base + "\n\nYour previous reply could not be used (" + err.Error() + "). Reply with only the JSON object."
 	}
 	return core.Verdict{}, parseErr
 }
@@ -340,11 +365,12 @@ func reviewDigest(verdicts []core.Verdict) string {
 }
 
 func (a *App) askForDelivery(ctx context.Context, p core.Project, t core.Task, r core.Revision, verdicts []core.Verdict) error {
-	where := "It stays with the project, ready to read on its page."
-	if p.Playbook != nil && p.Playbook.DeliverTo != "" {
-		where = "Approving copies it into " + p.Playbook.DeliverTo + "."
+	m, err := a.mediumFor(ctx, p, taskPlaybook(p, t))
+	if err != nil {
+		return a.roleFailed(ctx, t, "The workspace", err)
 	}
-	_, err := a.Core.OpenTaskDecision(ctx, t.ID, decisionDelivery, core.DecisionInput{
+	where := m.deliveryNote(t)
+	_, err = a.Core.OpenTaskDecision(ctx, t.ID, decisionDelivery, core.DecisionInput{
 		Title:          fmt.Sprintf("Ready to approve: %s (draft %d)", t.Objective, r.N),
 		Context:        clip(r.Summary, 600) + "\n\nReviews:\n" + reviewDigest(verdicts) + "\n\n" + where,
 		Recommendation: choiceApprove,
@@ -494,13 +520,13 @@ func (a *App) deliver(ctx context.Context, p core.Project, t core.Task) error {
 		return errors.New("nothing to deliver")
 	}
 	r := t.Revisions[len(t.Revisions)-1]
-	target := ""
-	if p.Playbook != nil && p.Playbook.DeliverTo != "" {
-		docs, err := localdocs.Open(p.ScratchDirectory)
+	m, err := a.mediumFor(ctx, p, taskPlaybook(p, t))
+	if err != nil {
+		return err
+	}
+	target, err := m.deliver(ctx, t, r)
+	{
 		if err != nil {
-			return err
-		}
-		if target, err = docs.Deliver(t.ID, r.N, p.Playbook.DeliverTo, t.Objective); err != nil {
 			if _, updateErr := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 				if t.Status == core.TaskStopped {
 					return "", nil
@@ -513,20 +539,20 @@ func (a *App) deliver(ctx context.Context, p core.Project, t core.Task) error {
 			_, openErr := a.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
 				Title:          fmt.Sprintf("Draft %d of %s couldn't be delivered", r.N, t.Objective),
 				Context:        clip(err.Error(), 600),
-				Recommendation: choiceTryAgain + " once the folder is available",
+				Recommendation: choiceTryAgain + " once the cause is fixed",
 				Choices:        []string{choiceTryAgain, choiceStop},
 			})
 			return openErr
 		}
 	}
-	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+	_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		if t.Status == core.TaskStopped {
 			return "", nil
 		}
 		t.Status, t.DecisionID, t.DeliveredTo = core.TaskDelivered, "", target
 		t.Detail = fmt.Sprintf("Draft %d approved", r.N)
 		if target != "" {
-			t.Detail += " and copied to " + target
+			t.Detail += " and delivered to " + target
 		}
 		return t.Objective + ": " + t.Detail, nil
 	})

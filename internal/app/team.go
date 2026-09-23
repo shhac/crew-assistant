@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
-	"github.com/shhac/crew-assistant/internal/media/localdocs"
+	"github.com/shhac/crew-assistant/internal/media"
 )
 
 // teamFrom builds a playbook from a template and the few choices the assistant
@@ -38,7 +40,15 @@ func teamFrom(in engine.SetTeamArgs) (core.Playbook, error) {
 		playbook.MaxRounds = rounds
 	}
 	playbook.DeliverTo = in.DeliverTo
-	return playbook, playbook.Validate()
+	if playbook.Medium == core.MediumGit {
+		playbook.Repo = in.Repo
+		if in.BranchPrefix != "" {
+			playbook.BranchPrefix = in.BranchPrefix
+		}
+		playbook.Check = in.Check
+		playbook.Prepare = append([]string(nil), in.Prepare...)
+	}
+	return playbook, nil
 }
 
 // SetTeam applies a team choice made in the dashboard or by the assistant.
@@ -47,11 +57,32 @@ func (a *App) SetTeam(ctx context.Context, in engine.SetTeamArgs) (core.Project,
 	if err != nil {
 		return core.Project{}, err
 	}
+	if playbook.Medium == core.MediumGit {
+		snap, err := a.Core.Snapshot(ctx)
+		if err != nil {
+			return core.Project{}, err
+		}
+		p, ok := findProject(snap, in.ProjectID)
+		if !ok {
+			return core.Project{}, core.ErrNotFound
+		}
+		// A code team works on one of the project's own folders, never an
+		// arbitrary path.
+		if playbook.Repo == "" && len(p.Directories) > 0 {
+			playbook.Repo = p.Directories[0]
+		}
+		if !slices.Contains(p.Directories, playbook.Repo) {
+			return core.Project{}, errors.New("a code team works on one of the project's linked folders; link the repository first")
+		}
+	}
+	if err = playbook.Validate(); err != nil {
+		return core.Project{}, err
+	}
 	return a.Core.SetPlaybook(ctx, in.ProjectID, playbook)
 }
 
-// RevisionPreview returns one revision's files for the owner to read.
-func (a *App) RevisionPreview(ctx context.Context, projectID, taskID string, n int) ([]localdocs.File, error) {
+// RevisionPreview returns what one revision holds, for the owner to read.
+func (a *App) RevisionPreview(ctx context.Context, projectID, taskID string, n int) ([]media.File, error) {
 	snap, err := a.Core.Snapshot(ctx)
 	if err != nil {
 		return nil, err
@@ -66,11 +97,11 @@ func (a *App) RevisionPreview(ctx context.Context, projectID, taskID string, n i
 		}
 		for _, r := range t.Revisions {
 			if r.N == n {
-				docs, err := localdocs.Open(p.ScratchDirectory)
+				m, err := a.mediumFor(ctx, p, taskPlaybook(p, t))
 				if err != nil {
 					return nil, err
 				}
-				return docs.Preview(taskID, n, 256<<10)
+				return m.preview(ctx, t, r)
 			}
 		}
 	}

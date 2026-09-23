@@ -16,7 +16,7 @@ export interface BriefInput {
 }
 export interface Role {
   name: string;
-  kind: "implementer" | "reviewer" | (string & {});
+  kind: "implementer" | "reviewer" | "qa" | (string & {});
   engine: string;
   model?: string;
   effort?: string;
@@ -29,6 +29,10 @@ export interface Playbook {
   max_rounds: number;
   deliver: string;
   deliver_to?: string;
+  repo?: string;
+  branch_prefix?: string;
+  check?: string;
+  prepare?: string[];
 }
 export interface Project {
   id: string;
@@ -54,6 +58,10 @@ export interface TeamInput {
   reviewer_engine: string;
   max_rounds: string;
   deliver_to: string;
+  repo?: string;
+  branch_prefix?: string;
+  check?: string;
+  prepare?: string[];
 }
 export interface TaskInput {
   objective: string;

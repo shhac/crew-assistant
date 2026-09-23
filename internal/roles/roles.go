@@ -22,7 +22,9 @@ type Spec struct {
 	WorkDir     string
 	// Write lets the role change files in WorkDir. Nothing a role runs reaches
 	// the network either way.
-	Write        bool
+	Write bool
+	// Env adds ordinary settings, such as build caches inside WorkDir.
+	Env          []string
 	Instructions string
 	Prompt       string
 	// Resume continues an earlier session of this role, when it still matches
@@ -54,6 +56,7 @@ func (Native) Run(ctx context.Context, spec Spec) (Result, error) {
 		Model:       spec.Model,
 		Effort:      spec.Effort,
 		Sandbox:     &session.Sandbox{Write: spec.Write},
+		Env:         spec.Env,
 	}
 	if spec.Engine != string(session.Codex) {
 		o.RuntimeHome = ""
