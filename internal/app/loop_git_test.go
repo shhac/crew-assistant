@@ -119,7 +119,7 @@ func TestCodeTaskRunsInACloneAndDeliversALocalBranch(t *testing.T) {
 		if qa && spec.Write {
 			sawQA = true
 		}
-		if strings.Contains(spec.Prompt, "git diff "+start+"..HEAD") && !spec.Write {
+		if strings.Contains(spec.Prompt, "git diff "+start+"..HEAD") && strings.Contains(spec.Prompt, "QA runs `make check` separately") && !spec.Write {
 			sawReviewer = true
 		}
 		if !qa && !strings.Contains(spec.Prompt, "AGENTS.md") {
@@ -172,5 +172,18 @@ func TestACodeTeamOnlyWorksOnTheProjectsOwnFolders(t *testing.T) {
 	}
 	if _, err = a.SetTeam(ctx, engine.SetTeamArgs{ProjectID: p.ID, Template: "code", Check: "make check", Repo: t.TempDir()}); err == nil {
 		t.Fatal("a code team was pointed at a folder the project does not link")
+	}
+}
+
+func TestBranchNamesKeepWholeWords(t *testing.T) {
+	for objective, want := range map[string]string{
+		"Next-message suggestions in the chat composer": "next-message-suggestions-in-the-chat",
+		"Add Feature":                  "add-feature",
+		"!!!":                          "change",
+		strings.Repeat("x", 50) + " y": strings.Repeat("x", 40),
+	} {
+		if got := slugify(objective); got != want {
+			t.Errorf("slugify(%q) = %q, want %q", objective, got, want)
+		}
 	}
 }

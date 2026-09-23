@@ -164,13 +164,7 @@ func (r Repo) Begin(ctx context.Context, branch string) (base, from string, err 
 		return "", "", err
 	}
 	base = strings.TrimSpace(head)
-	if err = r.Reset(ctx, "HEAD"); err != nil {
-		return "", "", err
-	}
-	if _, err = run(ctx, r.Workspace(), "checkout", "--quiet", "-B", branch, base); err != nil {
-		return "", "", err
-	}
-	return base, from, r.Reset(ctx, base)
+	return base, from, r.Reset(ctx, branch, base)
 }
 
 // Snapshot records the working tree as a commit on the task branch and
@@ -200,12 +194,14 @@ func (r Repo) Snapshot(ctx context.Context, base, previous, message string) (str
 	return head, strings.Fields(names), nil
 }
 
-// Reset puts the clone back to commit, dropping anything a role left behind,
+// Reset puts the clone on branch at commit, dropping anything a role left behind,
 // ignored files included: an ignored source file would still be compiled, so a
 // check could pass on code that never ships. Only the build caches and the
 // copied dependencies are kept.
-func (r Repo) Reset(ctx context.Context, commit string) error {
-	if _, err := run(ctx, r.Workspace(), "reset", "--quiet", "--hard", commit); err != nil {
+func (r Repo) Reset(ctx context.Context, branch, commit string) error {
+	// Several tasks share the clone, so each step checks out its own task's
+	// branch; a bare reset would move whichever branch was left checked out.
+	if _, err := run(ctx, r.Workspace(), "checkout", "--quiet", "--force", "--no-recurse-submodules", "-B", branch, commit); err != nil {
 		return err
 	}
 	args := []string{"clean", "-ffdxq", "-e", "/" + cacheDir + "/"}

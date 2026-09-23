@@ -118,7 +118,7 @@ func (m gitMedium) reset(ctx context.Context, t core.Task) error {
 	if ref == "" {
 		return errors.New("the task has no starting point")
 	}
-	return m.repo.Reset(ctx, ref)
+	return m.repo.Reset(ctx, t.Branch, ref)
 }
 
 func (m gitMedium) snapshot(ctx context.Context, t core.Task, n int) (core.Revision, error) {
@@ -132,11 +132,11 @@ func (m gitMedium) snapshot(ctx context.Context, t core.Task, n int) (core.Revis
 
 // checkDir is the clone itself, at the revision. Checks run one at a time, so
 // nothing else is working there; whatever a check wrote is reset afterwards.
-func (m gitMedium) checkDir(ctx context.Context, _ core.Task, r core.Revision) (string, func(), error) {
-	if err := m.repo.Reset(ctx, r.Ref); err != nil {
+func (m gitMedium) checkDir(ctx context.Context, t core.Task, r core.Revision) (string, func(), error) {
+	if err := m.repo.Reset(ctx, t.Branch, r.Ref); err != nil {
 		return "", nil, err
 	}
-	return m.repo.Workspace(), func() { _ = m.repo.Reset(context.WithoutCancel(ctx), r.Ref) }, nil
+	return m.repo.Workspace(), func() { _ = m.repo.Reset(context.WithoutCancel(ctx), t.Branch, r.Ref) }, nil
 }
 
 func (m gitMedium) preview(ctx context.Context, t core.Task, r core.Revision) ([]media.File, error) {
@@ -144,9 +144,6 @@ func (m gitMedium) preview(ctx context.Context, t core.Task, r core.Revision) ([
 }
 
 func (m gitMedium) deliver(ctx context.Context, t core.Task, r core.Revision) (string, error) {
-	if err := m.repo.Reset(ctx, r.Ref); err != nil {
-		return "", err
-	}
 	return m.repo.Deliver(ctx, t.Branch, r.Ref, m.branchName(t))
 }
 
@@ -165,21 +162,28 @@ func startedFrom(t core.Task) string {
 	return t.From + " at " + t.Base[:7]
 }
 
+// slugify keeps whole words, up to 40 characters, so a branch name never ends
+// mid-word.
 func slugify(text string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(text) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case b.Len() > 0 && !strings.HasSuffix(b.String(), "-"):
-			b.WriteByte('-')
+	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	})
+	out := ""
+	for _, word := range words {
+		next := word
+		if out != "" {
+			next = out + "-" + word
 		}
-		if b.Len() >= 40 {
+		if len(next) > 40 {
 			break
 		}
+		out = next
 	}
-	if out := strings.Trim(b.String(), "-"); out != "" {
-		return out
+	if out == "" && len(words) > 0 {
+		out = words[0][:min(len(words[0]), 40)]
 	}
-	return "change"
+	if out == "" {
+		return "change"
+	}
+	return out
 }

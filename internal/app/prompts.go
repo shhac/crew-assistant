@@ -106,6 +106,9 @@ Use "question" only if the check cannot run at all for a reason the implementer 
 		var b strings.Builder
 		b.WriteString(briefText(p, t))
 		fmt.Fprintf(&b, "\nThis repository holds a proposed change for this task: the commits between %s and HEAD (run `git diff %s..HEAD` and read whatever else you need). %s Do not modify anything.\n", t.Base, t.Base, repoInstructions)
+		if playbook != nil && playbook.Check != "" {
+			fmt.Fprintf(&b, "QA runs `%s` separately, so you need not run it or report on it.\n", playbook.Check)
+		}
 		b.WriteString(`
 Review it as a careful senior engineer, against the task and every criterion above: correctness first, then tests, then design and fit with the repository's conventions. Use:
 - "pass" only when you would merge it as it is;

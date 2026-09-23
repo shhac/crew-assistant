@@ -103,7 +103,7 @@ func TestRevisionsAndResetKeepIgnoredFilesOnly(t *testing.T) {
 	write(t, filepath.Join(r.Workspace(), "feature.go"), "broken")
 	write(t, filepath.Join(r.Workspace(), "stray.txt"), "junk")
 	write(t, filepath.Join(r.Workspace(), ".crew", "go-build", "cache"), "cache")
-	if err = r.Reset(ctx, first); err != nil {
+	if err = r.Reset(ctx, "crew/note", first); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(filepath.Join(r.Workspace(), "feature.go"))
@@ -116,6 +116,56 @@ func TestRevisionsAndResetKeepIgnoredFilesOnly(t *testing.T) {
 	preview, err := r.Preview(ctx, base, first, 1<<20)
 	if err != nil || len(preview) != 2 || !strings.Contains(preview[1].Content, "+package main") {
 		t.Fatalf("preview %+v err %v", preview, err)
+	}
+}
+
+func TestTasksSharingTheCloneKeepTheirOwnBranches(t *testing.T) {
+	source := ownerRepo(t)
+	r, err := Open(ctx, t.TempDir(), source, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, err := r.Begin(ctx, "crew-task/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Workspace(), "a.go"), "package main\n")
+	a1, _, err := r.Snapshot(ctx, base, base, "a draft 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A second task starts while the first waits on the owner.
+	if _, _, err = r.Begin(ctx, "crew-task/b"); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Workspace(), "b.go"), "package main\n")
+	b1, _, err := r.Snapshot(ctx, base, base, "b draft 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The owner asks the first task for changes.
+	if err = r.Reset(ctx, "crew-task/a", a1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(filepath.Join(r.Workspace(), "b.go")); err == nil {
+		t.Fatal("the second task's work is in the first task's round")
+	}
+	write(t, filepath.Join(r.Workspace(), "a.go"), "package main\n\nfunc A() {}\n")
+	a2, _, err := r.Snapshot(ctx, base, a1, "a draft 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tip := git(t, r.Workspace(), "rev-parse", "crew-task/b"); tip != b1 {
+		t.Fatalf("the first task's round moved the second task's branch to %s", tip)
+	}
+	if parent := git(t, r.Workspace(), "rev-parse", a2+"^"); parent != a1 {
+		t.Fatalf("draft 2 does not follow draft 1: parent %s", parent)
+	}
+	if _, err = r.Deliver(ctx, "crew-task/a", a2, "paul/a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.Deliver(ctx, "crew-task/b", b1, "paul/b"); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -143,7 +193,7 @@ func TestPlantedHooksAndFsmonitorNeverRunAsTheDaemon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = r.Reset(ctx, commit); err != nil {
+	if err = r.Reset(ctx, "crew/note", commit); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = os.Stat(marker); err == nil {
