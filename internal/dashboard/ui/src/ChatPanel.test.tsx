@@ -569,9 +569,6 @@ describe("composer attachments", () => {
     expect(paste([], "Just words")).toBe(true);
     await tick(0);
     expect(attachments()).toBeNull();
-    expect(paste([textFile("note", "copied.txt")], "copied.txt")).toBe(true);
-    await tick(0);
-    expect(attachments()).toBeNull();
     expect(paste([textFile("Remember the milk", "note.txt")])).toBe(false);
     await tick(0);
     expect(within(attachments()!).getByText("note.txt")).toBeTruthy();
@@ -581,6 +578,29 @@ describe("composer attachments", () => {
     await tick(0);
     expect(sentMessages(server)).toEqual([
       "Attached file: note.txt\n```\nRemember the milk\n```",
+    ]);
+  });
+  it("pastes text as usual and still handles files that come with it", async () => {
+    const server = backend();
+    render(panel());
+    // A copied file carries its name as text: the name pastes, the file attaches.
+    expect(paste([textFile("note", "copied.txt")], "copied.txt")).toBe(true);
+    await tick(0);
+    expect(within(attachments()!).getByText("copied.txt")).toBeTruthy();
+    // A file that can't be attached is reported, not silently dropped.
+    const image = new File([new Uint8Array([137, 80])], "render.png", {
+      type: "image/png",
+    });
+    expect(paste([image], "Quarterly figures")).toBe(true);
+    await tick(0);
+    expect(screen.getByRole("alert").textContent).toContain(
+      "render.png can't be attached: only text files can be sent",
+    );
+    expect(within(attachments()!).getAllByRole("listitem")).toHaveLength(1);
+    typeAndSend("See attached");
+    await tick(0);
+    expect(sentMessages(server)).toEqual([
+      "See attached\n\nAttached file: copied.txt\n```\nnote\n```",
     ]);
   });
   it("reports size limits and unreadable files, and keeps attachments when a message is too large", async () => {

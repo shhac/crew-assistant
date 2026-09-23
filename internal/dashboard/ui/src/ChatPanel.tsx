@@ -674,12 +674,12 @@ export function ChatPanel({
             value={message}
             onChange={(e) => setDraft(e.target.value)}
             onPaste={(e) => {
-              // Anything with text pastes as text; a clipboard of only files
-              // (a screenshot, a copied file) becomes attachments.
-              if (e.clipboardData.getData("text/plain")) return;
+              // Text always pastes as text. Files on the same clipboard (a
+              // copied file comes with its name as text) are still attached
+              // or refused with a reason, never dropped.
               const files = Array.from(e.clipboardData.files || []);
               if (!files.length) return;
-              e.preventDefault();
+              if (!e.clipboardData.getData("text/plain")) e.preventDefault();
               void addFiles(files);
             }}
             placeholder={`Ask ${name}, or hand over an outcome…`}
