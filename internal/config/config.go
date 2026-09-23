@@ -32,44 +32,49 @@ type Config struct {
 type Chat struct {
 	LoadingPhrases LoadingPhrases `json:"loading_phrases"`
 }
+
+// LoadingPhrases always use the approved small models; there is no model or
+// effort to choose.
 type LoadingPhrases struct {
-	Enabled bool   `json:"enabled"`
-	Model   string `json:"model"`
-	Effort  string `json:"effort"`
+	Enabled bool `json:"enabled"`
 }
 
-// LoadingModel shares the assistant's selected local CLI/account; cosmetic text
-// never switches to an API provider. An empty model follows the engine default.
-func (c Config) LoadingModel() (Model, bool) {
-	m := c.Model
-	if !c.Chat.LoadingPhrases.Enabled || (m.Engine != "codex" && m.Engine != "claude") {
-		return Model{}, false
-	}
-	m.Model, m.Effort, m.MaxTokens = c.Chat.LoadingPhrases.Model, c.Chat.LoadingPhrases.Effort, 128
-	if m.Model == "" {
-		m.Model = "gpt-5.6-luna"
-		if m.Engine == "claude" {
-			m.Model = "haiku"
-		}
-	}
-	return m, true
+// approvedSmallModels are the only models loading captions and next-message
+// suggestions may use, one per CLI engine. Luna runs at low effort; Haiku 4.5
+// has no effort setting, so none is sent for it.
+var approvedSmallModels = map[string]struct{ model, effort string }{
+	"codex":  {"gpt-6-luna", "low"},
+	"claude": {"haiku", ""},
 }
 
-// suggestionModels is the approved small model for next-message suggestions on
-// each CLI engine. There is no setting and no fallback: an engine without an
-// entry gets no suggestions rather than a guessed model.
-var suggestionModels = map[string]string{"codex": "gpt-5.6-luna", "claude": "haiku"}
-
-// SuggestionModel shares the assistant's selected CLI login, as LoadingModel
-// does. It reports why suggestions are off instead of substituting a model.
-func (c Config) SuggestionModel() (Model, error) {
-	m := c.Model
-	model, ok := suggestionModels[m.Engine]
-	if !ok {
-		return Model{}, fmt.Errorf("no approved suggestion model for the %s engine", m.Engine)
+// SmallModels lists the approved small models to try in order: the
+// assistant's own CLI engine first, then the other one. Each uses that CLI's
+// configured login. An API assistant has no CLI of its own to start from, so it
+// gets none rather than a guessed engine.
+func (c Config) SmallModels() ([]Model, error) {
+	var order []string
+	switch c.Model.Engine {
+	case "codex":
+		order = []string{"codex", "claude"}
+	case "claude":
+		order = []string{"claude", "codex"}
+	default:
+		return nil, fmt.Errorf("no approved small model for the %s engine", c.Model.Engine)
 	}
-	m.Model, m.Effort, m.MaxTokens = model, "low", 128
-	return m, nil
+	models := make([]Model, 0, len(order))
+	for _, engine := range order {
+		m := c.Model
+		approved := approvedSmallModels[engine]
+		m.Engine, m.Model, m.Effort, m.MaxTokens = engine, approved.model, approved.effort, 128
+		models = append(models, m)
+	}
+	return models, nil
+}
+
+// ApprovedSmallModel reports whether engine/model is one of the approved pair.
+func ApprovedSmallModel(engine, model string) bool {
+	approved, ok := approvedSmallModels[engine]
+	return ok && approved.model == model
 }
 
 type Assistant struct {
@@ -143,7 +148,7 @@ type FilePaths struct {
 
 func Default() Config {
 	return Config{
-		Chat:        Chat{LoadingPhrases: LoadingPhrases{Enabled: true, Effort: "low"}},
+		Chat:        Chat{LoadingPhrases: LoadingPhrases{Enabled: true}},
 		Assistant:   Assistant{Name: DefaultAssistantName, Personality: "Calm, concise and proactive. Bring clear recommendations and evidence; handle the chasing.", Theme: "graphite-sage", Avatar: Avatar{Shape: "orb", Background: "#16211e", Accent: "#a8c5a8"}},
 		Dashboard:   Dashboard{Addr: "127.0.0.1:8340", Tailscale: "off", TailscalePort: 8443, AllowedUsers: []string{}},
 		Model:       defaultModel(),
@@ -205,6 +210,9 @@ func Load(path string) (Config, error) {
 	if err := json.Unmarshal(data, &sections); err != nil {
 		return c, fmt.Errorf("decode config: %w", err)
 	}
+	if data, err = dropLoadingModelChoice(data, sections); err != nil {
+		return c, err
+	}
 	legacyModel := false
 	if raw, exists := sections["model"]; exists {
 		var fields map[string]json.RawMessage
@@ -229,6 +237,37 @@ func Load(path string) (Config, error) {
 	}
 	return c, c.Validate()
 }
+
+// dropLoadingModelChoice removes the loading-phrase model and effort that
+// earlier versions saved. Loading phrases now use only the approved small
+// models, so a saved choice is discarded rather than honoured, and the file
+// still loads. The next save writes it without them.
+func dropLoadingModelChoice(data []byte, sections map[string]json.RawMessage) ([]byte, error) {
+	var chat map[string]json.RawMessage
+	if raw, ok := sections["chat"]; !ok || json.Unmarshal(raw, &chat) != nil {
+		return data, nil
+	}
+	var phrases map[string]json.RawMessage
+	if raw, ok := chat["loading_phrases"]; !ok || json.Unmarshal(raw, &phrases) != nil {
+		return data, nil
+	}
+	_, model := phrases["model"]
+	_, effort := phrases["effort"]
+	if !model && !effort {
+		return data, nil
+	}
+	delete(phrases, "model")
+	delete(phrases, "effort")
+	var err error
+	if chat["loading_phrases"], err = json.Marshal(phrases); err != nil {
+		return nil, err
+	}
+	if sections["chat"], err = json.Marshal(chat); err != nil {
+		return nil, err
+	}
+	return json.Marshal(sections)
+}
+
 func Save(path string, c Config) error {
 	if err := c.Validate(); err != nil {
 		return err
@@ -263,15 +302,6 @@ func Save(path string, c Config) error {
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func (c Config) Validate() error {
-	if len(c.Chat.LoadingPhrases.Model) > 200 || strings.ContainsAny(c.Chat.LoadingPhrases.Model, "\r\n\x00") {
-		return errors.New("chat loading model must be a short model identifier")
-	}
-	switch c.Chat.LoadingPhrases.Effort {
-	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
-	default:
-		return errors.New("chat loading effort is not recognized")
-	}
-
 	if strings.TrimSpace(c.Assistant.Name) == "" || len(c.Assistant.Name) > 80 {
 		return errors.New("assistant.name must contain 1–80 characters")
 	}

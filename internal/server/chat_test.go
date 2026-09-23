@@ -224,7 +224,7 @@ func TestChatSuggestionRouteRefusesStaleRequestsAndReportsUnavailableModels(t *t
 	if err := a.UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if w := call(`{"after":"reply"}`, true); w.Code != 503 || !strings.Contains(w.Body.String(), "no approved suggestion model") {
+	if w := call(`{"after":"reply"}`, true); w.Code != 503 || !strings.Contains(w.Body.String(), "no approved small model") {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }

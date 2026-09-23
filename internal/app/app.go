@@ -22,8 +22,7 @@ import (
 
 type App struct {
 	Diagnostics      *diagnostics.Logger // Set before starting the daemon.
-	loadingComplete  func(context.Context, engine.Config, []engine.Message, []engine.Tool) (engine.Message, engine.Usage, error)
-	loadingDiscover  func(context.Context, engine.Config) ([]engine.ModelOption, error)
+	small            *smallModels        // Loading captions and suggestions.
 	connectionClient connections.Client
 	dispatchDisabled atomic.Bool
 	Core             *core.Service
@@ -41,13 +40,10 @@ type App struct {
 	runner           roles.Runner
 	meter            *quota.Meter
 	loopWake         chan struct{}
-	// suggestionComplete and suggestionDiscover replace the CLI in tests.
-	suggestionComplete func(context.Context, engine.Config, []engine.Message, []engine.Tool) (engine.Message, engine.Usage, error)
-	suggestionDiscover func(context.Context, engine.Config) ([]engine.ModelOption, error)
 }
 
 func New(s *core.Service, cfg config.Config, path string, demo bool) *App {
-	return &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), statuses: map[string]core.Integration{}, runner: roles.Native{}, meter: &quota.Meter{}, loopWake: make(chan struct{}, 1)}
+	return &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), statuses: map[string]core.Integration{}, runner: roles.Native{}, meter: &quota.Meter{}, loopWake: make(chan struct{}, 1), small: newSmallModels(s.StateDirectory())}
 }
 func (a *App) Config() config.Config { a.mu.RLock(); defer a.mu.RUnlock(); return a.cfg }
 func (a *App) UpdateConfig(cfg config.Config) error {

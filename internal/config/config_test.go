@@ -211,50 +211,68 @@ func TestAssignmentImportOptInDefaultsAndRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSuggestionModelRoutesByEngineWithoutSubstitution(t *testing.T) {
+func TestSmallModelsTryOwnEngineFirstThenOnlyTheOtherApprovedModel(t *testing.T) {
 	c := Default()
-	c.Model.CodexHome = "/synthetic/account"
-	// The loading model is owner-configurable; suggestions must not follow it.
-	c.Chat.LoadingPhrases.Model = "chosen-small-model"
-	m, err := c.SuggestionModel()
-	if err != nil || m.Engine != "codex" || m.Model != "gpt-5.6-luna" || m.Effort != "low" || m.CodexHome != c.Model.CodexHome {
-		t.Fatal(m, err)
+	c.Model.Model = "gpt-6-astra"
+	c.Model.Effort = "high"
+	c.Model.CodexHome = "/synthetic/codex"
+	c.Model.ClaudeHome = "/synthetic/claude"
+	models, err := c.SmallModels()
+	if err != nil || len(models) != 2 {
+		t.Fatal(models, err)
+	}
+	codex, claude := models[0], models[1]
+	if codex.Engine != "codex" || codex.Model != "gpt-6-luna" || codex.Effort != "low" || codex.CodexHome != "/synthetic/codex" {
+		t.Fatal(codex)
+	}
+	// Haiku 4.5 has no effort setting; none is sent.
+	if claude.Engine != "claude" || claude.Model != "haiku" || claude.Effort != "" || claude.ClaudeHome != "/synthetic/claude" {
+		t.Fatal(claude)
 	}
 	c.Model.Engine = "claude"
-	m, err = c.SuggestionModel()
-	if err != nil || m.Engine != "claude" || m.Model != "haiku" || m.ClaudeHome != c.Model.ClaudeHome {
-		t.Fatal(m, err)
+	c.Model.Model = "opus"
+	models, err = c.SmallModels()
+	if err != nil || len(models) != 2 || models[0].Model != "haiku" || models[1].Model != "gpt-6-luna" {
+		t.Fatal(models, err)
+	}
+	for _, m := range models {
+		if !ApprovedSmallModel(m.Engine, m.Model) {
+			t.Fatal("unapproved", m)
+		}
+	}
+	for _, pair := range [][2]string{{"codex", "gpt-5.6-luna"}, {"codex", "gpt-6-astra"}, {"claude", "opus"}, {"codex", "haiku"}, {"openai-compatible", "gpt-6-luna"}} {
+		if ApprovedSmallModel(pair[0], pair[1]) {
+			t.Fatal("approved", pair)
+		}
 	}
 	c.Model.Engine = "openai-compatible"
-	if m, err = c.SuggestionModel(); err == nil || m.Model != "" {
-		t.Fatal("unmapped engine was given a suggestion model", m)
+	if models, err = c.SmallModels(); err == nil || len(models) != 0 {
+		t.Fatal("API assistant was given a small model", models)
 	}
 }
 
-func TestLoadingModelInheritsCLIAccountAndCanBeDisabled(t *testing.T) {
-	c := Default()
-	c.Model.CodexHome = "/synthetic/account"
-	m, ok := c.LoadingModel()
-	if !ok || m.Engine != "codex" || m.Model != "gpt-5.6-luna" || m.Effort != "low" || m.CodexHome != c.Model.CodexHome {
-		t.Fatal(m, ok)
+func TestLoadDiscardsASavedLoadingModelChoice(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	saved := `{"chat":{"loading_phrases":{"enabled":false,"model":"chosen-small-model","effort":"max"}},"model":{"engine":"codex"}}`
+	if err := os.WriteFile(p, []byte(saved), 0600); err != nil {
+		t.Fatal(err)
 	}
-	c.Model.Engine = "claude"
-	m, ok = c.LoadingModel()
-	if !ok || m.Model != "haiku" || m.ClaudeHome != c.Model.ClaudeHome {
-		t.Fatal(m, ok)
+	c, err := Load(p)
+	if err != nil || c.Chat.LoadingPhrases.Enabled {
+		t.Fatal(c.Chat, err)
 	}
-	c.Chat.LoadingPhrases.Model = "chosen-small-model"
-	m, _ = c.LoadingModel()
-	if m.Model != "chosen-small-model" {
-		t.Fatal(m)
+	if err = Save(p, c); err != nil {
+		t.Fatal(err)
 	}
-	c.Model.Engine = "openai-compatible"
-	if _, ok = c.LoadingModel(); ok {
-		t.Fatal("API loading request enabled")
+	data, err := os.ReadFile(p)
+	if err != nil || strings.Contains(string(data), "chosen-small-model") {
+		t.Fatal(string(data), err)
 	}
-	c.Model.Engine = "codex"
-	c.Chat.LoadingPhrases.Enabled = false
-	if _, ok = c.LoadingModel(); ok {
-		t.Fatal("disabled loading request enabled")
+	// Other unknown keys are still refused.
+	if err = os.WriteFile(p, []byte(`{"chat":{"loading_phrases":{"enabled":true,"typo":1}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Load(p); err == nil {
+		t.Fatal("unknown loading key accepted")
 	}
 }

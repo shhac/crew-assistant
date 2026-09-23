@@ -14,8 +14,8 @@ import (
 	"github.com/shhac/crew-assistant/internal/engine"
 )
 
-// ErrSuggestionUnavailable means suggestions cannot run as approved, for
-// example because the approved model is not offered to the owner's login. The
+// ErrSuggestionUnavailable means suggestions cannot run as approved: the
+// assistant has no CLI engine, or neither login offers its approved model. The
 // owner is told; nothing is substituted.
 var ErrSuggestionUnavailable = errors.New("next-message suggestions are off")
 
@@ -44,7 +44,7 @@ func (a *App) SuggestNextMessage(ctx context.Context, after string) (string, err
 	if a.Demo {
 		return "", errors.New("demo mode never runs a model")
 	}
-	model, err := cfg.SuggestionModel()
+	models, err := cfg.SmallModels()
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrSuggestionUnavailable, err)
 	}
@@ -60,23 +60,14 @@ func (a *App) SuggestNextMessage(ctx context.Context, after string) (string, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	complete := a.suggestionComplete
-	if complete == nil {
-		complete = engine.Complete
-	}
-	discover := a.suggestionDiscover
-	if discover == nil {
-		discover = engine.DiscoverModels
-	}
-	withScratch := func(ctx context.Context, c engine.Config, messages []engine.Message, tools []engine.Tool) (engine.Message, engine.Usage, error) {
-		c.WorkDirRoot = a.Core.StateDirectory()
-		return complete(ctx, c, messages, tools)
-	}
-	suggestion, err := generateSuggestion(ctx, model, snap.Messages, discover, withScratch, func(ctx context.Context) error {
+	suggestion, err := generateSuggestion(ctx, a.small, models, snap.Messages, func(ctx context.Context) error {
 		// Keep one daily slot available for substantive work.
 		return a.Core.ReserveModelCall(ctx, a.Config().Limits.MaxModelCallsPerDay-1)
 	})
-	if errors.Is(err, errSmallModelUnavailable) {
+	// Neither login offers its approved model: tell the owner rather than
+	// quietly never suggesting. Outages and exhaustion just yield nothing.
+	var failure *smallModelFailure
+	if errors.As(err, &failure) && failure.notOffered() {
 		return "", fmt.Errorf("%w: %v", ErrSuggestionUnavailable, err)
 	}
 	if err != nil {
@@ -92,11 +83,7 @@ func (a *App) SuggestNextMessage(ctx context.Context, after string) (string, err
 	return suggestion, nil
 }
 
-func generateSuggestion(ctx context.Context, model config.Model, messages []core.Message, discover loadingDiscovery, complete loadingCompletion, reserve func(context.Context) error) (string, error) {
-	ec, err := smallModelConfig(ctx, model, discover, reserve)
-	if err != nil {
-		return "", err
-	}
+func generateSuggestion(ctx context.Context, small *smallModels, models []config.Model, messages []core.Message, reserve func(context.Context) error) (string, error) {
 	recent := []string{}
 	for i := len(messages) - 1; i >= 0 && len(recent) < 6; i-- {
 		switch messages[i].Role {
@@ -112,7 +99,7 @@ func generateSuggestion(ctx context.Context, model config.Model, messages []core
 	}
 	// No tools are offered and any tool request is refused: a suggestion can
 	// only ever become text in the owner's draft.
-	result, _, err := complete(ctx, ec, prompt, []engine.Tool{})
+	result, err := small.ask(ctx, models, prompt, reserve)
 	if err != nil {
 		return "", err
 	}

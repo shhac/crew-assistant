@@ -727,19 +727,72 @@ describe("next-message suggestions", () => {
     expect(server.posts()).toHaveLength(1);
   });
 
+  it("stays fully usable with no loading text and no suggestion when both CLIs fail", async () => {
+    // With both small models down the daemon writes no loading phrase and
+    // answers suggestion requests with a quiet failure.
+    const server = backend([], () => ({
+      ok: false,
+      status: 502,
+      json: async () => ({ error: "No suggestion this time." }),
+    }));
+    const view = render(panel(settled()));
+    typeAndSend("Carry on");
+    await tick(0);
+    expect(server.turns[0].status).toBe("running");
+    expect(server.turns[0].loading_phrase).toBeUndefined();
+    expect(screen.getByText("Iris is working through it…")).toBeTruthy();
+    // No suggestion is asked for while the reply is being written.
+    await tick(SUGGESTION_DELAY * 3);
+    expect(server.suggestions()).toHaveLength(0);
+    // The owner can keep drafting and queue another message meanwhile.
+    typeAndSend("And one more thing");
+    await tick(0);
+    expect(server.posts()).toHaveLength(2);
+    server.turns.forEach((t) => {
+      t.status = "completed";
+      t.assistant_message_id = `reply-${t.id}`;
+    });
+    view.rerender(
+      panel(
+        settled([
+          ...server.turns.map((t) => ({
+            id: t.user_message_id!,
+            role: "user",
+            content: t.message,
+            created_at: t.created_at,
+          })),
+          {
+            id: "reply-final",
+            role: "assistant",
+            content: "Done.",
+            created_at: new Date(Date.now() + 60_000).toISOString(),
+          },
+        ]),
+      ),
+    );
+    await tick(3000);
+    await tick(SUGGESTION_DELAY);
+    expect(server.suggestions()).toHaveLength(1);
+    expect(input().placeholder).toBe(defaultPlaceholder);
+    expect(screen.queryByRole("status", { name: /suggestions/ })).toBeNull();
+    expect(screen.queryByText(/suggestions are off/)).toBeNull();
+    fireEvent.change(input(), { target: { value: "Thanks" } });
+    expect(input().value).toBe("Thanks");
+  });
+
   it("tells the owner when the approved model is unavailable and stops asking", async () => {
     const server = backend([], () => ({
       ok: false,
       status: 503,
       json: async () => ({
         error:
-          "next-message suggestions are off: model unavailable: gpt-5.6-luna is not offered to the codex login",
+          "next-message suggestions are off: gpt-6-luna is not offered to the codex login; haiku is not offered to the claude login",
       }),
     }));
     const view = render(panel(settled()));
     await tick(SUGGESTION_DELAY);
     expect(
-      screen.getByText(/gpt-5.6-luna is not offered to the codex login/),
+      screen.getByText(/gpt-6-luna is not offered to the codex login/),
     ).toBeTruthy();
     view.rerender(
       panel(
