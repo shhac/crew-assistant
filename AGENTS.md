@@ -1,66 +1,40 @@
 # crew-assistant
 
-Go CLI and daemon for personal-assistant coordination. Dashboard is dark-mode-first; home is Overview, not Today/Tomorrow. Assistant display name comes from config; its default is defined once.
+Go daemon, CLI and embedded dashboard for a personal assistant that runs projects through teams of agents. The dashboard is dark-mode-first; home is Overview. The assistant's display name comes from config, and its default is defined once.
 
-## Pending direction (2026-09-23)
+## Direction
 
-A near-full rebuild is proposed in `design-docs/2026-09-23-project-teams.md`: general-purpose projects (code is one medium), Human → Assistant → Project manager → team roles (implementer, reviewer, QA) working from a shared project record, and playbooks plus media adapters in place of the worker broker. The project was renamed from `agent-assistant` to `crew-assistant` on 2026-09-23; `agent-code-review` is to become `crew-code-review` (`design-docs/decisions/2026-09-crew-prefix.md`). The owner's pending phase 0 decisions come first: trust, CLI sandboxes, migration and the rewrites of rules below. Until then, the rules below still apply; do not start rebuild code before the owner confirms phase 0.
+The project is mid-rebuild to the design in `design-docs/2026-09-23-project-teams.md`. Decisions made for it: `design-docs/decisions/2026-09-crew-prefix.md`, `2026-09-clean-break-state.md` and `2026-09-role-sandbox-trust.md`. Build order: (1) a writer and reviewer loop on local documents, (2) the git adapter, (3) a separate PM tier and concurrent projects. Each phase finishes with real use, not tests alone.
+
+The owner's core complaint about v1 was that it added mental load and was over-engineered. Prefer the smallest loop that works, and add machinery only when a real run needs it.
 
 ## Architecture and boundaries
 
-- Go owns deterministic policy, durable state, retries, scheduling, adapters and APIs. The model chooses coordination actions through constrained tools.
-- Local state owns the project registry. Linear and other connections are optional resources; local projects must work without them. Account access never implies project enrollment or relevance to personal work. Assignment imports require explicit opt-in.
-- Projects hold ongoing context; work items hold individual outcome contracts. Agent assignments belong to work items. Acceptance is pinned to the reviewed revision and leaves the project open. Steering belongs to the work item; explicit agent receipts are distinct from transport delivery and implementation evidence. Preserve compatibility migration without inventing historical acceptance.
-- Agents are peers with scoped outcome ownership. The daemon owns assignments, runtime lifecycle, routing and recovery. Reporting relationships constrain delegated authority and route escalation; peer messages never grant authority. Keep legacy parent_id wire/state compatibility.
-- The PA never writes project code or runs a general shell. Approved workers may implement within an isolated environment. No deployment, production-data access, or purchases, including through descendants.
-- All adapters must be testable using injected dependencies. Tests must not contact real Slack/Linear, start real agents, mutate Tailscale routes, or use live owner data.
-- Authority is scoped and inherited; retries are idempotent and uncertain external effects are reconciled before repeating. Unknown costs are not free.
-- The PA proposes coordination actions through `lib-agent-harness/completion`, with
-  its built-in tools disabled and fail-closed probes intact. Implementation workers
-  use `lib-agent-harness/session` instead: a persistent native Claude Code or Codex
-  session that owns its own agent loop, conversation and compaction. These are two
-  different execution contracts and neither may silently become the other. Depend on
-  published library versions, not local replaces.
-- A worker's own tools are removed and replaced by the daemon's, verified against
-  that exact installed binary and configuration before a credentialed process
-  starts. If the installed CLI cannot be restricted, fail closed and say which
-  tools were the problem. Never ship a worker with a shell, and never weaken the
-  boundary because a sandbox setting looks equivalent — a read-only sandbox is not
-  a read restriction. A worker runs from a private durable home the library owns,
-  sharing only the operator's login; credentials never reach a workspace, a model,
-  a tool result, a log or an error.
-- Worker limits are resource limits: shared subscription headroom and an optional
-  per-assignment token budget, both admitted before every turn, and headroom
-  re-read on a clock while a long turn runs. Never reintroduce a cumulative turn,
-  call, command or wall-clock cap as work authority, and do not add no-progress
-  heuristics that cannot distinguish repeated red tests from stuck work. A resource
-  hold is a wait, not a failure: it preserves work, keeps its own kind, spends no
-  recovery allowance, carries no provider classification and releases execution
-  capacity. Count every disjoint token class, cache creation included. Usage that
-  cannot be established is never counted as zero, and unresolved accounting blocks
-  further turns rather than being assumed free.
-- Nothing a worker does is retried automatically. A failed native turn may already
-  have edited files and run commands, so its diagnostic is preserved with the
-  harness's own code and a person decides. Keep typed library failures typed all
-  the way to the operator's log, inspect output and dashboard; never re-derive a
-  classification the library already made, and never parse its prose.
-- Stopping a turn is not stopping its tools. Close tool admission as part of every
-  interrupt, checkpoint and terminal transition, then wait for handlers to return
-  before describing a workspace or starting anything new. Cancelling a container
-  command does not stop the process inside it: hold further changes until confirmed
-  cleanup proves nothing is still writing, and keep the command's outcome recorded
-  as unestablished afterwards.
-- Direction is recorded as handed over before it is handed over, for both the
-  prompt that opens a turn and a steer into a running one. A missing
-  acknowledgement is not proof of non-delivery; replay only what this process saw
-  refused before it was sent, and stop for an owner otherwise.
-- Use lib-agent-cli/lib-agent-output conventions and the family Tailscale helpers when appropriate. Embedded dashboard bundle is built and committed. No separate frontend server needed at runtime.
-- Keep names, account IDs, project IDs, prompts, endpoints, and credentials configurable. Synthetic fixtures only. Secrets never appear in logs, config exports, or the UI.
+- **Any kind of work can be a project.** Code is one medium; so are documents and email. Never assume GitHub, Linear or pull requests. They are optional adapters or intake sources.
+- **The owner deals with the assistant, their projects and their decisions.** Owner-facing words are project, brief, deliverable and decision. Playbook, role, round, revision and verdict belong in drill-down views. Assistant replies lead with the outcome and carry no disclaimers about the machinery.
+- **Shape:** owner → assistant → project manager (PM) → team roles (implementer, reviewer, QA, …). The hierarchy governs authority and escalation, not messaging. Every role works from the project's shared record: a versioned brief, one artifact per task with numbered revisions, verdicts tied to revisions, decisions, memory and an append-only log. A role reads the original, never another role's account of it. There is no peer messaging.
+- **Go owns the loop:** plan → implement → check → PM decision → delivery gate. Model calls happen only to do the work and at decision points. The PM is invoked on project start, on brief changes and at decision points; it is a one-shot decision, not a long-running session. `max_rounds` is where the PM must escalate. It is not a cap on work, and nothing stops when it is reached.
+- **Playbooks are project data with a small, fixed schema.** They are not a workflow engine or a DSL; add a field only when a real project needs it. Only the assistant or the owner changes a playbook, and the PM may propose changes. A task pins the playbook revision it started with. Each revision and verdict records the brief version it was made against, and verdicts against an older brief do not count.
+- **Media adapters** own workspace, snapshot, preview and delivery. For git, the workspace is a separate local clone, not a worktree. Delivery is the only outward action. It goes through a gate (the owner, by default) and is reconciled rather than blindly retried. Team roles never get a delivery capability. QA uses the adapter's preview.
+- **Roles run as ordinary native Claude Code or Codex sessions** through `lib-agent-harness/session`, with their own tools, working in the adapter's workspace. Every role runs under the CLI's own OS sandbox, with writes limited to the workspace and no network, configured as `2026-09-role-sandbox-trust.md` specifies. If the sandbox cannot be confirmed for the installed CLI version, refuse to start the role and say what is missing. Never weaken this because a setting looks equivalent. Reads outside the workspace are an accepted, documented trade-off; never claim otherwise. The daemon itself never runs workspace content outside a sandbox: QA check commands, hooks, package scripts and Makefiles included. The offline-container route is an opt-in playbook setting, not the default.
+- **Credentials never reach a role's environment,** a workspace, a model prompt, a log or an error. Secrets never appear in logs, config exports or the UI.
+- **The assistant never writes project files and never runs a shell.** It proposes coordination actions through `lib-agent-harness/completion`, with built-in tools disabled. PM decisions use the same one-shot contract with structured output. Depend on published library versions, not local replaces.
+- **Standing prohibitions for every role:** no deployment, no production-data access, no purchases. Inference and subscription use are expected operating costs. Outside what the sandbox enforces, these prohibitions hold only through the prompt; say so rather than claim otherwise.
+- **Failures resolve at the lowest level that can resolve them:** role, then PM, then assistant, then owner. Failed work inside a workspace resets to the last revision and retries in the same session with bounded backoff, without notifying anyone. The owner sees a failure only when it needs their choice, described in project terms. Outward delivery is never retried without reconciling what already happened.
+- **Usage:** keep the simple subscription-headroom check and show usage per project. There is no token ledger.
+- **Local state owns the project registry.** Account access never implies project enrollment. Clean break: no compatibility layers for pre-rebuild state (`2026-09-clean-break-state.md`).
+- **Adapters must be testable with injected dependencies.** Tests must not contact real services, start real agents, mutate Tailscale routes or use live owner data. Use fake CLIs and synthetic fixtures only.
+- **Keep names, account IDs, project IDs, prompts, endpoints and credentials configurable.** Config and state live under the reverse-DNS namespace `app.paulie.crew-assistant`.
+- **Use lib-agent-cli and lib-agent-output conventions,** and the family's Tailscale helpers where appropriate. The embedded dashboard bundle is built and committed; no separate frontend server runs at runtime.
+
+## Legacy, being removed
+
+`internal/workerbroker`, `internal/managedworkers` and `internal/integrations/worker` (the container broker and the replaced-tool sessions), plus peer messaging, steering receipts, the token ledger and work-item acceptance, are pre-rebuild. Do not extend them. Delete each one when its replacement lands. Their runtime names (the Colima profile, image and containers) still say `agent-assistant` on purpose; see the crew-prefix decision.
 
 ## Working conventions
 
-Commit verified increments directly to main as authorized by the owner. Use git-hunk for staging. Do not commit unrelated work. Use conventional descriptive commit messages. Run Go tests and go vet; build/typecheck frontend after changes and commit generated assets. No release tags or real deployment unless separately requested.
+Commit verified increments directly to main as authorized by the owner. Use git-hunk for staging, and don't commit unrelated work. Use conventional, descriptive commit messages. Run Go tests and go vet; after UI changes, build and typecheck the frontend and commit the generated assets. No release tags or real deployment unless separately requested.
 
-Bounded subagent delegation is authorized. Coordinate file ownership and interfaces before editing shared files. Only the primary agent stages and commits.
+Bounded subagent delegation is authorized. Agree file ownership and interfaces before editing shared files. Only the primary agent stages and commits.
 
-Design docs are dated snapshots. See design-docs/README.md.
+Design docs are dated snapshots. See `design-docs/README.md`.
