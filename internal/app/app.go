@@ -16,6 +16,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/integrations/connections"
+	"github.com/shhac/crew-assistant/internal/roles"
 )
 
 type App struct {
@@ -36,10 +37,12 @@ type App struct {
 	chatWaiters      sync.Map
 	chatInvoker      func(context.Context, engine.Config, engine.Request, engine.ToolExecutor) (engine.Result, error)
 	statuses         map[string]core.Integration
+	runner           roles.Runner
+	loopWake         chan struct{}
 }
 
 func New(s *core.Service, cfg config.Config, path string, demo bool) *App {
-	return &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), statuses: map[string]core.Integration{}}
+	return &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), statuses: map[string]core.Integration{}, runner: roles.Native{}, loopWake: make(chan struct{}, 1)}
 }
 func (a *App) Config() config.Config { a.mu.RLock(); defer a.mu.RUnlock(); return a.cfg }
 func (a *App) UpdateConfig(cfg config.Config) error {
@@ -178,13 +181,37 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		return a.Core.CreateProject(ctx, core.ProjectInput{Directories: in.Directories, Title: in.Title, Description: in.Objective, AcceptanceCriteria: strings.Join(in.AcceptanceCriteria, "\n")})
-	case "update_project":
-		var in engine.UpdateProjectArgs
+		return a.Core.CreateProject(ctx, core.ProjectInput{Directories: in.Directories, Title: in.Title, Template: in.Template, Brief: core.BriefInput{Goal: in.Goal, Audience: in.Audience, Constraints: in.Constraints, Criteria: in.Criteria}})
+	case "update_brief":
+		var in engine.UpdateBriefArgs
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		return a.Core.RefineProjectWithDirectories(ctx, in.ProjectID, in.Objective, strings.Join(in.AcceptanceCriteria, "\n"), in.Directories)
+		project, err := a.Core.UpdateBrief(ctx, in.ProjectID, core.BriefInput{Goal: in.Goal, Audience: in.Audience, Constraints: in.Constraints, Criteria: in.Criteria})
+		a.nudgeLoop()
+		return project, err
+	case "set_team":
+		var in engine.SetTeamArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		return a.SetTeam(ctx, in)
+	case "queue_task":
+		var in engine.QueueTaskArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		queued, err := a.Core.QueueTask(ctx, in.ProjectID, core.TaskInput{Objective: in.Objective, Criteria: in.Criteria})
+		a.nudgeLoop()
+		return queued, err
+	case "resolve_decision":
+		var in engine.ResolveDecisionArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		decision, err := a.Core.ResolveDecision(ctx, in.DecisionID, in.Answer)
+		a.nudgeLoop()
+		return decision, err
 	case "ask_decision":
 		var in engine.DecisionArgs
 		if err := args(raw, &in); err != nil {

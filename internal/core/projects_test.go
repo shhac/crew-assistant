@@ -73,12 +73,9 @@ func TestInvalidProjectDirectoriesDoNotMutateContract(t *testing.T) {
 		if _, err := s.SetProjectDirectories(testContext, p.ID, directories); err == nil {
 			t.Fatalf("accepted %q", directories)
 		}
-		if _, err := s.RefineProjectWithDirectories(testContext, p.ID, "replacement", "replacement", directories); err == nil {
-			t.Fatalf("refinement accepted %q", directories)
-		}
 	}
 	snapshot, _ := s.Snapshot(testContext)
-	if snapshot.Projects[0].AcceptanceCriteria != p.AcceptanceCriteria || len(snapshot.Projects[0].Directories) != 0 {
+	if !reflect.DeepEqual(snapshot.Projects[0].Brief, p.Brief) || len(snapshot.Projects[0].Directories) != 0 {
 		t.Fatal("invalid update partially changed project")
 	}
 }
@@ -156,7 +153,7 @@ func TestExistingRecordsDeriveScratchRatherThanTrustStoredPath(t *testing.T) {
 func TestTitleOnlyAndDirectoryClearing(t *testing.T) {
 	s, _ := fixture(t)
 	p, err := s.CreateProject(testContext, ProjectInput{Title: "Remember this project"})
-	if err != nil || p.ContractDefined {
+	if err != nil || p.Brief.Version != 0 || p.Playbook != nil {
 		t.Fatalf("project=%+v err=%v", p, err)
 	}
 	p, err = s.SetProjectDirectories(testContext, p.ID, []string{t.TempDir()})

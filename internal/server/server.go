@@ -19,6 +19,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 	registerFilesystem(mux, a)
 	registerModels(mux, a)
 	registerChatQueue(mux, a)
+	registerProjectWork(mux, a)
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
 		s, err := a.Snapshot(r.Context())
 		if err != nil {
@@ -152,6 +153,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 			problem(w, err)
 			return
 		}
+		a.Nudge()
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("POST /api/decisions/{id}/dismiss", func(w http.ResponseWriter, r *http.Request) {
@@ -166,6 +168,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 			problem(w, err)
 			return
 		}
+		a.Nudge()
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("POST /api/memories", func(w http.ResponseWriter, r *http.Request) {

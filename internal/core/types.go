@@ -7,33 +7,39 @@ type Assistant struct {
 	Name        string `json:"name"`
 	Personality string `json:"personality"`
 }
+
+// Project is an ongoing area of the owner's work: what it is for (its brief),
+// how its work gets done (its playbook) and where it lives.
 type Project struct {
-	Directories        []string  `json:"directories"`
-	ScratchDirectory   string    `json:"scratch_directory"`
-	ContractDefined    bool      `json:"contract_defined"`
-	SourceDescription  string    `json:"source_description,omitempty"`
-	ID                 string    `json:"id"`
-	Title              string    `json:"title"`
-	Description        string    `json:"description"`
-	AcceptanceCriteria string    `json:"acceptance_criteria"`
-	Status             string    `json:"status"`
-	SourceID           string    `json:"source_id,omitempty"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                string    `json:"id"`
+	Title             string    `json:"title"`
+	Status            string    `json:"status"`
+	Brief             Brief     `json:"brief"`
+	Playbook          *Playbook `json:"playbook,omitempty"`
+	Directories       []string  `json:"directories"`
+	ScratchDirectory  string    `json:"scratch_directory"`
+	SourceID          string    `json:"source_id,omitempty"`
+	SourceDescription string    `json:"source_description,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type Decision struct {
-	Disposition      string     `json:"disposition,omitempty"`
-	ResolutionReason string     `json:"resolution_reason,omitempty"`
-	ID               string     `json:"id"`
-	ProjectID        string     `json:"project_id,omitempty"`
-	Title            string     `json:"title"`
-	Context          string     `json:"context"`
-	Recommendation   string     `json:"recommendation"`
-	Choices          []string   `json:"choices"`
-	Status           string     `json:"status"`
-	Answer           string     `json:"answer,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	ResolvedAt       *time.Time `json:"resolved_at,omitempty"`
+	Disposition      string `json:"disposition,omitempty"`
+	ResolutionReason string `json:"resolution_reason,omitempty"`
+	ID               string `json:"id"`
+	ProjectID        string `json:"project_id,omitempty"`
+	// TaskID and Kind tie a decision to the task it holds. Kind is "choice"
+	// for an ordinary decision, or delivery, question or escalation.
+	TaskID         string     `json:"task_id,omitempty"`
+	Kind           string     `json:"kind,omitempty"`
+	Title          string     `json:"title"`
+	Context        string     `json:"context"`
+	Recommendation string     `json:"recommendation"`
+	Choices        []string   `json:"choices"`
+	Status         string     `json:"status"`
+	Answer         string     `json:"answer,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
 }
 type Message struct {
 	ID        string    `json:"id"`
@@ -91,6 +97,7 @@ type Snapshot struct {
 	Events            map[string]bool    `json:"-"`
 	Assistant         Assistant          `json:"assistant"`
 	Projects          []Project          `json:"projects"`
+	Tasks             []Task             `json:"tasks"`
 	Decisions         []Decision         `json:"decisions"`
 	Messages          []Message          `json:"messages"`
 	Memories          []Memory           `json:"memories"`
@@ -100,15 +107,14 @@ type Snapshot struct {
 	ModelCalls        map[string]int     `json:"-"`
 }
 type ProjectInput struct {
-	Directories        []string `json:"directories"`
-	Title              string   `json:"title"`
-	Description        string   `json:"description"`
-	AcceptanceCriteria string   `json:"acceptance_criteria"`
-	SourceID           string   `json:"source_id,omitempty"`
+	Directories       []string   `json:"directories"`
+	Title             string     `json:"title"`
+	Brief             BriefInput `json:"brief"`
+	Template          string     `json:"template"`
+	SourceID          string     `json:"source_id,omitempty"`
+	SourceDescription string     `json:"source_description,omitempty"`
 }
 
-// DelegateInput requests a daemon-owned assignment. ParentID selects the
-// responsible coordinator and constrains delegated capabilities.
 type DecisionInput struct {
 	ProjectID      string   `json:"project_id,omitempty"`
 	Title          string   `json:"title"`

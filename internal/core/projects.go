@@ -98,74 +98,42 @@ func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (Project, 
 	if err != nil {
 		return Project{}, err
 	}
-	out := Project{Directories: directories, ContractDefined: in.SourceID == "" && required(in.AcceptanceCriteria), SourceDescription: in.Description, ID: uid(), Title: in.Title, Description: in.Description, AcceptanceCriteria: in.AcceptanceCriteria, Status: "ready", SourceID: in.SourceID, UpdatedAt: s.now().UTC()}
+	now := s.now().UTC()
+	out := Project{ID: uid(), Title: in.Title, Status: "active", Directories: directories, SourceID: in.SourceID, SourceDescription: in.SourceDescription, UpdatedAt: now}
+	if required(in.Brief.Goal) {
+		out.Brief = Brief{Version: 1, Goal: strings.TrimSpace(in.Brief.Goal), Audience: strings.TrimSpace(in.Brief.Audience), Constraints: strings.TrimSpace(in.Brief.Constraints), Criteria: cleanList(in.Brief.Criteria), UpdatedAt: now}
+	}
+	if in.Template != "" {
+		template, ok := Templates[in.Template]
+		if !ok {
+			return Project{}, fmt.Errorf("unknown project template %q", in.Template)
+		}
+		template.Roles = append([]Role(nil), template.Roles...)
+		out.Playbook = &template
+	}
 	err = s.store.update(ctx, func(v *Snapshot) error {
 		if in.SourceID != "" {
 			for i := range v.Projects {
 				p := &v.Projects[i]
-				if p.SourceID == in.SourceID {
-					if p.Title != in.Title || p.SourceDescription != in.Description {
-						p.Title = in.Title
-						p.SourceDescription = in.Description
-						if !p.ContractDefined {
-							p.Description = in.Description
-						}
-						p.UpdatedAt = s.now().UTC()
-					}
-					// Source refreshes cannot replace the commissioned acceptance contract.
-					out = *p
-					return nil
+				if p.SourceID != in.SourceID {
+					continue
 				}
+				// A source refresh updates what the source says, never the brief
+				// the owner and assistant have since agreed.
+				if p.Title != in.Title || p.SourceDescription != in.SourceDescription {
+					p.Title = in.Title
+					p.SourceDescription = in.SourceDescription
+					p.UpdatedAt = now
+				}
+				out = *p
+				return nil
 			}
 		}
 		if err := s.store.prepareProject(&out); err != nil {
 			return err
 		}
 		v.Projects = append(v.Projects, out)
-		record(v, out.UpdatedAt, out.ID, "project.created", out.Title)
-		return nil
-	})
-	return out, err
-}
-
-// RefineProject establishes the acceptance contract at intake. Once any work
-// has been commissioned, changing it requires an explicit new commission.
-func (s *Service) RefineProject(ctx context.Context, id, description, acceptanceCriteria string) (Project, error) {
-	return s.RefineProjectWithDirectories(ctx, id, description, acceptanceCriteria, nil)
-}
-
-// RefineProjectWithDirectories atomically refines a contract and, when non-nil,
-// replaces linked directory metadata. Linking never grants worker access.
-func (s *Service) RefineProjectWithDirectories(ctx context.Context, id, description, acceptanceCriteria string, directories []string) (Project, error) {
-	if !required(description, acceptanceCriteria) {
-		return Project{}, errors.New("description and measurable acceptance criteria are required")
-	}
-	var normalized []string
-	var err error
-	if directories != nil {
-		normalized, err = s.normalizeProjectDirectories(directories)
-		if err != nil {
-			return Project{}, err
-		}
-	}
-	var out Project
-	err = s.store.update(ctx, func(v *Snapshot) error {
-		p := project(v, id)
-		if p == nil {
-			return ErrNotFound
-		}
-		if p.Status != "ready" {
-			return errors.New("only an uncommissioned ready project can be refined")
-		}
-		if directories != nil {
-			p.Directories = normalized
-		}
-		p.Description = description
-		p.AcceptanceCriteria = acceptanceCriteria
-		p.ContractDefined = true
-		p.UpdatedAt = s.now().UTC()
-		out = *p
-		record(v, p.UpdatedAt, id, "project.refined", "Acceptance criteria defined for "+p.Title)
+		record(v, now, out.ID, "project.created", out.Title)
 		return nil
 	})
 	return out, err

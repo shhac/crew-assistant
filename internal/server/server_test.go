@@ -34,7 +34,7 @@ func TestDashboardProjectDecisionMemoryFlow(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w
 	}
-	created := call("POST", "/api/projects", `{"title":"Export","description":"CSV","acceptance_criteria":"Valid CSV"}`)
+	created := call("POST", "/api/projects", `{"title":"Export","brief":{"goal":"CSV","criteria":["Valid CSV"]},"template":"draft"}`)
 	if created.Code != 201 {
 		t.Fatal(created.Body.String())
 	}

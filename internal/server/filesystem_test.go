@@ -103,7 +103,7 @@ func TestExistingProjectDirectoriesHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	canonical, _ := filepath.EvalSymlinks(source)
-	if p.ContractDefined || len(p.Directories) != 1 || p.Directories[0] != canonical || p.ScratchDirectory == "" {
+	if p.Brief.Version != 0 || len(p.Directories) != 1 || p.Directories[0] != canonical || p.ScratchDirectory == "" {
 		t.Fatalf("bad intake: %+v", p)
 	}
 	if entries, err := os.ReadDir(source); err != nil || len(entries) != 0 {

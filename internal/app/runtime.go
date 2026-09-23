@@ -34,6 +34,11 @@ func (a *App) Run(ctx context.Context, noDispatch bool) error {
 			a.Status("chat", "Conversation", "error", "The message queue stopped; restart the daemon to recover pending messages")
 		}
 	}()
+	listeners.Add(1)
+	go func() {
+		defer listeners.Done()
+		a.runLoop(ctx, noDispatch)
+	}()
 	pending, err := a.Core.PendingEvents(ctx)
 	if err != nil {
 		return err
@@ -127,7 +132,7 @@ func (a *App) syncLinear(ctx context.Context, c assignmentSource) error {
 	}
 	for _, issue := range result.Issues {
 		description := issue.Description + "\nSource: " + issue.URL + "\nLinear status: " + issue.State.Name
-		_, err = a.Core.CreateProject(ctx, core.ProjectInput{Title: issue.Identifier + " · " + issue.Title, Description: description, SourceID: "linear:" + issue.ID, AcceptanceCriteria: "Deliver the source outcome: " + issue.Title + ". Define measurable acceptance checks from the source requirements before commissioning work. Source: " + issue.URL})
+		_, err = a.Core.CreateProject(ctx, core.ProjectInput{Title: issue.Identifier + " · " + issue.Title, SourceDescription: description, SourceID: "linear:" + issue.ID})
 		if err != nil {
 			return err
 		}

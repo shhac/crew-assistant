@@ -79,7 +79,7 @@ func (a *App) syncCLIConnections(ctx context.Context) error {
 				if err = json.Unmarshal(raw, &issue); err != nil || issue.ID == "" || issue.Title == "" || issue.StatusType == "completed" || issue.StatusType == "canceled" {
 					continue
 				}
-				_, err = a.Core.CreateProject(ctx, core.ProjectInput{Title: issue.Identifier + " · " + issue.Title, Description: fmt.Sprintf("Linear assignment from %s / %s. Status: %s. Read the full issue using this connection before commissioning work.", binding.Name, profile, issue.Status), SourceID: "lin:" + binding.ID + ":" + profile + ":" + issue.ID, AcceptanceCriteria: "Deliver the source outcome: " + issue.Title + ". Read the full source issue and define measurable acceptance checks before commissioning work."})
+				_, err = a.Core.CreateProject(ctx, core.ProjectInput{Title: issue.Identifier + " · " + issue.Title, SourceDescription: fmt.Sprintf("Linear assignment from %s / %s. Status: %s. Read the full issue using this connection before writing its brief.", binding.Name, profile, issue.Status), SourceID: "lin:" + binding.ID + ":" + profile + ":" + issue.ID})
 				if err != nil {
 					connectionErr = err
 					failures = append(failures, err)

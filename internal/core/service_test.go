@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func fixture(t *testing.T) (*Service, config.Config) {
 }
 func newProject(t *testing.T, s *Service) Project {
 	t.Helper()
-	p, err := s.CreateProject(testContext, ProjectInput{Title: "Fictional project", AcceptanceCriteria: "Demonstrated test evidence"})
+	p, err := s.CreateProject(testContext, ProjectInput{Title: "Fictional project", Brief: BriefInput{Goal: "A fictional outcome", Criteria: []string{"Demonstrated test evidence"}}, Template: "draft"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,17 +62,17 @@ func TestDecisionResolvesExactlyOnceUnderConcurrency(t *testing.T) {
 		t.Fatalf("successful resolutions: %d", n)
 	}
 }
-func TestSourceRefreshPreservesAcceptanceContract(t *testing.T) {
+func TestSourceRefreshPreservesTheBrief(t *testing.T) {
 	s, _ := fixture(t)
-	p, err := s.CreateProject(testContext, ProjectInput{Title: "Issue", SourceID: "linear:fixture", Description: "Initial source", AcceptanceCriteria: "Explicit acceptance contract"})
+	p, err := s.CreateProject(testContext, ProjectInput{Title: "Issue", SourceID: "linear:fixture", SourceDescription: "Initial source", Brief: BriefInput{Goal: "Agreed goal", Criteria: []string{"Explicit acceptance"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.CreateProject(testContext, ProjectInput{Title: "Updated title", SourceID: p.SourceID, Description: "Updated source", AcceptanceCriteria: "Generic discovery placeholder"})
+	got, err := s.CreateProject(testContext, ProjectInput{Title: "Updated title", SourceID: p.SourceID, SourceDescription: "Updated source", Brief: BriefInput{Goal: "Generic placeholder"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.AcceptanceCriteria != p.AcceptanceCriteria || got.Title != "Updated title" {
+	if !reflect.DeepEqual(got.Brief, p.Brief) || got.Title != "Updated title" || got.SourceDescription != "Updated source" {
 		t.Fatal(got)
 	}
 }
