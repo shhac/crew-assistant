@@ -183,3 +183,48 @@ func TestChatQueueHoldEditAndReorder(t *testing.T) {
 		t.Fatal("the hold survived its release")
 	}
 }
+
+func TestChatSuggestionRouteRefusesStaleRequestsAndReportsUnavailableModels(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	store, err := core.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	a := app.New(core.NewService(store, cfg), cfg, filepath.Join(dir, "config.json"), false)
+	auth, err := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(a, auth)
+	call := func(body string, authorized bool) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "http://127.0.0.1:8340/api/chat/suggestion", strings.NewReader(body))
+		r.RemoteAddr = "127.0.0.1:1234"
+		if authorized {
+			r.Header.Set("Authorization", "Bearer "+auth.admin)
+		}
+		r.Header.Set("X-Requested-With", "crew-assistant")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if w := call(`{"after":"reply"}`, false); w.Code != 401 {
+		t.Fatal(w.Code)
+	}
+	if w := call(`{"after":"reply","extra":true}`, true); w.Code != 400 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	// Nothing to follow yet: the conversation has not settled on that reply.
+	if w := call(`{"after":"reply"}`, true); w.Code != 409 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	cfg.Model.Engine = "openai-compatible"
+	cfg.Model.Model = "local"
+	if err := a.UpdateConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if w := call(`{"after":"reply"}`, true); w.Code != 503 || !strings.Contains(w.Body.String(), "no approved small model") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}

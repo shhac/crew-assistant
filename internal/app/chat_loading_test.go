@@ -11,18 +11,12 @@ import (
 )
 
 func TestLoadingCaptionUsesSmallCLIWithOnlyRecentContext(t *testing.T) {
-	cfg := config.Default()
-	cfg.Model.CodexHome = "/synthetic/shared-login"
-	reserved := false
-	discover := func(_ context.Context, c engine.Config) ([]engine.ModelOption, error) {
-		if c.Engine != "codex" || c.Model != "gpt-5.6-luna" || c.CodexHome != cfg.Model.CodexHome {
+	f := newFakeCLIs(t)
+	s := f.models()
+	complete := s.complete
+	s.complete = func(ctx context.Context, c engine.Config, m []engine.Message, tools []engine.Tool) (engine.Message, engine.Usage, error) {
+		if c.APIKeyEnv != "" || c.Endpoint != "" || c.CodexHome != config.Default().Model.CodexHome {
 			t.Fatal(c)
-		}
-		return []engine.ModelOption{{ID: "gpt-5.6-luna", Efforts: []engine.ModelEffort{{ID: "low"}}}}, nil
-	}
-	complete := func(ctx context.Context, c engine.Config, m []engine.Message, tools []engine.Tool) (engine.Message, engine.Usage, error) {
-		if c.Model != "gpt-5.6-luna" || c.Effort != "low" || c.APIKeyEnv != "" || c.Endpoint != "" || len(tools) != 0 {
-			t.Fatal(c, tools)
 		}
 		if len(m) != 2 || strings.Contains(m[1].Content, "old secret") || !strings.Contains(m[1].Content, "recent answer") || !strings.Contains(m[1].Content, "plan a garden") {
 			t.Fatal(m)
@@ -30,90 +24,104 @@ func TestLoadingCaptionUsesSmallCLIWithOnlyRecentContext(t *testing.T) {
 		if err := c.BeforeRequest(ctx); err != nil {
 			return engine.Message{}, engine.Usage{}, err
 		}
-		return engine.Message{Content: "Planting the next idea…"}, engine.Usage{}, nil
+		return complete(ctx, c, m, tools)
 	}
-	phrase, err := generateLoadingPhrase(context.Background(), cfg, "plan a garden", []engine.Message{{Role: "user", Content: "old secret"}, {Role: "assistant", Content: "recent answer"}, {Role: "system", Content: "not dialogue"}}, discover, complete, func(context.Context) error { reserved = true; return nil })
-	if err != nil || !reserved || phrase != "Planting the next idea…" {
+	reserved := false
+	phrase, err := generateLoadingPhrase(context.Background(), s, smallModelsFor(t, "codex"), "plan a garden", []engine.Message{{Role: "user", Content: "old secret"}, {Role: "assistant", Content: "recent answer"}, {Role: "system", Content: "not dialogue"}}, func(context.Context) error { reserved = true; return nil })
+	if err != nil || !reserved || phrase != "Planting the next idea" {
 		t.Fatal(phrase, err, reserved)
 	}
-}
-
-func TestLoadingCaptionNeverFallsBackToAPIOrUnsupportedEffort(t *testing.T) {
-	cfg := config.Default()
-	cfg.Model.Engine = "claude"
-	cfg.Model.ClaudeHome = "/synthetic/shared-claude"
-	calls := 0
-	discover := func(context.Context, engine.Config) ([]engine.ModelOption, error) {
-		return []engine.ModelOption{{ID: "haiku"}}, nil
-	}
-	complete := func(_ context.Context, c engine.Config, _ []engine.Message, _ []engine.Tool) (engine.Message, engine.Usage, error) {
-		calls++
-		if c.Engine != "claude" || c.Model != "haiku" || c.Effort != "" || c.ClaudeHome != cfg.Model.ClaudeHome {
-			t.Fatal(c)
-		}
-		return engine.Message{Content: "Gathering a little perspective"}, engine.Usage{}, nil
-	}
-	if _, err := generateLoadingPhrase(context.Background(), cfg, "hello", nil, discover, complete, nil); err != nil {
-		t.Fatal(err)
-	}
-	cfg.Model.Engine = "openai-compatible"
-	if _, err := generateLoadingPhrase(context.Background(), cfg, "hello", nil, discover, complete, nil); err == nil || calls != 1 {
-		t.Fatal("API caption attempted", err, calls)
-	}
-	cfg.Model.Engine = "codex"
-	cfg.Chat.LoadingPhrases.Enabled = false
-	if _, err := generateLoadingPhrase(context.Background(), cfg, "hello", nil, discover, complete, nil); err == nil || calls != 1 {
-		t.Fatal("disabled caption attempted")
+	if !equalStrings(f.used(), []string{"codex/gpt-6-luna/low"}) {
+		t.Fatal(f.used())
 	}
 }
 
-func TestLoadingCaptionFailureAndOutputBounds(t *testing.T) {
-	cfg := config.Default()
-	discover := func(context.Context, engine.Config) ([]engine.ModelOption, error) {
-		return []engine.ModelOption{{ID: "gpt-5.6-luna"}}, nil
+func TestLoadingCaptionFallsBackToTheOtherCLI(t *testing.T) {
+	f := newFakeCLIs(t)
+	f.discoverErr["claude"] = errors.New("claude: not logged in")
+	phrase, err := generateLoadingPhrase(context.Background(), f.models(), smallModelsFor(t, "claude"), "hello", nil, nil)
+	if err != nil || phrase == "" || !equalStrings(f.used(), []string{"codex/gpt-6-luna/low"}) {
+		t.Fatal(phrase, err, f.used())
 	}
+	f = newFakeCLIs(t)
+	f.replyErr["codex"] = errors.New("usage limit reached")
+	phrase, err = generateLoadingPhrase(context.Background(), f.models(), smallModelsFor(t, "codex"), "hello", nil, nil)
+	if err != nil || phrase == "" || !equalStrings(f.used(), []string{"codex/gpt-6-luna/low", "claude/haiku/"}) {
+		t.Fatal(phrase, err, f.used())
+	}
+}
+
+func TestLoadingCaptionOutputBounds(t *testing.T) {
 	for _, bad := range []string{"", "two\nlines", "[click](https://example.test)", strings.Repeat("a", 71), "one two three four five six seven eight nine"} {
-		complete := func(context.Context, engine.Config, []engine.Message, []engine.Tool) (engine.Message, engine.Usage, error) {
-			return engine.Message{Content: bad}, engine.Usage{}, nil
-		}
-		if _, err := generateLoadingPhrase(context.Background(), cfg, "hello", nil, discover, complete, nil); err == nil {
+		f := newFakeCLIs(t)
+		f.reply = bad
+		if _, err := generateLoadingPhrase(context.Background(), f.models(), smallModelsFor(t, "codex"), "hello", nil, nil); err == nil {
 			t.Fatal("accepted invalid caption", bad)
 		}
-	}
-	calls := 0
-	unavailable := func(context.Context, engine.Config) ([]engine.ModelOption, error) {
-		return nil, errors.New("unavailable")
-	}
-	complete := func(context.Context, engine.Config, []engine.Message, []engine.Tool) (engine.Message, engine.Usage, error) {
-		calls++
-		return engine.Message{}, engine.Usage{}, nil
-	}
-	if _, err := generateLoadingPhrase(context.Background(), cfg, "hello", nil, unavailable, complete, nil); err == nil || calls != 0 {
-		t.Fatal(err, calls)
-	}
-	higherOnly := func(context.Context, engine.Config) ([]engine.ModelOption, error) {
-		return []engine.ModelOption{{ID: "gpt-5.6-luna", Efforts: []engine.ModelEffort{{ID: "high"}}}}, nil
-	}
-	if _, err := generateLoadingPhrase(context.Background(), cfg, "hello", nil, higherOnly, complete, nil); err == nil || calls != 0 {
-		t.Fatal("silently increased effort", err, calls)
 	}
 	if len([]rune(clipLoadingContext(strings.Repeat("界", 1000)))) != 600 {
 		t.Fatal("context not bounded")
 	}
 }
 
+func TestLoadingCaptionSkipsAPIAssistantsAndDisabledCaptions(t *testing.T) {
+	for _, change := range []func(*App){
+		func(a *App) { a.cfg.Model.Engine = "openai-compatible" },
+		func(a *App) { a.cfg.Chat.LoadingPhrases.Enabled = false },
+	} {
+		a := testApp(t)
+		a.cfg.Model = config.Default().Model
+		change(a)
+		f := newFakeCLIs(t)
+		a.small = f.models()
+		a.startChatLoading(context.Background(), "turn", "hello", nil)
+		if f.calls() != 0 {
+			t.Fatal("caption attempted", f.calls())
+		}
+	}
+}
+
+func TestLoadingCaptionWithBothCLIsFailingLeavesTheTurnAlone(t *testing.T) {
+	a := testApp(t)
+	a.cfg.Model = config.Default().Model
+	f := newFakeCLIs(t)
+	f.discoverErr["codex"] = errors.New("codex: not installed")
+	f.replyErr["claude"] = errors.New("usage limit reached")
+	a.small = f.models()
+	ctx := context.Background()
+	if _, err := a.Core.EnqueueChat(ctx, "one", "Plan the garden"); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := a.Core.StartNextChat(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.startChatLoading(ctx, turn.ID, turn.Message, nil)
+	turns, _ := a.Core.ChatTurns(ctx)
+	if turns[0].LoadingPhrase != "" || turns[0].Status != "running" {
+		t.Fatal(turns[0])
+	}
+	// The next message spends nothing on either resting CLI.
+	before := f.calls()
+	a.startChatLoading(ctx, turn.ID, turn.Message, nil)
+	if f.calls() != before {
+		t.Fatal("rested CLIs were tried again", f.calls()-before)
+	}
+	// The reply itself is unaffected.
+	if err := a.Core.FinishChat(ctx, turn.ID, "completed", "Here is a plan.", ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCancelledTurnSkipsLoadingWork(t *testing.T) {
 	a := testApp(t)
 	a.cfg.Model = config.Default().Model
-	a.loadingDiscover = func(context.Context, engine.Config) ([]engine.ModelOption, error) {
-		t.Fatal("cancelled turn discovered models")
-		return nil, nil
-	}
-	a.loadingComplete = func(context.Context, engine.Config, []engine.Message, []engine.Tool) (engine.Message, engine.Usage, error) {
-		t.Fatal("cancelled turn used inference")
-		return engine.Message{}, engine.Usage{}, nil
-	}
+	f := newFakeCLIs(t)
+	a.small = f.models()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	a.startChatLoading(ctx, "cancelled", "hello", nil)
+	if f.calls() != 0 {
+		t.Fatal("cancelled turn used a model", f.calls())
+	}
 }

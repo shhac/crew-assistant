@@ -82,7 +82,9 @@ export function App() {
         event.preventDefault();
         setChatOpen(false);
       }
-      if (event.key !== "Tab") return;
+      // A Tab the conversation already handled (accepting a suggestion) is not
+      // focus movement.
+      if (event.key !== "Tab" || event.defaultPrevented) return;
       const focusable = Array.from(
         conversation.current?.querySelectorAll<HTMLElement>(
           "button:not([disabled]),textarea:not([disabled]),input:not([disabled]),a[href]",
@@ -416,6 +418,7 @@ export function App() {
       >
         <ChatPanel
           onProjectOpen={openProject}
+          view={selectedProject ? `${page}/${selectedProject}` : page}
           state={state}
           refresh={refresh}
           onClose={() => setChatOpen(false)}

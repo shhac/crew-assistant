@@ -59,6 +59,27 @@ func registerChatQueue(mux *http.ServeMux, a *app.App) {
 		}
 		respond(w, http.StatusOK, turn)
 	})
+	// A suggestion names the reply it follows, so one that arrives after the
+	// conversation moved on is refused rather than shown.
+	mux.HandleFunc("POST /api/chat/suggestion", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			After string `json:"after"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		suggestion, err := a.SuggestNextMessage(r.Context(), in.After)
+		switch {
+		case err == nil:
+			respond(w, http.StatusOK, map[string]string{"after": in.After, "suggestion": suggestion})
+		case errors.Is(err, core.ErrConflict):
+			problem(w, err)
+		case errors.Is(err, app.ErrSuggestionUnavailable):
+			fail(w, http.StatusServiceUnavailable, err.Error())
+		default:
+			fail(w, http.StatusBadGateway, "No suggestion this time.")
+		}
+	})
 	// Holding names a queued message the owner is changing. It blocks that
 	// message and everything after it, and lapses on its own so a browser that
 	// disappears cannot strand the queue.

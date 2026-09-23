@@ -124,6 +124,17 @@
   font-size: 11px;
   line-height: 1.6;
 }
+/* A suggestion reads as a proposal, distinct from the owner's own draft. */
+.chat-composer textarea.has-suggestion::placeholder {
+  color: var(--text-soft);
+  font-style: italic;
+}
+.chat-suggestions-off {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  margin-top: 8px;
+}
 .chat-turn-status .chat-recovery {
   padding-top: 8px;
 }

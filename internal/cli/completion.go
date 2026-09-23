@@ -104,7 +104,7 @@ func completionConfigValues(key string) []string {
 		return []string{"443", "8443", "10000"}
 	case "model.engine":
 		return []string{"codex", "claude", "openai-compatible"}
-	case "model.effort", "chat.loading_phrases.effort":
+	case "model.effort":
 		return []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
 	}
 	return nil
