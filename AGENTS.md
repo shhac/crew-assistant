@@ -4,7 +4,7 @@ Go daemon, CLI and embedded dashboard for a personal assistant that runs project
 
 ## Direction
 
-The project is mid-rebuild to the design in `design-docs/2026-09-23-project-teams.md`. Decisions made for it: `design-docs/decisions/2026-09-crew-prefix.md`, `2026-09-clean-break-state.md` and `2026-09-role-sandbox-trust.md`. Build order: (1) a writer and reviewer loop on local documents, (2) the git adapter, (3) a separate PM tier and concurrent projects. Each phase finishes with real use, not tests alone.
+The project follows the design in `design-docs/2026-09-23-project-teams.md`; phases 0 and 1 are built, and `design-docs/reference/2026-09-23-first-real-runs.md` records the first real runs and the open isolation gaps. Decisions made for it: `design-docs/decisions/2026-09-crew-prefix.md`, `2026-09-clean-break-state.md` and `2026-09-role-sandbox-trust.md`. Build order: (1) a writer and reviewer loop on local documents, (2) the git adapter, (3) a separate PM tier and concurrent projects. Each phase finishes with real use, not tests alone.
 
 The owner's core complaint about v1 was that it added mental load and was over-engineered. Prefer the smallest loop that works, and add machinery only when a real run needs it.
 
@@ -27,9 +27,9 @@ The owner's core complaint about v1 was that it added mental load and was over-e
 - **Keep names, account IDs, project IDs, prompts, endpoints and credentials configurable.** Config and state live under the reverse-DNS namespace `app.paulie.crew-assistant`.
 - **Use lib-agent-cli and lib-agent-output conventions,** and the family's Tailscale helpers where appropriate. The embedded dashboard bundle is built and committed; no separate frontend server runs at runtime.
 
-## Legacy, being removed
+## Removed in the rebuild
 
-`internal/workerbroker`, `internal/managedworkers` and `internal/integrations/worker` (the container broker and the replaced-tool sessions), plus peer messaging, steering receipts, the token ledger and work-item acceptance, are pre-rebuild. Do not extend them. Delete each one when its replacement lands. Their runtime names (the Colima profile, image and containers) still say `agent-assistant` on purpose; see the crew-prefix decision.
+The container worker broker, replaced-tool sessions, agents, work items, steering, acceptance, peer messaging and the token ledger were deleted on 2026-09-23, along with the old Colima VM and worker image. Do not reintroduce them. Pre-rebuild state lives only in `backups/pre-project-teams-20260923/` under the state directory, and no code reads it.
 
 ## Working conventions
 
