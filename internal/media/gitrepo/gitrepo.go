@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -198,12 +199,54 @@ func (r Repo) Begin(ctx context.Context, branch string) (base, from string, err 
 	return base, from, r.Reset(ctx, branch, base)
 }
 
+// Contains reports whether commit is already part of tip's history.
+func (r Repo) Contains(ctx context.Context, tip, commit string) (bool, error) {
+	_, err := run(ctx, r.Workspace(), "merge-base", "--is-ancestor", commit, tip)
+	var status *gitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &status) && status.code == 1:
+		return false, nil
+	}
+	return false, err
+}
+
+// Merge brings commit into the checked-out task branch without committing, so
+// the implementer's next revision records the merged result. It returns the
+// files left with conflicts for the implementer to resolve.
+func (r Repo) Merge(ctx context.Context, commit string) ([]string, error) {
+	_, mergeErr := run(ctx, r.Workspace(), "merge", "--quiet", "--no-commit", "--no-ff", "--no-edit", commit)
+	out, err := run(ctx, r.Workspace(), "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	conflicts := strings.Fields(out)
+	if mergeErr != nil && len(conflicts) == 0 {
+		return nil, mergeErr
+	}
+	return conflicts, nil
+}
+
 // Snapshot records the working tree as a commit on the task branch and
 // returns it with the files changed since base. Nothing new since previous is
 // an error: the role changed nothing.
 func (r Repo) Snapshot(ctx context.Context, base, previous, message string) (string, []string, error) {
 	if _, err := run(ctx, r.Workspace(), "add", "-A"); err != nil {
 		return "", nil, err
+	}
+	if _, err := run(ctx, r.Workspace(), "rev-parse", "--quiet", "--verify", "MERGE_HEAD"); err == nil {
+		// Completing a merge: refuse to record conflicts nobody resolved.
+		check, _ := run(ctx, r.Workspace(), "diff", "--cached", "--check")
+		var left []string
+		for _, line := range strings.Split(check, "\n") {
+			if strings.Contains(line, "leftover conflict marker") {
+				left = append(left, strings.SplitN(line, ":", 2)[0])
+			}
+		}
+		if len(left) > 0 {
+			return "", nil, fmt.Errorf("conflict markers are still in %s", strings.Join(slices.Compact(left), ", "))
+		}
 	}
 	if _, err := run(ctx, r.Workspace(), "diff", "--cached", "--quiet"); err != nil {
 		if _, err = run(ctx, r.Workspace(), "commit", "--quiet", "--no-verify", "-m", message); err != nil {
@@ -233,6 +276,10 @@ func (r Repo) Reset(ctx context.Context, branch, commit string) error {
 	// Several tasks share the clone, so each step checks out its own task's
 	// branch; a bare reset would move whichever branch was left checked out.
 	if _, err := run(ctx, r.Workspace(), "checkout", "--quiet", "--force", "--no-recurse-submodules", "-B", branch, commit); err != nil {
+		return err
+	}
+	// A merge a failed round left in progress must not carry into the next.
+	if _, err := run(ctx, r.Workspace(), "reset", "--quiet", "--hard"); err != nil {
 		return err
 	}
 	args := []string{"clean", "-ffdxq", "-e", "/" + cacheDir + "/"}
@@ -366,10 +413,22 @@ func run(ctx context.Context, dir string, args ...string) (string, error) {
 		if len(detail) > 300 {
 			detail = detail[:300]
 		}
-		return stdout.String(), fmt.Errorf("git %s: %s", args[0], detail)
+		code := -1
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			code = exit.ExitCode()
+		}
+		return stdout.String(), &gitError{command: args[0], detail: detail, code: code}
 	}
 	return stdout.String(), nil
 }
+
+type gitError struct {
+	command, detail string
+	code            int
+}
+
+func (e *gitError) Error() string { return "git " + e.command + ": " + e.detail }
 
 // safety is prepended to every git command: nothing configured in a
 // repository, the operator's global config or the system can make git run a

@@ -195,7 +195,23 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 	if held, err := a.holdForUsage(ctx, t, writers[0]); held || err != nil {
 		return err
 	}
-	spec := a.roleSpec(writers[0], m.workspace(), true, m, writerPrompt(p, t))
+	caughtUp := ""
+	if behind, err := m.behind(ctx, t); err != nil {
+		return a.roleFailed(ctx, t, "The workspace", err)
+	} else if behind {
+		moved, conflicts, err := m.catchUp(ctx, t)
+		if err != nil {
+			return a.roleFailed(ctx, t, "The workspace", fmt.Errorf("catching up with %s: %w", p.Landed.Objective, err))
+		}
+		if t, err = a.Core.UpdateTask(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
+			task.Base, task.From = moved.Base, moved.From
+			return "", nil
+		}); err != nil {
+			return err
+		}
+		caughtUp = catchUpText(*p.Landed, conflicts)
+	}
+	spec := a.roleSpec(writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp))
 	spec.Resume = t.WriterSession
 	result, err := a.runner.Run(ctx, spec)
 	if err != nil {
@@ -369,6 +385,11 @@ func (a *App) askForDelivery(ctx context.Context, p core.Project, t core.Task, r
 	if err != nil {
 		return a.roleFailed(ctx, t, "The workspace", err)
 	}
+	if behind, err := m.behind(ctx, t); err != nil {
+		return a.roleFailed(ctx, t, "The workspace", err)
+	} else if behind {
+		return a.catchUpRound(ctx, t, *p.Landed)
+	}
 	where := m.deliveryNote(t)
 	_, err = a.Core.OpenTaskDecision(ctx, t.ID, decisionDelivery, core.DecisionInput{
 		Title:          fmt.Sprintf("Ready to approve: %s (draft %d)", t.Objective, r.N),
@@ -524,6 +545,11 @@ func (a *App) deliver(ctx context.Context, p core.Project, t core.Task) error {
 	if err != nil {
 		return err
 	}
+	if behind, err := m.behind(ctx, t); err != nil {
+		return err
+	} else if behind {
+		return a.catchUpRound(ctx, t, *p.Landed)
+	}
 	target, err := m.deliver(ctx, t, r)
 	{
 		if err != nil {
@@ -545,7 +571,7 @@ func (a *App) deliver(ctx context.Context, p core.Project, t core.Task) error {
 			return openErr
 		}
 	}
-	_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+	_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 		if t.Status == core.TaskStopped {
 			return "", nil
 		}
@@ -554,7 +580,70 @@ func (a *App) deliver(ctx context.Context, p core.Project, t core.Task) error {
 		if target != "" {
 			t.Detail += " and delivered to " + target
 		}
+		if r.Ref != "" {
+			p.Landed = &core.Landing{TaskID: t.ID, Objective: t.Objective, Commit: r.Ref, Branch: target, At: time.Now().UTC()}
+		}
 		return t.Objective + ": " + t.Detail, nil
+	})
+	if err != nil || r.Ref == "" {
+		return err
+	}
+	return a.supersedeStaleApprovals(ctx, p.ID)
+}
+
+// supersedeStaleApprovals replaces any approval another task in the project
+// is waiting on with a round that catches up with what just landed, so the
+// owner is never asked to approve work that is out of date.
+func (a *App) supersedeStaleApprovals(ctx context.Context, projectID string) error {
+	snap, err := a.Core.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	p, ok := findProject(snap, projectID)
+	if !ok || p.Landed == nil {
+		return nil
+	}
+	for _, t := range snap.Tasks {
+		if t.ProjectID != projectID || t.Status != core.TaskWaiting || t.DecisionID == "" {
+			continue
+		}
+		d, ok := findDecision(snap, t.DecisionID)
+		if !ok || d.Status != "open" || (d.Kind != decisionDelivery && d.Kind != decisionEscalation) {
+			continue
+		}
+		m, err := a.mediumFor(ctx, p, taskPlaybook(p, t))
+		if err != nil {
+			return err
+		}
+		if behind, err := m.behind(ctx, t); err != nil || !behind {
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		if err = a.catchUpRound(ctx, t, *p.Landed); err != nil {
+			return err
+		}
+		if _, err = a.Core.DismissDecision(ctx, d.ID, p.Landed.Objective+" landed first; this is catching up with it and will ask again"); err != nil && !errors.Is(err, core.ErrConflict) {
+			return err
+		}
+	}
+	return nil
+}
+
+// catchUpRound sends a task back to its implementer to take in work that
+// landed after it started. It is the team's job, not the owner's.
+func (a *App) catchUpRound(ctx context.Context, t core.Task, landed core.Landing) error {
+	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.Status == core.TaskStopped || t.Status == core.TaskDelivered {
+			return "", nil
+		}
+		t.Round++
+		if t.MaxRounds < t.Round {
+			t.MaxRounds = t.Round
+		}
+		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", "Catching up with "+landed.Objective+", which landed first"
+		return t.Objective + " is catching up with " + landed.Objective, nil
 	})
 	return err
 }

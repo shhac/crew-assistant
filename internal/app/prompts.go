@@ -37,12 +37,14 @@ func briefText(p core.Project, t core.Task) string {
 
 // writerPrompt stands on its own, so a fresh session can pick the work up if
 // the previous one cannot be resumed.
-func writerPrompt(p core.Project, t core.Task) string {
+func writerPrompt(p core.Project, t core.Task, caughtUp string) string {
 	code := isCode(p, t)
 	var b strings.Builder
 	b.WriteString(briefText(p, t))
 	last := len(t.Revisions)
 	switch {
+	case caughtUp != "":
+		b.WriteString(caughtUp)
 	case last == 0 && code:
 		b.WriteString("\nYou are in a clone of the repository, on a branch for this task. " + repoInstructions + " Make the change, with tests, following those conventions. Run the relevant tests yourself before you finish.\n")
 	case last == 0:
@@ -81,6 +83,20 @@ func writerPrompt(p core.Project, t core.Task) string {
 // repoInstructions is needed because roles run with no instruction files
 // loaded, the repository's own included.
 const repoInstructions = "First read the repository's own instructions for contributors, such as AGENTS.md, CLAUDE.md, CONTRIBUTING.md and the README, wherever they apply."
+
+// catchUpText tells the implementer that work landed and has been merged
+// into their branch, and what is left to them.
+func catchUpText(landed core.Landing, conflicts []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nSince this task started, another task in the project landed: %q, on branch %s. It has been merged into this branch for you", landed.Objective, landed.Branch)
+	if len(conflicts) > 0 {
+		fmt.Fprintf(&b, ", and these files have conflict markers you must resolve: %s", strings.Join(conflicts, ", "))
+	} else {
+		b.WriteString(" without conflicts")
+	}
+	b.WriteString(". " + repoInstructions + " Make both changes work together: keep what landed working as it was, adapt this task's change and its tests where they now overlap, regenerate any generated files, and run the tests.\n")
+	return b.String()
+}
 
 func isCode(p core.Project, t core.Task) bool {
 	playbook := taskPlaybook(p, t)

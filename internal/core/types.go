@@ -20,7 +20,19 @@ type Project struct {
 	ScratchDirectory  string    `json:"scratch_directory"`
 	SourceID          string    `json:"source_id,omitempty"`
 	SourceDescription string    `json:"source_description,omitempty"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	// Landed is the project's most recently delivered code change. Other work
+	// in the project catches up with it before it is delivered.
+	Landed    *Landing  `json:"landed,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Landing is one delivered code change: the commit and the branch it went to.
+type Landing struct {
+	TaskID    string    `json:"task_id"`
+	Objective string    `json:"objective"`
+	Commit    string    `json:"commit"`
+	Branch    string    `json:"branch"`
+	At        time.Time `json:"at"`
 }
 
 type Decision struct {

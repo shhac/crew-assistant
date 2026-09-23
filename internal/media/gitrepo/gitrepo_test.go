@@ -169,6 +169,62 @@ func TestTasksSharingTheCloneKeepTheirOwnBranches(t *testing.T) {
 	}
 }
 
+func TestCatchingUpMergesLandedWorkAndRefusesUnresolvedConflicts(t *testing.T) {
+	source := ownerRepo(t)
+	r, err := Open(ctx, t.TempDir(), source, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, err := r.Begin(ctx, "crew-task/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Workspace(), "main.go"), "package main\n\nfunc A() {}\n")
+	landed, _, err := r.Snapshot(ctx, base, base, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = r.Begin(ctx, "crew-task/b"); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Workspace(), "main.go"), "package main\n\nfunc B() {}\n")
+	b1, _, err := r.Snapshot(ctx, base, base, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in, err := r.Contains(ctx, b1, landed); err != nil || in {
+		t.Fatalf("b already contains a: %v %v", in, err)
+	}
+	if err = r.Reset(ctx, "crew-task/b", b1); err != nil {
+		t.Fatal(err)
+	}
+	conflicts, err := r.Merge(ctx, landed)
+	if err != nil || len(conflicts) != 1 || conflicts[0] != "main.go" {
+		t.Fatalf("conflicts %v err %v", conflicts, err)
+	}
+	if _, _, err = r.Snapshot(ctx, landed, b1, "b caught up"); err == nil || !strings.Contains(err.Error(), "conflict markers") {
+		t.Fatalf("recorded unresolved conflicts: %v", err)
+	}
+	// A failed round is reset; the next one merges again and resolves.
+	if err = r.Reset(ctx, "crew-task/b", b1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.Merge(ctx, landed); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Workspace(), "main.go"), "package main\n\nfunc A() {}\n\nfunc B() {}\n")
+	b2, files, err := r.Snapshot(ctx, landed, b1, "b caught up")
+	if err != nil || len(files) != 1 {
+		t.Fatalf("files %v err %v", files, err)
+	}
+	if in, err := r.Contains(ctx, b2, landed); err != nil || !in {
+		t.Fatalf("the caught-up revision does not contain what landed: %v %v", in, err)
+	}
+	if in, _ := r.Contains(ctx, b2, b1); !in {
+		t.Fatal("the caught-up revision dropped the task's own history")
+	}
+}
+
 func TestPlantedHooksAndFsmonitorNeverRunAsTheDaemon(t *testing.T) {
 	source := ownerRepo(t)
 	r, err := Open(ctx, t.TempDir(), source, nil)

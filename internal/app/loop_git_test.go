@@ -192,3 +192,90 @@ func TestBranchNamesKeepWholeWords(t *testing.T) {
 		}
 	}
 }
+
+// The owner approves one change; the other, which started from the same
+// point and touched the same file, catches up, resolves the conflict with its
+// team and asks again, building on what landed. The owner only approves.
+func TestTheSecondChangeCatchesUpWhenTheFirstLands(t *testing.T) {
+	source := t.TempDir()
+	ownerGit(t, source, "init", "-q", "-b", "main")
+	ownerGit(t, source, "config", "commit.gpgsign", "false")
+	os.WriteFile(filepath.Join(source, "main.go"), []byte("package main\n"), 0600)
+	ownerGit(t, source, "add", "-A")
+	ownerGit(t, source, "commit", "-q", "-m", "start")
+
+	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass, pass, pass, pass, pass}}}
+	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
+	a.runner = runner
+	ctx := context.Background()
+	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{source}, Brief: core.BriefInput{Goal: "Add features"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.SetTeam(ctx, engine.SetTeamArgs{ProjectID: p.ID, Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	a.StopTask(ctx, snap.Tasks[0].ProjectID, snap.Tasks[0].ID)
+	first, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
+	second, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add B"})
+	current := func(id string) core.Task {
+		t.Helper()
+		settle(t, a)
+		snap, _ := a.Core.Snapshot(ctx)
+		for _, task := range snap.Tasks {
+			if task.ID == id {
+				return task
+			}
+		}
+		t.Fatalf("no task %s", id)
+		return core.Task{}
+	}
+	first, second = current(first.ID), current(second.ID)
+	if first.Status != core.TaskWaiting || second.Status != core.TaskWaiting || first.Base != second.Base {
+		t.Fatalf("both should wait for approval from the same start: %+v\n%+v", first, second)
+	}
+	stale := openDecision(t, a, second)
+	if _, err = a.Core.ResolveDecision(ctx, openDecision(t, a, first).ID, choiceApprove); err != nil {
+		t.Fatal(err)
+	}
+	first, second = current(first.ID), current(second.ID)
+	if first.Status != core.TaskDelivered || first.DeliveredTo != "paul/add-a" {
+		t.Fatalf("the first change did not land: %+v", first)
+	}
+	snap, _ = a.Core.Snapshot(ctx)
+	if d, _ := findDecision(snap, stale.ID); d.Status != "dismissed" {
+		t.Fatalf("the out-of-date approval is still open: %+v", d)
+	}
+	if second.Status != core.TaskWaiting || len(second.Revisions) != 2 || second.Base != first.Revisions[0].Ref {
+		t.Fatalf("the second change did not catch up: %+v", second)
+	}
+	var catchUp string
+	for _, spec := range runner.seen {
+		if strings.Contains(spec.Prompt, "another task in the project landed") {
+			catchUp = spec.Prompt
+		}
+	}
+	if !strings.Contains(catchUp, `"Add A", on branch paul/add-a`) || !strings.Contains(catchUp, "conflict markers you must resolve: feature.go") {
+		t.Fatalf("the implementer was not told what landed and what conflicts: %q", catchUp)
+	}
+	d := openDecision(t, a, second)
+	if !strings.Contains(d.Context, "It builds on Add A, which landed first") {
+		t.Fatalf("the owner is not told the change builds on what landed: %s", d.Context)
+	}
+	if _, err = a.Core.ResolveDecision(ctx, d.ID, choiceApprove); err != nil {
+		t.Fatal(err)
+	}
+	if second = current(second.ID); second.Status != core.TaskDelivered || second.DeliveredTo != "paul/add-b" {
+		t.Fatalf("the second change did not land: %+v", second)
+	}
+	// Both land in the owner's repository, the second on top of the first.
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", "paul/add-a", "paul/add-b")
+	cmd.Dir = source
+	if err = cmd.Run(); err != nil {
+		t.Fatal("the second branch does not include the first")
+	}
+	if got := ownerGit(t, source, "show", "paul/add-b:feature.go"); !strings.Contains(got, "attempt 3") || strings.Contains(got, "<<<<<<<") {
+		t.Fatalf("the landed file is not the resolved one: %q", got)
+	}
+}

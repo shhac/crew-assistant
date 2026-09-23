@@ -34,6 +34,13 @@ type medium interface {
 	deliver(ctx context.Context, t core.Task, r core.Revision) (string, error)
 	// deliveryNote tells the owner what approving will do.
 	deliveryNote(t core.Task) string
+	// behind reports whether work landed in the project that the task's
+	// latest revision does not yet include.
+	behind(ctx context.Context, t core.Task) (bool, error)
+	// catchUp brings the landed work into the workspace for the implementer's
+	// next round. It returns the task on its new base and the files left with
+	// conflicts to resolve.
+	catchUp(ctx context.Context, t core.Task) (core.Task, []string, error)
 }
 
 func (a *App) mediumFor(ctx context.Context, p core.Project, playbook *core.Playbook) (medium, error) {
@@ -48,7 +55,7 @@ func (a *App) mediumFor(ctx context.Context, p core.Project, playbook *core.Play
 	if err != nil {
 		return nil, err
 	}
-	return gitMedium{repo: repo, playbook: *playbook}, nil
+	return gitMedium{repo: repo, playbook: *playbook, landed: p.Landed}, nil
 }
 
 func deliverTo(p *core.Playbook) string {
@@ -88,6 +95,10 @@ func (m docsMedium) deliver(_ context.Context, t core.Task, r core.Revision) (st
 	}
 	return m.docs.Deliver(t.ID, r.N, m.deliverTo, t.Objective)
 }
+func (m docsMedium) behind(context.Context, core.Task) (bool, error) { return false, nil }
+func (m docsMedium) catchUp(_ context.Context, t core.Task) (core.Task, []string, error) {
+	return t, nil, nil
+}
 func (m docsMedium) deliveryNote(core.Task) string {
 	if m.deliverTo != "" {
 		return "Approving copies it into " + m.deliverTo + "."
@@ -98,6 +109,7 @@ func (m docsMedium) deliveryNote(core.Task) string {
 type gitMedium struct {
 	repo     gitrepo.Repo
 	playbook core.Playbook
+	landed   *core.Landing
 }
 
 func (m gitMedium) workspace() string  { return m.repo.Workspace() }
@@ -110,8 +122,46 @@ func (m gitMedium) begin(ctx context.Context, t core.Task) (core.Task, error) {
 	}
 	t.Branch = "crew-task/" + t.ID
 	base, from, err := m.repo.Begin(ctx, t.Branch)
+	if err != nil {
+		return t, err
+	}
 	t.Base, t.From = base, from
-	return t, err
+	// Build on what already landed when the owner's branch has not moved past
+	// it, rather than starting behind and catching up later.
+	if m.landed == nil {
+		return t, nil
+	}
+	ahead, err := m.repo.Contains(ctx, m.landed.Commit, base)
+	if err != nil || !ahead || m.landed.Commit == base {
+		return t, err
+	}
+	t.Base, t.From = m.landed.Commit, m.landed.Branch
+	return t, m.repo.Reset(ctx, t.Branch, t.Base)
+}
+
+func (m gitMedium) behind(ctx context.Context, t core.Task) (bool, error) {
+	if m.landed == nil || m.landed.TaskID == t.ID {
+		return false, nil
+	}
+	tip := t.Base
+	if n := len(t.Revisions); n > 0 {
+		tip = t.Revisions[n-1].Ref
+	}
+	if tip == "" {
+		return false, nil
+	}
+	contains, err := m.repo.Contains(ctx, tip, m.landed.Commit)
+	return !contains, err
+}
+
+func (m gitMedium) catchUp(ctx context.Context, t core.Task) (core.Task, []string, error) {
+	conflicts, err := m.repo.Merge(ctx, m.landed.Commit)
+	if err != nil {
+		return t, nil, err
+	}
+	// The task's own change is now measured from what landed.
+	t.Base, t.From = m.landed.Commit, m.landed.Branch
+	return t, conflicts, nil
 }
 
 func (m gitMedium) reset(ctx context.Context, t core.Task) error {
@@ -156,7 +206,11 @@ func (m gitMedium) branchName(t core.Task) string {
 }
 
 func (m gitMedium) deliveryNote(t core.Task) string {
-	return "Approving creates the branch " + m.branchName(t) + " in " + filepath.Base(m.playbook.Repo) + ", from " + startedFrom(t) + ". Nothing is pushed, and your checkout is not touched."
+	note := "Approving creates the branch " + m.branchName(t) + " in " + filepath.Base(m.playbook.Repo) + ", from " + startedFrom(t) + "."
+	if m.landed != nil && m.landed.TaskID != t.ID && t.Base == m.landed.Commit {
+		note += " It builds on " + m.landed.Objective + ", which landed first, so it includes that change too."
+	}
+	return note + " Nothing is pushed, and your checkout is not touched."
 }
 
 func startedFrom(t core.Task) string {
