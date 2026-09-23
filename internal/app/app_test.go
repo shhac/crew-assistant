@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
 func testApp(t *testing.T) *App {
@@ -33,7 +33,7 @@ func testApp(t *testing.T) *App {
 func TestChatModelUsesConfiguredNameAndPersistsToolEffects(t *testing.T) {
 	a := testApp(t)
 	var calls atomic.Int32
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	remote := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
 			t.Error(r.URL.Path)
 		}

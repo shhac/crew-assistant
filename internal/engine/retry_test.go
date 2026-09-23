@@ -6,19 +6,19 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/shhac/crew-assistant/internal/testutil"
 	"github.com/shhac/lib-agent-harness/completion"
 )
 
 func retryFixture(t *testing.T, handler http.HandlerFunc) (*Engine, *atomic.Int32, *[]time.Duration) {
 	t.Helper()
-	server := httptest.NewServer(handler)
+	server := testutil.NewServer(t, handler)
 	t.Cleanup(server.Close)
 	var admissions atomic.Int32
 	e, err := New(Config{Model: "fixture", Endpoint: server.URL, BeforeRequest: func(context.Context) error { admissions.Add(1); return nil }}, ExecutorFunc(func(context.Context, string, json.RawMessage) (any, error) {

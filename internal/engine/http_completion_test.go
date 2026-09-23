@@ -7,12 +7,13 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"net/http/httptest"
 	"testing"
+
+	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
 func TestHTTPEffortAndCallerTools(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			Model     string `json:"model"`
 			Effort    string `json:"reasoning_effort"`
@@ -60,7 +61,7 @@ func TestHTTPUsageRequiresCompleteNonNegativeCounts(t *testing.T) {
 				body += `,"usage":` + tc.usage
 			}
 			body += `}`
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = io.WriteString(w, body)
 			}))
 			defer server.Close()

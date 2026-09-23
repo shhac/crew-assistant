@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
 func TestLocalProjectGuidanceAndToolsReachModel(t *testing.T) {
 	var calls, creations atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			Messages []Message `json:"messages"`
 			Tools    []Tool    `json:"tools"`

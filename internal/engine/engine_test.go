@@ -5,15 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
 func TestChatExecutesCoordinationAndReturnsUsage(t *testing.T) {
 	t.Setenv("TEST_MODEL_KEY", "secret-fixture")
 	calls, actions, reservations := 0, 0, 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if r.Header.Get("Authorization") != "Bearer secret-fixture" {
 			t.Error("missing authentication")
@@ -57,7 +58,7 @@ func TestChatExecutesCoordinationAndReturnsUsage(t *testing.T) {
 }
 func TestModelFailureIsRedactedAndNeverRetried(t *testing.T) {
 	calls := 0
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.WriteHeader(500)
 		_, _ = w.Write([]byte("secret-fixture"))
@@ -74,7 +75,7 @@ func TestModelFailureIsRedactedAndNeverRetried(t *testing.T) {
 }
 func TestAllowanceDenialDoesNotContactModel(t *testing.T) {
 	calls := 0
-	s := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
+	s := testutil.NewServer(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }))
 	defer s.Close()
 	e, _ := New(Config{Endpoint: s.URL, Model: "fixture", BeforeRequest: func(context.Context) error { return errors.New("daily allowance exhausted") }}, ExecutorFunc(func(context.Context, string, json.RawMessage) (any, error) { return nil, nil }))
 	_, err := e.Chat(context.Background(), Request{Message: "Check"})
@@ -83,7 +84,7 @@ func TestAllowanceDenialDoesNotContactModel(t *testing.T) {
 	}
 }
 func TestUnapprovedToolCannotExecute(t *testing.T) {
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"unsafe","type":"function","function":{"name":"shell","arguments":"{}"}}]}}]}`))
 	}))
 	defer s.Close()
@@ -97,7 +98,7 @@ func TestUnapprovedToolCannotExecute(t *testing.T) {
 	}
 }
 func TestTurnLimitKeepsActionEvidence(t *testing.T) {
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"one","type":"function","function":{"name":"read_state","arguments":"{}"}}]}}]}`))
 	}))
 	defer s.Close()
@@ -122,9 +123,9 @@ func TestRejectsCredentialBearingEndpointsAndRedirect(t *testing.T) {
 		}
 	}
 	hits := 0
-	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
+	target := testutil.NewServer(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
 	defer target.Close()
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, 307) }))
+	s := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, 307) }))
 	defer s.Close()
 	e, _ := New(Config{Endpoint: s.URL, Model: "fixture"}, ExecutorFunc(func(context.Context, string, json.RawMessage) (any, error) { return nil, nil }))
 	_, err := e.Chat(context.Background(), Request{Message: "check"})

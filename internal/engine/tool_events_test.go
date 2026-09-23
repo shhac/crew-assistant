@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"testing"
+
+	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
 func TestToolObserverRecordsBeforeExecutionAndConfirmedOutcome(t *testing.T) {
@@ -18,7 +19,7 @@ func TestToolObserverRecordsBeforeExecutionAndConfirmedOutcome(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			calls := 0
-			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			provider := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				w.Header().Set("Content-Type", "application/json")
 				if calls == 1 {
@@ -63,7 +64,7 @@ func TestToolObserverRecordsBeforeExecutionAndConfirmedOutcome(t *testing.T) {
 }
 
 func TestToolObserverFailurePreventsUnrecordedAction(t *testing.T) {
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	provider := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-one","type":"function","function":{"name":"read_state","arguments":"{}"}}]}}]}`))
 	}))

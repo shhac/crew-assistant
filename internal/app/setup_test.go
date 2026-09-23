@@ -11,11 +11,12 @@ import (
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
 func setupModel(t *testing.T, a *App, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
-	server := httptest.NewServer(handler)
+	server := testutil.NewServer(t, handler)
 	t.Cleanup(server.Close)
 	cfg := a.Config()
 	cfg.Model.Engine = "openai-compatible"

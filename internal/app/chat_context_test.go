@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
 func TestChatHistoryCheckpointBatchesAndRetainsOriginals(t *testing.T) {
@@ -31,7 +31,7 @@ func TestChatHistoryCheckpointBatchesAndRetainsOriginals(t *testing.T) {
 	}
 	before, _ := a.Core.Snapshot(ctx)
 	var calls atomic.Int32
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	provider := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		var request struct {
 			Messages []engine.Message `json:"messages"`
@@ -101,7 +101,7 @@ func TestChatCheckpointFailurePreservesHistory(t *testing.T) {
 		}
 		_, _ = a.Core.AddMessage(ctx, role, "source")
 	}
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	provider := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":""}}]}`))
 	}))
 	defer provider.Close()

@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
 func largeChatHistory() []Message {
@@ -19,7 +20,7 @@ func largeChatHistory() []Message {
 }
 func TestChatCompactionArchivesBeforeFurtherInferenceAndCountsSummary(t *testing.T) {
 	archived, reservations, calls := false, 0, 0
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	remote := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		var in struct {
 			Messages []Message `json:"messages"`
@@ -61,7 +62,7 @@ func TestChatCompactionArchivesBeforeFurtherInferenceAndCountsSummary(t *testing
 }
 func TestChatArchiveFailureStopsAfterToolsDisabledSummary(t *testing.T) {
 	calls := 0
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	remote := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Checkpoint; no success inferred."}}]}`))
 	}))

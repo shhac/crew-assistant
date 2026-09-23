@@ -4,16 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
 func TestAssignedUsesViewerScopeAndPagination(t *testing.T) {
 	t.Setenv("TEST_LINEAR_KEY", "linear-fixture-secret")
 	calls := 0
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if r.Header.Get("Authorization") != "linear-fixture-secret" {
 			t.Error("missing credential")
@@ -59,7 +60,7 @@ func TestAssignedUsesViewerScopeAndPagination(t *testing.T) {
 func TestAssignedRejectsPartialGraphQLErrorAndScopeLeak(t *testing.T) {
 	t.Setenv("TEST_LINEAR_KEY", "private-key")
 	for _, body := range []string{`{"data":{"viewer":{"id":"owner"}},"errors":[{"message":"private-key"}]}`, `{"data":{"viewer":{"id":"owner"},"issues":{"nodes":[{"id":"issue","team":{"id":"other-team"}}],"pageInfo":{"hasNextPage":false}}}}`} {
-		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }))
+		s := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }))
 		c, _ := New(Config{Endpoint: s.URL, APIKeyEnv: "TEST_LINEAR_KEY", TeamIDs: []string{"team"}})
 		_, err := c.Assigned(context.Background())
 		s.Close()
@@ -70,7 +71,7 @@ func TestAssignedRejectsPartialGraphQLErrorAndScopeLeak(t *testing.T) {
 }
 func TestAssignedTimeout(t *testing.T) {
 	t.Setenv("TEST_LINEAR_KEY", "fixture")
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 		case <-time.After(50 * time.Millisecond):
@@ -89,7 +90,7 @@ func TestRequiresExplicitTeamScope(t *testing.T) {
 }
 func TestRepeatedCursorFails(t *testing.T) {
 	t.Setenv("TEST_LINEAR_KEY", "fixture")
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":{"viewer":{"id":"owner"},"issues":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":"same"}}}}`))
 	}))
 	defer s.Close()

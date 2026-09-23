@@ -10,11 +10,13 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/testutil"
 	libcli "github.com/shhac/lib-agent-cli/cli"
 	output "github.com/shhac/lib-agent-output"
 )
 
 func TestDemoShutdownReleasesStateAndRuntimeRecord(t *testing.T) {
+	testutil.RequireLoopback(t)
 	dir := t.TempDir()
 	o := &options{configPath: filepath.Join(dir, "config.json"), statePath: filepath.Join(dir, "state.db"), globals: &libcli.Globals{Format: string(output.FormatNDJSON)}}
 	cfg := config.Default()
