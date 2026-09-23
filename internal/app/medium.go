@@ -19,6 +19,8 @@ import (
 type medium interface {
 	workspace() string
 	env() []string
+	// readable is what roles may read outside the workspace.
+	readable() []string
 	// begin readies the workspace for a task's first round and returns the
 	// task with anything the medium needs to remember.
 	begin(ctx context.Context, t core.Task) (core.Task, error)
@@ -61,8 +63,9 @@ type docsMedium struct {
 	deliverTo string
 }
 
-func (m docsMedium) workspace() string { return m.docs.Workspace() }
-func (m docsMedium) env() []string     { return nil }
+func (m docsMedium) workspace() string  { return m.docs.Workspace() }
+func (m docsMedium) env() []string      { return nil }
+func (m docsMedium) readable() []string { return nil }
 func (m docsMedium) begin(_ context.Context, t core.Task) (core.Task, error) {
 	return t, nil
 }
@@ -97,8 +100,9 @@ type gitMedium struct {
 	playbook core.Playbook
 }
 
-func (m gitMedium) workspace() string { return m.repo.Workspace() }
-func (m gitMedium) env() []string     { return m.repo.Env() }
+func (m gitMedium) workspace() string  { return m.repo.Workspace() }
+func (m gitMedium) env() []string      { return m.repo.Env() }
+func (m gitMedium) readable() []string { return m.repo.Readable() }
 
 func (m gitMedium) begin(ctx context.Context, t core.Task) (core.Task, error) {
 	if t.Base != "" {

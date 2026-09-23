@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -127,6 +128,10 @@ func TestCodeTaskRunsInACloneAndDeliversALocalBranch(t *testing.T) {
 		}
 		if !strings.HasPrefix(spec.WorkDir, filepath.Join(p.ScratchDirectory, "clone")) || !strings.Contains(strings.Join(spec.Env, " "), "GOCACHE=") {
 			t.Fatalf("a role ran outside the clone or without its build environment: %+v", spec)
+		}
+		// An offline build needs the modules the owner already has.
+		if len(spec.Read) != 1 || !slices.Contains(spec.Env, "GOMODCACHE="+spec.Read[0]) {
+			t.Fatalf("a role cannot read the Go module cache its build uses: read=%v env=%v", spec.Read, spec.Env)
 		}
 	}
 	if !sawQA || !sawReviewer {

@@ -24,7 +24,10 @@ type Spec struct {
 	// the network either way.
 	Write bool
 	// Env adds ordinary settings, such as build caches inside WorkDir.
-	Env          []string
+	Env []string
+	// Read names directories outside WorkDir the role may read, such as a
+	// module cache its build needs.
+	Read         []string
 	Instructions string
 	Prompt       string
 	// Resume continues an earlier session of this role, when it still matches
@@ -55,7 +58,7 @@ func (Native) Run(ctx context.Context, spec Spec) (Result, error) {
 		WorkDir:     spec.WorkDir,
 		Model:       spec.Model,
 		Effort:      spec.Effort,
-		Sandbox:     &session.Sandbox{Write: spec.Write},
+		Sandbox:     &session.Sandbox{Write: spec.Write, Read: spec.Read},
 		Env:         spec.Env,
 	}
 	if spec.Engine != string(session.Codex) {

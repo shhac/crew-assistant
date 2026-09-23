@@ -155,9 +155,9 @@ func taskPlaybook(p core.Project, t core.Task) *core.Playbook {
 	return p.Playbook
 }
 
-func (a *App) roleSpec(r core.Role, workDir string, write bool, env []string, prompt string) roles.Spec {
+func (a *App) roleSpec(r core.Role, workDir string, write bool, m medium, prompt string) roles.Spec {
 	cfg := a.Config()
-	spec := roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Write: write, Env: env, Instructions: r.Instructions, Prompt: prompt}
+	spec := roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Write: write, Env: m.env(), Read: m.readable(), Instructions: r.Instructions, Prompt: prompt}
 	if r.Engine == "codex" {
 		spec.Binary, spec.Home = cfg.Model.CodexBin, cfg.Model.CodexHome
 		spec.RuntimeHome = filepath.Join(a.Core.StateDirectory(), "roles", "codex")
@@ -195,7 +195,7 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 	if held, err := a.holdForUsage(ctx, t, writers[0]); held || err != nil {
 		return err
 	}
-	spec := a.roleSpec(writers[0], m.workspace(), true, m.env(), writerPrompt(p, t))
+	spec := a.roleSpec(writers[0], m.workspace(), true, m, writerPrompt(p, t))
 	spec.Resume = t.WriterSession
 	result, err := a.runner.Run(ctx, spec)
 	if err != nil {
@@ -275,7 +275,7 @@ func (a *App) runChecker(ctx context.Context, p core.Project, t core.Task, r cor
 	prompt := base
 	var parseErr error
 	for attempt := 0; attempt < 2; attempt++ {
-		result, err := a.runner.Run(ctx, a.roleSpec(checker, dir, checker.Kind == core.RoleQA, m.env(), prompt))
+		result, err := a.runner.Run(ctx, a.roleSpec(checker, dir, checker.Kind == core.RoleQA, m, prompt))
 		if err != nil {
 			return core.Verdict{}, err
 		}
