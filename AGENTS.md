@@ -2,6 +2,10 @@
 
 Go CLI and daemon for personal-assistant coordination. Dashboard is dark-mode-first; home is Overview, not Today/Tomorrow. Assistant display name comes from config; its default is defined once.
 
+## Pending direction (2026-09-23)
+
+A near-full rebuild is proposed in `design-docs/2026-09-23-project-teams.md`: general-purpose projects (code is one medium), Human → Assistant → Project manager → team roles (implementer, reviewer, QA) working from a shared project record, and playbooks plus media adapters in place of the worker broker. The project is being renamed to `crew-assistant`, with `agent-code-review` becoming `crew-code-review` (`design-docs/decisions/2026-09-crew-prefix.md`). The owner's pending phase 0 decisions come first: trust, CLI sandboxes, migration and the rewrites of rules below. Until then, the rules below still apply; do not start rebuild code before the owner confirms phase 0.
+
 ## Architecture and boundaries
 
 - Go owns deterministic policy, durable state, retries, scheduling, adapters and APIs. The model chooses coordination actions through constrained tools.

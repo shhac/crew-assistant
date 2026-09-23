@@ -265,8 +265,10 @@ chat. Archive the old agents and work items rather than migrate them.
 ## Build order
 
 0. **Decide.** Settle the trust trade-off, confirm the CLI sandboxes, the
-   migration, the `AGENTS.md` rewrites and the project name (see Open
-   questions).
+   migration and the `AGENTS.md` rewrites (see Open questions). Carry out the
+   `crew-assistant` rename from the
+   [decision's checklist](decisions/2026-09-crew-prefix.md) before new code
+   lands.
 1. **The loop on local documents.** One project, a writer and a reviewer, with
    the assistant acting as PM and owner-gated delivery. This adapter is thin, so
    this phase would test the part that matters: whether agent review produces
@@ -311,13 +313,9 @@ success.
 2. For local documents, what would "deliver" mean: copy to a chosen folder, or
    mark a revision as final?
 3. Should long projects, such as a book, have a persistent PM session?
-4. Should the rebuild ship under a new name? `agent-*` means "a tool an agent
-   uses", while this is a daemon that runs agents. The new prefix also had to
-   fit `agent-code-review`, a sibling daemon that runs review agents.
-   `crew-assistant` and `crew-code-review` were suggested. Renaming would touch the binary, the Go
-   module, the config and state namespace, the brew formula and the repository.
-   The existing legacy-namespace detection gives the state files a migration
-   path.
+4. ~~Should the rebuild ship under a new name?~~ Decided on 2026-09-23: this
+   project becomes `crew-assistant`, and its sibling becomes `crew-code-review`.
+   See [the `crew-` prefix](decisions/2026-09-crew-prefix.md).
 
 ## Sources
 
