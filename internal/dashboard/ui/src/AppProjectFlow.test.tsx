@@ -84,7 +84,7 @@ describe("project context", () => {
       ).getByRole("heading", { name: "Choose a scope" }),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /^Decisions/ }));
-    expect(window.location.hash).toBe("");
+    expect(window.location.hash).toBe("#/decisions");
     const operations = await screen.findByRole("region", {
       name: "Interrupted operations",
     });
@@ -93,7 +93,7 @@ describe("project context", () => {
     );
     await screen.findByRole("region", { name: "Brief" });
     fireEvent.click(screen.getByRole("button", { name: /All projects/ }));
-    expect(window.location.hash).toBe("");
+    expect(window.location.hash).toBe("#/projects");
     expect(screen.queryByRole("region", { name: "Brief" })).toBeNull();
   });
 

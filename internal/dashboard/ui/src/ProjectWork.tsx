@@ -108,9 +108,11 @@ function scrollToDecision(decisionID: string) {
 
 export function TaskList({
   tasks,
+  hasTeam,
   refresh,
 }: {
   tasks: Task[];
+  hasTeam: boolean;
   refresh: () => Promise<void>;
 }) {
   if (!tasks.length)
@@ -120,7 +122,12 @@ export function TaskList({
   return (
     <ul className="task-list" aria-label="Requests">
       {tasks.map((task) => (
-        <TaskRow key={task.id} task={task} refresh={refresh} />
+        <TaskRow
+          key={task.id}
+          task={task}
+          hasTeam={hasTeam}
+          refresh={refresh}
+        />
       ))}
     </ul>
   );
@@ -128,14 +135,16 @@ export function TaskList({
 
 function TaskRow({
   task,
+  hasTeam,
   refresh,
 }: {
   task: Task;
+  hasTeam: boolean;
   refresh: () => Promise<void>;
 }) {
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState("");
-  const status = taskStatusLine(task);
+  const status = taskStatusLine(task, hasTeam);
   const detail = taskDetail(task);
   const decisionID = task.status === "waiting" ? task.decision_id : "";
   const finished = task.status === "delivered" || task.status === "stopped";
@@ -158,6 +167,7 @@ function TaskRow({
         {detail && <span>{detail}</span>}
         {error && <ErrorNotice error={error} />}
       </div>
+      <div className="task-row-actions">
       {!finished && (
         <button
           type="button"
@@ -174,11 +184,16 @@ function TaskRow({
           className="text-button task-decision-link"
           onClick={() => scrollToDecision(decisionID)}
         >
-          <Status tone={status.tone}>{status.label}</Status>
+          <Status tone={status.tone} plain>
+            {status.label}
+          </Status>
         </button>
       ) : (
-        <Status tone={status.tone}>{status.label}</Status>
+        <Status tone={status.tone} plain>
+            {status.label}
+          </Status>
       )}
+      </div>
     </li>
   );
 }

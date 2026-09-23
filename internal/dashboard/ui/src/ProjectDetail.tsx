@@ -70,7 +70,11 @@ export function ProjectDetail({
           <div className="section-heading">
             <h2>Asked for {tasks.length > 0 && <span>{tasks.length}</span>}</h2>
           </div>
-          <TaskList tasks={tasks} refresh={refresh} />
+          <TaskList
+            tasks={tasks}
+            hasTeam={!!project.playbook}
+            refresh={refresh}
+          />
           <WorkHistory project={project} tasks={tasks} />
         </section>
         <BriefCard

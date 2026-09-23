@@ -119,6 +119,14 @@ export function App() {
   }, [state?.assistant.theme]);
   useEffect(() => {
     const follow = () => {
+      const page = pages.find(
+        (p) => window.location.hash === `#/${p.toLowerCase()}`,
+      );
+      if (page) {
+        setPage(page);
+        setSelectedProject(null);
+        return;
+      }
       const match = /^#\/projects\/([^/]+)$/.exec(window.location.hash);
       if (match) {
         try {
@@ -143,10 +151,11 @@ export function App() {
     setChatOpen(false);
   }
   function navigate(next: Page) {
+    // Each page has its own address, so it can be bookmarked or linked to.
     window.history.replaceState(
       window.history.state,
       "",
-      window.location.pathname + window.location.search,
+      `${window.location.pathname}${window.location.search}#/${next.toLowerCase()}`,
     );
     setChatExpanded(false);
     setPage(next);

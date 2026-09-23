@@ -59,12 +59,15 @@ export function Mark({ small = false }: { small?: boolean }) {
 export function Status({
   children,
   tone = "",
+  plain = false,
 }: {
   children: ReactNode;
   tone?: string;
+  /** Keep a label's own wording instead of capitalising every word. */
+  plain?: boolean;
 }) {
   return (
-    <span className={`status ${tone}`}>
+    <span className={`status ${tone}${plain ? " plain" : ""}`}>
       <span className="status-dot" />
       {children}
     </span>

@@ -7,10 +7,12 @@ export interface StatusLine {
 
 const latestDraft = (task: Task) => task.revisions?.at(-1)?.n ?? 0;
 
-export function taskStatusLine(task: Task): StatusLine {
+export function taskStatusLine(task: Task, hasTeam = true): StatusLine {
   switch (task.status) {
     case "queued":
-      return { label: "Waiting to start", tone: "" };
+      return hasTeam
+        ? { label: "Waiting to start", tone: "" }
+        : { label: "Waiting for a team", tone: "amber" };
     case "writing":
       return { label: `Writing draft ${latestDraft(task) + 1}`, tone: "" };
     case "reviewing":
@@ -66,7 +68,7 @@ export function projectStatusLine(project: Project, tasks: Task[]): StatusLine {
   const open = projectTasks(project, tasks);
   for (const status of attention) {
     const task = open.find((t) => t.status === status);
-    if (task) return taskStatusLine(task);
+    if (task) return taskStatusLine(task, !!project.playbook);
   }
   return { label: "Idle", tone: "" };
 }

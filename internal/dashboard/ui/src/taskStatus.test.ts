@@ -37,6 +37,11 @@ describe("task status in plain words", () => {
     expect(taskStatusLine(task(overrides)).label).toBe(label);
   });
 
+  it("says a queued request is waiting for a team when there is none", () => {
+    const parked = taskStatusLine(task({ status: "queued" }), false);
+    expect(parked).toEqual({ label: "Waiting for a team", tone: "amber" });
+  });
+
   it("tolerates revisions the daemon sent as null", () => {
     expect(
       taskStatusLine(task({ status: "writing", revisions: null })).label,

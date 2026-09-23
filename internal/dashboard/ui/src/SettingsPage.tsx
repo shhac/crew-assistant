@@ -210,11 +210,11 @@ export function Settings({
       </section>
       <section className="section-block">
         <div className="section-heading">
-          <h2>Dispatch control</h2>
+          <h2>Pause</h2>
         </div>
         <p className="section-description">
-          Pausing stops new work from being dispatched. Work already underway
-          may continue.
+          Pausing stops teams from starting their next step. A step already
+          running finishes first.
         </p>
         {control}
       </section>
@@ -384,7 +384,65 @@ function ConfigurationFields({
             { type: "number", min: 1, max: 32 },
           )}
         </div>
+        <RoleUsageFields config={config} onChange={onChange} />
       </details>
+    </div>
+  );
+}
+
+const usageEngines = [
+  ["codex_max_used_percent", "Hold Codex roles above (% of subscription used)"],
+  ["claude_max_used_percent", "Hold Claude roles above (% of subscription used)"],
+] as const;
+
+/**
+ * Team roles wait, rather than fail, while a subscription is nearly used up.
+ * The thresholds live one level deeper than the other limits.
+ */
+function RoleUsageFields({
+  config,
+  onChange,
+}: {
+  config: Config;
+  onChange: (value: Config) => void;
+}) {
+  const limits = (config.limits || {}) as Record<string, unknown>;
+  const usage = (limits.role_usage || {}) as Record<string, unknown>;
+  const set = (key: string, value: unknown) =>
+    onChange({
+      ...config,
+      limits: { ...limits, role_usage: { ...usage, [key]: value } },
+    });
+  return (
+    <div className="config-field-group">
+      {usageEngines.map(([key, label]) => (
+        <label key={key} htmlFor={`role-usage-${key}`}>
+          {label}
+          <input
+            id={`role-usage-${key}`}
+            type="number"
+            min={0}
+            max={100}
+            value={typeof usage[key] === "number" ? (usage[key] as number) : ""}
+            onChange={(e) => set(key, Number(e.target.value))}
+          />
+        </label>
+      ))}
+      <label htmlFor="role-usage-unavailable">
+        When usage can't be checked
+        <select
+          id="role-usage-unavailable"
+          value={usage.on_unavailable === "pause" ? "pause" : "allow"}
+          onChange={(e) => set("on_unavailable", e.target.value)}
+        >
+          <option value="allow">Carry on</option>
+          <option value="pause">Wait until it can be</option>
+        </select>
+      </label>
+      <p className="field-hint">
+        A held role waits for its usage window to reset and then carries on by
+        itself. 0 turns the hold off for that engine.
+      </p>
     </div>
   );
 }

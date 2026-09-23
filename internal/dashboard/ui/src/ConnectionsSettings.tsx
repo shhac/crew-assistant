@@ -287,13 +287,6 @@ function ConnectionEditor({
           ))}
         </div>
       )}
-      {usesDefaultAccount && (
-        <p className="field-hint">
-          Uses the current account and authentication from{" "}
-          <code>agent-notion</code>. Changing that CLI’s default changes the
-          account this connection reads.
-        </p>
-      )}
       {usesDefaultAccount && connection.profiles.length > 0 && (
         <button
           type="button"
