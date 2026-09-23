@@ -293,3 +293,43 @@
 .chat-queue-editor label {
   font-size: 11px;
 }
+
+/* Files waiting in the composer until the message is sent. */
+.composer-dragging {
+  border-color: var(--accent);
+  border-style: dashed;
+}
+.composer-assets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 10px 10px 0;
+}
+.composer-assets li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 4px 3px 9px;
+  font-size: 10px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.composer-asset-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-asset-size,
+.composer-asset-reading {
+  color: var(--muted);
+}
+.composer-asset-errors p {
+  margin: 0;
+}
+.composer-asset-errors p + p {
+  margin-top: 4px;
+}

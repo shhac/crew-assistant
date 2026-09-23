@@ -13,10 +13,20 @@ import { dateLabel, Icon } from "./ui";
 import { ChatQueue, type QueueHold } from "./ChatQueue";
 import { ToolActivity } from "./ToolActivity";
 import { fullDateLabel } from "./ui";
+import {
+  carriesFiles,
+  composeMessage,
+  messageLimitError,
+  readAsset,
+  sizeLabel,
+  type ComposerAsset,
+} from "./composerAssets";
 import "./chat.css";
 type VisibleTurn = Omit<ChatTurn, "status"> & {
   status:
     ChatTurn["status"] | "waiting" | "sending" | "unconfirmed" | "rejected";
+  /** What the composer held, so a refused message restores its attachments. */
+  draft?: { text: string; assets: ComposerAsset[] };
 };
 // A turn has spoken once its reply is in the thread; until then its newest
 // tool step is still the most recent thing the owner has to look at.
@@ -179,6 +189,24 @@ export function ChatPanel({
   function setDraft(value: string) {
     draftRef.current = value;
     setMessage(value);
+  }
+  const [assets, setAssets] = useState<ComposerAsset[]>([]);
+  const assetsRef = useRef(assets);
+  assetsRef.current = assets;
+  const [assetErrors, setAssetErrors] = useState<string[]>([]);
+  const [reading, setReading] = useState(0);
+  const readingRef = useRef(0);
+  const [dragging, setDragging] = useState(false);
+  async function addFiles(files: File[]) {
+    if (!files.length) return;
+    readingRef.current += files.length;
+    setReading(readingRef.current);
+    const results = await Promise.all(files.map(readAsset));
+    readingRef.current -= files.length;
+    setReading(readingRef.current);
+    const added = results.flatMap((r) => ("asset" in r ? [r.asset] : []));
+    setAssets((current) => [...current, ...added]);
+    setAssetErrors(results.flatMap((r) => ("error" in r ? [r.error] : [])));
   }
   const [turns, setTurns] = useState<VisibleTurn[]>([]);
   const [error, setError] = useState("");
@@ -367,10 +395,21 @@ export function ChatPanel({
   function send(e: FormEvent) {
     e.preventDefault();
     const submitted = draftRef.current.trim();
-    if (!submitted) return;
+    const attached = assetsRef.current;
+    // Sending while a file is still being read would leave it behind.
+    if ((!submitted && !attached.length) || readingRef.current) return;
+    const composed = composeMessage(submitted, attached);
+    const tooLarge = messageLimitError(composed);
+    if (tooLarge) {
+      setAssetErrors([tooLarge]);
+      return;
+    }
     const turn: VisibleTurn = {
       id: crypto.randomUUID(),
-      message: submitted,
+      message: composed,
+      draft: attached.length
+        ? { text: submitted, assets: attached }
+        : undefined,
       // The daemon has not seen this message yet, so it has no revision of its
       // own; it gets one once the queue accepts it.
       revision: 0,
@@ -380,6 +419,9 @@ export function ChatPanel({
     };
     setTurns((current) => [...current, turn]);
     setDraft("");
+    assetsRef.current = [];
+    setAssets([]);
+    setAssetErrors([]);
     void enqueue(turn);
   }
   async function cancel(turn: VisibleTurn) {
@@ -485,11 +527,18 @@ export function ChatPanel({
                 cancelling={cancelling}
                 onCancel={cancel}
                 onRestore={(t) => {
+                  // Attachments go back to the composer as attachments, not as
+                  // the text they were folded into.
+                  const text = t.draft ? t.draft.text : t.message;
                   setDraft(
-                    draftRef.current
-                      ? `${draftRef.current}\n\n${t.message}`
-                      : t.message,
+                    draftRef.current && text
+                      ? `${draftRef.current}\n\n${text}`
+                      : draftRef.current || text,
                   );
+                  if (t.draft) {
+                    const restored = t.draft.assets;
+                    setAssets((current) => [...current, ...restored]);
+                  }
                   setTurns((current) => current.filter((x) => x.id !== t.id));
                   document.getElementById("chat-message")?.focus();
                 }}
@@ -562,14 +611,77 @@ export function ChatPanel({
           }}
           onChanged={() => refreshRef.current()}
         />
-        <form className="chat-composer" onSubmit={send}>
+        {assetErrors.length > 0 && (
+          <div className="error-notice composer-asset-errors" role="alert">
+            {assetErrors.map((text) => (
+              <p key={text}>{text}</p>
+            ))}
+          </div>
+        )}
+        <form
+          className={`chat-composer${dragging ? " composer-dragging" : ""}`}
+          onSubmit={send}
+          onDragOver={(e) => {
+            if (!carriesFiles(e.dataTransfer)) return;
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+              setDragging(false);
+          }}
+          onDrop={(e) => {
+            setDragging(false);
+            const files = Array.from(e.dataTransfer?.files || []);
+            // Dropped text falls through to the textarea as usual.
+            if (!files.length) return;
+            e.preventDefault();
+            void addFiles(files);
+          }}
+        >
           <label className="sr-only" htmlFor="chat-message">
             Message {name}
           </label>
+          {(assets.length > 0 || reading > 0) && (
+            <ul className="composer-assets" aria-label="Attachments">
+              {assets.map((asset) => (
+                <li key={asset.id}>
+                  <span className="composer-asset-name">{asset.name}</span>
+                  <span className="composer-asset-size">
+                    {sizeLabel(asset.size)}
+                  </span>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={`Remove attachment ${asset.name}`}
+                    onClick={() =>
+                      setAssets((current) =>
+                        current.filter((a) => a.id !== asset.id),
+                      )
+                    }
+                  >
+                    <Icon name="Close" size={12} />
+                  </button>
+                </li>
+              ))}
+              {reading > 0 && (
+                <li className="composer-asset-reading">Reading files…</li>
+              )}
+            </ul>
+          )}
           <textarea
             id="chat-message"
             value={message}
             onChange={(e) => setDraft(e.target.value)}
+            onPaste={(e) => {
+              // Anything with text pastes as text; a clipboard of only files
+              // (a screenshot, a copied file) becomes attachments.
+              if (e.clipboardData.getData("text/plain")) return;
+              const files = Array.from(e.clipboardData.files || []);
+              if (!files.length) return;
+              e.preventDefault();
+              void addFiles(files);
+            }}
             placeholder={`Ask ${name}, or hand over an outcome…`}
             rows={3}
             maxLength={20000}
@@ -586,11 +698,14 @@ export function ChatPanel({
             }}
           />
           <div className="composer-footer">
-            <span>Enter to send · Shift + Enter for a new line</span>
+            <span>
+              Enter to send · Shift + Enter for a new line · Drop or paste text
+              files to attach
+            </span>
             <button
               className="send-button"
               type="submit"
-              disabled={!message.trim()}
+              disabled={(!message.trim() && !assets.length) || reading > 0}
               aria-label="Send message"
             >
               <Icon name="Send" size={17} />

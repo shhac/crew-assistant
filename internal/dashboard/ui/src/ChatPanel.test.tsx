@@ -507,3 +507,146 @@ describe("conversation", () => {
     expect(open).toHaveBeenCalledWith("proj-123");
   });
 });
+describe("composer attachments", () => {
+  const textFile = (content: string, name: string, type = "text/plain") =>
+    new File([content], name, { type });
+  function drop(files: File[]) {
+    const form = screen.getByRole("textbox").closest("form")!;
+    fireEvent.dragOver(form, { dataTransfer: { files, types: ["Files"] } });
+    return fireEvent.drop(form, {
+      dataTransfer: { files, types: ["Files"] },
+    });
+  }
+  function paste(files: File[], text = "") {
+    return fireEvent.paste(screen.getByRole("textbox"), {
+      clipboardData: {
+        files,
+        types: files.length ? ["Files"] : ["text/plain"],
+        getData: (type: string) => (type === "text/plain" ? text : ""),
+      },
+    });
+  }
+  const attachments = () => screen.queryByRole("list", { name: "Attachments" });
+  const sentMessages = (server: ReturnType<typeof backend>) =>
+    server
+      .posts()
+      .map(([, options]) => JSON.parse(options!.body as string).message);
+  it("attaches dropped text files, refuses others with a reason, and sends what remains", async () => {
+    const server = backend();
+    render(panel());
+    expect(
+      drop([
+        textFile("# Plan\n", "plan.md", ""),
+        textFile("a,b\n", "data.csv", "text/csv"),
+        new File([new Uint8Array([137, 80, 78, 71])], "shot.png", {
+          type: "image/png",
+        }),
+      ]),
+    ).toBe(false);
+    await tick(0);
+    const list = attachments()!;
+    expect(within(list).getByText("plan.md")).toBeTruthy();
+    expect(within(list).getByText("data.csv")).toBeTruthy();
+    expect(within(list).queryByText("shot.png")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "shot.png can't be attached: only text files can be sent (image/png is not supported yet).",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove attachment data.csv" }),
+    );
+    expect(within(list).queryByText("data.csv")).toBeNull();
+    typeAndSend("Use this plan");
+    await tick(0);
+    expect(sentMessages(server)).toEqual([
+      "Use this plan\n\nAttached file: plan.md\n```\n# Plan\n```",
+    ]);
+    expect(attachments()).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+  it("attaches pasted files, sends them without text, and leaves ordinary text paste alone", async () => {
+    const server = backend();
+    render(panel());
+    expect(paste([], "Just words")).toBe(true);
+    await tick(0);
+    expect(attachments()).toBeNull();
+    expect(paste([textFile("note", "copied.txt")], "copied.txt")).toBe(true);
+    await tick(0);
+    expect(attachments()).toBeNull();
+    expect(paste([textFile("Remember the milk", "note.txt")])).toBe(false);
+    await tick(0);
+    expect(within(attachments()!).getByText("note.txt")).toBeTruthy();
+    const send = screen.getByRole("button", { name: "Send message" });
+    expect((send as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(send);
+    await tick(0);
+    expect(sentMessages(server)).toEqual([
+      "Attached file: note.txt\n```\nRemember the milk\n```",
+    ]);
+  });
+  it("reports size limits and unreadable files, and keeps attachments when a message is too large", async () => {
+    const server = backend();
+    render(panel());
+    drop([
+      textFile("x".repeat(24_001), "huge.txt"),
+      new File([new Uint8Array([0xff, 0xfe, 0x00])], "broken.txt", {
+        type: "text/plain",
+      }),
+    ]);
+    await tick(0);
+    const errors = screen.getByRole("alert").textContent;
+    expect(errors).toContain(
+      "huge.txt can't be attached: it is 24,001 bytes, and a message can carry at most 24,000 bytes.",
+    );
+    expect(errors).toContain(
+      "broken.txt can't be attached: it is not readable UTF-8 text.",
+    );
+    expect(attachments()).toBeNull();
+    drop([
+      textFile("a".repeat(13_000), "one.txt"),
+      textFile("b".repeat(13_000), "two.txt"),
+    ]);
+    await tick(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+    typeAndSend("Both please");
+    await tick(0);
+    expect(server.posts()).toHaveLength(0);
+    expect(screen.getByRole("alert").textContent).toContain(
+      "the limit is 24,000 bytes. Remove an attachment or shorten the message.",
+    );
+    expect(within(attachments()!).getAllByRole("listitem")).toHaveLength(2);
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+      "Both please",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove attachment two.txt" }),
+    );
+    typeAndSend("Both please");
+    await tick(0);
+    expect(server.posts()).toHaveLength(1);
+  });
+  it("restores a refused message's attachments to the composer", async () => {
+    const server = backend();
+    const original = server.fetch.getMockImplementation()!;
+    server.fetch.mockImplementation(async (path, options) =>
+      options?.method === "POST"
+        ? {
+            ok: false,
+            status: 429,
+            json: async () => ({ error: "The message queue is full." }),
+          }
+        : original(path, options),
+    );
+    render(panel());
+    drop([textFile("draft", "draft.md", "text/markdown")]);
+    await tick(0);
+    const input = typeAndSend("Review this");
+    await tick(0);
+    expect(screen.getByText("Message not sent")).toBeTruthy();
+    expect(attachments()).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Restore message to draft" }),
+    );
+    expect(input.value).toBe("Review this");
+    expect(within(attachments()!).getByText("draft.md")).toBeTruthy();
+  });
+});
