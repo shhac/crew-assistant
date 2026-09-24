@@ -7,6 +7,7 @@ import {
   isOpenMessage,
   landsBy,
   leadRequest,
+  mergeMethod,
   projectGroup,
   projectKind,
   projectTasks,
@@ -15,6 +16,7 @@ import {
   reversibility,
   taskPlaybook,
   underWay,
+  wayFor,
   whatHappens,
 } from "./stages";
 import type { Decision, Playbook, Project, Task } from "./api";
@@ -328,5 +330,23 @@ describe("projects", () => {
     expect(whatHappens({ ...writing, deliver_to: "/out" })).toEqual([
       "The draft is copied into /out.",
     ]);
+    expect(whatHappens(code({}))).toEqual([
+      "A new branch starting crew/ is created in your repository.",
+      "Nothing is pushed.",
+    ]);
+    expect(
+      whatHappens(
+        code({ via: "pull-request", target: "main", github: "o/r" }),
+      )[2],
+    ).toBe("It merges by squash once GitHub says it's approved and green.");
+    // A way this dashboard doesn't know lands as a new branch.
+    expect(landsBy(code({ via: "carrier-pigeon" }))).toBe("New local branch");
+    expect(reversibility({ via: "carrier-pigeon" })).toBe("Undoable");
+    expect(wayFor("carrier-pigeon")).toBeUndefined();
+    expect(wayFor("push")?.method("squash")).toBe("fast-forward");
+    expect(wayFor("pull-request")?.method("rebase")).toBe("rebase");
+    expect(wayFor("branch")?.method("squash")).toBe("");
+    expect(mergeMethod({ method: "merge" })).toBe("merge");
+    expect(mergeMethod(undefined)).toBe("squash");
   });
 });

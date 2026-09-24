@@ -1,23 +1,13 @@
 import { useState, type FormEvent } from "react";
-import { reversibility, whatHappens } from "./stages";
+import {
+  landingWays,
+  mergeMethod,
+  reversibility,
+  wayFor,
+  whatHappens,
+} from "./stages";
 import { ErrorNotice, useAction } from "./ui";
 import { setLanding, type Project } from "./api";
-
-// landingMethod is the merge method each way takes: a push only lands by
-// fast-forward, a new branch needs none.
-function landingMethod(via: string, chosen: string) {
-  const methods: Record<string, string> = {
-    push: "fast-forward",
-    "pull-request": chosen,
-  };
-  return methods[via] ?? "";
-}
-
-const ways: Record<string, string> = {
-  branch: "A new local branch",
-  push: "Fast-forward a branch",
-  "pull-request": "A pull request on GitHub",
-};
 
 /**
  * What landing an approved change means for this project. Only the owner and
@@ -71,7 +61,7 @@ export function LandingTab({
         <div className="fact-row">
           <dt>Lands as</dt>
           <dd>
-            {ways[via]}
+            {wayFor(via)?.label}
             {via === "push" && (
               <>
                 : <code>{land?.target}</code>
@@ -81,7 +71,7 @@ export function LandingTab({
               <>
                 {" "}
                 on <code>{land?.github}</code> into <code>{land?.target}</code>,
-                merged by {land?.method || "squash"}
+                merged by {mergeMethod(land)}
               </>
             )}
           </dd>
@@ -128,7 +118,7 @@ function LandingEditor({
   const [via, setVia] = useState(land?.via || "branch");
   const [github, setGithub] = useState(land?.github ?? "");
   const [method, setMethod] = useState(
-    land?.via === "pull-request" ? land.method || "squash" : "squash",
+    land?.via === "pull-request" ? mergeMethod(land) : "squash",
   );
   const [target, setTarget] = useState(land?.target || "main");
   const [approve, setApprove] = useState(land?.approve || "before");
@@ -141,7 +131,7 @@ function LandingEditor({
         means: means.trim(),
         via,
         target: via === "branch" ? "" : target.trim(),
-        method: landingMethod(via, method),
+        method: wayFor(via)?.method(method) ?? "",
         github: via === "pull-request" ? github.trim() : "",
         approve,
       });
@@ -161,9 +151,11 @@ function LandingEditor({
             value={via}
             onChange={(e) => setVia(e.target.value)}
           >
-            <option value="branch">A new local branch</option>
-            <option value="push">Fast-forward a branch</option>
-            <option value="pull-request">A pull request on GitHub</option>
+            {Object.entries(landingWays).map(([id, way]) => (
+              <option key={id} value={id}>
+                {way.label}
+              </option>
+            ))}
           </select>
         </label>
         {via === "pull-request" && (
