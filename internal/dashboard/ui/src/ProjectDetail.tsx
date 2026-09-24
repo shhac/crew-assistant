@@ -73,6 +73,11 @@ export function ProjectDetail({
           <TaskList
             tasks={tasks}
             hasTeam={!!project.playbook}
+            landsOn={
+              project.playbook?.land?.via === "push"
+                ? project.playbook.land.target
+                : undefined
+            }
             refresh={refresh}
           />
           <WorkHistory project={project} tasks={tasks} />

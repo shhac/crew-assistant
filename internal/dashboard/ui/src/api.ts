@@ -33,6 +33,23 @@ export interface Playbook {
   branch_prefix?: string;
   check?: string;
   prepare?: string[];
+  land?: LandPolicy;
+}
+export interface LandPolicy {
+  means?: string;
+  via?: "branch" | "push" | "pull-request" | (string & {});
+  target?: string;
+  method?: string;
+  github?: string;
+  approve?: "before" | "none" | (string & {});
+}
+export interface LandingInput {
+  means: string;
+  via: string;
+  target: string;
+  method: string;
+  github: string;
+  approve: string;
 }
 export interface Project {
   id: string;
@@ -74,6 +91,9 @@ export type TaskStatus =
   | "deciding"
   | "waiting"
   | "delivered"
+  | "landing"
+  | "awaiting"
+  | "landed"
   | "stopped";
 export interface Revision {
   n: number;
@@ -143,6 +163,7 @@ export interface Message {
   id: string;
   role: string;
   content: string;
+  origin?: "wake" | (string & {});
   created_at?: string;
 }
 export interface ChatToolEvent {
@@ -321,6 +342,18 @@ export function askForTask(projectID: string, input: TaskInput) {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+export function setLanding(projectID: string, input: LandingInput) {
+  return api<Project>(`${projectPath(projectID)}/landing`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+export function landTask(projectID: string, taskID: string) {
+  return api<Task>(
+    `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/land`,
+    { method: "POST", body: "{}" },
+  );
 }
 export function stopTask(projectID: string, taskID: string) {
   return api<Task>(

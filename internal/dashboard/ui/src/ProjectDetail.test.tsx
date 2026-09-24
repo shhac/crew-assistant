@@ -12,6 +12,7 @@ import { ProjectDetail } from "./ProjectDetail";
 import {
   normalizeState,
   type Decision,
+  type LandPolicy,
   type Project,
   type State,
   type Task,
@@ -280,6 +281,87 @@ describe("project page", () => {
     expect(within(team).getByText(/nothing is pushed/)).toBeTruthy();
   });
 
+  const codeProject = (land: LandPolicy) =>
+    project({
+      playbook: {
+        template: "code",
+        medium: "git",
+        roles: [
+          { name: "Implementer", kind: "implementer", engine: "claude" },
+          { name: "Reviewer", kind: "reviewer", engine: "codex" },
+          { name: "QA", kind: "qa", engine: "codex" },
+        ],
+        max_rounds: 3,
+        deliver: "owner",
+        repo: "/work/service",
+        branch_prefix: "paul/",
+        check: "make check",
+        land,
+      },
+    });
+
+  it("sets where a code team's changes land", async () => {
+    show(codeProject({}));
+    const team = screen.getByRole("region", { name: "Team" });
+    expect(within(team).getByText(/become a local branch/)).toBeTruthy();
+    fireEvent.click(
+      within(team).getByRole("button", { name: "Change where changes land" }),
+    );
+    fireEvent.change(within(team).getByLabelText("When approved"), {
+      target: { value: "push" },
+    });
+    fireEvent.change(
+      within(team).getByLabelText("What landing means here (optional)"),
+      { target: { value: "fully ff-merged to main" } },
+    );
+    fireEvent.click(within(team).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/landing",
+        method: "PUT",
+        body: {
+          means: "fully ff-merged to main",
+          via: "push",
+          target: "main",
+          method: "fast-forward",
+          github: "",
+          approve: "before",
+        },
+      },
+    ]);
+  });
+
+  it("offers to land a change delivered before the project landed on main", async () => {
+    show(
+      codeProject({
+        via: "push",
+        target: "main",
+        means: "fully ff-merged to main",
+      }),
+      {
+        tasks: [
+          task({ id: "t1", status: "delivered", delivered_to: "paul/feature" }),
+          task({
+            id: "t2",
+            status: "landed",
+            delivered_to: "main",
+            objective: "Earlier",
+          }),
+        ],
+      },
+    );
+    expect(screen.getByText(/Landing means:/)).toBeTruthy();
+    expect(screen.getByText("On main")).toBeTruthy();
+    const buttons = screen.getAllByRole("button", { name: "Land on main" });
+    expect(buttons).toHaveLength(1);
+    fireEvent.click(buttons[0]);
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      { path: "/api/projects/p1/tasks/t1/land", method: "POST", body: {} },
+    ]);
+  });
+
   it("explains why it can't take requests without a brief", () => {
     show(project({ brief: { version: 0, goal: "", criteria: null } }));
     expect(screen.getByText(/Write the brief first/)).toBeTruthy();
@@ -324,7 +406,7 @@ describe("project page", () => {
       "NewestStopWaiting to start",
       "Writing oneStopWriting draft 2",
       "Stopped onethe owner stopped itStopped",
-      "OldestCopied to /home/out/note.mdDelivered",
+      "OldestDelivered to /home/out/note.mdDelivered",
     ]);
   });
 

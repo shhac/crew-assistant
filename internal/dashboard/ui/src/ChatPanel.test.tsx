@@ -144,6 +144,28 @@ describe("conversation", () => {
     ).toHaveLength(1);
     expect(input.value).toBe("");
   });
+  it("shows a wake-up as the daemon's, not the owner's", () => {
+    const state = initial();
+    state.messages = [
+      {
+        id: "w1",
+        role: "user",
+        origin: "wake",
+        content: "[Wake-up from the daemon] wake-1 fired",
+        created_at: "2026-09-24T09:18:23Z",
+      },
+      {
+        id: "u1",
+        role: "user",
+        content: "Thanks",
+        created_at: "2026-09-24T09:19:00Z",
+      },
+    ];
+    render(panel(state));
+    const log = screen.getByRole("log");
+    expect(within(log).getByText("Wake-up")).toBeTruthy();
+    expect(within(log).getAllByText("You")).toHaveLength(1);
+  });
   it("does not submit Shift+Enter or an IME composition", async () => {
     const server = backend();
     render(panel());

@@ -592,14 +592,16 @@ export function ChatPanel({
           messages.map((m) => (
             <article
               key={m.id}
-              className={`message ${m.role === "user" ? "user-message" : "assistant-message"}`}
+              className={`message ${"origin" in m && m.origin === "wake" ? "wake-message" : m.role === "user" ? "user-message" : "assistant-message"}`}
             >
               <div className="message-label">
-                {m.role === "user"
-                  ? "You"
-                  : m.role === "system"
-                    ? "Status"
-                    : name}
+                {m.role === "user" && "origin" in m && m.origin === "wake"
+                  ? "Wake-up"
+                  : m.role === "user"
+                    ? "You"
+                    : m.role === "system"
+                      ? "Status"
+                      : name}
                 {m.created_at && (
                   <time dateTime={m.created_at}>{dateLabel(m.created_at)}</time>
                 )}

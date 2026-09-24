@@ -23,6 +23,12 @@ export function taskStatusLine(task: Task, hasTeam = true): StatusLine {
       return { label: "Needs your decision", tone: "amber" };
     case "delivered":
       return { label: "Delivered", tone: "green" };
+    case "landing":
+      return { label: "Landing", tone: "" };
+    case "awaiting":
+      return { label: "Waiting on others", tone: "" };
+    case "landed":
+      return { label: "Landed", tone: "green" };
     case "stopped":
       return { label: "Stopped", tone: "" };
   }
@@ -36,7 +42,9 @@ export function taskStatusLine(task: Task, hasTeam = true): StatusLine {
  */
 export function taskDetail(task: Task) {
   if (task.status === "delivered")
-    return task.delivered_to ? `Copied to ${task.delivered_to}` : "";
+    return task.delivered_to ? `Delivered to ${task.delivered_to}` : "";
+  if (task.status === "landed")
+    return task.delivered_to ? `On ${task.delivered_to}` : "";
   return task.detail ?? "";
 }
 
@@ -57,6 +65,8 @@ export function projectTasks(project: Project, tasks: Task[]) {
 
 const attention: Task["status"][] = [
   "waiting",
+  "landing",
+  "awaiting",
   "writing",
   "reviewing",
   "deciding",

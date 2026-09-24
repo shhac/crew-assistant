@@ -39,6 +39,35 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		a.Nudge()
 		respond(w, 200, v)
 	})
+	mux.HandleFunc("PUT /api/projects/{id}/landing", func(w http.ResponseWriter, r *http.Request) {
+		var in engine.SetLandingArgs
+		if decode(w, r, &in) != nil {
+			return
+		}
+		in.ProjectID = r.PathValue("id")
+		v, err := a.SetLanding(r.Context(), in)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/land", func(w http.ResponseWriter, r *http.Request) {
+		v, err := a.LandTask(r.Context(), r.PathValue("id"), r.PathValue("task"))
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
+	mux.HandleFunc("POST /api/wakes/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
+		v, err := a.Core.CancelWake(r.Context(), r.PathValue("id"), "")
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
 	mux.HandleFunc("POST /api/projects/{id}/tasks", func(w http.ResponseWriter, r *http.Request) {
 		var in core.TaskInput
 		if decode(w, r, &in) != nil {

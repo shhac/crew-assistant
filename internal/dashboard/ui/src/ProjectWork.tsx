@@ -5,6 +5,7 @@ import {
   askForTask,
   criteriaLines,
   errorText,
+  landTask,
   stopTask,
   type Project,
   type Task,
@@ -109,10 +110,12 @@ function scrollToDecision(decisionID: string) {
 export function TaskList({
   tasks,
   hasTeam,
+  landsOn,
   refresh,
 }: {
   tasks: Task[];
   hasTeam: boolean;
+  landsOn?: string;
   refresh: () => Promise<void>;
 }) {
   if (!tasks.length)
@@ -126,6 +129,7 @@ export function TaskList({
           key={task.id}
           task={task}
           hasTeam={hasTeam}
+          landsOn={landsOn}
           refresh={refresh}
         />
       ))}
@@ -136,10 +140,12 @@ export function TaskList({
 function TaskRow({
   task,
   hasTeam,
+  landsOn,
   refresh,
 }: {
   task: Task;
   hasTeam: boolean;
+  landsOn?: string;
   refresh: () => Promise<void>;
 }) {
   const [stopping, setStopping] = useState(false);
@@ -147,7 +153,24 @@ function TaskRow({
   const status = taskStatusLine(task, hasTeam);
   const detail = taskDetail(task);
   const decisionID = task.status === "waiting" ? task.decision_id : "";
-  const finished = task.status === "delivered" || task.status === "stopped";
+  const finished =
+    task.status === "delivered" ||
+    task.status === "landed" ||
+    task.status === "stopped";
+  const landsElsewhere = !!landsOn && task.status === "delivered";
+  const [landing, setLanding] = useState(false);
+  async function land() {
+    setLanding(true);
+    setError("");
+    try {
+      await landTask(task.project_id, task.id);
+      await refresh();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setLanding(false);
+    }
+  }
   async function stop() {
     setStopping(true);
     setError("");
@@ -168,31 +191,41 @@ function TaskRow({
         {error && <ErrorNotice error={error} />}
       </div>
       <div className="task-row-actions">
-      {!finished && (
-        <button
-          type="button"
-          className="text-button"
-          disabled={stopping}
-          onClick={stop}
-        >
-          {stopping ? "Stopping…" : "Stop"}
-        </button>
-      )}
-      {decisionID ? (
-        <button
-          type="button"
-          className="text-button task-decision-link"
-          onClick={() => scrollToDecision(decisionID)}
-        >
+        {landsElsewhere && (
+          <button
+            type="button"
+            className="text-button"
+            disabled={landing}
+            onClick={land}
+          >
+            {landing ? "Landing…" : `Land on ${landsOn}`}
+          </button>
+        )}
+        {!finished && (
+          <button
+            type="button"
+            className="text-button"
+            disabled={stopping}
+            onClick={stop}
+          >
+            {stopping ? "Stopping…" : "Stop"}
+          </button>
+        )}
+        {decisionID ? (
+          <button
+            type="button"
+            className="text-button task-decision-link"
+            onClick={() => scrollToDecision(decisionID)}
+          >
+            <Status tone={status.tone} plain>
+              {status.label}
+            </Status>
+          </button>
+        ) : (
           <Status tone={status.tone} plain>
             {status.label}
           </Status>
-        </button>
-      ) : (
-        <Status tone={status.tone} plain>
-            {status.label}
-          </Status>
-      )}
+        )}
       </div>
     </li>
   );

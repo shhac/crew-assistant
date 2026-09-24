@@ -3,6 +3,7 @@ import { FileSystemPicker } from "./FileSystemPicker";
 import { ErrorNotice } from "./ui";
 import {
   errorText,
+  setLanding,
   setTeam,
   type Playbook,
   type Project,
@@ -46,7 +47,12 @@ export function TeamCard({
           refresh={refresh}
         />
       ) : playbook ? (
-        <TeamView playbook={playbook} />
+        <>
+          <TeamView playbook={playbook} />
+          {playbook.medium === "git" && (
+            <LandingCard project={project} refresh={refresh} />
+          )}
+        </>
       ) : (
         <div className="team-prompt">
           <p className="muted">
@@ -81,9 +87,7 @@ function TeamView({ playbook }: { playbook: Playbook }) {
       {playbook.medium === "git" ? (
         <p className="field-hint">
           Works in a private copy of <code>{playbook.repo}</code>; QA runs{" "}
-          <code>{playbook.check}</code>. {rounds} Approved changes become a
-          local branch starting <code>{playbook.branch_prefix}</code>, and
-          nothing is pushed.
+          <code>{playbook.check}</code>. {rounds}
         </p>
       ) : (
         <p className="field-hint">
@@ -334,5 +338,136 @@ function EngineSelect({
         ))}
       </select>
     </label>
+  );
+}
+
+function landingSummary(project: Project) {
+  const land = project.playbook?.land;
+  const ask =
+    land?.approve === "none"
+      ? "A change that passes its checks lands without asking you."
+      : "You approve each change before it lands.";
+  if (land?.via === "push")
+    return `Approved changes land on ${land.target} by fast-forward: it only moves forward, and nothing already there is replaced. ${ask}`;
+  return `Approved changes become a local branch starting ${project.playbook?.branch_prefix ?? ""}; nothing is pushed. ${ask}`;
+}
+
+function LandingCard({
+  project,
+  refresh,
+}: {
+  project: Project;
+  refresh: () => Promise<void>;
+}) {
+  const land = project.playbook?.land;
+  const [editing, setEditing] = useState(false);
+  const [via, setVia] = useState(land?.via === "push" ? "push" : "branch");
+  const [target, setTarget] = useState(land?.target || "main");
+  const [approve, setApprove] = useState(land?.approve || "before");
+  const [means, setMeans] = useState(land?.means ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await setLanding(project.id, {
+        means: means.trim(),
+        via,
+        target: via === "push" ? target.trim() : "",
+        method: via === "push" ? "fast-forward" : "",
+        github: "",
+        approve,
+      });
+      await refresh();
+      setEditing(false);
+    } catch (error) {
+      setError(errorText(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!editing)
+    return (
+      <div className="team-landing" aria-label="Landing">
+        <p className="field-hint">
+          {land?.means && (
+            <>
+              <strong>Landing means:</strong> {land.means}.{" "}
+            </>
+          )}
+          {landingSummary(project)}
+        </p>
+        <button
+          type="button"
+          className="text-button"
+          onClick={() => setEditing(true)}
+        >
+          Change where changes land
+        </button>
+      </div>
+    );
+  return (
+    <form className="project-card-form" aria-label="Landing" onSubmit={save}>
+      <div className="team-fields">
+        <label htmlFor="land-via">
+          When approved
+          <select
+            id="land-via"
+            value={via}
+            onChange={(e) => setVia(e.target.value)}
+          >
+            <option value="branch">Create a new local branch</option>
+            <option value="push">Fast-forward a branch</option>
+          </select>
+        </label>
+        {via === "push" && (
+          <label htmlFor="land-target">
+            Branch to land on
+            <input
+              id="land-target"
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              required
+            />
+          </label>
+        )}
+        <label htmlFor="land-approve">
+          Before it lands
+          <select
+            id="land-approve"
+            value={approve}
+            onChange={(e) => setApprove(e.target.value)}
+          >
+            <option value="before">Ask me first</option>
+            <option value="none">Land when the checks pass</option>
+          </select>
+        </label>
+      </div>
+      <label htmlFor="land-means">
+        What landing means here (optional)
+        <input
+          id="land-means"
+          value={means}
+          placeholder="fully fast-forward merged to main"
+          onChange={(e) => setMeans(e.target.value)}
+        />
+      </label>
+      <ErrorNotice error={error} />
+      <div className="form-actions">
+        <button className="button primary" type="submit" disabled={busy}>
+          {busy ? "Saving…" : "Save"}
+        </button>
+        <button
+          className="text-button"
+          type="button"
+          disabled={busy}
+          onClick={() => setEditing(false)}
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
