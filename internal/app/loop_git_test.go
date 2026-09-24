@@ -342,7 +342,6 @@ func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
 	ownerGit(t, source, "add", "owner.go")
 	ownerGit(t, source, "commit", "-q", "-m", "owner work")
 	ownerWork := ownerGit(t, source, "rev-parse", "HEAD")
-	ownerGit(t, source, "config", "receive.denyCurrentBranch", "updateInstead")
 	if _, err = a.SetLanding(ctx, engine.SetLandingArgs{ProjectID: p.ID, Via: core.LandPush, Target: "main", Means: "fast-forward main"}); err != nil {
 		t.Fatal(err)
 	}

@@ -247,12 +247,8 @@ func TestPushLandsOnlyByFastForwardAndFollowsTheOwnersCheckoutRules(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	// main is checked out in the owner's repository, which by default
-	// refuses to have it updated underneath them.
-	if err = r.PushFastForward(ctx, "crew-task/a", commit, "main"); !errors.Is(err, ErrCheckedOut) {
-		t.Fatalf("pushed into a checked-out branch against the owner's settings: %v", err)
-	}
-	git(t, source, "config", "receive.denyCurrentBranch", "updateInstead")
+	// main is checked out in the owner's repository. Landing may update it in
+	// place, but only when the checkout is clean.
 	write(t, filepath.Join(source, "main.go"), "package main // the owner's edit\n")
 	if err = r.PushFastForward(ctx, "crew-task/a", commit, "main"); !errors.Is(err, ErrDirtyCheckout) {
 		t.Fatalf("landed over the owner's uncommitted work: %v", err)
@@ -272,6 +268,20 @@ func TestPushLandsOnlyByFastForwardAndFollowsTheOwnersCheckoutRules(t *testing.T
 	}
 	if _, err = os.Stat(marker); err == nil {
 		t.Fatal("the owner's hooks ran for a daemon push")
+	}
+	// The daemon owns that choice for its own pushes: the owner's config is
+	// untouched, and any other push into their checked-out main is refused
+	// as git refuses by default.
+	if out, err := exec.Command("git", "-C", source, "config", "--get", "receive.denyCurrentBranch").Output(); err == nil {
+		t.Fatalf("the owner's config was changed: %s", out)
+	}
+	other := t.TempDir()
+	git(t, other, "clone", "-q", source, ".")
+	write(t, filepath.Join(other, "other.go"), "package main\n")
+	git(t, other, "add", "-A")
+	git(t, other, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "someone else")
+	if out, err := exec.Command("git", "-C", other, "push", "-q", "origin", "main").CombinedOutput(); err == nil || !strings.Contains(string(out), "checked out") {
+		t.Fatalf("an ordinary push into the checked-out main was accepted: %s", out)
 	}
 	// The owner commits to main; a change built on the old tip is never forced over it.
 	write(t, filepath.Join(source, "owner.go"), "package main\n")

@@ -508,14 +508,17 @@ func (r Repo) FetchFrom(ctx context.Context, url, branch string, config []string
 }
 
 // receivePack runs the receiving side of a push into the owner's repository
-// with their hooks and file-system monitor off. Their repository's own rules,
-// such as receive.denyCurrentBranch, still apply.
-var receivePack = "git " + strings.Join(append(append([]string(nil), safety...), "-c", "receive.autogc=false"), " ") + " receive-pack"
+// with their hooks and file-system monitor off. It also lets this push, and
+// only this push, update a checked-out target in place when the checkout is
+// clean: the project's landing policy is the owner's say-so, so their
+// repository's own config is left alone and every other push into it keeps
+// git's default refusal.
+var receivePack = "git " + strings.Join(append(append([]string(nil), safety...), "-c", "receive.autogc=false", "-c", "receive.denyCurrentBranch=updateInstead"), " ") + " receive-pack"
 
 // PushFastForward lands commit on target in the owner's repository by a plain
 // push: never forced, so it only succeeds when target has not moved past what
-// commit was built on. A checked-out target follows the owner's
-// receive.denyCurrentBranch setting.
+// commit was built on. A checked-out target is updated in place only when the
+// checkout has no uncommitted changes to tracked files.
 func (r Repo) PushFastForward(ctx context.Context, taskBranch, commit, target string) error {
 	tip, err := run(ctx, r.Workspace(), "rev-parse", "refs/heads/"+taskBranch)
 	if err != nil || strings.TrimSpace(tip) != commit {

@@ -70,7 +70,7 @@ Only one daemon can own a state file. `serve --no-dispatch` observes without run
 - **Delivery** is the only outward step. It happens when you approve, copies the draft into its own new folder (never overwriting anything), and a retried delivery settles instead of making a second copy.
 - **Code teams** work in a private clone of one of the project's repositories: an implementer changes it, a reviewer reads the change, and QA runs your check command. What **landing** means is set per project, by you or the assistant; nothing inside the project can change it:
   - a new local branch (the default);
-  - a fast-forward of a branch such as `main`, which only ever moves forward. If `main` is checked out, git's own `receive.denyCurrentBranch` decides: set it to `updateInstead` to have a clean checkout updated in place;
+  - a fast-forward of a branch such as `main`, which only ever moves forward. If `main` is checked out, landing updates your checkout in place only when it has no uncommitted changes, and otherwise asks you to commit or stash first. This applies to crew-assistant's own pushes only; your repository's config is not changed, and other pushes into it keep git's default refusal;
   - a GitHub pull request, opened with your `gh` login. The team answers its reviews and CI, and it merges once GitHub says it is approved and green.
 
   Before landing, a change catches up with whatever landed since. A clean merge keeps your approval; a conflict goes back to the implementer and comes back to you. Nothing the project does not own is ever forced, and a change built on another lands after it.

@@ -242,6 +242,13 @@ code differs.
   safety list, plus `receive.autogc=false`. Local transport drops `-c`
   settings, so they are passed through `--receive-pack`. Git's messages are
   read with `LC_ALL=C`.
+- **The daemon owns `receive.denyCurrentBranch=updateInstead`.** It is
+  passed to the receiving side of its own pushes, not set in the owner's
+  config. The design above left this to the owner's repository. For the
+  first landings the owner set it in `.git/config`, where it also let every
+  other push update their checkout. The project's landing policy is already
+  the owner's consent, so only crew-assistant's landings update a clean
+  checkout in place. Any other push into it keeps git's default refusal.
 - **Wake-ups.** A wake-up on a task fires inside the state change that
   matches it. An assistant's wake-ups count as delivered only when its turn
   completes; a failed turn offers them again, up to three attempts.

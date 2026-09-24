@@ -136,7 +136,7 @@ func (a *App) landingFailed(ctx context.Context, t core.Task, r core.Revision, c
 	}
 	switch {
 	case errors.Is(cause, gitrepo.ErrCheckedOut):
-		reason = fmt.Sprintf("%s is checked out in your repository, and git there refuses to move a checked-out branch. To let landing update your checkout whenever it has no uncommitted changes, run: git config receive.denyCurrentBranch updateInstead (in that repository). Or check out another branch. Then choose Try again.", target)
+		reason = fmt.Sprintf("%s is checked out in your repository, and git there refused to update it in place. Check out another branch, or check what is holding it, then choose Try again. Nothing was forced.", target)
 	case errors.Is(cause, gitrepo.ErrDirtyCheckout):
 		reason = fmt.Sprintf("Your checkout of %s has uncommitted changes, so git would not update it. Commit or stash them, then choose Try again. Nothing of yours was changed.", target)
 	}
