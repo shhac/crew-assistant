@@ -1,5 +1,7 @@
 import type { LandPolicy, Playbook } from "./api";
-import { isCode } from "./stages";
+
+/** Whether a team works on code; landing only has meaning for code. */
+export const isCode = (playbook?: Playbook) => playbook?.medium === "git";
 
 /** How a pull request merges, when the owner hasn't said. */
 export const mergeMethod = (land?: LandPolicy) => land?.method || "squash";

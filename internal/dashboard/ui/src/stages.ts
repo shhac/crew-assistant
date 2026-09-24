@@ -1,5 +1,5 @@
 import { recordedTime } from "./ui";
-import { approveLabel } from "./landing";
+import { approveLabel, isCode } from "./landing";
 import {
   pendingDecisions,
   type Decision,
@@ -13,7 +13,7 @@ import {
 /** Colour roles: amber needs the owner, blue is under way, grey waits. */
 export type Tone = "needs" | "work" | "wait" | "block" | "done" | "";
 
-export const isCode = (playbook?: Playbook) => playbook?.medium === "git";
+export { isCode };
 
 export const finished = (task: Task) =>
   task.status === "delivered" ||
