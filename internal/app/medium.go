@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/integrations/github"
 	"github.com/shhac/crew-assistant/internal/media"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 	"github.com/shhac/crew-assistant/internal/media/localdocs"
@@ -48,11 +49,15 @@ type medium interface {
 }
 
 // line is work a task must include before it lands: the target branch's tip
-// for a push, or the project's last landing for new branches.
+// for a push or pull request, the project's last landing for new branches, or
+// commits someone else pushed to a pull request's branch.
 type line struct {
 	Commit, Name string
 	// What says in words what moved, for the implementer and the activity log.
 	What string
+	// Foreign marks commits from outside the team. Merging them in is never a
+	// clean catch-up that keeps an approval or carries reviews over.
+	Foreign bool
 }
 
 func (a *App) mediumFor(ctx context.Context, p core.Project, playbook *core.Playbook) (medium, error) {
@@ -67,7 +72,7 @@ func (a *App) mediumFor(ctx context.Context, p core.Project, playbook *core.Play
 	if err != nil {
 		return nil, err
 	}
-	return gitMedium{repo: repo, playbook: *playbook, landed: p.Landed}, nil
+	return gitMedium{repo: repo, playbook: *playbook, landed: p.Landed, remote: a.githubURL}, nil
 }
 
 func deliverTo(p *core.Playbook) string {
@@ -126,7 +131,11 @@ type gitMedium struct {
 	repo     gitrepo.Repo
 	playbook core.Playbook
 	landed   *core.Landing
+	remote   func(repo string) string
 }
+
+// url is where a pull request's branch is pushed and its base fetched from.
+func (m gitMedium) url() string { return m.remote(m.playbook.Land.GitHub) }
 
 func (m gitMedium) workspace() string  { return m.repo.Workspace() }
 func (m gitMedium) env() []string      { return m.repo.Env() }
@@ -139,6 +148,14 @@ func (m gitMedium) begin(ctx context.Context, t core.Task) (core.Task, error) {
 	t.Branch = "crew-task/" + t.ID
 	// A task that lands on a target starts from it, whatever the owner has
 	// checked out.
+	if m.playbook.Land.Way() == core.LandPullRequest {
+		base, err := m.repo.FetchFrom(ctx, m.url(), m.playbook.Land.Target, github.CredentialConfig())
+		if err != nil {
+			return t, err
+		}
+		t.Base, t.From = base, m.playbook.Land.Target
+		return t, m.repo.Reset(ctx, t.Branch, base)
+	}
 	from := ""
 	if m.playbook.Land.Way() != core.LandBranch {
 		from = m.playbook.Land.Target
@@ -171,6 +188,23 @@ func (m gitMedium) lineFor(ctx context.Context, t core.Task) (*line, error) {
 			return nil, nil
 		}
 		return &line{Commit: m.landed.Commit, Name: m.landed.Branch, What: fmt.Sprintf("%q landed on branch %s", m.landed.Objective, m.landed.Branch)}, nil
+	}
+	if land.Way() == core.LandPullRequest {
+		// Commits someone else pushed to the pull request's branch come first:
+		// they must be taken in before anything is pushed over them.
+		if prop := t.Proposal; prop != nil && prop.Pushed != "" {
+			head, err := m.repo.FetchFrom(ctx, m.url(), prop.Branch, github.CredentialConfig())
+			if err == nil && head != prop.Pushed {
+				if in, err := m.repo.Contains(ctx, tipOf(t), head); err == nil && !in {
+					return &line{Commit: head, Name: prop.Branch, What: "someone else pushed to the pull request's branch " + prop.Branch, Foreign: true}, nil
+				}
+			}
+		}
+		tip, err := m.repo.FetchFrom(ctx, m.url(), land.Target, github.CredentialConfig())
+		if err != nil {
+			return nil, err
+		}
+		return &line{Commit: tip, Name: land.Target, What: fmt.Sprintf("%s on GitHub moved on since this task started (it is now at %s)", land.Target, short(tip))}, nil
 	}
 	tip, err := m.repo.Fetch(ctx, land.Target)
 	if err != nil {
@@ -209,8 +243,11 @@ func (m gitMedium) behind(ctx context.Context, t core.Task) (*line, error) {
 func (m gitMedium) catchUp(ctx context.Context, t core.Task, l line) (core.Task, string, []string, error) {
 	tip := tipOf(t)
 	moved := t
-	// The task's own change is now measured from what it took in.
-	moved.Base, moved.From = l.Commit, l.Name
+	// The task's own change is now measured from what it took in, unless
+	// that was someone else's push to its pull request.
+	if !l.Foreign {
+		moved.Base, moved.From = l.Commit, l.Name
+	}
 	clean, err := m.repo.MergeClean(ctx, tip, l.Commit, fmt.Sprintf("catch up with %s: %s", l.Name, clip(t.Objective, 60)))
 	if err != nil {
 		return t, "", nil, err
@@ -285,6 +322,17 @@ func (m gitMedium) branchName(t core.Task) string {
 }
 
 func (m gitMedium) deliveryNote(t core.Task) string {
+	if land := m.playbook.Land; land.Way() == core.LandPullRequest {
+		method := land.Method
+		if method == "" {
+			method = "squash"
+		}
+		note := fmt.Sprintf("Approving pushes it to %s as the branch %s and opens a pull request into %s. From then on the team answers reviews and CI on it, and it merges by %s once GitHub says it is approved and green; you are asked again only if an update touches what runs or instructs on your side.", land.GitHub, m.branchName(t), land.Target, method)
+		if land.Means != "" {
+			note += " For this project, landing means: " + land.Means
+		}
+		return note
+	}
 	if land := m.playbook.Land; land.Way() == core.LandPush {
 		note := "Approving lands it on " + land.Target + " in " + filepath.Base(m.playbook.Repo) + " by fast-forward: " + land.Target + " only moves forward, nothing already on it is replaced, and nothing is pushed anywhere else."
 		if land.Means != "" {

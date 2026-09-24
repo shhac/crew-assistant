@@ -10,6 +10,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 	"github.com/shhac/crew-assistant/internal/quota"
 	"github.com/shhac/crew-assistant/internal/roles"
 )
@@ -218,14 +219,36 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 		}
 		caughtUp = catchUpText(l.What, conflicts)
 	}
-	spec := a.roleSpec(writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp))
+	woken, err := a.Core.TakeTaskWakes(ctx, t.ID, core.WakeTask)
+	if err != nil {
+		return err
+	}
+	prompt, err := a.wakePrompt(ctx, t, woken)
+	if err != nil {
+		return err
+	}
+	spec := a.roleSpec(writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp)+prompt)
 	spec.Resume = t.WriterSession
 	result, err := a.runner.Run(ctx, spec)
 	if err != nil {
 		return a.roleFailed(ctx, t, writers[0].Name, err)
 	}
+	reply, block := splitWakeBlock(result.Text)
+	wakeErrors := a.applyWakeBlock(ctx, p, t, block)
 	n := len(t.Revisions) + 1
 	revision, err := m.snapshot(ctx, t, n)
+	if errors.Is(err, gitrepo.ErrNoChange) && proposed(t) {
+		// Feedback on a pull request can need no change; the team says why.
+		_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+			if t.Finished() {
+				return "", nil
+			}
+			t.WriterSession, t.WakeErrors, t.Failures, t.RetryAt = result.Session, wakeErrors, 0, time.Time{}
+			t.Status, t.Detail = core.TaskLanding, "No change needed: "+clip(reply, 300)
+			return fmt.Sprintf("%s: no change needed for the pull request's feedback", t.Objective), nil
+		})
+		return err
+	}
 	if err != nil {
 		return a.roleFailed(ctx, t, writers[0].Name, fmt.Errorf("the work could not be recorded: %w", err))
 	}
@@ -233,9 +256,9 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 		if t.Status == core.TaskStopped {
 			return "", nil
 		}
-		revision.BriefVersion, revision.Summary, revision.At = p.Brief.Version, clip(result.Text, 2000), time.Now().UTC()
+		revision.BriefVersion, revision.Summary, revision.At = p.Brief.Version, clip(reply, 2000), time.Now().UTC()
 		t.Revisions = append(t.Revisions, revision)
-		t.WriterSession = result.Session
+		t.WriterSession, t.WakeErrors = result.Session, wakeErrors
 		t.Failures, t.RetryAt, t.CatchUp = 0, time.Time{}, false
 		t.Status, t.Detail = core.TaskReviewing, fmt.Sprintf("Draft %d written; reviewing", n)
 		return fmt.Sprintf("%s wrote draft %d of %s", writers[0].Name, n, t.Objective), nil
@@ -399,7 +422,7 @@ func (a *App) askForDelivery(ctx context.Context, p core.Project, t core.Task, r
 	if l != nil {
 		return a.catchUpRound(ctx, t, *l)
 	}
-	if approvalStands(t) || !taskPlaybook(p, t).Land.AsksFirst() {
+	if approvalStands(t) || !taskPlaybook(p, t).Land.AsksFirst() || proposed(t) {
 		return a.startLanding(ctx, t, false)
 	}
 	where := m.deliveryNote(t)

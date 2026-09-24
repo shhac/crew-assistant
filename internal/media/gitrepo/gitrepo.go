@@ -317,7 +317,7 @@ func (r Repo) Snapshot(ctx context.Context, base, previous, message string) (str
 	}
 	head = strings.TrimSpace(head)
 	if head == previous {
-		return "", nil, errors.New("the implementer changed nothing")
+		return "", nil, ErrNoChange
 	}
 	names, err := run(ctx, r.Workspace(), "diff", "--no-ext-diff", "--no-textconv", "--name-only", base+".."+head)
 	if err != nil {
@@ -465,6 +465,47 @@ var (
 	ErrCheckedOut    = errors.New("the branch is checked out in the owner's repository, which refuses updates to it")
 	ErrDirtyCheckout = errors.New("the owner's checkout of the branch has uncommitted changes")
 )
+
+// ErrNoChange means a round left the task exactly as it was.
+var ErrNoChange = errors.New("the implementer changed nothing")
+
+// ErrLeaseLost means someone else pushed to a branch the project owns since
+// the project last did. Their commits are taken in, never overwritten.
+var ErrLeaseLost = errors.New("someone else pushed to the branch since the project last did")
+
+// PushOwned updates a branch the project owns on a remote, with a lease on the
+// commit it last pushed there. An empty lease means the project never pushed
+// it, so the branch must not exist yet.
+func (r Repo) PushOwned(ctx context.Context, url, commit, branch, lease string, config []string) error {
+	if _, err := run(ctx, r.source, "check-ref-format", "--branch", branch); err != nil {
+		return fmt.Errorf("%q is not a valid branch name", branch)
+	}
+	args := append(append([]string(nil), config...), "push", "--porcelain", "--no-verify", "--force-with-lease=refs/heads/"+branch+":"+lease, url, commit+":refs/heads/"+branch)
+	out, err := run(ctx, r.Workspace(), args...)
+	if err == nil {
+		return nil
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "!") && strings.Contains(strings.ToLower(line), "stale info") {
+			return ErrLeaseLost
+		}
+	}
+	return err
+}
+
+// FetchFrom brings a remote branch into the clone and returns its tip.
+func (r Repo) FetchFrom(ctx context.Context, url, branch string, config []string) (string, error) {
+	if _, err := run(ctx, r.source, "check-ref-format", "--branch", branch); err != nil {
+		return "", fmt.Errorf("%q is not a valid branch name", branch)
+	}
+	ref := "refs/remotes/remote/" + branch
+	args := append(append([]string(nil), config...), "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-auto-gc", url, "+refs/heads/"+branch+":"+ref)
+	if _, err := run(ctx, r.Workspace(), args...); err != nil {
+		return "", err
+	}
+	tip, err := run(ctx, r.Workspace(), "rev-parse", ref)
+	return strings.TrimSpace(tip), err
+}
 
 // receivePack runs the receiving side of a push into the owner's repository
 // with their hooks and file-system monitor off. Their repository's own rules,

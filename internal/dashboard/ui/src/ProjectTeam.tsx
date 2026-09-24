@@ -349,6 +349,8 @@ function landingSummary(project: Project) {
       : "You approve each change before it lands.";
   if (land?.via === "push")
     return `Approved changes land on ${land.target} by fast-forward: it only moves forward, and nothing already there is replaced. ${ask}`;
+  if (land?.via === "pull-request")
+    return `Approved changes open a pull request on ${land.github} into ${land.target}; the team answers its reviews and CI, and it merges by ${land.method || "squash"} once GitHub says it is approved and green. ${ask}`;
   return `Approved changes become a local branch starting ${project.playbook?.branch_prefix ?? ""}; nothing is pushed. ${ask}`;
 }
 
@@ -361,7 +363,11 @@ function LandingCard({
 }) {
   const land = project.playbook?.land;
   const [editing, setEditing] = useState(false);
-  const [via, setVia] = useState(land?.via === "push" ? "push" : "branch");
+  const [via, setVia] = useState(land?.via || "branch");
+  const [github, setGithub] = useState(land?.github ?? "");
+  const [method, setMethod] = useState(
+    land?.via === "pull-request" ? land.method || "squash" : "squash",
+  );
   const [target, setTarget] = useState(land?.target || "main");
   const [approve, setApprove] = useState(land?.approve || "before");
   const [means, setMeans] = useState(land?.means ?? "");
@@ -375,9 +381,14 @@ function LandingCard({
       await setLanding(project.id, {
         means: means.trim(),
         via,
-        target: via === "push" ? target.trim() : "",
-        method: via === "push" ? "fast-forward" : "",
-        github: "",
+        target: via === "branch" ? "" : target.trim(),
+        method:
+          via === "push"
+            ? "fast-forward"
+            : via === "pull-request"
+              ? method
+              : "",
+        github: via === "pull-request" ? github.trim() : "",
         approve,
       });
       await refresh();
@@ -420,11 +431,38 @@ function LandingCard({
           >
             <option value="branch">Create a new local branch</option>
             <option value="push">Fast-forward a branch</option>
+            <option value="pull-request">Open a pull request on GitHub</option>
           </select>
         </label>
-        {via === "push" && (
+        {via === "pull-request" && (
+          <label htmlFor="land-github">
+            GitHub repository
+            <input
+              id="land-github"
+              value={github}
+              placeholder="owner/name"
+              onChange={(e) => setGithub(e.target.value)}
+              required
+            />
+          </label>
+        )}
+        {via === "pull-request" && (
+          <label htmlFor="land-method">
+            Merge by
+            <select
+              id="land-method"
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+            >
+              <option value="squash">Squash</option>
+              <option value="merge">Merge commit</option>
+              <option value="rebase">Rebase</option>
+            </select>
+          </label>
+        )}
+        {via !== "branch" && (
           <label htmlFor="land-target">
-            Branch to land on
+            {via === "pull-request" ? "Into branch" : "Branch to land on"}
             <input
               id="land-target"
               value={target}

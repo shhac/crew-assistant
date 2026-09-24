@@ -2,13 +2,17 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/integrations/github"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 )
 
@@ -19,6 +23,10 @@ const wakeCheckEvery = 15 * time.Second
 // WakeMeWhen registers one of the assistant's wakes. The baseline is read now,
 // so a change is measured from what the assistant could see when it asked.
 func (a *App) WakeMeWhen(ctx context.Context, in engine.WakeArgs) (core.Wake, error) {
+	return a.registerWake(ctx, core.WakeAssistant, "", in)
+}
+
+func (a *App) registerWake(ctx context.Context, owner, taskID string, in engine.WakeArgs) (core.Wake, error) {
 	timeout := time.Duration(0)
 	if in.Timeout != "" {
 		d, err := time.ParseDuration(in.Timeout)
@@ -27,7 +35,7 @@ func (a *App) WakeMeWhen(ctx context.Context, in engine.WakeArgs) (core.Wake, er
 		}
 		timeout = d
 	}
-	wake := core.WakeInput{Owner: core.WakeAssistant, On: in.On, Target: in.Target, Match: in.Match, Prompt: in.Prompt, ProjectID: in.ProjectID, Timeout: timeout}
+	wake := core.WakeInput{Owner: owner, TaskID: taskID, On: in.On, Target: in.Target, Match: in.Match, Prompt: in.Prompt, ProjectID: in.ProjectID, Timeout: timeout}
 	snap, err := a.Core.Snapshot(ctx)
 	if err != nil {
 		return core.Wake{}, err
@@ -60,7 +68,11 @@ func (a *App) WakeMeWhen(ctx context.Context, in engine.WakeArgs) (core.Wake, er
 			wake.Timeout = time.Until(at) + time.Minute
 		}
 	case core.WakeOnChecks, core.WakeOnReview:
-		return core.Wake{}, errors.New("waiting on pull requests is not built yet")
+		pr, err := a.viewPR(ctx, in.Target)
+		if err != nil {
+			return core.Wake{}, err
+		}
+		wake.Baseline = prValue(in.On, pr)
 	}
 	return a.Core.RegisterWake(ctx, wake)
 }
@@ -78,6 +90,23 @@ func (a *App) OpenWakes(ctx context.Context) ([]core.Wake, error) {
 		}
 	}
 	return out, nil
+}
+
+// viewPR reads a pull request named as owner/name#number.
+func (a *App) viewPR(ctx context.Context, target string) (github.PR, error) {
+	repo, number, ok := strings.Cut(target, "#")
+	n, err := strconv.Atoi(number)
+	if !ok || err != nil || n < 1 {
+		return github.PR{}, errors.New("a pull request is named as owner/name#number")
+	}
+	return a.github.View(ctx, repo, n)
+}
+
+func prValue(on string, pr github.PR) string {
+	if on == core.WakeOnReview {
+		return prReviewValue(pr)
+	}
+	return prChecksValue(pr)
 }
 
 // wakeTime reads a time as RFC 3339 or as a duration from now.
@@ -141,6 +170,21 @@ func (a *App) checkWakes(ctx context.Context, now time.Time) error {
 			if err == nil && !now.Before(at) {
 				observed, event, fired = "reached", "the time came", true
 			}
+		case w.On == core.WakeOnChecks || w.On == core.WakeOnReview:
+			// GitHub is asked about each pull request at most once a minute.
+			if last, ok := a.prSeen.Load(w.On + w.Target); ok && now.Sub(last.(time.Time)) < time.Minute {
+				continue
+			}
+			a.prSeen.Store(w.On+w.Target, now)
+			pr, err := a.viewPR(ctx, w.Target)
+			if err != nil {
+				continue
+			}
+			value := prValue(w.On, pr)
+			if (w.Match == "" && value == w.Baseline) || (w.Match != "" && !strings.HasPrefix(value, w.Match)) {
+				continue
+			}
+			observed, event, fired = value, fmt.Sprintf("pull request %s: %s is now %s", w.Target, strings.TrimPrefix(w.On, "pr_"), value), true
 		case w.On == core.WakeOnBranch:
 			dir, err := projectRepo(snap, w.ProjectID)
 			if err != nil {
@@ -159,6 +203,15 @@ func (a *App) checkWakes(ctx context.Context, now time.Time) error {
 			return err
 		}
 		if w.Owner != core.WakeAssistant {
+			// A task asleep on the pull request goes back to landing.
+			if _, err := a.Core.UpdateTask(ctx, w.TaskID, func(t *core.Task, _ *core.Project) (string, error) {
+				if t.Status == core.TaskAwaiting {
+					t.Status, t.Detail = core.TaskLanding, "Looking again: "+event
+				}
+				return "", nil
+			}); err != nil && !errors.Is(err, core.ErrNotFound) {
+				return err
+			}
 			a.nudgeLoop()
 		}
 	}
@@ -170,4 +223,85 @@ func short(sha string) string {
 		return sha[:7]
 	}
 	return sha
+}
+
+// wakeBlock is what an implementer may end its reply with.
+type wakeBlock struct {
+	WakeMeWhen []engine.WakeArgs `json:"wake_me_when"`
+	Cancel     []string          `json:"cancel"`
+}
+
+// splitWakeBlock takes a trailing ```wake block off the implementer's reply.
+func splitWakeBlock(text string) (string, string) {
+	start := strings.LastIndex(text, "```wake")
+	if start < 0 {
+		return text, ""
+	}
+	rest := text[start+len("```wake"):]
+	end := strings.Index(rest, "```")
+	if end < 0 {
+		return text, ""
+	}
+	return strings.TrimSpace(text[:start] + rest[end+3:]), strings.TrimSpace(rest[:end])
+}
+
+// applyWakeBlock registers and cancels the implementer's wakes. Problems are
+// kept for its next round rather than dropped.
+func (a *App) applyWakeBlock(ctx context.Context, p core.Project, t core.Task, block string) []string {
+	if block == "" {
+		return nil
+	}
+	var in wakeBlock
+	if err := json.Unmarshal([]byte(block), &in); err != nil {
+		return []string{"the wake block was not valid JSON: " + err.Error()}
+	}
+	var problems []string
+	for _, handle := range in.Cancel {
+		if _, err := a.Core.CancelWake(ctx, handle, t.ID); err != nil {
+			problems = append(problems, fmt.Sprintf("cancelling %s: %v", handle, err))
+		}
+	}
+	for _, req := range in.WakeMeWhen {
+		req.ProjectID = p.ID
+		if req.Target == "this" {
+			if !proposed(t) || t.Playbook == nil {
+				problems = append(problems, "there is no pull request yet, so \"this\" names nothing")
+				continue
+			}
+			req.Target = fmt.Sprintf("%s#%d", t.Playbook.Land.GitHub, t.Proposal.Number)
+		}
+		if _, err := a.registerWake(ctx, core.WakeTask, t.ID, req); err != nil {
+			problems = append(problems, fmt.Sprintf("waiting on %s %s: %v", req.On, req.Target, err))
+		}
+	}
+	return problems
+}
+
+// wakePrompt tells the implementer what woke it, what it is still waiting
+// on, and how to ask for more.
+func (a *App) wakePrompt(ctx context.Context, t core.Task, woken []core.Wake) (string, error) {
+	snap, err := a.Core.Snapshot(ctx)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	if len(woken) > 0 {
+		b.WriteString("\n\nWake-ups you asked for have come:\n" + core.WakeReport(woken, time.Now()) + "\n")
+	}
+	var waiting []string
+	for _, w := range snap.Wakes {
+		if w.TaskID == t.ID && w.Owner == core.WakeTask && w.Status == core.WakeWaiting {
+			waiting = append(waiting, fmt.Sprintf("%s (%s %s, until %s)", w.ID, w.On, w.Target, w.ExpiresAt.UTC().Format(time.RFC3339)))
+		}
+	}
+	if len(waiting) > 0 {
+		b.WriteString("\nYou are still waiting on: " + strings.Join(waiting, "; ") + ".\n")
+	}
+	if len(t.WakeErrors) > 0 {
+		b.WriteString("\nYour last wake block had problems: " + strings.Join(t.WakeErrors, "; ") + ".\n")
+	}
+	if t.Playbook != nil && t.Playbook.Land.Way() == core.LandPullRequest {
+		b.WriteString("\nIf something outside this change matters later, you can end your reply with a wake block and be woken in a later round, with your own note:\n```wake\n{\"wake_me_when\": [{\"on\": \"pr_checks\", \"target\": \"this\", \"match\": \"\", \"prompt\": \"what to do then\", \"timeout\": \"2h\"}], \"cancel\": []}\n```\non can be pr_checks or pr_review (target this), branch (a branch name), time (RFC 3339 or a duration) or task (a task id). Cancel handles you no longer need.\n")
+	}
+	return b.String(), nil
 }

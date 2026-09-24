@@ -16,6 +16,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/integrations/connections"
+	"github.com/shhac/crew-assistant/internal/integrations/github"
 	"github.com/shhac/crew-assistant/internal/quota"
 	"github.com/shhac/crew-assistant/internal/roles"
 )
@@ -40,10 +41,15 @@ type App struct {
 	runner           roles.Runner
 	meter            *quota.Meter
 	loopWake         chan struct{}
+	// github reads and merges pull requests; githubURL is where git pushes.
+	// Both are replaced in tests.
+	github    github.Client
+	githubURL func(repo string) string
+	prSeen    sync.Map
 }
 
 func New(s *core.Service, cfg config.Config, path string, demo bool) *App {
-	return &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), statuses: map[string]core.Integration{}, runner: roles.Native{}, meter: &quota.Meter{}, loopWake: make(chan struct{}, 1), small: newSmallModels(func() string { return s.StateDirectory() })}
+	return &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), statuses: map[string]core.Integration{}, runner: roles.Native{}, meter: &quota.Meter{}, loopWake: make(chan struct{}, 1), small: newSmallModels(func() string { return s.StateDirectory() }), github: github.New(), githubURL: github.URL}
 }
 func (a *App) Config() config.Config { a.mu.RLock(); defer a.mu.RUnlock(); return a.cfg }
 func (a *App) UpdateConfig(cfg config.Config) error {

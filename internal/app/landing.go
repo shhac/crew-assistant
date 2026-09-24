@@ -62,8 +62,11 @@ func (a *App) land(ctx context.Context, p core.Project, t core.Task, m medium) e
 	if len(t.Revisions) == 0 {
 		return a.setStatus(ctx, t.ID, core.TaskWriting, "")
 	}
-	if taskPlaybook(p, t).Land.AsksFirst() && !approvalStands(t) {
+	if taskPlaybook(p, t).Land.AsksFirst() && !approvalStands(t) && !proposed(t) {
 		return a.setStatus(ctx, t.ID, core.TaskDeciding, "Checks are in")
+	}
+	if gm, ok := m.(gitMedium); ok && gm.playbook.Land.Way() == core.LandPullRequest {
+		return a.landPR(ctx, p, t, gm)
 	}
 	r := t.Revisions[len(t.Revisions)-1]
 	done, err := m.alreadyLanded(ctx, t, r)
@@ -92,6 +95,10 @@ func (a *App) land(ctx context.Context, p core.Project, t core.Task, m medium) e
 	return a.recordLanded(ctx, t, r, target, "")
 }
 
+// proposed reports a task whose pull request is open: updates to it go out
+// without asking again, unless they touch what runs or instructs.
+func proposed(t core.Task) bool { return t.Proposal != nil && t.Proposal.Number > 0 }
+
 func (a *App) recordLanded(ctx context.Context, t core.Task, r core.Revision, target, note string) error {
 	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 		if t.Finished() {
@@ -102,7 +109,7 @@ func (a *App) recordLanded(ctx context.Context, t core.Task, r core.Revision, ta
 		if target != "" {
 			t.Detail += " and delivered to " + target
 		}
-		if t.Playbook != nil && t.Playbook.Land.Way() == core.LandPush {
+		if t.Playbook != nil && t.Playbook.Land.Way() != core.LandBranch {
 			t.Status, t.Detail = core.TaskLanded, fmt.Sprintf("Draft %d landed on %s", r.N, target)
 		}
 		if note != "" {
@@ -201,9 +208,19 @@ func (a *App) recordCatchUp(ctx context.Context, moved core.Task, m medium, comm
 		prev := t.Revisions[len(t.Revisions)-1]
 		n := prev.N + 1
 		now := time.Now().UTC()
-		t.Base, t.From = moved.Base, moved.From
-		t.Revisions = append(t.Revisions, core.Revision{N: n, BriefVersion: p.Brief.Version, Files: files, Ref: commit, CleanMergeOf: prev.N, Summary: "Merged in without conflicts: " + l.What + ".", At: now})
+		if !l.Foreign {
+			t.Base, t.From = moved.Base, moved.From
+		}
+		revision := core.Revision{N: n, BriefVersion: p.Brief.Version, Files: files, Ref: commit, CleanMergeOf: prev.N, Summary: "Merged in without conflicts: " + l.What + ".", At: now}
+		if l.Foreign {
+			// Someone else's commits are new work: nothing carries over.
+			revision.CleanMergeOf = 0
+		}
+		t.Revisions = append(t.Revisions, revision)
 		for _, v := range t.Verdicts {
+			if l.Foreign {
+				break
+			}
 			if v.Revision != prev.N || !reviewers[v.Role] || v.Outcome != core.VerdictPass || v.BriefVersion != p.Brief.Version {
 				continue
 			}

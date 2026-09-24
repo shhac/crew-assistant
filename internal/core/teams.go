@@ -334,8 +334,10 @@ type Proposal struct {
 	Pushed string `json:"pushed,omitempty"`
 	Number int    `json:"number,omitempty"`
 	URL    string `json:"url,omitempty"`
-	// Seen is the newest review or comment already passed to the team.
-	Seen time.Time `json:"seen,omitzero"`
+	// Seen is the newest review or comment already passed to the team, and
+	// ChecksFor the commit whose failing checks were.
+	Seen      time.Time `json:"seen,omitzero"`
+	ChecksFor string    `json:"checks_for,omitempty"`
 }
 
 // Revision is one snapshot of the artifact, stamped with the brief it answers.

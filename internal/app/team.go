@@ -104,9 +104,6 @@ func (a *App) SetLanding(ctx context.Context, in engine.SetLandingArgs) (core.Pr
 	}
 	playbook := *p.Playbook
 	playbook.Land = core.LandPolicy{Means: strings.TrimSpace(in.Means), Via: in.Via, Target: strings.TrimSpace(in.Target), Method: in.Method, GitHub: strings.TrimSpace(in.GitHub), Approve: in.Approve}
-	if playbook.Land.Via == core.LandPullRequest {
-		return core.Project{}, errors.New("landing through pull requests is not built yet; use push or branch")
-	}
 	if err = playbook.Validate(); err != nil {
 		return core.Project{}, err
 	}

@@ -326,6 +326,55 @@ func TestAMergeThatChangesNoFilesIsStillRecorded(t *testing.T) {
 	}
 }
 
+func TestAnOwnedBranchIsOnlyUpdatedUnderItsLease(t *testing.T) {
+	source := ownerRepo(t)
+	remote := t.TempDir()
+	git(t, remote, "init", "-q", "--bare")
+	r, err := Open(ctx, t.TempDir(), source, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, err := r.Begin(ctx, "crew-task/a", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Workspace(), "a.go"), "package main\n")
+	first, _, _ := r.Snapshot(ctx, base, base, "a")
+	if err = r.PushOwned(ctx, remote, first, "crew/a", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	// A branch that already exists is not ours to create over.
+	if err = r.PushOwned(ctx, remote, first, "crew/a", "", nil); err != nil && !errors.Is(err, ErrLeaseLost) {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Workspace(), "a.go"), "package main\n\nfunc A() {}\n")
+	second, _, _ := r.Snapshot(ctx, base, first, "a2")
+	if err = r.PushOwned(ctx, remote, second, "crew/a", first, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Someone else pushes a fix-up to the branch; the next update must not
+	// overwrite it.
+	other := t.TempDir()
+	git(t, other, "clone", "-q", "--branch", "crew/a", remote, ".")
+	write(t, filepath.Join(other, "theirs.go"), "package main\n")
+	git(t, other, "add", "-A")
+	git(t, other, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "reviewer's fix-up")
+	git(t, other, "push", "-q", "origin", "crew/a")
+	theirs := git(t, other, "rev-parse", "HEAD")
+	write(t, filepath.Join(r.Workspace(), "a.go"), "package main\n\nfunc A() { _ = 1 }\n")
+	third, _, _ := r.Snapshot(ctx, base, second, "a3")
+	if err = r.PushOwned(ctx, remote, third, "crew/a", second, nil); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("overwrote someone else's push: %v", err)
+	}
+	if got := git(t, remote, "rev-parse", "refs/heads/crew/a"); got != theirs {
+		t.Fatal("the other push was lost")
+	}
+	fetched, err := r.FetchFrom(ctx, remote, "crew/a", nil)
+	if err != nil || fetched != theirs {
+		t.Fatalf("fetched %s err %v", fetched, err)
+	}
+}
+
 func TestPlantedHooksAndFsmonitorNeverRunAsTheDaemon(t *testing.T) {
 	source := ownerRepo(t)
 	r, err := Open(ctx, t.TempDir(), source, nil)

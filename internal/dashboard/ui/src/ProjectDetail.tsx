@@ -74,7 +74,8 @@ export function ProjectDetail({
             tasks={tasks}
             hasTeam={!!project.playbook}
             landsOn={
-              project.playbook?.land?.via === "push"
+              project.playbook?.land?.via === "push" ||
+              project.playbook?.land?.via === "pull-request"
                 ? project.playbook.land.target
                 : undefined
             }
