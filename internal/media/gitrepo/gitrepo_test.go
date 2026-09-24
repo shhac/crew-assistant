@@ -521,3 +521,54 @@ func TestDaemonGitIgnoresGlobalConfig(t *testing.T) {
 		t.Fatal("a filter from global config ran as the daemon")
 	}
 }
+
+func TestMergeCleanNeverTouchesTheWorkspace(t *testing.T) {
+	source := ownerRepo(t)
+	r, err := Open(ctx, t.TempDir(), source, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, _ := r.Begin(ctx, "crew-task/a", "")
+	write(t, filepath.Join(r.Workspace(), "main.go"), "package main // a\n")
+	a, _, _ := r.Snapshot(ctx, base, base, "a")
+	r.Begin(ctx, "crew-task/b", "")
+	write(t, filepath.Join(r.Workspace(), "main.go"), "package main // b\n")
+	b, _, _ := r.Snapshot(ctx, base, base, "b")
+	before := git(t, r.Workspace(), "rev-parse", "HEAD")
+	if commit, err := r.MergeClean(ctx, b, a, "merge"); err != nil || commit != "" {
+		t.Fatalf("a conflicting merge was made clean: %q %v", commit, err)
+	}
+	if git(t, r.Workspace(), "rev-parse", "HEAD") != before || git(t, r.Workspace(), "status", "--porcelain") != "" {
+		t.Fatal("a merge attempt changed the workspace")
+	}
+	r.Begin(ctx, "crew-task/c", "")
+	write(t, filepath.Join(r.Workspace(), "other.go"), "package main\n")
+	c, _, _ := r.Snapshot(ctx, base, base, "c")
+	merged, err := r.MergeClean(ctx, c, a, "merge")
+	if err != nil || merged == "" {
+		t.Fatalf("a clean merge failed: %v", err)
+	}
+	if parents := strings.Fields(git(t, r.Workspace(), "rev-list", "--parents", "-n1", merged)); len(parents) != 3 || parents[1] != c || parents[2] != a {
+		t.Fatalf("the merge does not have both parents: %v", parents)
+	}
+}
+
+func TestAFirstPushNeverTakesOverABranchAlreadyThere(t *testing.T) {
+	source := ownerRepo(t)
+	remote := t.TempDir()
+	git(t, remote, "init", "-q", "--bare")
+	git(t, source, "push", "-q", remote, "main:crew/a")
+	r, err := Open(ctx, t.TempDir(), source, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, _ := r.Begin(ctx, "crew-task/a", "main")
+	write(t, filepath.Join(r.Workspace(), "a.go"), "package main\n")
+	commit, _, _ := r.Snapshot(ctx, base, base, "a")
+	if err = r.PushOwned(ctx, remote, commit, "crew/a", "", nil); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("pushed over a branch someone else made: %v", err)
+	}
+	if git(t, remote, "rev-parse", "refs/heads/crew/a") != base {
+		t.Fatal("the existing branch was moved")
+	}
+}

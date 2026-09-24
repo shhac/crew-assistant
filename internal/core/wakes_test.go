@@ -196,3 +196,53 @@ func TestAWakeFiresOnItsMatchOrAnyChange(t *testing.T) {
 		}
 	}
 }
+
+func TestAWakeUpTurnIsRetriedTwiceThenGivenUpAndCanBeCancelled(t *testing.T) {
+	s, _ := fixture(t)
+	w, _ := s.RegisterWake(testContext, WakeInput{Owner: WakeAssistant, On: WakeOnTime, Target: "x", Baseline: "not yet"})
+	s.FireWake(testContext, w.ID, "reached", "", false)
+	for attempt := 1; attempt <= maxWakeAttempts; attempt++ {
+		turn, err := s.StartNextChat(testContext)
+		if err != nil || turn.Origin != OriginWake {
+			t.Fatalf("attempt %d: %+v %v", attempt, turn, err)
+		}
+		if attempt == 2 {
+			// A daemon restart interrupts the turn; the wake comes again.
+			if err = s.RecoverChatTurns(testContext); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		s.FinishChat(testContext, turn.ID, "failed", "", "model unavailable")
+	}
+	if _, err := s.StartNextChat(testContext); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a wake that failed %d times was offered again: %v", maxWakeAttempts, err)
+	}
+	snap, _ := s.Snapshot(testContext)
+	if got := snap.Wakes[0]; got.Status != WakeDelivered || got.Attempts != maxWakeAttempts {
+		t.Fatalf("wake %+v", got)
+	}
+
+	// The owner cancels a queued wake-up turn: its wakes are cancelled too.
+	w2, _ := s.RegisterWake(testContext, WakeInput{Owner: WakeAssistant, On: WakeOnTime, Target: "y", Baseline: "not yet"})
+	s.FireWake(testContext, w2.ID, "reached", "", false)
+	turns, _ := s.ChatTurns(testContext)
+	queued := turns[len(turns)-1]
+	if _, err := s.CancelChat(testContext, queued.ID); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ = s.Snapshot(testContext)
+	for _, got := range snap.Wakes {
+		if got.ID == w2.ID && got.Status != WakeCancelled {
+			t.Fatalf("cancelling the turn left its wake %s", got.Status)
+		}
+	}
+	// Cancelling the last wake of a queued turn cancels the turn.
+	w3, _ := s.RegisterWake(testContext, WakeInput{Owner: WakeAssistant, On: WakeOnTime, Target: "z", Baseline: "not yet"})
+	s.FireWake(testContext, w3.ID, "reached", "", false)
+	s.CancelWake(testContext, w3.ID, "")
+	turns, _ = s.ChatTurns(testContext)
+	if last := turns[len(turns)-1]; last.Status != "cancelled" || last.FinishedAt == nil {
+		t.Fatalf("an empty wake-up turn stayed queued: %+v", last)
+	}
+}

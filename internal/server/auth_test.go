@@ -3,8 +3,13 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/shhac/crew-assistant/internal/config"
 )
 
 func TestPrivateAPIAndPairing(t *testing.T) {
@@ -90,5 +95,51 @@ func TestDecodeAcceptsOneObjectAndWhitespace(t *testing.T) {
 	}
 	if err := decode(w, r, &v); err != nil || v.Token != "valid" {
 		t.Fatalf("valid JSON rejected: %v", err)
+	}
+}
+
+func TestAuthRefusesWhatIsNotTheOwnersOwnDashboard(t *testing.T) {
+	dir := t.TempDir()
+	a, err := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := a.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+	send := func(method, host, remote, path, body string, headers map[string]string, cookie *http.Cookie) int {
+		r := httptest.NewRequest(method, "http://"+host+path, strings.NewReader(body))
+		r.RemoteAddr = remote
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	dashboard := map[string]string{"X-Requested-With": "crew-assistant"}
+	admin := map[string]string{"Authorization": "Bearer " + a.admin}
+	if send("GET", "evil.example:8340", "127.0.0.1:1", "/api/state", "", admin, nil) != 403 {
+		t.Error("a request for another host name was served (DNS rebinding)")
+	}
+	if send("GET", "127.0.0.1:8340", "127.0.0.1:1", "/api/state", "", admin, nil) != 204 {
+		t.Error("the CLI's admin token was refused from this machine")
+	}
+	if send("GET", "127.0.0.1:8340", "100.64.0.9:1", "/api/state", "", admin, nil) != 401 {
+		t.Error("the admin token was accepted from another machine")
+	}
+	code, _ := Pair(dir)
+	if send("POST", "127.0.0.1:8340", "127.0.0.1:1", "/api/session", `{"token":"`+code+`"}`, nil, nil) != 403 {
+		t.Error("a write without the dashboard's header was accepted")
+	}
+	old := time.Now().Add(-6 * time.Minute)
+	os.Chtimes(filepath.Join(dir, "pairing-code"), old, old)
+	if send("POST", "127.0.0.1:8340", "127.0.0.1:1", "/api/session", `{"token":"`+code+`"}`, dashboard, nil) != 401 {
+		t.Error("a sign-in code older than five minutes was accepted")
+	}
+	a.sessions["stale"] = time.Now().Add(-time.Minute)
+	if send("GET", "127.0.0.1:8340", "127.0.0.1:1", "/api/state", "", nil, &http.Cookie{Name: config.Namespace + ".session", Value: "stale"}) != 401 {
+		t.Error("an expired session was accepted")
 	}
 }

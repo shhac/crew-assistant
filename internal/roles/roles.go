@@ -50,24 +50,7 @@ type Runner interface {
 type Native struct{}
 
 func (Native) Run(ctx context.Context, spec Spec) (Result, error) {
-	o := session.Options{
-		Engine:      session.Engine(spec.Engine),
-		Binary:      spec.Binary,
-		Home:        spec.Home,
-		RuntimeHome: spec.RuntimeHome,
-		WorkDir:     spec.WorkDir,
-		Model:       spec.Model,
-		Effort:      spec.Effort,
-		Sandbox:     &session.Sandbox{Write: spec.Write, Read: spec.Read},
-		Env:         spec.Env,
-	}
-	if spec.Engine != string(session.Codex) {
-		o.RuntimeHome = ""
-	}
-	if spec.Instructions != "" {
-		o.Instructions = session.Instructions{Mode: session.Append, Text: spec.Instructions}
-	}
-	s, err := open(ctx, o, spec.Resume)
+	s, err := open(ctx, options(spec), spec.Resume)
 	if err != nil {
 		return Result{}, err
 	}
@@ -98,6 +81,29 @@ func (Native) Run(ctx context.Context, spec Spec) (Result, error) {
 		return Result{Session: ref}, fmt.Errorf("the %s session ended its turn as %s", spec.Engine, result.Status)
 	}
 	return Result{Text: result.Text, Session: ref}, nil
+}
+
+// options is the session a role runs as. Every role runs sandboxed; only a
+// Codex role gets a private runtime home.
+func options(spec Spec) session.Options {
+	o := session.Options{
+		Engine:      session.Engine(spec.Engine),
+		Binary:      spec.Binary,
+		Home:        spec.Home,
+		RuntimeHome: spec.RuntimeHome,
+		WorkDir:     spec.WorkDir,
+		Model:       spec.Model,
+		Effort:      spec.Effort,
+		Sandbox:     &session.Sandbox{Write: spec.Write, Read: spec.Read},
+		Env:         spec.Env,
+	}
+	if spec.Engine != string(session.Codex) {
+		o.RuntimeHome = ""
+	}
+	if spec.Instructions != "" {
+		o.Instructions = session.Instructions{Mode: session.Append, Text: spec.Instructions}
+	}
+	return o
 }
 
 // open resumes the recorded session when it is still compatible and otherwise

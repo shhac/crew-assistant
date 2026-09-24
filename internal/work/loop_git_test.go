@@ -529,3 +529,57 @@ func TestLandingRefusesWhenItCannotTellTheOrder(t *testing.T) {
 		t.Fatalf("landed without knowing the order: %v", err)
 	}
 }
+
+// A project whose owner lets checked changes land unasked gets no approval
+// question, and a change already on the target is recorded, not pushed again.
+func TestNoApprovalStepAndAlreadyLanded(t *testing.T) {
+	source := t.TempDir()
+	ownerGit(t, source, "init", "-q", "-b", "main")
+	ownerGit(t, source, "config", "commit.gpgsign", "false")
+	os.WriteFile(filepath.Join(source, "main.go"), []byte("package main\n"), 0600)
+	ownerGit(t, source, "add", "-A")
+	ownerGit(t, source, "commit", "-q", "-m", "start")
+	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass, pass, pass}}}
+	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
+	a.runner = runner
+	ctx := context.Background()
+	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{source}, Brief: core.BriefInput{Goal: "x"}})
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SetLanding(ctx, p.ID, core.LandPolicy{Via: core.LandPush, Target: "main", Approve: core.ApproveNone}); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	a.StopTask(ctx, snap.Tasks[0].ProjectID, snap.Tasks[0].ID)
+	first, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
+	settle(t, a)
+	snap, _ = a.Core.Snapshot(ctx)
+	first, _ = findTask(snap, p.ID, first.ID)
+	for _, d := range snap.Decisions {
+		if d.TaskID == first.ID {
+			t.Fatalf("asked the owner although they said not to: %+v", d)
+		}
+	}
+	if first.Status != core.TaskLanded || ownerGit(t, source, "rev-parse", "main") != first.Revisions[0].Ref {
+		t.Fatalf("did not land unasked: %+v", first)
+	}
+
+	// Another task's approved draft is put on main by hand before it lands.
+	second, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add B"})
+	if _, err := a.SetLanding(ctx, p.ID, core.LandPolicy{Via: core.LandPush, Target: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, a)
+	snap, _ = a.Core.Snapshot(ctx)
+	second, _ = findTask(snap, p.ID, second.ID)
+	ownerGit(t, source, "fetch", "-q", filepath.Join(p.ScratchDirectory, "clone"), second.Branch)
+	ownerGit(t, source, "merge", "-q", "--ff-only", second.Revisions[len(second.Revisions)-1].Ref)
+	a.Core.ResolveDecision(ctx, openDecision(t, a, second).ID, choiceApprove)
+	settle(t, a)
+	snap, _ = a.Core.Snapshot(ctx)
+	second, _ = findTask(snap, p.ID, second.ID)
+	if second.Status != core.TaskLanded || !strings.Contains(second.Detail, "already there") {
+		t.Fatalf("a change already on main was not recorded as landed: %s %s", second.Status, second.Detail)
+	}
+}

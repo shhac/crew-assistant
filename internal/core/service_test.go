@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -94,4 +95,36 @@ func TestPendingOperationInspectionIsVisibleAndDoesNotReplay(t *testing.T) {
 	if fresh {
 		t.Fatal("acknowledgement replayed operation")
 	}
+}
+
+func TestStateFromAnotherModelIsRefusedAndLeftAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewService(st, config.Default())
+	if _, err = s.Snapshot(testContext); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Remember(testContext, "tone", "brief"); err != nil {
+		t.Fatal(err)
+	}
+	for _, payload := range []string{`{"snapshot":{"projects":[]}}`, `{"schema":1,"snapshot":{"projects":[]}}`} {
+		if _, err = st.db.Exec("UPDATE state SET payload=? WHERE id=1", payload); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = s.Snapshot(testContext); !errors.Is(err, ErrStateSchema) {
+			t.Fatalf("read state written by another model: %v", err)
+		}
+		if _, err = s.Remember(testContext, "tone", "warm"); !errors.Is(err, ErrStateSchema) {
+			t.Fatalf("wrote over state written by another model: %v", err)
+		}
+		var after string
+		st.db.QueryRow("SELECT payload FROM state WHERE id=1").Scan(&after)
+		if after != payload {
+			t.Fatal("state from another model was changed")
+		}
+	}
+	st.Close()
 }
