@@ -53,17 +53,6 @@ export function roleName(task: Task, kind: string, fallback: string) {
   return task.roles?.find((r) => r.kind === kind)?.name ?? fallback;
 }
 
-/** The reviewer still to judge the latest draft, or the first reviewer. */
-function reviewerAtWork(task: Task) {
-  const latest = task.revisions?.at(-1)?.n;
-  const reviewers = (task.roles ?? []).filter((r) => r.kind === "reviewer");
-  const waiting = reviewers.find(
-    (r) =>
-      !task.verdicts?.some((v) => v.role === r.name && v.revision === latest),
-  );
-  return (waiting ?? reviewers[0])?.name ?? "Reviewer";
-}
-
 const held = (task: Task) =>
   !!task.retry_at &&
   !task.retry_at.startsWith("0001-") &&
@@ -82,7 +71,7 @@ export function requestStep(task: Task, decision?: Decision): string {
     case "reviewing":
     case "deciding": {
       if (task.stage !== "qa")
-        return `${round}${reviewerAtWork(task)} reviewing`;
+        return `${round}${task.checking || roleName(task, "reviewer", "Reviewer")} reviewing`;
       const check = task.playbook?.check;
       return check ? `${round}QA running ${check}` : `${round}QA checking`;
     }

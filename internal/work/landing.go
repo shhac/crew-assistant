@@ -219,7 +219,7 @@ func (lp *Loop) recordCatchUp(ctx context.Context, moved core.Task, c catcher, c
 		return lp.roleFailed(ctx, moved, "The workspace", err)
 	}
 	reviewers := map[string]bool{}
-	for _, r := range roleOf(moved, core.RoleReviewer) {
+	for _, r := range moved.RolesOf(core.RoleReviewer) {
 		reviewers[r.Name] = true
 	}
 	_, err = lp.updateOpen(ctx, moved.ID, func(t *core.Task, p *core.Project) (string, error) {

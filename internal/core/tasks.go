@@ -20,9 +20,12 @@ type Task struct {
 	Status    string   `json:"status"`
 	// Stage is where the task sits on its project's board, derived from the
 	// rest of the record; see stage.go.
-	Stage  string `json:"stage,omitempty"`
-	Detail string `json:"detail,omitempty"`
-	Roles  []Role `json:"roles,omitempty"`
+	Stage string `json:"stage,omitempty"`
+	// Checking names the checker at work while the task is being checked,
+	// derived with Stage.
+	Checking string `json:"checking,omitempty"`
+	Detail   string `json:"detail,omitempty"`
+	Roles    []Role `json:"roles,omitempty"`
 	// Playbook is the team's setup as it was when the task started: its
 	// medium and, for code, the repository, check and branch prefix.
 	Playbook  *Playbook `json:"playbook,omitempty"`
@@ -296,7 +299,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Pro
 		if activity != "" {
 			record(v, t.UpdatedAt, t.ProjectID, "task."+t.Status, activity)
 		}
-		t.Stage = stageOf(v, *t)
+		derive(v, t)
 		out = *t
 		return nil
 	})

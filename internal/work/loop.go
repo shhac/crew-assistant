@@ -190,16 +190,6 @@ func findDecision(s core.Snapshot, id string) (core.Decision, bool) {
 	return core.Decision{}, false
 }
 
-func roleOf(t core.Task, kind string) []core.Role {
-	var out []core.Role
-	for _, r := range t.Roles {
-		if r.Kind == kind {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
 // taskPlaybook is the setup a task runs under: the one pinned when it
 // started, or the project's current one for a task that has not started.
 func taskPlaybook(p core.Project, t core.Task) *core.Playbook {
@@ -225,7 +215,7 @@ func (lp *Loop) roleSpec(r core.Role, workDir string, write bool, m medium, prom
 // The workspace is first reset to the last revision, so nothing a crashed or
 // failed turn left behind is ever mistaken for a draft.
 func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium) error {
-	writers := roleOf(t, core.RoleImplementer)
+	writers := t.RolesOf(core.RoleImplementer)
 	if len(writers) != 1 {
 		return lp.stopTask(ctx, t, "This task's team has no writer")
 	}
@@ -347,8 +337,8 @@ func (lp *Loop) review(ctx context.Context, p core.Project, t core.Task, m mediu
 		return lp.takeDirection(ctx, t)
 	}
 	r := t.Revisions[len(t.Revisions)-1]
-	for _, checker := range checkers(t) {
-		if judged(t, checker.Name, r.N, p.Brief.Version) {
+	for _, checker := range t.Checkers() {
+		if t.Judged(checker.Name, r.N, p.Brief.Version) {
 			continue
 		}
 		if held, err := lp.holdForUsage(ctx, t, checker); held || err != nil {
@@ -369,10 +359,6 @@ func (lp *Loop) review(ctx context.Context, p core.Project, t core.Task, m mediu
 	return lp.setStatus(ctx, t.ID, core.TaskDeciding, "Checks are in")
 }
 
-func checkers(t core.Task) []core.Role {
-	return append(roleOf(t, core.RoleReviewer), roleOf(t, core.RoleQA)...)
-}
-
 // takeDirection sends a task back to the implementer when the owner has told
 // it something it has not yet had in view, so the task never reaches approval
 // or landing without it.
@@ -385,15 +371,6 @@ func (lp *Loop) takeDirection(ctx context.Context, t core.Task) error {
 		return fmt.Sprintf("Revising %s with your note", t.Objective), nil
 	})
 	return err
-}
-
-func judged(t core.Task, role string, revision, briefVersion int) bool {
-	for _, v := range t.Verdicts {
-		if v.Role == role && v.Revision == revision && v.BriefVersion == briefVersion {
-			return true
-		}
-	}
-	return false
 }
 
 // runChecker gives a fresh checking session the revision to judge. Only QA
@@ -441,8 +418,8 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 			current = append(current, v)
 		}
 	}
-	for _, checker := range checkers(t) {
-		if !judged(t, checker.Name, r.N, p.Brief.Version) {
+	for _, checker := range t.Checkers() {
+		if !t.Judged(checker.Name, r.N, p.Brief.Version) {
 			// The brief changed after some checks: judge again against it.
 			return lp.setStatus(ctx, t.ID, core.TaskReviewing, "Checking again against the updated brief")
 		}

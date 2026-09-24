@@ -155,6 +155,8 @@ export interface Task {
   criteria: string[] | null;
   status: TaskStatus;
   stage: Stage;
+  /** The checker at work while the request is being checked. */
+  checking?: string;
   detail?: string;
   roles?: Role[];
   playbook?: Playbook;
@@ -181,7 +183,7 @@ export interface RevisionFile {
   size: number;
 }
 export type DecisionKind =
-  "choice" | "delivery" | "question" | "escalation" | "failure";
+  "choice" | "delivery" | "update" | "question" | "escalation" | "failure";
 export interface Decision {
   answer?: string;
   disposition?: "choice" | "custom" | "dismissed";

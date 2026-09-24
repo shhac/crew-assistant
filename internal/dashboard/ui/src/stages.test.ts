@@ -116,6 +116,17 @@ describe("the board", () => {
       requestStep(
         task({
           status: "reviewing",
+          stage: "reviewing",
+          checking: "Rune",
+          roles: pb.roles,
+          playbook: pb,
+        }),
+      ),
+    ).toBe("Rune reviewing");
+    expect(
+      requestStep(
+        task({
+          status: "reviewing",
           stage: "qa",
           roles: pb.roles,
           playbook: pb,

@@ -12,7 +12,7 @@ func TestATaskSitsOnTheBoardWhereTheLoopHasGotTo(t *testing.T) {
 	drafted := []Revision{{N: 1}, {N: 2}}
 	reviewed := []Verdict{{Revision: 2, Role: "Reviewer", Outcome: VerdictPass}}
 	qaAsked := []Verdict{{Revision: 2, Role: "Reviewer", Outcome: VerdictPass}, {Revision: 2, Role: "QA", Outcome: VerdictQuestion, Question: "which tool?"}}
-	decisions := []Decision{{ID: "delivery", Kind: "delivery"}, {ID: "failure", Kind: "failure"}, {ID: "question", Kind: "question"}, {ID: "escalation", Kind: "escalation"}}
+	decisions := []Decision{{ID: "delivery", Kind: "delivery"}, {ID: "update", Kind: "update"}, {ID: "failure", Kind: "failure"}, {ID: "question", Kind: "question"}, {ID: "escalation", Kind: "escalation"}}
 	for name, tc := range map[string]struct {
 		task Task
 		want string
@@ -24,6 +24,8 @@ func TestATaskSitsOnTheBoardWhereTheLoopHasGotTo(t *testing.T) {
 		"reviewed, no QA":            {Task{Status: TaskDeciding, Roles: noQA, Revisions: drafted, Verdicts: reviewed}, StageReviewing},
 		"every check in":             {Task{Status: TaskDeciding, Roles: team, Revisions: drafted, Verdicts: qaAsked}, StageQA},
 		"awaiting approval":          {Task{Status: TaskWaiting, DecisionID: "delivery", Roles: team, Revisions: drafted}, StageReady},
+		"update waiting":             {Task{Status: TaskWaiting, DecisionID: "update", Roles: team, Revisions: drafted}, StageReady},
+		"failed mid-review":          {Task{Status: TaskWaiting, DecisionID: "failure", ResumeStatus: TaskReviewing, Roles: team, Revisions: drafted, Verdicts: reviewed}, StageQA},
 		"QA asked a question":        {Task{Status: TaskWaiting, DecisionID: "question", Roles: team, Revisions: drafted, Verdicts: qaAsked}, StageQA},
 		"reviewer asked a question":  {Task{Status: TaskWaiting, DecisionID: "question", Roles: team, Revisions: drafted, Verdicts: reviewed}, StageReviewing},
 		"out of rounds":              {Task{Status: TaskWaiting, DecisionID: "escalation", Roles: team, Revisions: drafted}, StageQA},
@@ -39,6 +41,31 @@ func TestATaskSitsOnTheBoardWhereTheLoopHasGotTo(t *testing.T) {
 		if got := stageOf(&Snapshot{Decisions: decisions}, tc.task); got != tc.want {
 			t.Errorf("%s: stage %q, want %q", name, got, tc.want)
 		}
+	}
+}
+
+// After the brief changes, every checker judges the revision again, so the
+// board goes back to reviewing and names who is at work, as the loop does.
+func TestABriefChangeSendsTheBoardBackToReviewing(t *testing.T) {
+	team := []Role{{Name: "Implementer", Kind: RoleImplementer}, {Name: "Rune", Kind: RoleReviewer}, {Name: "QA", Kind: RoleQA}}
+	v := &Snapshot{
+		Projects: []Project{{ID: "p", Brief: Brief{Version: 2}}},
+		Tasks: []Task{{ProjectID: "p", Status: TaskReviewing, Roles: team, Revisions: []Revision{{N: 1}}, Verdicts: []Verdict{
+			{Revision: 1, Role: "Rune", Outcome: VerdictPass, BriefVersion: 1},
+		}}},
+	}
+	deriveStages(v)
+	if got := v.Tasks[0]; got.Stage != StageReviewing || got.Checking != "Rune" {
+		t.Fatalf("stage %q checking %q, want reviewing by Rune", got.Stage, got.Checking)
+	}
+	v.Tasks[0].Verdicts = append(v.Tasks[0].Verdicts, Verdict{Revision: 1, Role: "Rune", Outcome: VerdictPass, BriefVersion: 2})
+	deriveStages(v)
+	if got := v.Tasks[0]; got.Stage != StageQA || got.Checking != "QA" {
+		t.Fatalf("stage %q checking %q, want QA next", got.Stage, got.Checking)
+	}
+	v.Tasks[0].Status = TaskWriting
+	if deriveStages(v); v.Tasks[0].Checking != "" {
+		t.Fatal("nobody is checking while the implementer writes")
 	}
 }
 
