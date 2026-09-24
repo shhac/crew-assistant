@@ -52,7 +52,7 @@ func codePlaybook(repo string, land core.LandPolicy) *core.Playbook {
 func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 	crewRepo := filepath.Join(dir, "projects", "crew-assistant")
 	docsRepo := filepath.Join(dir, "projects", "docs-site")
-	fastForward := core.LandPolicy{Via: core.LandPush, Target: "main", Method: "fast-forward", Approve: core.ApproveBefore, Means: "fast-forwarded onto main"}
+	fastForward := core.LandPolicy{Via: core.LandPush, Target: "main", Method: "fast-forward", Approve: core.ApproveBefore, Means: "the next release includes it"}
 	pullRequest := core.LandPolicy{Via: core.LandPullRequest, Target: "main", Method: "squash", GitHub: "example/docs-site", Approve: core.ApproveBefore}
 	crew := core.Project{ID: "demo-crew", Title: "crew-assistant", Status: "active", Directories: []string{crewRepo}, Playbook: codePlaybook(crewRepo, fastForward), UpdatedAt: ago(4 * time.Minute),
 		Brief: core.Brief{Version: 3, Goal: "Make crew-assistant a software factory that can build and improve itself.", Criteria: []string{"Features land on main without losing work", "Tests never touch real services"}, UpdatedAt: ago(72 * time.Hour)}}
@@ -148,7 +148,7 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 		queued(memo, "demo-notes", "Speaker notes for the plan", ago(20*time.Minute)),
 	}
 	decisions := []core.Decision{
-		{ID: "demo-land-signing", ProjectID: crew.ID, TaskID: signing.ID, Kind: "delivery", Title: "Land “Sign commits as your git config says” on main", Context: "Signing failures now say signing was the cause, and the tests use a stand-in signer.\n\nApproving moves main in crew-assistant forward to include it. Nothing already on main is replaced. Landing here means: fast-forwarded onto main.", Recommendation: "Approve", Choices: []string{"Approve", "Request changes"}, Status: "open", CreatedAt: ago(4 * time.Minute)},
+		{ID: "demo-land-signing", ProjectID: crew.ID, TaskID: signing.ID, Kind: "delivery", Title: "Land “Sign commits as your git config says” on main", Context: "Signing failures now say signing was the cause, and the tests use a stand-in signer.\n\nApproving moves main in crew-assistant forward to include it. Nothing already on main is replaced. Landing here means: the next release includes it.", Recommendation: "Approve", Choices: []string{"Approve", "Request changes"}, Status: "open", CreatedAt: ago(4 * time.Minute)},
 		{ID: "demo-changelog-question", ProjectID: docs.ID, TaskID: changelog.ID, Kind: "question", Title: "Reviewer has a question about “Changelog page”", Context: "Should the changelog list patch releases, or only minor ones with their patches linked?", Recommendation: "Answer it, or let the team decide", Choices: []string{"Use your judgment", "Stop"}, Status: "open", CreatedAt: ago(22 * time.Minute)},
 		{ID: "demo-approve-plan", ProjectID: memo.ID, TaskID: plan.ID, Kind: "delivery", Title: "Approve “One-page Q4 plan”", Context: "Cut to three priorities, each with how we will know it worked.\n\nIt stays on the project.", Recommendation: "Approve", Choices: []string{"Approve", "Request changes"}, Status: "open", CreatedAt: ago(10 * time.Minute)},
 	}
