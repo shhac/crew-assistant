@@ -59,11 +59,15 @@ func (a Avatar) Normalized() Avatar {
 
 var imageID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
+// ValidImageID reports whether id could name a drawn picture, so it is safe
+// to put in a path.
+func ValidImageID(id string) bool { return imageID.MatchString(id) }
+
 func (a Avatar) Validate() error {
 	if !hexColor.MatchString(a.Background) || !hexColor.MatchString(a.Accent) {
 		return errors.New("colors must be #RRGGBB")
 	}
-	if a.Image != "" && !imageID.MatchString(a.Image) {
+	if a.Image != "" && !ValidImageID(a.Image) {
 		return errors.New("image must name a drawn picture")
 	}
 	if len(a.Look) > MaxLook {

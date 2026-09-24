@@ -12,8 +12,8 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
-	"regexp"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"golang.org/x/image/draw"
 )
 
@@ -30,10 +30,8 @@ const (
 	minSide  = 256
 )
 
-var validID = regexp.MustCompile(`^[0-9a-f]{32}$`)
-
 // ValidID reports whether id names a stored avatar, so it can go in a path.
-func ValidID(id string) bool { return validID.MatchString(id) }
+func ValidID(id string) bool { return config.ValidImageID(id) }
 
 type Store struct{ dir string }
 

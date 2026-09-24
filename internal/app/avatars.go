@@ -29,10 +29,10 @@ func (a *App) CodexPainter() avatars.Painter { return codexPainter{a} }
 type codexPainter struct{ a *App }
 
 func (p codexPainter) Paint(ctx context.Context, character string) ([]byte, error) {
-	cfg := p.a.Config()
+	binary, home := p.a.Config().Model.EngineBinary("codex")
 	state := p.a.Core.StateDirectory()
 	return avatars.CodexPainter{Runner: roles.Native{}, Spec: roles.Spec{
-		Binary: cfg.Model.CodexBin, Home: cfg.Model.CodexHome,
+		Binary: binary, Home: home,
 		RuntimeHome: filepath.Join(state, "roles", "painter"),
 		WorkDir:     filepath.Join(state, "roles", "painter-work"),
 	}}.Paint(ctx, character)
@@ -196,17 +196,6 @@ func lookOrChoose(look string) string {
 		return "Design their look yourself to suit them."
 	}
 	return "Their look: " + look
-}
-
-// CreateMember adds a member and has Codex draw it. The member is kept even
-// when the drawing cannot start; its preset face stands in.
-func (a *App) CreateMember(ctx context.Context, in core.MemberInput) (core.Member, error) {
-	m, err := a.Core.SaveMember(ctx, "", in)
-	if err != nil {
-		return m, err
-	}
-	a.drawSoon(m.ID, func() error { return a.DrawMember(ctx, m.ID, "") })
-	return m, nil
 }
 
 // WaitForDrawings returns once every drawing under way has finished.

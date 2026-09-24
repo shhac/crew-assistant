@@ -126,6 +126,16 @@ type Model struct {
 	APIKeyEnv  string `json:"api_key_env"`
 	MaxTokens  int    `json:"max_tokens"`
 }
+
+// EngineBinary is the CLI an engine runs as and the login home it uses:
+// Codex's for codex, and Claude's otherwise.
+func (m Model) EngineBinary(engine string) (binary, home string) {
+	if engine == "codex" {
+		return m.CodexBin, m.CodexHome
+	}
+	return m.ClaudeBin, m.ClaudeHome
+}
+
 type Slack struct {
 	BotTokenEnv string `json:"bot_token_env"`
 	AppTokenEnv string `json:"app_token_env"`

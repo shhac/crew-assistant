@@ -1,9 +1,7 @@
 package server
 
 import (
-	"context"
 	"net/http"
-	"os"
 
 	"github.com/shhac/crew-assistant/internal/app"
 	"github.com/shhac/crew-assistant/internal/core"
@@ -12,26 +10,30 @@ import (
 // registerMembers serves the owner's team: the members kept across projects
 // and what each has learned.
 func registerMembers(mux *http.ServeMux, a *app.App) {
-	save := func(w http.ResponseWriter, r *http.Request, id string) {
+	mux.HandleFunc("POST /api/members", func(w http.ResponseWriter, r *http.Request) {
 		var in core.MemberInput
 		if decode(w, r, &in) != nil {
 			return
 		}
-		save := a.Core.SaveMember
-		if id == "" {
-			save = func(ctx context.Context, _ string, in core.MemberInput) (core.Member, error) {
-				return a.CreateMember(ctx, in)
-			}
-		}
-		v, err := save(r.Context(), id, in)
+		v, err := a.CreateMember(r.Context(), in)
 		if err != nil {
 			problem(w, err)
 			return
 		}
 		respond(w, 200, v)
-	}
-	mux.HandleFunc("POST /api/members", func(w http.ResponseWriter, r *http.Request) { save(w, r, "") })
-	mux.HandleFunc("PUT /api/members/{id}", func(w http.ResponseWriter, r *http.Request) { save(w, r, r.PathValue("id")) })
+	})
+	mux.HandleFunc("PUT /api/members/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var in core.MemberInput
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Core.SaveMember(r.Context(), r.PathValue("id"), in)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
 	mux.HandleFunc("DELETE /api/members/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if err := a.Core.DeleteMember(r.Context(), r.PathValue("id")); err != nil {
 			problem(w, err)
@@ -73,14 +75,9 @@ func registerMembers(mux *http.ServeMux, a *app.App) {
 			fail(w, 404, "No such picture")
 			return
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			fail(w, 404, "No such picture")
-			return
-		}
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-		w.Write(data)
+		http.ServeFile(w, r, path)
 	})
 	mux.HandleFunc("POST /api/members/{id}/learnings", func(w http.ResponseWriter, r *http.Request) {
 		var in core.LearningInput

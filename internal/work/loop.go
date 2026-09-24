@@ -226,11 +226,9 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 		spec.Read = append(append([]string(nil), spec.Read...), learned.dir)
 		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + learned.index)
 	}
+	spec.Binary, spec.Home = cfg.Model.EngineBinary(r.Engine)
 	if r.Engine == "codex" {
-		spec.Binary, spec.Home = cfg.Model.CodexBin, cfg.Model.CodexHome
 		spec.RuntimeHome = filepath.Join(lp.Core.StateDirectory(), "roles", "codex")
-	} else {
-		spec.Binary, spec.Home = cfg.Model.ClaudeBin, cfg.Model.ClaudeHome
 	}
 	return spec, learned.cleanup, nil
 }
@@ -650,64 +648,7 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 	return err
 }
 
-// holdForUsage waits a task out while the role's subscription is past the
-// owner's threshold. A hold is a wait, not a failure: nothing is retried or
-// counted against the task, and it resumes by itself when the window resets
-// or the threshold is raised.
-func (lp *Loop) holdForUsage(ctx context.Context, t core.Task, r core.Role) (bool, error) {
-	wait, detail := lp.usageWait(ctx, r)
-	if wait.IsZero() {
-		return false, nil
-	}
-	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		t.RetryAt, t.Detail = wait, detail
-		return "", nil
-	})
-	return true, err
-}
-
-// usageWait is when the role may run again, and why, while its subscription
-// is past the owner's threshold; zero when it may run now.
-// UsageWait is when an engine may be used again, if the owner's usage limit
-// holds it now, and why.
-func (lp *Loop) UsageWait(ctx context.Context, engine string) (time.Time, string) {
-	return lp.usageWait(ctx, core.Role{Engine: engine})
-}
-
-func (lp *Loop) usageWait(ctx context.Context, r core.Role) (time.Time, string) {
-	cfg := lp.Config()
-	threshold, supported := quota.Threshold(cfg.Limits.RoleUsage, r.Engine)
-	if !supported || threshold == 0 {
-		return time.Time{}, ""
-	}
-	model := cfg.Model
-	model.Engine, model.Model = r.Engine, r.Model
-	now := time.Now()
-	verdict := quota.Evaluate(lp.meter.Read(ctx, model), model, threshold, now)
-	switch {
-	case verdict.Held:
-		wait := verdict.ResetsAt
-		if !wait.After(now) {
-			wait = now.Add(10 * time.Minute)
-		}
-		return wait, fmt.Sprintf("Waiting for %s usage to reset (%s)", engineName(r.Engine), verdict.Detail)
-	case !verdict.Known && cfg.Limits.RoleUsage.OnUnavailable == "pause":
-		return now.Add(5 * time.Minute), "Waiting until " + engineName(r.Engine) + " usage can be checked"
-	}
-	return time.Time{}, ""
-}
-
 var outcomeWords = map[string]string{core.VerdictPass: "passed", core.VerdictRevise: "asked for changes", core.VerdictQuestion: "asked a question"}
-
-func engineName(engine string) string {
-	if engine == "codex" {
-		return "Codex"
-	}
-	if engine == "claude" {
-		return "Claude"
-	}
-	return engine
-}
 
 // StopTask ends a task at the owner's request. A turn already running
 // finishes, but nothing it reports can restart the task, and any decision the
