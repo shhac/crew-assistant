@@ -271,6 +271,7 @@ func TestTheImplementerAsksForItsOwnWakesInItsReply(t *testing.T) {
 	ownerGit(t, remote, "init", "-q", "--bare", "-b", "main")
 	seed := t.TempDir()
 	ownerGit(t, seed, "init", "-q", "-b", "paul/x")
+	ownerGit(t, seed, "config", "commit.gpgsign", "false")
 	ownerGit(t, seed, "commit", "-q", "--allow-empty", "-m", "x")
 	ownerGit(t, seed, "push", "-q", remote, "paul/x")
 	gh.remote, gh.head = remote, "paul/x"
