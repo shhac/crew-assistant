@@ -9,7 +9,8 @@ import {
   within,
 } from "@testing-library/react";
 import { FileSystemPicker } from "./FileSystemPicker";
-import { DirectoryList, NewProject } from "./ProjectForms";
+import { DirectoryList } from "./ProjectFolders";
+import { NewProject } from "./ProjectForms";
 import { TeamTab } from "./ProjectTeam";
 import type { FileSystemPage, Project } from "./api";
 let calls: URL[];

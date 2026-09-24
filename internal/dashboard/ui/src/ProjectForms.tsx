@@ -1,44 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { FileSystemPicker } from "./FileSystemPicker";
+import { DirectoryList, directoryName } from "./ProjectFolders";
 import { ErrorNotice, Icon, useAction } from "./ui";
 import { createProject, criteriaLines, setTeam } from "./api";
-
-function directoryName(path: string) {
-  return (
-    path
-      .replace(/[\\/]+$/, "")
-      .split(/[\\/]/)
-      .pop() || path
-  );
-}
-
-export function DirectoryList({
-  paths,
-  onRemove,
-}: {
-  paths: string[];
-  onRemove?: (path: string) => void;
-}) {
-  return (
-    <ul className="folders">
-      {paths.map((path) => (
-        <li key={path}>
-          <code title={path}>{path}</code>
-          {onRemove && (
-            <button
-              type="button"
-              className="btn btn-quiet btn-sm"
-              aria-label={`Remove folder ${path}`}
-              onClick={() => onRemove(path)}
-            >
-              Remove
-            </button>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 type Kind = "writing" | "code" | "tracking";
 
