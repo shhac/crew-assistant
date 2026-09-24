@@ -1,10 +1,9 @@
 import { useState, type FormEvent } from "react";
-import { CriteriaList, dateLabel, ErrorNotice, Status } from "./ui";
+import { CriteriaList, dateLabel, ErrorNotice, Status, useAction } from "./ui";
 import { taskDetail, taskStatusLine } from "./taskStatus";
 import {
   askForTask,
   criteriaLines,
-  errorText,
   landTask,
   stopTask,
   type Project,
@@ -33,14 +32,11 @@ export function AskForSomething({
 }) {
   const [objective, setObjective] = useState("");
   const [criteria, setCriteria] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const { busy, error, run } = useAction();
   const blocker = askBlocker(project);
   async function ask(e: FormEvent) {
     e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
+    await run(async () => {
       await askForTask(project.id, {
         objective: objective.trim(),
         criteria: criteriaLines(criteria),
@@ -48,11 +44,7 @@ export function AskForSomething({
       setObjective("");
       setCriteria("");
       await refresh();
-    } catch (error) {
-      setError(errorText(error));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
   return (
     <form
@@ -148,8 +140,9 @@ function TaskRow({
   landsOn?: string;
   refresh: () => Promise<void>;
 }) {
-  const [stopping, setStopping] = useState(false);
-  const [error, setError] = useState("");
+  const stopping = useAction();
+  const landing = useAction();
+  const error = stopping.error || landing.error;
   const status = taskStatusLine(task, hasTeam);
   const detail = taskDetail(task);
   const decisionID = task.status === "waiting" ? task.decision_id : "";
@@ -158,31 +151,16 @@ function TaskRow({
     task.status === "landed" ||
     task.status === "stopped";
   const landsElsewhere = !!landsOn && task.status === "delivered";
-  const [landing, setLanding] = useState(false);
-  async function land() {
-    setLanding(true);
-    setError("");
-    try {
+  const land = () =>
+    landing.run(async () => {
       await landTask(task.project_id, task.id);
       await refresh();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setLanding(false);
-    }
-  }
-  async function stop() {
-    setStopping(true);
-    setError("");
-    try {
+    });
+  const stop = () =>
+    stopping.run(async () => {
       await stopTask(task.project_id, task.id);
       await refresh();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setStopping(false);
-    }
-  }
+    });
   return (
     <li className="task-row">
       <div className="task-row-text">
@@ -195,20 +173,20 @@ function TaskRow({
           <button
             type="button"
             className="text-button"
-            disabled={landing}
+            disabled={landing.busy}
             onClick={land}
           >
-            {landing ? "Landing…" : `Land on ${landsOn}`}
+            {landing.busy ? "Landing…" : `Land on ${landsOn}`}
           </button>
         )}
         {!finished && (
           <button
             type="button"
             className="text-button"
-            disabled={stopping}
+            disabled={stopping.busy}
             onClick={stop}
           >
-            {stopping ? "Stopping…" : "Stop"}
+            {stopping.busy ? "Stopping…" : "Stop"}
           </button>
         )}
         {decisionID ? (

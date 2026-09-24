@@ -1,11 +1,6 @@
+import { useAction } from "./ui";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import {
-  api,
-  createProject,
-  criteriaLines,
-  errorText,
-  type Project,
-} from "./api";
+import { api, createProject, criteriaLines, type Project } from "./api";
 import { FileSystemPicker } from "./FileSystemPicker";
 
 function directoryName(path: string) {
@@ -60,8 +55,7 @@ export function NewProject({
   const [criteria, setCriteria] = useState("");
   const [directories, setDirectories] = useState<string[]>([]);
   const [picking, setPicking] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const { busy, error, run } = useAction();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current;
@@ -70,9 +64,7 @@ export function NewProject({
   }, []);
   async function create(e: FormEvent) {
     e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
+    await run(async () => {
       await createProject({
         title: title.trim(),
         directories,
@@ -85,11 +77,7 @@ export function NewProject({
         template: kind === "draft" ? "draft" : "",
       });
       await onCreated();
-    } catch (error) {
-      setError(errorText(error));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
   const goalRequired = kind === "draft";
   return (
@@ -303,23 +291,16 @@ export function ProjectDirectories({
   const [editing, setEditing] = useState(false);
   const [picking, setPicking] = useState(false);
   const [paths, setPaths] = useState(project.directories || []);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const { busy, error, setError, run } = useAction();
   async function save() {
-    setBusy(true);
-    setError("");
-    try {
+    await run(async () => {
       await api(`/api/projects/${encodeURIComponent(project.id)}/directories`, {
         method: "PUT",
         body: JSON.stringify({ directories: paths }),
       });
       await refresh();
       setEditing(false);
-    } catch (error) {
-      setError(errorText(error));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
   return (
     <section className="project-locations">

@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { criteriaLines } from "./api";
+import { useState, type ReactNode } from "react";
+import { criteriaLines, errorText } from "./api";
 
 const icons: Record<string, string> = {
   Overview: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
@@ -206,4 +206,28 @@ export function CriteriaList({
       ))}
     </ul>
   );
+}
+
+/**
+ * useAction runs one owner action at a time: it marks the component busy,
+ * clears the last error, and shows a failure as the error. run resolves to
+ * whether the action succeeded.
+ */
+export function useAction() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function run(action: () => Promise<unknown>) {
+    setBusy(true);
+    setError("");
+    try {
+      await action();
+      return true;
+    } catch (err) {
+      setError(errorText(err));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+  return { busy, error, setError, run };
 }

@@ -31,10 +31,11 @@ export const themes: {
     colors: ["#211f1d", "#e4c292"],
   },
 ];
+function isTheme(value?: string): value is Theme {
+  return themes.some((t) => t.id === value);
+}
 export function validTheme(value?: string): Theme {
-  return themes.some((t) => t.id === value)
-    ? (value as Theme)
-    : "graphite-sage";
+  return isTheme(value) ? value : "graphite-sage";
 }
 function safeColor(value: string | undefined, fallback: string) {
   return value && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;

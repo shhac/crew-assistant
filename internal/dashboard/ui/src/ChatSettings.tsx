@@ -1,4 +1,4 @@
-import type { Config } from "./api";
+import { section, type Config } from "./api";
 
 // The only small models loading messages and suggestions may use. Haiku 4.5
 // has no effort setting, so none is sent for it.
@@ -14,9 +14,9 @@ export function ChatSettings({
   config: Config;
   onChange: (value: Config) => void;
 }) {
-  const chat = (config.chat || {}) as Record<string, unknown>;
-  const phrases = (chat.loading_phrases || {}) as Record<string, unknown>;
-  const assistant = (config.model || {}) as Record<string, unknown>;
+  const chat = section(config.chat);
+  const phrases = section(chat.loading_phrases);
+  const assistant = section(config.model);
   const engine = String(assistant.engine || "codex");
   const local = engine === "codex" || engine === "claude";
   const enabled = phrases.enabled !== false;

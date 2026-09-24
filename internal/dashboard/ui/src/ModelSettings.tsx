@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type Config } from "./api";
+import { api, section, type Config } from "./api";
 
 export type ModelOption = {
   id: string;
@@ -28,7 +28,7 @@ export function ModelSettings({
   config: Config;
   onChange: (value: Config) => void;
 }) {
-  const model = (config[group] || {}) as Record<string, unknown>;
+  const model = section(config[group]);
   const value = (key: string) => String(model[key] ?? "");
   const change = (key: string, next: string | number) =>
     onChange({ ...config, [group]: { ...model, [key]: next } });

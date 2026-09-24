@@ -1,13 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { BriefFields } from "./ProjectForms";
-import { CriteriaList, dateLabel, ErrorNotice } from "./ui";
-import {
-  criteriaLines,
-  errorText,
-  updateBrief,
-  type Brief,
-  type Project,
-} from "./api";
+import { CriteriaList, dateLabel, ErrorNotice, useAction } from "./ui";
+import { criteriaLines, updateBrief, type Brief, type Project } from "./api";
 
 export function BriefCard({
   project,
@@ -102,13 +96,10 @@ function BriefEditor({
   const [criteria, setCriteria] = useState(
     criteriaLines(brief.criteria).join("\n"),
   );
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const { busy, error, run } = useAction();
   async function save(e: FormEvent) {
     e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
+    await run(async () => {
       await updateBrief(project.id, {
         goal: goal.trim(),
         audience: audience.trim(),
@@ -117,11 +108,7 @@ function BriefEditor({
       });
       await refresh();
       onDone();
-    } catch (error) {
-      setError(errorText(error));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
   return (
     <form className="project-card-form" onSubmit={save}>

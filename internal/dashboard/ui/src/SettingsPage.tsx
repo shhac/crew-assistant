@@ -12,7 +12,7 @@ import {
   PageHeading,
   Status,
 } from "./ui";
-import { api, errorText, type Config, type State } from "./api";
+import { api, errorText, section, type Config, type State } from "./api";
 
 export function Settings({
   state,
@@ -241,7 +241,7 @@ function ConfigurationFields({
   onChange: (value: Config) => void;
 }) {
   const [listDrafts, setListDrafts] = useState<Record<string, string>>({});
-  const linear = (config.linear || {}) as Record<string, unknown>;
+  const linear = section(config.linear);
   function field(
     group: string,
     key: string,
@@ -255,7 +255,7 @@ function ConfigurationFields({
       list?: boolean;
     } = {},
   ) {
-    const object = (config[group] || {}) as Record<string, unknown>;
+    const object = section(config[group]);
     const raw = object[key];
     const value =
       options.list && listDrafts[`${group}.${key}`] !== undefined
@@ -392,7 +392,10 @@ function ConfigurationFields({
 
 const usageEngines = [
   ["codex_max_used_percent", "Hold Codex roles above (% of subscription used)"],
-  ["claude_max_used_percent", "Hold Claude roles above (% of subscription used)"],
+  [
+    "claude_max_used_percent",
+    "Hold Claude roles above (% of subscription used)",
+  ],
 ] as const;
 
 /**
@@ -406,8 +409,8 @@ function RoleUsageFields({
   config: Config;
   onChange: (value: Config) => void;
 }) {
-  const limits = (config.limits || {}) as Record<string, unknown>;
-  const usage = (limits.role_usage || {}) as Record<string, unknown>;
+  const limits = section(config.limits);
+  const usage = section(limits.role_usage);
   const set = (key: string, value: unknown) =>
     onChange({
       ...config,
@@ -423,7 +426,7 @@ function RoleUsageFields({
             type="number"
             min={0}
             max={100}
-            value={typeof usage[key] === "number" ? (usage[key] as number) : ""}
+            value={numberOrEmpty(usage[key])}
             onChange={(e) => set(key, Number(e.target.value))}
           />
         </label>
@@ -445,4 +448,8 @@ function RoleUsageFields({
       </p>
     </div>
   );
+}
+
+function numberOrEmpty(value: unknown) {
+  return typeof value === "number" ? value : "";
 }
