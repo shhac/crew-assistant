@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Panel } from "./SettingsPanel";
-import { Avatar, ErrorNotice } from "./ui";
+import { Avatar, ErrorNotice, hasFace } from "./ui";
 import { api, errorText, type AvatarSpec, type Config } from "./api";
 interface Recommendation {
   id: string;
@@ -178,12 +178,12 @@ export function AssistantSetup({
       {proposal && (
         <div className="setup-proposal">
           <div className="setup-proposal-head">
-            <Avatar svg={proposal.avatar_svg} size={96} />
+            <Avatar of={proposal} size={96} />
             <div className="setup-proposal-name">
               <h3>{proposal.name}</h3>
-              {proposal.avatar_svg && (
+              {hasFace(proposal) && (
                 <p className="setup-favicon muted small">
-                  <Avatar svg={proposal.avatar_svg} size={16} />
+                  <Avatar of={proposal} size={16} />
                   As the tab icon
                 </p>
               )}

@@ -1,5 +1,11 @@
 import { useState, type ReactNode } from "react";
-import { criteriaLines, errorText } from "./api";
+import {
+  avatarSrcSet,
+  avatarURL,
+  criteriaLines,
+  errorText,
+  type Face,
+} from "./api";
 
 const icons: Record<string, string> = {
   Inbox:
@@ -53,20 +59,37 @@ export function Icon({ name, size = 16 }: { name: string; size?: number }) {
   );
 }
 
-/** The address of a drawn avatar, for an img or the favicon. */
-export const avatarURL = (svg: string) =>
+/** The address of a vector avatar, for an img or the favicon. */
+export const svgURL = (svg: string) =>
   `data:image/svg+xml,${encodeURIComponent(svg)}`;
 
+export const hasFace = (face: Face) =>
+  !!(face.avatar?.image || face.avatar_svg);
+
 /**
- * A drawn avatar. It is only ever shown as an image, so nothing in the SVG
- * can run or reach the page.
+ * A face: the picture Codex drew, or the vector sketch until there is one.
+ * It is only ever shown as an image, so nothing in either can run or reach
+ * the page. The name is always beside it, so it has no text of its own.
  */
-export function Avatar({ svg, size }: { svg?: string; size: number }) {
-  if (!svg) return null;
+export function Avatar({ of, size }: { of: Face; size: number }) {
+  const image = of.avatar?.image;
+  if (image)
+    return (
+      <img
+        className="avatar avatar-drawn"
+        src={avatarURL(of.avatar, size)}
+        srcSet={avatarSrcSet(image)}
+        sizes={`${size}px`}
+        alt=""
+        width={size}
+        height={size}
+      />
+    );
+  if (!of.avatar_svg) return null;
   return (
     <img
       className="avatar"
-      src={avatarURL(svg)}
+      src={svgURL(of.avatar_svg)}
       alt=""
       width={size}
       height={size}

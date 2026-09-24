@@ -9,6 +9,15 @@ export interface AvatarSpec {
   background?: string;
   accent?: string;
   marks?: AvatarMark[];
+  /** A picture Codex drew, by its id; shown in place of the vector sketch. */
+  image?: string;
+  /** How the picture was described when it was drawn. */
+  look?: string;
+}
+/** Anyone with a face: the assistant, a member or a proposed identity. */
+export interface Face {
+  avatar?: AvatarSpec;
+  avatar_svg?: string;
 }
 export interface Brief {
   version: number;
@@ -523,6 +532,53 @@ export async function revisionFiles(
     { signal },
   );
   return body.files ?? [];
+}
+
+const avatarSizes = [
+  { name: "small", px: 48 },
+  { name: "medium", px: 128 },
+  { name: "large", px: 512 },
+] as const;
+
+const avatarPath = (image: string, size: string) =>
+  `/api/avatars/${encodeURIComponent(image)}/${size}`;
+
+/**
+ * The drawn picture to show at a size on the page, or nothing when there is
+ * none. Each size is kept at twice the pixels it is shown at, so it stays
+ * sharp on high-density screens.
+ */
+export function avatarURL(avatar: AvatarSpec | undefined, displayPx: number) {
+  if (!avatar?.image) return undefined;
+  const size = avatarSizes.find((s) => s.px >= displayPx * 2) ?? avatarSizes[2];
+  return avatarPath(avatar.image, size.name);
+}
+
+/** Every size of a drawn picture, for the browser to choose from. */
+export const avatarSrcSet = (image: string) =>
+  avatarSizes.map((s) => `${avatarPath(image, s.name)} ${s.px}w`).join(", ");
+
+/**
+ * The small picture as a data URL, for the tab icon: some browsers fetch
+ * icons without the session cookie, and the page's policy allows data
+ * images.
+ */
+export async function avatarDataURL(image: string, signal?: AbortSignal) {
+  const response = await fetch(avatarPath(image, "small"), {
+    credentials: "same-origin",
+    signal,
+  });
+  if (!response.ok) throw new APIError("No such picture", response.status);
+  const blob = await response.blob();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      typeof reader.result === "string"
+        ? resolve(reader.result)
+        : reject(new Error("Unreadable picture"));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }
 
 const memberPath = (id: string) => `/api/members/${encodeURIComponent(id)}`;

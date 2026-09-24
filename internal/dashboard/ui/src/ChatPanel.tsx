@@ -267,7 +267,6 @@ export function ChatPanel({
   const confirmed = useRef(new Set<string>());
   const scroll = useRef<HTMLDivElement>(null);
   const name = state.assistant.name || "Assistant";
-  const avatar = state.assistant.avatar_svg;
   const messageIDs = new Set(state.messages.map((m) => m.id));
   const messages = [
     ...state.messages,
@@ -556,7 +555,7 @@ export function ChatPanel({
   return (
     <div className="chat">
       <header className="chat-head">
-        <Avatar svg={avatar} size={20} />
+        <Avatar of={state.assistant} size={20} />
         <h2>{name}</h2>
         <button
           className="btn btn-quiet btn-icon chat-expand"
@@ -637,7 +636,9 @@ export function ChatPanel({
                 className={`message ${m.role === "user" ? "from-you" : "from-assistant"}`}
               >
                 <p className="message-by">
-                  {m.role !== "user" && <Avatar svg={avatar} size={16} />}
+                  {m.role !== "user" && (
+                    <Avatar of={state.assistant} size={16} />
+                  )}
                   <span>{m.role === "user" ? "You" : name}</span>
                   {m.created_at && (
                     <time dateTime={m.created_at}>

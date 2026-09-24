@@ -68,7 +68,7 @@ function MemberCard({ member, state }: { member: Member; state: State }) {
   return (
     <li>
       <a className="member-card card" href={memberHref(member.id)}>
-        <Avatar svg={member.avatar_svg} size={40} />
+        <Avatar of={member} size={40} />
         <span className="member-card-text">
           <span className="member-name">{member.name}</span>
           <span className="soft small">{memberSummary(member)}</span>

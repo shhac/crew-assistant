@@ -50,7 +50,7 @@ export function MemberPage({
           </section>
         ) : (
           <div className="member-head">
-            <Avatar svg={member.avatar_svg} size={64} />
+            <Avatar of={member} size={64} />
             <div className="member-head-text">
               <h1>{member.name}</h1>
               <p className="soft">{memberSummary(member)}</p>

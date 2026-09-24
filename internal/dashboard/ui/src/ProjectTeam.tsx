@@ -135,7 +135,7 @@ function RoleName({ role, members }: { role: Role; members: Member[] }) {
   if (!member) return <>{role.name}</>;
   return (
     <a className="role-member" href={memberHref(member.id)}>
-      <Avatar svg={member.avatar_svg} size={20} />
+      <Avatar of={member} size={20} />
       {role.name}
     </a>
   );

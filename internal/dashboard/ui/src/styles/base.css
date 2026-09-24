@@ -91,6 +91,12 @@ kbd {
   flex-shrink: 0;
 }
 
+/* The same corners as the vector sketch it replaces. */
+.avatar-drawn {
+  border-radius: 25%;
+  object-fit: cover;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
