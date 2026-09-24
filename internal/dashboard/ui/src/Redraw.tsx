@@ -48,7 +48,11 @@ export function LookForm({
           value={look}
           onChange={(e) => setLook(e.target.value)}
         />
-        <span className="hint">Leave it as it is to redraw the same look.</span>
+        {face.avatar?.look && (
+          <span className="hint">
+            Leave it as it is to redraw the same look.
+          </span>
+        )}
       </label>
       <ErrorNotice error={error} />
       <DrawingStatus face={face} />
