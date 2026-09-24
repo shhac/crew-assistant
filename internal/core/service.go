@@ -40,7 +40,9 @@ func (s *Service) configuration() config.Config { s.mu.RLock(); defer s.mu.RUnlo
 func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	v, err := s.store.Snapshot(ctx)
 	cfg := s.configuration()
-	v.Assistant = Assistant{Name: cfg.Assistant.Name, Personality: cfg.Assistant.Personality, Theme: cfg.Assistant.Theme, Avatar: cfg.Assistant.Avatar}
+	// A loaded configuration is valid, so its avatar always draws.
+	svg, _ := cfg.Assistant.Avatar.SVG()
+	v.Assistant = Assistant{Name: cfg.Assistant.Name, Personality: cfg.Assistant.Personality, Theme: cfg.Assistant.Theme, Avatar: cfg.Assistant.Avatar, AvatarSVG: svg}
 	v.PendingOperations = []PendingOperation{}
 	for id, done := range v.Events {
 		if !done {

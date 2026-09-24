@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/text"
 )
@@ -84,5 +85,7 @@ func assistantView(s core.Snapshot) core.Snapshot {
 		}
 	}
 	s.Wakes = wakes
+	// How the assistant looks is for the owner's screen, not its turns.
+	s.Assistant.Avatar, s.Assistant.AvatarSVG = config.Avatar{}, ""
 	return s
 }

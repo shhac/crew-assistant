@@ -284,7 +284,7 @@ func TestAppearanceIsTheOwnersAndSurvivesEarlierVersions(t *testing.T) {
 		t.Fatalf("identity %+v %v", identity, err)
 	}
 	snap, _ := a.Core.Snapshot(ctx)
-	if snap.Assistant.Theme != config.ThemeLight || snap.Assistant.Avatar.Shape != "leaf" {
+	if snap.Assistant.Theme != config.ThemeLight || snap.Assistant.Avatar.Shape != "leaf" || !strings.HasPrefix(snap.Assistant.AvatarSVG, "<svg") {
 		t.Fatalf("the dashboard does not see the appearance and avatar: %+v", snap.Assistant)
 	}
 }

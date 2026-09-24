@@ -12,6 +12,8 @@ type Assistant struct {
 	Personality string        `json:"personality"`
 	Theme       string        `json:"theme"`
 	Avatar      config.Avatar `json:"avatar"`
+	// AvatarSVG is the avatar drawn, for the dashboard's tab icon and chat.
+	AvatarSVG string `json:"avatar_svg,omitempty"`
 }
 
 // Project is an ongoing area of the owner's work: what it is for (its brief),

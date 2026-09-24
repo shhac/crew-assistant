@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
 )
@@ -47,5 +48,15 @@ func TestTheAssistantSeesWhatItCanActOnAndOnlyTheOutcomeOfWhatIsDone(t *testing.
 	}
 	if len(s.Tasks[0].Revisions) != 5 {
 		t.Fatal("the view changed the state it was made from")
+	}
+}
+
+func TestTheAssistantDoesNotCarryItsOwnPictureIntoEveryTurn(t *testing.T) {
+	drawn := config.Avatar{Background: "#101820", Accent: "#ffffff", Marks: []config.Mark{{D: "M10 10L118 118", Color: "#ffffff", StrokeWidth: 8}}}
+	svg, _ := drawn.SVG()
+	view := assistantView(core.Snapshot{Assistant: core.Assistant{Name: "Iris", Avatar: drawn, AvatarSVG: svg}})
+	raw, _ := json.Marshal(view.Assistant)
+	if view.Assistant.Name != "Iris" || strings.Contains(string(raw), "M10 10") || strings.Contains(string(raw), "<svg") {
+		t.Fatalf("assistant view: %s", raw)
 	}
 }
