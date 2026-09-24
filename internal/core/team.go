@@ -28,7 +28,7 @@ type TeamMessage struct {
 	Revision int    `json:"revision,omitempty"`
 	// Direction is the message's place in the task's direction: the first
 	// revision written with it in view answers it.
-	Direction  int       `json:"direction,omitempty"`
+	Direction  int       `json:"direction"`
 	At         time.Time `json:"at"`
 	AnsweredAt time.Time `json:"answered_at,omitzero"`
 }
@@ -159,16 +159,11 @@ func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
 	if t.Status == TaskLanding {
 		return fmt.Errorf("it is landing right now; message the implementer once it has landed or is waiting on its pull request: %w", ErrConflict)
 	}
-	entry := m.Text
 	var open *Decision
 	if d := decision(v, t.DecisionID); t.Status == TaskWaiting && d != nil && d.Status == DecisionOpen {
 		open = d
 	}
-	if open != nil && open.Kind == DecisionQuestion {
-		entry = "Answer to a reviewer's question (" + text.Clip(open.Context, 300) + "): " + m.Text
-	}
-	m.Direction = len(t.Direction)
-	t.Direction = append(t.Direction, entry)
+	m.Direction = t.AddDirection(open, m.Text)
 	t.DirectionPending++
 	switch {
 	case open != nil && open.Kind == DecisionFailure:
@@ -186,6 +181,18 @@ func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
 		t.ReviseWithDirection()
 	}
 	return nil
+}
+
+// AddDirection makes the owner's words part of the task's direction, naming
+// the question they answer when d is a reviewer's question, and returns the
+// entry's place in Direction.
+func (t *Task) AddDirection(d *Decision, words string) int {
+	entry := words
+	if d != nil && d.Kind == DecisionQuestion {
+		entry = "Answer to a reviewer's question (" + text.Clip(d.Context, 300) + "): " + words
+	}
+	t.Direction = append(t.Direction, entry)
+	return len(t.Direction) - 1
 }
 
 // ReviseWithDirection sends the task back to the implementer, in a new round,

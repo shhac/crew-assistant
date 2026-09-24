@@ -603,11 +603,8 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 	// Anything else is direction for another round: the owner asked for
 	// changes, answered a reviewer's question or wants one more attempt.
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		switch {
-		case d.Kind == core.DecisionQuestion:
-			t.Direction = append(t.Direction, "Answer to a reviewer's question ("+text.Clip(d.Context, 300)+"): "+answer)
-		case !chose(choiceAnotherRound) && !chose(choiceChanges):
-			t.Direction = append(t.Direction, answer)
+		if d.Kind == core.DecisionQuestion || (!chose(choiceAnotherRound) && !chose(choiceChanges)) {
+			t.AddDirection(&d, answer)
 		}
 		t.NextRound()
 		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", "Revising with your answer"

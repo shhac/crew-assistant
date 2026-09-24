@@ -57,13 +57,12 @@ export function RequestPanel({
     };
   }, [onClose]);
   // Direction that came from the team thread is already shown there.
-  const messaged = (task?.messages ?? [])
-    .filter((m) => m.kind === "implementer")
-    .map((m) => m.text);
-  const said = (task?.direction ?? []).filter(
-    (line) =>
-      !messaged.some((text) => line === text || line.endsWith(`: ${text}`)),
+  const fromThread = new Set(
+    (task?.messages ?? [])
+      .filter((m) => m.kind === "implementer")
+      .map((m) => m.direction ?? 0),
   );
+  const said = (task?.direction ?? []).filter((_, i) => !fromThread.has(i));
   const decision = task?.decision_id
     ? pendingDecisions(state.decisions).find((d) => d.id === task.decision_id)
     : undefined;

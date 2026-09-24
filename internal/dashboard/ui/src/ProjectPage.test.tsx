@@ -416,6 +416,32 @@ describe("a request", () => {
       },
     ]);
   });
+  it("keeps an answer to a decision that repeats a message to the implementer", () => {
+    const told = started({
+      status: "writing",
+      stage: "implementing",
+      direction: ["Keep it short", "Keep it short"],
+      messages: [
+        {
+          id: "m1",
+          to: "Implementer",
+          kind: "implementer",
+          from: "owner",
+          text: "Keep it short",
+          status: "answered",
+          direction: 0,
+        },
+      ],
+    });
+    show(project(), { tasks: [told] }, { request: "t1" });
+    const panel = screen.getByRole("complementary", {
+      name: "Cache the lookups",
+    });
+    expect(within(panel).getByText("Your answers along the way")).toBeTruthy();
+    expect(
+      [...panel.querySelectorAll("ul.said li")].map((li) => li.textContent),
+    ).toEqual(["Keep it short"]);
+  });
   it("stops a request that isn't finished, and offers nothing for one that is", async () => {
     show(
       project(),

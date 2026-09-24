@@ -140,6 +140,7 @@ export interface TeamMessage {
   reply?: string;
   outcome?: string;
   revision?: number;
+  direction?: number;
   at?: string;
   answered_at?: string;
 }
