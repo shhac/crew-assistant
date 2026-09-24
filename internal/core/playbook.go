@@ -263,10 +263,20 @@ func (s *Service) SetPlaybook(ctx context.Context, projectID string, playbook Pl
 	return out, err
 }
 
+func engineLabel(engine string) string {
+	switch engine {
+	case "codex":
+		return "Codex"
+	case "claude":
+		return "Claude"
+	}
+	return engine
+}
+
 func playbookSummary(p Playbook) string {
 	parts := make([]string, 0, len(p.Roles))
 	for _, r := range p.Roles {
-		parts = append(parts, r.Name+" ("+r.Engine+")")
+		parts = append(parts, r.Name+" on "+engineLabel(r.Engine))
 	}
 	return strings.Join(parts, ", ")
 }

@@ -188,7 +188,7 @@ func TestAPullRequestIsBabysatThroughReviewAndCIUntilItMerges(t *testing.T) {
 	task := current()
 	var err error
 	d := openDecision(t, a, task)
-	if !strings.Contains(d.Context, "opens a pull request into main") {
+	if !strings.Contains(d.Context, "opens a pull request on o/r from paul/add-a into main") {
 		t.Fatalf("the owner is not told approving opens a pull request: %s", d.Context)
 	}
 	a.Core.ResolveDecision(ctx, d.ID, choiceApprove)
@@ -335,7 +335,7 @@ func TestAnUpdateThatTouchesWhatRunsWaitsForTheOwnerBeforeItIsPushed(t *testing.
 	s.review(t, "Add a make target for this.", time.Now())
 	task := s.current(t)
 	d := openDecision(t, s.a, task)
-	if d.Kind != decisionDelivery || !strings.Contains(d.Context, "Makefile changed") || s.remoteHead(t) != first {
+	if d.Kind != decisionUpdate || !strings.Contains(d.Context, "Makefile changed") || s.remoteHead(t) != first {
 		t.Fatalf("a Makefile change went to the pull request unasked: %+v head %s", d, s.remoteHead(t))
 	}
 	s.a.Core.ResolveDecision(s.ctx, d.ID, choiceApprove)

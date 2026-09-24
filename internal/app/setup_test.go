@@ -240,7 +240,7 @@ func TestAppearanceIsTheOwnersAndSurvivesEarlierVersions(t *testing.T) {
 	// A dashboard still running an earlier build saves a palette name.
 	cfg := a.Config()
 	cfg.Assistant.Theme = "charcoal-amber"
-	if err := a.UpdateConfig(cfg); err != nil || a.Config().Assistant.Theme != config.ThemeDark {
+	if err := a.UpdateConfig(cfg); err != nil || a.Config().Assistant.Theme != config.ThemeSystem {
 		t.Fatalf("theme %q %v", a.Config().Assistant.Theme, err)
 	}
 	// A recommendation saved by an earlier version still names a palette;

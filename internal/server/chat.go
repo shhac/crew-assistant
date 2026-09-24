@@ -24,7 +24,7 @@ func registerChatQueue(mux *http.ServeMux, a *app.App) {
 			case errors.Is(err, app.ErrChatQueueUnavailable):
 				fail(w, http.StatusServiceUnavailable, err.Error())
 			default:
-				fail(w, http.StatusInternalServerError, "Could not confirm whether the message was accepted. Retry using the same message ID.")
+				fail(w, http.StatusInternalServerError, "Couldn't confirm the message arrived. Retrying is safe.")
 			}
 			return
 		}
@@ -150,6 +150,6 @@ func queueProblem(w http.ResponseWriter, err error) {
 	case errors.Is(err, core.ErrChatValidation), errors.Is(err, core.ErrNotFound), errors.Is(err, core.ErrConflict):
 		problem(w, err)
 	default:
-		fail(w, http.StatusInternalServerError, "The daemon could not change the queue. Refresh it before trying again.")
+		fail(w, http.StatusInternalServerError, "Couldn't change the queue. Refresh it and try again.")
 	}
 }

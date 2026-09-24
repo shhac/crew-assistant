@@ -154,11 +154,11 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 	st, err := os.Stat(a.pairingPath)
 	b, readErr := os.ReadFile(a.pairingPath)
 	if err != nil || readErr != nil || time.Since(st.ModTime()) > 5*time.Minute || !equal(v.Token, string(b)) {
-		fail(w, 401, "invalid or expired sign-in code")
+		fail(w, 401, "That pairing code is wrong or has expired.")
 		return
 	}
 	if err := os.Remove(a.pairingPath); err != nil {
-		fail(w, 500, "could not consume sign-in code")
+		fail(w, 500, "Couldn't check the pairing code. Try again.")
 		return
 	}
 	for token, expires := range a.sessions {

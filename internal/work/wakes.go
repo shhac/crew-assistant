@@ -191,12 +191,12 @@ type firing struct {
 // observe looks at what w waits on and reports a change that fires it.
 func (lp *Loop) observe(ctx context.Context, snap core.Snapshot, w core.Wake, now time.Time) (firing, bool) {
 	if now.After(w.ExpiresAt) {
-		return firing{observed: w.Baseline, event: "timed out with no change", timedOut: true}, true
+		return firing{observed: w.Baseline, event: "Nothing changed before it timed out", timedOut: true}, true
 	}
 	switch w.On {
 	case core.WakeOnTime:
 		at, err := time.Parse(time.RFC3339, w.Target)
-		return firing{observed: "reached", event: "the time came"}, err == nil && !now.Before(at)
+		return firing{observed: "reached", event: "The time came"}, err == nil && !now.Before(at)
 	case core.WakeOnChecks, core.WakeOnReview:
 		// GitHub is asked about each pull request at most once a minute.
 		if last, ok := lp.prSeen.Load(w.On + w.Target); ok && now.Sub(last.(time.Time)) < time.Minute {
@@ -208,7 +208,7 @@ func (lp *Loop) observe(ctx context.Context, snap core.Snapshot, w core.Wake, no
 			return firing{}, false
 		}
 		value := prValue(w.On, pr)
-		return firing{observed: value, event: fmt.Sprintf("pull request %s: %s is now %s", w.Target, strings.TrimPrefix(w.On, "pr_"), value)}, w.FiresOn(value)
+		return firing{observed: value, event: prEvent(w, value)}, w.FiresOn(value)
 	case core.WakeOnBranch:
 		dir, err := projectRepo(snap, w.ProjectID)
 		if err != nil {
@@ -223,12 +223,25 @@ func (lp *Loop) observe(ctx context.Context, snap core.Snapshot, w core.Wake, no
 	return firing{}, false
 }
 
+// prEvent says what changed on a pull request, in words.
+func prEvent(w core.Wake, value string) string {
+	state, _, _ := strings.Cut(value, "@")
+	if w.On != core.WakeOnChecks {
+		return fmt.Sprintf("New review activity on pull request %s", w.Target)
+	}
+	words := map[string]string{"SUCCESS": "passed", "FAILURE": "failed", "PENDING": "are running", "NONE": "are gone"}
+	if said, ok := words[state]; ok {
+		return fmt.Sprintf("Checks %s on pull request %s", said, w.Target)
+	}
+	return fmt.Sprintf("Checks on pull request %s are now %s", w.Target, strings.ToLower(state))
+}
+
 // wakeTask sends a task asleep on something outside the team back to
 // landing, to look again.
 func (lp *Loop) wakeTask(ctx context.Context, taskID, event string) error {
 	_, err := lp.Core.UpdateTask(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
 		if t.Status == core.TaskAwaiting {
-			t.Status, t.Detail = core.TaskLanding, "Looking again: "+event
+			t.Status, t.Detail = core.TaskLanding, event
 		}
 		return "", nil
 	})

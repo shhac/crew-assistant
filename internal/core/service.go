@@ -159,13 +159,13 @@ func (s *Service) RecordActivity(ctx context.Context, projectID, kind, summary s
 }
 
 func pendingOperation(v Snapshot, id string) PendingOperation {
-	out := PendingOperation{ID: id, Summary: "An interrupted operation needs inspection before any repeat."}
+	out := PendingOperation{ID: id, Summary: "Something stopped before it finished"}
 	parts := strings.Split(id, ":")
 	switch parts[0] {
 	case "slack":
-		out.Summary = "A received Slack request needs processing confirmation; it was not replayed."
+		out.Summary = "A Slack message may not have been handled"
 	case "notify":
-		out.Summary = "An owner notification needs delivery confirmation."
+		out.Summary = "A notification to you may not have been sent"
 	}
 	for _, d := range v.Decisions {
 		if contains(parts, d.ID) {

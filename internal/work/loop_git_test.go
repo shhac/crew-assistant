@@ -284,7 +284,7 @@ func TestTheSecondChangeCatchesUpWhenTheFirstLands(t *testing.T) {
 			catchUp = spec.Prompt
 		}
 	}
-	if !strings.Contains(catchUp, `"Add A" landed on branch paul/add-a`) || !strings.Contains(catchUp, "conflict markers you must resolve: feature.go") {
+	if !strings.Contains(catchUp, "“Add A” landed on branch paul/add-a") || !strings.Contains(catchUp, "conflict markers you must resolve: feature.go") {
 		t.Fatalf("the implementer was not told what landed and what conflicts: %q", catchUp)
 	}
 	d := openDecision(t, a, second)

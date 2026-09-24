@@ -116,7 +116,7 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 		{Revision: 1, Role: "Reviewer", BriefVersion: 1, Outcome: core.VerdictPass, Summary: "Contrast checked on every page.", At: ago(4 * time.Hour)},
 		{Revision: 1, Role: "QA", BriefVersion: 1, Outcome: core.VerdictPass, Summary: "make check passed.", At: ago(4 * time.Hour)},
 	}
-	darkDocs.Approved, darkDocs.Detail = 1, "Waiting on checks and reviews"
+	darkDocs.Approved = 1
 	darkDocs.Proposal = &core.Proposal{Branch: "crew/dark-mode", Number: 128, URL: "https://github.com/example/docs-site/pull/128"}
 
 	changelog := started(docs, "demo-changelog", "Changelog page", core.TaskWaiting, 1, ago(3*time.Hour))
@@ -148,9 +148,9 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 		queued(memo, "demo-notes", "Speaker notes for the plan", ago(20*time.Minute)),
 	}
 	decisions := []core.Decision{
-		{ID: "demo-land-signing", ProjectID: crew.ID, TaskID: signing.ID, Kind: "delivery", Title: "Land “Sign commits as your git config says” on main", Context: "Signing failures now say signing was the cause, and the tests use a stand-in signer.", Recommendation: "Approve", Choices: []string{"Approve", "Request changes"}, Status: "open", CreatedAt: ago(4 * time.Minute)},
-		{ID: "demo-changelog-question", ProjectID: docs.ID, TaskID: changelog.ID, Kind: "question", Title: "Reviewer has a question about Changelog page", Context: "Should the changelog list patch releases, or only minor ones with their patches linked?", Recommendation: "Answer the question so the next draft can meet the brief", Choices: []string{"Use your judgment", "Stop"}, Status: "open", CreatedAt: ago(22 * time.Minute)},
-		{ID: "demo-approve-plan", ProjectID: memo.ID, TaskID: plan.ID, Kind: "delivery", Title: "Approve “One-page Q4 plan”", Context: "Cut to three priorities, each with how we will know it worked.", Recommendation: "Approve", Choices: []string{"Approve", "Request changes"}, Status: "open", CreatedAt: ago(10 * time.Minute)},
+		{ID: "demo-land-signing", ProjectID: crew.ID, TaskID: signing.ID, Kind: "delivery", Title: "Land “Sign commits as your git config says” on main", Context: "Signing failures now say signing was the cause, and the tests use a stand-in signer.\n\nApproving moves main in crew-assistant forward to include it. Nothing already on main is replaced. Landing here means: fast-forwarded onto main.", Recommendation: "Approve", Choices: []string{"Approve", "Request changes"}, Status: "open", CreatedAt: ago(4 * time.Minute)},
+		{ID: "demo-changelog-question", ProjectID: docs.ID, TaskID: changelog.ID, Kind: "question", Title: "Reviewer has a question about “Changelog page”", Context: "Should the changelog list patch releases, or only minor ones with their patches linked?", Recommendation: "Answer it, or let the team decide", Choices: []string{"Use your judgment", "Stop"}, Status: "open", CreatedAt: ago(22 * time.Minute)},
+		{ID: "demo-approve-plan", ProjectID: memo.ID, TaskID: plan.ID, Kind: "delivery", Title: "Approve “One-page Q4 plan”", Context: "Cut to three priorities, each with how we will know it worked.\n\nIt stays on the project.", Recommendation: "Approve", Choices: []string{"Approve", "Request changes"}, Status: "open", CreatedAt: ago(10 * time.Minute)},
 	}
 	resolved := ago(3 * time.Hour)
 	decisions = append(decisions, core.Decision{ID: "demo-land-assets", ProjectID: crew.ID, Kind: "delivery", Title: "Land “Composer asset drop and paste” on main", Context: "Both checks passed.", Recommendation: "Approve", Choices: []string{"Approve", "Request changes"}, Status: "resolved", Disposition: "choice", Answer: "Approve", CreatedAt: ago(4 * time.Hour), ResolvedAt: &resolved})
@@ -174,7 +174,7 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 			{ID: "demo-a1", ProjectID: crew.ID, Kind: "task.landed", Summary: "Next-message suggestions landed on main", CreatedAt: ago(150 * time.Minute)},
 			{ID: "demo-a2", ProjectID: crew.ID, Kind: "task.landed", Summary: "Composer asset drop and paste landed on main", CreatedAt: ago(3 * time.Hour)},
 			{ID: "demo-a3", ProjectID: crew.ID, Kind: "decision.opened", Summary: "Land “Sign commits as your git config says” on main", CreatedAt: ago(4 * time.Minute)},
-			{ID: "demo-a4", ProjectID: docs.ID, Kind: "decision.opened", Summary: "Reviewer has a question about Changelog page", CreatedAt: ago(22 * time.Minute)},
+			{ID: "demo-a4", ProjectID: docs.ID, Kind: "decision.opened", Summary: "Reviewer has a question about “Changelog page”", CreatedAt: ago(22 * time.Minute)},
 			{ID: "demo-a5", ProjectID: memo.ID, Kind: "decision.opened", Summary: "Approve “One-page Q4 plan”", CreatedAt: ago(10 * time.Minute)},
 		},
 	}

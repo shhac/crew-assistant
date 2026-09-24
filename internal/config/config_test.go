@@ -277,7 +277,7 @@ func TestLoadDiscardsASavedLoadingModelChoice(t *testing.T) {
 	}
 }
 
-func TestAnEarlierDarkPaletteLoadsAsDark(t *testing.T) {
+func TestAnEarlierDarkPaletteFollowsTheSystem(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
 	if err := Save(p, Default()); err != nil {
 		t.Fatal(err)
@@ -289,7 +289,7 @@ func TestAnEarlierDarkPaletteLoadsAsDark(t *testing.T) {
 	}
 	os.WriteFile(p, []byte(legacy), 0600)
 	got, err := Load(p)
-	if err != nil || got.Assistant.Theme != ThemeDark {
+	if err != nil || got.Assistant.Theme != ThemeSystem {
 		t.Fatalf("theme %q %v", got.Assistant.Theme, err)
 	}
 }

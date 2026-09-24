@@ -84,7 +84,7 @@ func waitingStage(v *Snapshot, t Task) string {
 		}
 	}
 	switch kind {
-	case "delivery":
+	case "delivery", "update":
 		return StageReady
 	case "failure":
 		if t.ResumeStatus == "" || t.ResumeStatus == TaskWaiting {

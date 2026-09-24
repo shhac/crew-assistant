@@ -128,7 +128,7 @@ func (s *Service) EditChatMessage(ctx context.Context, id, message string, revis
 			return err
 		}
 		if turn.Origin == OriginWake {
-			return fmt.Errorf("a wake-up is written by the daemon, not edited; cancel it instead: %w", ErrConflict)
+			return fmt.Errorf("a wake-up can't be edited, only cancelled: %w", ErrConflict)
 		}
 		if turn.Revision != revision {
 			return fmt.Errorf("this message changed since you opened it: %w", ErrConflict)

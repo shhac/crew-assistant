@@ -114,7 +114,7 @@ func (s *Service) SendTeamMessage(ctx context.Context, projectID, taskID, to, fr
 				return err
 			}
 		} else if len(t.Revisions) == 0 {
-			return fmt.Errorf("there is nothing for %s to check yet; the implementer has not finished a first draft: %w", role.Name, ErrConflict)
+			return fmt.Errorf("there's nothing for %s to check until the first version is done: %w", role.Name, ErrConflict)
 		}
 		t.Messages = append(t.Messages, out)
 		t.UpdatedAt = now
@@ -238,7 +238,7 @@ func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID strin
 			t.Verdicts = append(t.Verdicts, counted)
 		case verdict.Outcome != VerdictPass && t.Status == TaskWaiting:
 			for i := range v.Decisions {
-				if d := &v.Decisions[i]; d.ID == t.DecisionID && d.Status == "open" && d.Kind == "delivery" {
+				if d := &v.Decisions[i]; d.ID == t.DecisionID && d.Status == "open" && (d.Kind == "delivery" || d.Kind == "update") {
 					d.Context += fmt.Sprintf("\n\nAsked directly, %s did not pass it: %s", m.To, verdict.Summary)
 				}
 			}

@@ -112,7 +112,7 @@ func tipOf(t core.Task) string {
 
 func startedFrom(t core.Task) string {
 	if t.From == "" || len(t.Base) < 7 {
-		return "where the task started"
+		return "where the request started"
 	}
 	return t.From + " at " + text.Short(t.Base)
 }

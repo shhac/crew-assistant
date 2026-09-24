@@ -84,13 +84,12 @@ const (
 	ThemeDark   = "dark"
 )
 
-// NormalizeTheme reads the dark palettes earlier versions offered as dark, so
-// a config file or an open dashboard from before still saves.
+// NormalizeTheme reads the dark palettes earlier versions offered as following
+// the system: they were never a choice of dark, only the one look there was.
+// A config file or an open dashboard from before still saves.
 func NormalizeTheme(theme string) string {
 	switch theme {
-	case "graphite-sage", "ink-blue", "charcoal-amber":
-		return ThemeDark
-	case "":
+	case "graphite-sage", "ink-blue", "charcoal-amber", "":
 		return ThemeSystem
 	}
 	return theme

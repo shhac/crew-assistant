@@ -91,7 +91,7 @@ func (a *App) syncCLIConnections(ctx context.Context) error {
 		if connectionErr != nil {
 			a.Status("connection:"+binding.ID, binding.Name, "error", connectionErr.Error())
 		} else {
-			a.Status("connection:"+binding.ID, binding.Name, "connected", fmt.Sprintf("%d active assignments from selected CLI accounts; bounded to 50 per account. No work starts without a commission.", count))
+			a.Status("connection:"+binding.ID, binding.Name, "connected", fmt.Sprintf("%d assigned issues", count))
 		}
 	}
 	return errors.Join(failures...)

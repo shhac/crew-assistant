@@ -14,7 +14,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/engine"
 )
 
-var ErrChatQueueUnavailable = errors.New("conversation queue unavailable; restart the daemon to recover pending messages")
+var ErrChatQueueUnavailable = errors.New("the chat has stopped; restart crew-assistant to pick up waiting messages")
 
 type chatOutcome struct {
 	result engine.Result
@@ -31,7 +31,7 @@ func chatID() string {
 
 func (a *App) EnqueueChat(ctx context.Context, id, message string) (core.ChatTurn, error) {
 	if a.Demo {
-		return core.ChatTurn{}, fmt.Errorf("demo mode does not invoke models or workers; start without --demo and configure a model to chat: %w", core.ErrChatValidation)
+		return core.ChatTurn{}, fmt.Errorf("the demo doesn't run models: %w", core.ErrChatValidation)
 	}
 	if a.chatFailed.Load() {
 		return core.ChatTurn{}, ErrChatQueueUnavailable

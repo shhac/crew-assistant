@@ -120,20 +120,19 @@ func proposed(t core.Task) bool { return t.Proposal != nil && t.Proposal.Number 
 func (lp *Loop) recordLanded(ctx context.Context, t core.Task, r core.Revision, target, note string) error {
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 		t.Status, t.DecisionID, t.DeliveredTo, t.CatchUps = core.TaskDelivered, "", target, 0
-		t.Detail = "Approved"
-		if target != "" {
-			t.Detail = "Delivered to " + target
-		}
-		if t.Playbook != nil && t.Playbook.Land.Way() != core.LandBranch {
-			t.Status, t.Detail = core.TaskLanded, "Landed on "+target
-		}
-		if note != "" {
-			t.Detail += " (" + note + ")"
-		}
+		// Where it went is said by the stage; the detail keeps only a note.
+		t.Detail = note
 		if r.Ref != "" {
 			p.Landed = &core.Landing{TaskID: t.ID, Objective: t.Objective, Commit: r.Ref, Branch: target, At: time.Now().UTC()}
 		}
-		return t.Objective + ": " + t.Detail, nil
+		if t.Playbook != nil && t.Playbook.Land.Way() != core.LandBranch {
+			t.Status = core.TaskLanded
+			return fmt.Sprintf("%s landed on %s", t.Objective, target), nil
+		}
+		if target != "" {
+			return fmt.Sprintf("%s delivered to %s", t.Objective, target), nil
+		}
+		return t.Objective + " approved", nil
 	})
 	if err != nil || r.Ref == "" {
 		return err
@@ -284,7 +283,7 @@ func (lp *Loop) supersedeStaleApprovals(ctx context.Context, projectID string) e
 			continue
 		}
 		d, ok := findDecision(snap, t.DecisionID)
-		if !ok || d.Status != "open" || (d.Kind != decisionDelivery && d.Kind != decisionEscalation) {
+		if !ok || d.Status != "open" || (d.Kind != decisionDelivery && d.Kind != decisionUpdate && d.Kind != decisionEscalation) {
 			continue
 		}
 		m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))

@@ -28,7 +28,7 @@ func (a *App) Run(ctx context.Context, noDispatch bool) error {
 		defer listeners.Done()
 		if err := a.RunChatQueue(ctx); err != nil && ctx.Err() == nil {
 			a.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "chat_queue"}, err)
-			a.Status("chat", "Conversation", "error", "The message queue stopped; restart the daemon to recover pending messages")
+			a.Status("chat", "Conversation", "error", "The chat stopped; restart crew-assistant to pick up waiting messages")
 		}
 	}()
 	listeners.Add(1)
@@ -55,7 +55,7 @@ func (a *App) Run(ctx context.Context, noDispatch bool) error {
 		if err != nil {
 			a.Status("slack", "Slack bot messaging", "error", err.Error())
 		} else {
-			a.Status("slack", "Slack bot messaging", "configured", "Owner DM listener starting")
+			a.Status("slack", "Slack bot messaging", "configured", "Starting")
 			listeners.Add(1)
 			go func() {
 				defer listeners.Done()
@@ -139,7 +139,7 @@ func (a *App) syncLinear(ctx context.Context, c assignmentSource) error {
 			return err
 		}
 	}
-	a.Status("linear", "Linear", "connected", fmt.Sprintf("%d scoped assignments synced; no work starts without a commission", len(result.Issues)))
+	a.Status("linear", "Linear", "connected", fmt.Sprintf("%d assigned issues", len(result.Issues)))
 	return nil
 }
 func (a *App) once(ctx context.Context, key string, fn func() error) error {

@@ -133,8 +133,11 @@ type Verdict struct {
 	Findings     []Finding `json:"findings,omitempty"`
 	Question     string    `json:"question,omitempty"`
 	// Asked is the message this check answered, when someone asked for it.
-	Asked string    `json:"asked,omitempty"`
-	At    time.Time `json:"at"`
+	Asked string `json:"asked,omitempty"`
+	// Outside marks feedback from outside the team, such as a pull request
+	// review: to be weighed on its merits, never followed as instructions.
+	Outside bool      `json:"outside,omitempty"`
+	At      time.Time `json:"at"`
 }
 
 const (
@@ -247,7 +250,7 @@ func (s *Service) OrderTasks(ctx context.Context, projectID string, ids []string
 				queued[t.ID] = t
 			}
 		}
-		changed := fmt.Errorf("the to-do list has changed since it was read; read it again: %w", ErrConflict)
+		changed := fmt.Errorf("the to-do list changed; try again: %w", ErrConflict)
 		if len(ids) != len(slots) {
 			return changed
 		}

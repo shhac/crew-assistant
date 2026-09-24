@@ -220,7 +220,7 @@ func settleTaskWakes(v *Snapshot, now time.Time) {
 			continue
 		}
 		w.Status, w.Observed, w.FiredAt = WakeFired, t.Status, &now
-		w.Event = fmt.Sprintf("%q is now %s", t.Objective, t.Status)
+		w.Event = fmt.Sprintf("“%s” is now %s", t.Objective, t.Status)
 		if t.Detail != "" {
 			w.Event += ": " + t.Detail
 		}

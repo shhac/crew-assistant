@@ -123,7 +123,7 @@ func (m gitMedium) deliver(ctx context.Context, t core.Task, r core.Revision) (s
 func (m gitMedium) deliveryNote(t core.Task) string {
 	note := m.way.note(m, t)
 	if means := m.playbook.Land.Means; means != "" {
-		note += " For this project, landing means: " + means
+		note += " Landing here means: " + means + "."
 	}
 	return note
 }

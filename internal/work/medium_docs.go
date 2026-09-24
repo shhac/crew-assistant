@@ -44,5 +44,5 @@ func (m docsMedium) deliveryNote(core.Task) string {
 	if m.deliverTo != "" {
 		return "Approving copies it into " + m.deliverTo + "."
 	}
-	return "It stays with the project, ready to read on its page."
+	return "It stays on the project."
 }

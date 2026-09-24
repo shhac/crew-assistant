@@ -1,10 +1,10 @@
 # crew-assistant
 
-Go daemon, CLI and embedded dashboard for a personal assistant that runs projects through teams of agents. The dashboard is dark-mode-first; home is Overview. The assistant's display name comes from config, and its default is defined once.
+Go daemon, CLI and embedded dashboard for a personal assistant that runs projects through teams of agents. The dashboard follows the system's light or dark appearance unless the owner chooses one; home is the inbox, and its copy and design rules are in `design-docs/2026-09-24-dashboard-and-boards.md`. The assistant's display name comes from config, and its default is defined once.
 
 ## Direction
 
-The project follows the design in `design-docs/2026-09-23-project-teams.md`; phases 0 to 2 are built, with landing and wake-ups from `design-docs/2026-09-24-landing-and-wakes.md`. `design-docs/reference/2026-09-23-first-real-runs.md` records the first real runs, `2026-09-23-code-teams.md` corrects its instruction-file finding and records what code work under the sandbox needs, and `2026-09-24-first-landings.md` records the first changes landed on main. Decisions made for it: `design-docs/decisions/2026-09-crew-prefix.md`, `2026-09-clean-break-state.md` and `2026-09-role-sandbox-trust.md`. Build order: (1) a writer and reviewer loop on local documents, (2) the git adapter, (3) a separate PM tier and concurrent projects. Each phase finishes with real use, not tests alone.
+The project follows the design in `design-docs/2026-09-23-project-teams.md`; phases 0 to 2 are built, with landing and wake-ups from `design-docs/2026-09-24-landing-and-wakes.md`, and boards and messaging the team from `design-docs/2026-09-24-dashboard-and-boards.md`. `design-docs/reference/2026-09-23-first-real-runs.md` records the first real runs, `2026-09-23-code-teams.md` corrects its instruction-file finding and records what code work under the sandbox needs, and `2026-09-24-first-landings.md` records the first changes landed on main. Decisions made for it: `design-docs/decisions/2026-09-crew-prefix.md`, `2026-09-clean-break-state.md` and `2026-09-role-sandbox-trust.md`. Build order: (1) a writer and reviewer loop on local documents, (2) the git adapter, (3) a separate PM tier and concurrent projects. Each phase finishes with real use, not tests alone.
 
 The owner's core complaint about v1 was that it added mental load and was over-engineered. Prefer the smallest loop that works, and add machinery only when a real run needs it.
 

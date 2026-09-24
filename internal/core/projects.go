@@ -84,7 +84,7 @@ func (s *Service) SetProjectDirectories(ctx context.Context, id string, director
 		p.Directories = normalized
 		p.UpdatedAt = s.now().UTC()
 		out = *p
-		record(v, p.UpdatedAt, id, "project.directories_updated", "Linked directories updated for "+p.Title)
+		record(v, p.UpdatedAt, id, "project.directories_updated", "Folders changed")
 		return nil
 	})
 	return out, err

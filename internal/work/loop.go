@@ -25,7 +25,10 @@ import (
 
 // Decision kinds a task can wait on.
 const (
-	decisionDelivery   = "delivery"
+	decisionDelivery = "delivery"
+	// decisionUpdate holds an update to an open pull request that changes
+	// what runs or instructs on the owner's side.
+	decisionUpdate     = "update"
 	decisionQuestion   = "question"
 	decisionEscalation = "escalation"
 	decisionFailure    = "failure"
@@ -329,7 +332,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 		t.WriterSession, t.WakeErrors = result.Session, wakeErrors
 		t.Failures, t.RetryAt = 0, time.Time{}
 		t.Status, t.Detail = core.TaskReviewing, ""
-		return fmt.Sprintf("%s wrote draft %d of %s", writer, n, t.Objective), nil
+		return fmt.Sprintf("%s finished version %d of %s", writer, n, t.Objective), nil
 	})
 	return err
 }
@@ -359,7 +362,7 @@ func (lp *Loop) review(ctx context.Context, p core.Project, t core.Task, m mediu
 			verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, checker.Name, p.Brief.Version, time.Now().UTC()
 			t.Verdicts = append(t.Verdicts, verdict)
 			t.Failures, t.RetryAt = 0, time.Time{}
-			return fmt.Sprintf("%s checked draft %d: %s", checker.Name, r.N, verdict.Outcome), nil
+			return fmt.Sprintf("%s checked version %d of %s: %s", checker.Name, r.N, t.Objective, outcomeWords[verdict.Outcome]), nil
 		})
 		return err
 	}
@@ -525,10 +528,9 @@ func (lp *Loop) askForDelivery(ctx context.Context, p core.Project, t core.Task,
 	if approvalStands(t) || !taskPlaybook(p, t).Land.AsksFirst() || proposed(t) {
 		return lp.resumeLanding(ctx, t)
 	}
-	where := m.deliveryNote(t)
 	_, err = lp.Core.OpenTaskDecision(ctx, t.ID, decisionDelivery, core.DecisionInput{
 		Title:          approvalTitle(t, taskPlaybook(p, t)),
-		Context:        text.Clip(r.Summary, 600) + "\n\n" + where,
+		Context:        text.Clip(r.Summary, 600) + "\n\n" + m.deliveryNote(t),
 		Recommendation: choiceApprove,
 		Choices:        []string{choiceApprove, choiceChanges},
 	})
@@ -584,7 +586,7 @@ func (lp *Loop) setStatus(ctx context.Context, id, status, detail string) error 
 func (lp *Loop) stopTask(ctx context.Context, t core.Task, reason string) error {
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Status, t.Detail = core.TaskStopped, reason
-		return t.Objective + " stopped: " + reason, nil
+		return t.Objective + " stopped", nil
 	})
 	return err
 }
@@ -606,13 +608,13 @@ func (lp *Loop) settleAnswers(ctx context.Context, snap core.Snapshot) (bool, er
 
 func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) error {
 	if d.Status == "dismissed" {
-		return lp.stopTask(ctx, t, "the owner said it is no longer needed")
+		return lp.stopTask(ctx, t, "You closed it")
 	}
 	answer := strings.TrimSpace(d.Answer)
 	switch {
 	case strings.EqualFold(answer, choiceStop):
-		return lp.stopTask(ctx, t, "the owner stopped it")
-	case d.Kind == decisionDelivery && strings.EqualFold(answer, choiceApprove),
+		return lp.stopTask(ctx, t, "You stopped it")
+	case (d.Kind == decisionDelivery || d.Kind == decisionUpdate) && strings.EqualFold(answer, choiceApprove),
 		d.Kind == decisionEscalation && strings.EqualFold(answer, choiceAcceptDraft):
 		return lp.approve(ctx, t)
 	case d.Kind == decisionFailure && strings.EqualFold(answer, choiceTryAgain):
@@ -638,7 +640,7 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 		}
 		t.NextRound()
 		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", "Revising with your answer"
-		return fmt.Sprintf("Revising %s with the owner's direction", t.Objective), nil
+		return fmt.Sprintf("Revising %s with your direction", t.Objective), nil
 	})
 	return err
 }
@@ -677,11 +679,23 @@ func (lp *Loop) usageWait(ctx context.Context, r core.Role) (time.Time, string) 
 		if !wait.After(now) {
 			wait = now.Add(10 * time.Minute)
 		}
-		return wait, fmt.Sprintf("Waiting for %s usage to reset (%s)", r.Engine, verdict.Detail)
+		return wait, fmt.Sprintf("Waiting for %s usage to reset (%s)", engineName(r.Engine), verdict.Detail)
 	case !verdict.Known && cfg.Limits.RoleUsage.OnUnavailable == "pause":
-		return now.Add(5 * time.Minute), "Waiting until " + r.Engine + " usage can be checked"
+		return now.Add(5 * time.Minute), "Waiting until " + engineName(r.Engine) + " usage can be checked"
 	}
 	return time.Time{}, ""
+}
+
+var outcomeWords = map[string]string{core.VerdictPass: "passed", core.VerdictRevise: "asked for changes", core.VerdictQuestion: "asked a question"}
+
+func engineName(engine string) string {
+	if engine == "codex" {
+		return "Codex"
+	}
+	if engine == "claude" {
+		return "Claude"
+	}
+	return engine
 }
 
 // StopTask ends a task at the owner's request. A turn already running
@@ -694,11 +708,11 @@ func (lp *Loop) StopTask(ctx context.Context, projectID, taskID string) (core.Ta
 			return "", core.ErrNotFound
 		}
 		if t.Finished() {
-			return "", fmt.Errorf("this task has already finished: %w", core.ErrConflict)
+			return "", fmt.Errorf("this request has already finished: %w", core.ErrConflict)
 		}
 		decisionID = t.DecisionID
-		t.Status, t.DecisionID, t.Detail = core.TaskStopped, "", "the owner stopped it"
-		return t.Objective + " stopped by the owner", nil
+		t.Status, t.DecisionID, t.Detail = core.TaskStopped, "", "You stopped it"
+		return t.Objective + " stopped", nil
 	})
 	if err != nil {
 		return stopped, err

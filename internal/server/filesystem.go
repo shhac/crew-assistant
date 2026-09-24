@@ -28,13 +28,13 @@ func registerFilesystem(mux *http.ServeMux, a *app.App) {
 			case errors.Is(err, filesystem.ErrCursor):
 				fail(w, 409, err.Error())
 			case errors.Is(err, os.ErrPermission):
-				fail(w, 403, "The daemon cannot read this directory")
+				fail(w, 403, "crew-assistant can't read this folder")
 			case errors.Is(err, os.ErrNotExist):
-				fail(w, 404, "Directory not found on the daemon host")
+				fail(w, 404, "There's no such folder")
 			case errors.Is(err, filesystem.ErrTooLarge), errors.Is(err, filesystem.ErrKind), errors.Is(err, filesystem.ErrPath):
 				fail(w, 400, err.Error())
 			default:
-				fail(w, 400, "Unable to list this directory on the daemon host")
+				fail(w, 400, "Can't open this folder")
 			}
 			return
 		}

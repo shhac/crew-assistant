@@ -57,7 +57,7 @@ func (branchWay) line(_ context.Context, m gitMedium, t core.Task) (*line, error
 	if m.landed == nil || m.landed.TaskID == t.ID {
 		return nil, nil
 	}
-	return &line{Commit: m.landed.Commit, Name: m.landed.Branch, What: fmt.Sprintf("%q landed on branch %s", m.landed.Objective, m.landed.Branch)}, nil
+	return &line{Commit: m.landed.Commit, Name: m.landed.Branch, What: fmt.Sprintf("“%s” landed on branch %s", m.landed.Objective, m.landed.Branch)}, nil
 }
 
 func (branchWay) deliver(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (string, error) {
@@ -73,7 +73,7 @@ func (branchWay) note(m gitMedium, t core.Task) string {
 	if m.landed != nil && m.landed.TaskID != t.ID && t.Base == m.landed.Commit {
 		note += " It builds on " + m.landed.Objective + ", which landed first, so it includes that change too."
 	}
-	return note + " Nothing is pushed, and your checkout is not touched."
+	return note + " Nothing is pushed."
 }
 
 // pushWay fast-forwards a target branch in the owner's repository. Tasks
@@ -90,9 +90,9 @@ func (pushWay) line(ctx context.Context, m gitMedium, t core.Task) (*line, error
 	if err != nil {
 		return nil, err
 	}
-	what := fmt.Sprintf("%s moved on since this task started (it is now at %s)", target, text.Short(tip))
+	what := fmt.Sprintf("%s moved on since this request started (it is now at %s)", target, text.Short(tip))
 	if m.landed != nil && m.landed.TaskID != t.ID && m.landed.Commit == tip {
-		what = fmt.Sprintf("%q landed on %s", m.landed.Objective, target)
+		what = fmt.Sprintf("“%s” landed on %s", m.landed.Objective, target)
 	}
 	return &line{Commit: tip, Name: target, What: what}, nil
 }
@@ -112,7 +112,7 @@ func (pushWay) alreadyLanded(ctx context.Context, m gitMedium, r core.Revision) 
 
 func (pushWay) note(m gitMedium, _ core.Task) string {
 	target := m.playbook.Land.Target
-	return "Approving lands it on " + target + " in " + filepath.Base(m.playbook.Repo) + " by fast-forward: " + target + " only moves forward, nothing already on it is replaced, and nothing is pushed anywhere else."
+	return "Approving moves " + target + " in " + filepath.Base(m.playbook.Repo) + " forward to include it. Nothing already on " + target + " is replaced."
 }
 
 // prWay lands through a GitHub pull request. Tasks start from the target on
@@ -143,7 +143,7 @@ func (prWay) line(ctx context.Context, m gitMedium, t core.Task) (*line, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &line{Commit: tip, Name: target, What: fmt.Sprintf("%s on GitHub moved on since this task started (it is now at %s)", target, text.Short(tip))}, nil
+	return &line{Commit: tip, Name: target, What: fmt.Sprintf("%s on GitHub moved on since this request started (it is now at %s)", target, text.Short(tip))}, nil
 }
 
 func (prWay) deliver(context.Context, gitMedium, core.Task, core.Revision) (string, error) {
@@ -156,5 +156,5 @@ func (prWay) alreadyLanded(context.Context, gitMedium, core.Revision) (bool, err
 
 func (prWay) note(m gitMedium, t core.Task) string {
 	land := m.playbook.Land
-	return fmt.Sprintf("Approving pushes it to %s as the branch %s and opens a pull request into %s. From then on the team answers reviews and CI on it, and it merges by %s once GitHub says it is approved and green; you are asked again only if an update touches what runs or instructs on your side.", land.GitHub, m.branchName(t), land.Target, land.MergeMethod())
+	return fmt.Sprintf("Approving opens a pull request on %s from %s into %s. The team answers its reviews and checks, and it merges by %s once it's approved and green.", land.GitHub, m.branchName(t), land.Target, land.MergeMethod())
 }

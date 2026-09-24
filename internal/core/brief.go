@@ -52,7 +52,7 @@ func (s *Service) UpdateBrief(ctx context.Context, projectID string, in BriefInp
 		p.Brief = Brief{Version: p.Brief.Version + 1, Goal: strings.TrimSpace(in.Goal), Audience: strings.TrimSpace(in.Audience), Constraints: strings.TrimSpace(in.Constraints), Criteria: cleanList(in.Criteria), UpdatedAt: now}
 		p.UpdatedAt = now
 		out = *p
-		record(v, now, p.ID, "brief.updated", fmt.Sprintf("Brief for %s is now version %d", p.Title, p.Brief.Version))
+		record(v, now, p.ID, "brief.updated", fmt.Sprintf("Brief is now version %d", p.Brief.Version))
 		return nil
 	})
 	return out, err

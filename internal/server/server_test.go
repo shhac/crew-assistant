@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -157,5 +158,17 @@ func TestTheOwnerOrdersTheToDoListAndMessagesTheTeam(t *testing.T) {
 	state := call("GET", "/api/state", "")
 	if !strings.Contains(state.Body.String(), `"stage":"todo"`) || !strings.Contains(state.Body.String(), "Keep it to one page") {
 		t.Fatal("the state does not carry stages and messages")
+	}
+}
+
+func TestErrorsReachTheOwnerWithoutTheirInternalLabels(t *testing.T) {
+	for err, want := range map[error]string{
+		fmt.Errorf("this request has already finished: %w", core.ErrConflict): "This request has already finished",
+		core.ErrNotFound: "Not found",
+		fmt.Errorf("the demo doesn't run models: %w", core.ErrChatValidation): "The demo doesn't run models",
+	} {
+		if got := ownerText(err); got != want {
+			t.Errorf("%v: %q, want %q", err, got, want)
+		}
 	}
 }
