@@ -43,17 +43,6 @@
   color: var(--soft);
 }
 
-.decision-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 4px;
-}
-
-.decision-section h4 {
-  margin: 0;
-}
-
 .decision-answer {
   display: flex;
   flex-direction: column;
@@ -63,20 +52,6 @@
 .decision-close {
   margin-left: auto;
   color: var(--muted);
-}
-
-.evidence {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0;
-  list-style: none;
-}
-
-.evidence li {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
 }
 
 .happens {

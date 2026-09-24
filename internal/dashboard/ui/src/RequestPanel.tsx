@@ -57,7 +57,7 @@ export function RequestPanel({
   const fromThread = new Set(
     (task?.messages ?? [])
       .filter((m) => m.kind === "implementer")
-      .map((m) => m.direction ?? 0),
+      .map((m) => m.direction),
   );
   const said = (task?.direction ?? []).filter((_, i) => !fromThread.has(i));
   const decision = task ? decisionFor(task, state.decisions) : undefined;

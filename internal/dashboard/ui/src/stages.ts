@@ -24,7 +24,7 @@ export const finished = (task: Task) =>
 
 export const needsYou = (task: Task) => task.status === "waiting";
 
-export const active = (task: Task) =>
+const active = (task: Task) =>
   task.status === "writing" ||
   task.status === "reviewing" ||
   task.status === "deciding" ||

@@ -61,13 +61,6 @@
   font-weight: 500;
 }
 
-.plain-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-left: 18px;
-}
-
 .integration {
   display: flex;
   align-items: center;

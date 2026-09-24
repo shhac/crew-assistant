@@ -163,7 +163,7 @@ type Loaded =
   | { state: "ready"; files: RevisionFile[] };
 
 /** A draft's files, read from where the team keeps them. */
-export function DraftFiles({
+function DraftFiles({
   projectID,
   taskID,
   n,

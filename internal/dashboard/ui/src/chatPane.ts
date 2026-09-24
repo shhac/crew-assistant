@@ -25,7 +25,7 @@ const narrow = () =>
  * Keeps keyboard focus inside `ref` while `active`, and hands it back to
  * whatever had it once the trap lifts.
  */
-export function useFocusTrap(
+function useFocusTrap(
   ref: RefObject<HTMLElement | null>,
   active: boolean,
   onEscape: () => void,

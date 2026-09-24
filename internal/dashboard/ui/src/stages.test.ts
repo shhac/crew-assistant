@@ -245,6 +245,7 @@ describe("the board", () => {
       from: "owner",
       text: "",
       status,
+      direction: 0,
     });
     expect(isOpenMessage(message("waiting"))).toBe(true);
     expect(isOpenMessage(message("working"))).toBe(true);

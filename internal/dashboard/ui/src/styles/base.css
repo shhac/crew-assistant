@@ -62,10 +62,15 @@ a:hover {
 
 code,
 pre,
-kbd,
-.mono {
+kbd {
   font-family: var(--font-mono);
   font-size: 0.93em;
+}
+
+/* Paths and commands are long single words; let them break rather than
+   push the page sideways on a phone. */
+:not(pre) > code {
+  overflow-wrap: anywhere;
 }
 
 :focus-visible {

@@ -183,7 +183,8 @@ export interface TeamMessage {
   reply?: string;
   outcome?: string;
   revision?: number;
-  direction?: number;
+  /** Which of the task's direction entries this message became. */
+  direction: number;
   at?: string;
   answered_at?: string;
 }

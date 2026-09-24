@@ -456,6 +456,7 @@ describe("a request", () => {
           id: "m1",
           to: "Reviewer",
           kind: "reviewer",
+          direction: 0,
           from: "owner",
           text: "Is the cache safe?",
           status: "answered",
