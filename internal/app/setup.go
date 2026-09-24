@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/config"
-	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
 )
 
@@ -275,7 +274,7 @@ func (a *App) ApplyIdentity(ctx context.Context, id string, accepted bool) (conf
 		// The stand-in shows until the drawing is done; a drawing that cannot
 		// start is shown as its status, and the identity stands either way.
 		if drawErr := a.DrawAssistant(ctx, ""); drawErr != nil {
-			a.Core.SetDrawing(core.DrawingAssistant, core.Drawing{Error: "Couldn't draw it: " + drawErr.Error()})
+			a.setDrawing(drawingAssistant, drawing{failure: "Couldn't draw it: " + drawErr.Error()})
 		}
 	}
 	return applied, err

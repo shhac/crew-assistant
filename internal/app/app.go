@@ -35,6 +35,10 @@ type App struct {
 	chatWaiters      sync.Map
 	chatInvoker      func(context.Context, engine.Config, engine.Request, engine.ToolExecutor) (engine.Result, error)
 	statuses         map[string]core.Integration
+	// drawing is each picture being drawn or that failed, by member id or
+	// drawingAssistant. It is not stored: a restart forgets a drawing it
+	// could not finish.
+	drawing map[string]drawing
 	// Work runs the teams' tasks and wakes agents.
 	Work *work.Loop
 	// Painter draws avatars; nil draws with Codex.
@@ -45,7 +49,7 @@ type App struct {
 }
 
 func New(s *core.Service, cfg config.Config, path string, demo bool) *App {
-	a := &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), statuses: map[string]core.Integration{}, small: newSmallModels(func() string { return s.StateDirectory() })}
+	a := &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
 	a.Work = work.New(s, a.Config, demo)
 	return a
 }
@@ -129,6 +133,12 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 			live.ProjectID = st.ProjectID
 			s.Integrations[i] = live
 		}
+	}
+	d := a.drawing[drawingAssistant]
+	s.Assistant.Drawing, s.Assistant.DrawError = d.busy, d.failure
+	for i := range s.Members {
+		d := a.drawing[s.Members[i].ID]
+		s.Members[i].Drawing, s.Members[i].DrawError = d.busy, d.failure
 	}
 	return s, nil
 }

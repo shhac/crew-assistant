@@ -26,8 +26,8 @@ type Member struct {
 	Effort       string        `json:"effort,omitempty"`
 	Instructions string        `json:"instructions,omitempty"`
 	Avatar       config.Avatar `json:"avatar"`
-	// AvatarSVG and the drawing status are filled in when the state is
-	// read, never stored.
+	// AvatarSVG is filled in when the state is read, and the drawing status
+	// by the app, which does the drawing; neither is stored.
 	AvatarSVG string     `json:"avatar_svg,omitempty"`
 	Drawing   bool       `json:"drawing,omitempty"`
 	DrawError string     `json:"draw_error,omitempty"`

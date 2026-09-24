@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -48,7 +49,7 @@ func TestCodexDrawsAMemberInTheBackground(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.drawings.Wait()
-	snap, _ := a.Core.Snapshot(ctx)
+	snap, _ := a.Snapshot(ctx)
 	got := snap.Members[0]
 	if got.Avatar.Image == "" || got.Drawing || got.DrawError != "" {
 		t.Fatalf("a new member should be drawn: %+v", got)
@@ -63,7 +64,7 @@ func TestCodexDrawsAMemberInTheBackground(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.drawings.Wait()
-	snap, _ = a.Core.Snapshot(ctx)
+	snap, _ = a.Snapshot(ctx)
 	if snap.Members[0].Avatar.Look != "Violet bob, round glasses" || snap.Members[0].Avatar.Image == got.Avatar.Image {
 		t.Fatalf("a redraw should keep the new look and picture: %+v", snap.Members[0].Avatar)
 	}
@@ -71,7 +72,7 @@ func TestCodexDrawsAMemberInTheBackground(t *testing.T) {
 	if _, err := a.Core.SaveMember(ctx, m.ID, core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "codex", Avatar: &snap.Members[0].Avatar}); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := a.Core.Snapshot(ctx)
+	after, _ := a.Snapshot(ctx)
 	if after.Members[0].Avatar.Image != snap.Members[0].Avatar.Image {
 		t.Fatal("saving a member lost its picture")
 	}
@@ -86,7 +87,7 @@ func TestADrawingThatFailsSaysSoAndOneAtATimeIsDrawn(t *testing.T) {
 	if err := a.DrawMember(ctx, m.ID, ""); err != nil {
 		t.Fatal(err)
 	}
-	if snap, _ := a.Core.Snapshot(ctx); !snap.Members[0].Drawing {
+	if snap, _ := a.Snapshot(ctx); !snap.Members[0].Drawing {
 		t.Fatal("the member should show as being drawn")
 	}
 	if err := a.DrawMember(ctx, m.ID, ""); !errors.Is(err, core.ErrConflict) {
@@ -94,7 +95,7 @@ func TestADrawingThatFailsSaysSoAndOneAtATimeIsDrawn(t *testing.T) {
 	}
 	close(painter.block)
 	a.drawings.Wait()
-	snap, _ := a.Core.Snapshot(ctx)
+	snap, _ := a.Snapshot(ctx)
 	if snap.Members[0].Drawing || !strings.Contains(snap.Members[0].DrawError, "no image tool") || snap.Members[0].Avatar.Image != "" {
 		t.Fatalf("a failed drawing: %+v", snap.Members[0])
 	}
@@ -117,8 +118,86 @@ func TestApplyingAnIdentityDrawsTheAssistant(t *testing.T) {
 	if avatar.Image == "" || avatar.Look != "Silver hair, a green scarf" || !strings.Contains(painter.seen[0], "a green scarf") {
 		t.Fatalf("assistant avatar %+v, character %q", avatar, painter.seen)
 	}
-	snap, _ := a.Core.Snapshot(ctx)
+	snap, _ := a.Snapshot(ctx)
 	if snap.Assistant.Avatar.Image != avatar.Image || snap.Assistant.Drawing {
 		t.Fatalf("the dashboard should see the picture: %+v", snap.Assistant)
+	}
+}
+
+// countingPainter records how many drawings ran and the most at once.
+type countingPainter struct {
+	release  chan struct{}
+	calls    atomic.Int32
+	inFlight atomic.Int32
+	most     atomic.Int32
+}
+
+func (p *countingPainter) Paint(ctx context.Context, character string) ([]byte, error) {
+	p.calls.Add(1)
+	now := p.inFlight.Add(1)
+	defer p.inFlight.Add(-1)
+	for {
+		most := p.most.Load()
+		if now <= most || p.most.CompareAndSwap(most, now) {
+			break
+		}
+	}
+	if p.release != nil {
+		<-p.release
+	}
+	return (&fakePainter{}).Paint(ctx, character)
+}
+
+func TestOnlyOneOfManyRequestsToDrawAMemberStartsIt(t *testing.T) {
+	a := testApp(t)
+	painter := &countingPainter{release: make(chan struct{})}
+	a.Painter = painter
+	ctx := context.Background()
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	const n = 16
+	start := make(chan struct{})
+	errs := make(chan error, n)
+	var ready sync.WaitGroup
+	for i := 0; i < n; i++ {
+		ready.Add(1)
+		go func() {
+			ready.Done()
+			<-start
+			errs <- a.DrawMember(ctx, m.ID, "")
+		}()
+	}
+	ready.Wait()
+	close(start)
+	started := 0
+	for i := 0; i < n; i++ {
+		err := <-errs
+		switch {
+		case err == nil:
+			started++
+		case !errors.Is(err, core.ErrConflict):
+			t.Fatalf("a refused drawing should be a conflict: %v", err)
+		}
+	}
+	close(painter.release)
+	a.WaitForDrawings()
+	if started != 1 || painter.calls.Load() != 1 {
+		t.Fatalf("%d drawings started and %d painted, want 1", started, painter.calls.Load())
+	}
+}
+
+func TestDrawingsOfDifferentMembersNeverOverlap(t *testing.T) {
+	a := testApp(t)
+	painter := &countingPainter{}
+	a.Painter = painter
+	ctx := context.Background()
+	for _, name := range []string{"Ada", "Rune", "Zed"} {
+		m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: name, Kind: core.RoleImplementer, Engine: "claude"})
+		if err := a.DrawMember(ctx, m.ID, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.WaitForDrawings()
+	if painter.calls.Load() != 3 || painter.most.Load() != 1 {
+		t.Fatalf("%d drawings, at most %d at once", painter.calls.Load(), painter.most.Load())
 	}
 }

@@ -47,9 +47,6 @@ func (a *App) startDrawing(ctx context.Context, key, character string, done func
 	if a.Demo {
 		return errors.New("demo mode doesn't draw; start without --demo to draw with Codex")
 	}
-	if a.Core.DrawingOf(key).Busy {
-		return fmt.Errorf("already drawing: %w", core.ErrConflict)
-	}
 	// The owner's usage limit applies to Codex, the painter unless one is set;
 	// reading it would reach Codex itself, which tests never do.
 	if a.Painter == nil && !testing.Testing() {
@@ -57,8 +54,9 @@ func (a *App) startDrawing(ctx context.Context, key, character string, done func
 			return errors.New(detail)
 		}
 	}
-	a.Core.SetDrawing(key, core.Drawing{Busy: true})
-	a.drawings.Add(1)
+	if err := a.markDrawing(key); err != nil {
+		return err
+	}
 	go func() {
 		defer a.drawings.Done()
 		ctx, cancel := context.WithTimeout(a.lifetime(), 12*time.Minute)
@@ -77,9 +75,36 @@ func (a *App) startDrawing(ctx context.Context, key, character string, done func
 		if err != nil {
 			failure = "Couldn't draw it: " + err.Error()
 		}
-		a.Core.SetDrawing(key, core.Drawing{Error: failure})
+		a.setDrawing(key, drawing{failure: failure})
 	}()
 	return nil
+}
+
+// drawingAssistant keys the assistant's own picture in the drawing status.
+const drawingAssistant = "assistant"
+
+type drawing struct {
+	busy    bool
+	failure string
+}
+
+// markDrawing claims a picture for one drawing; checking and claiming under
+// one lock means two requests never both start one.
+func (a *App) markDrawing(key string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.drawing[key].busy {
+		return fmt.Errorf("already drawing: %w", core.ErrConflict)
+	}
+	a.drawing[key] = drawing{busy: true}
+	a.drawings.Add(1)
+	return nil
+}
+
+func (a *App) setDrawing(key string, d drawing) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.drawing[key] = d
 }
 
 // DrawMember draws a team member's face, from look if given, or else from
@@ -127,7 +152,7 @@ func (a *App) DrawAssistant(ctx context.Context, look string) error {
 		return errors.New("a look is at most 600 characters")
 	}
 	character := cfg.Name + ", a calm personal assistant who runs projects for its owner. Personality: " + text.Clip(cfg.Personality, 200) + " " + lookOrChoose(look)
-	return a.startDrawing(ctx, core.DrawingAssistant, character, func(_ context.Context, image string) error {
+	return a.startDrawing(ctx, drawingAssistant, character, func(_ context.Context, image string) error {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		next := a.cfg
@@ -151,7 +176,7 @@ func (a *App) CreateMember(ctx context.Context, in core.MemberInput) (core.Membe
 		return m, err
 	}
 	if drawErr := a.DrawMember(ctx, m.ID, ""); drawErr != nil {
-		a.Core.SetDrawing(m.ID, core.Drawing{Error: "Couldn't draw it: " + drawErr.Error()})
+		a.setDrawing(m.ID, drawing{failure: "Couldn't draw it: " + drawErr.Error()})
 	}
 	return m, nil
 }
