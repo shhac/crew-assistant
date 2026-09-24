@@ -118,23 +118,20 @@ func (s *Service) RegisterWake(ctx context.Context, in WakeInput) (Wake, error) 
 func (s *Service) CancelWake(ctx context.Context, id, taskID string) (Wake, error) {
 	var out Wake
 	err := s.store.update(ctx, func(v *Snapshot) error {
-		for i := range v.Wakes {
-			w := &v.Wakes[i]
-			if w.ID != id {
-				continue
-			}
-			if taskID != "" && w.TaskID != taskID {
-				return ErrNotFound
-			}
-			if w.Status != WakeWaiting && w.Status != WakeFired {
-				return fmt.Errorf("%s is already %s: %w", id, w.Status, ErrConflict)
-			}
-			w.Status = WakeCancelled
-			removeFromWakeTurns(v, id, s.now().UTC())
-			out = *w
-			return nil
+		w := wakeByID(v, id)
+		if w == nil {
+			return ErrNotFound
 		}
-		return ErrNotFound
+		if taskID != "" && w.TaskID != taskID {
+			return ErrNotFound
+		}
+		if w.Status != WakeWaiting && w.Status != WakeFired {
+			return fmt.Errorf("%s is already %s: %w", id, w.Status, ErrConflict)
+		}
+		w.Status = WakeCancelled
+		removeFromWakeTurns(v, id, s.now().UTC())
+		out = *w
+		return nil
 	})
 	return out, err
 }
@@ -159,24 +156,21 @@ func (s *Service) Waiting(ctx context.Context) ([]Wake, error) {
 func (s *Service) FireWake(ctx context.Context, id, observed, event string, timedOut bool) (Wake, error) {
 	var out Wake
 	err := s.store.update(ctx, func(v *Snapshot) error {
-		for i := range v.Wakes {
-			w := &v.Wakes[i]
-			if w.ID != id {
-				continue
-			}
-			if w.Status != WakeWaiting {
-				return fmt.Errorf("%s is %s: %w", id, w.Status, ErrConflict)
-			}
-			now := s.now().UTC()
-			w.Status, w.Observed, w.Event, w.TimedOut, w.FiredAt = WakeFired, observed, event, timedOut, &now
-			if w.Owner == WakeAssistant {
-				queueWakeTurn(v, w.ID, now)
-			}
-			pruneWakes(v)
-			out = *w
-			return nil
+		w := wakeByID(v, id)
+		if w == nil {
+			return ErrNotFound
 		}
-		return ErrNotFound
+		if w.Status != WakeWaiting {
+			return fmt.Errorf("%s is %s: %w", id, w.Status, ErrConflict)
+		}
+		now := s.now().UTC()
+		w.Status, w.Observed, w.Event, w.TimedOut, w.FiredAt = WakeFired, observed, event, timedOut, &now
+		if w.Owner == WakeAssistant {
+			queueWakeTurn(v, w.ID, now)
+		}
+		pruneWakes(v)
+		out = *w
+		return nil
 	})
 	return out, err
 }
@@ -301,3 +295,12 @@ func WakeReport(wakes []Wake, now time.Time) string {
 }
 
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+
+func wakeByID(v *Snapshot, id string) *Wake {
+	for i := range v.Wakes {
+		if v.Wakes[i].ID == id {
+			return &v.Wakes[i]
+		}
+	}
+	return nil
+}

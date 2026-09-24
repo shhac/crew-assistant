@@ -143,29 +143,26 @@ func (s *Service) StartNextChat(ctx context.Context) (ChatTurn, error) {
 func (s *Service) CancelChat(ctx context.Context, id string) (ChatTurn, error) {
 	var out ChatTurn
 	err := s.store.update(ctx, func(v *Snapshot) error {
-		for i := range v.ChatTurns {
-			t := &v.ChatTurns[i]
-			if t.ID != id {
-				continue
-			}
-			if t.Status == "cancelled" {
-				out = *t
-				return nil
-			}
-			if t.Status != "queued" {
-				return fmt.Errorf("only queued messages can be cancelled: %w", ErrConflict)
-			}
-			now := s.now().UTC()
-			t.Status = "cancelled"
-			v.ChatQueueRevision++
-			t.FinishedAt = &now
-			if t.Origin == OriginWake {
-				settleWakeTurn(v, t, "cancelled", now)
-			}
+		t := chatTurn(v, id)
+		if t == nil {
+			return ErrNotFound
+		}
+		if t.Status == "cancelled" {
 			out = *t
 			return nil
 		}
-		return ErrNotFound
+		if t.Status != "queued" {
+			return fmt.Errorf("only queued messages can be cancelled: %w", ErrConflict)
+		}
+		now := s.now().UTC()
+		t.Status = "cancelled"
+		v.ChatQueueRevision++
+		t.FinishedAt = &now
+		if t.Origin == OriginWake {
+			settleWakeTurn(v, t, "cancelled", now)
+		}
+		out = *t
+		return nil
 	})
 	return out, err
 }
@@ -180,37 +177,34 @@ func (s *Service) FinishChat(ctx context.Context, id, status, reply, reason stri
 		return errors.New("completed chat needs a reply")
 	}
 	return s.store.update(ctx, func(v *Snapshot) error {
-		for i := range v.ChatTurns {
-			t := &v.ChatTurns[i]
-			if t.ID != id {
-				continue
-			}
-			if t.Status != "running" {
-				return ErrConflict
-			}
-			now := s.now().UTC()
-			t.Status = status
-			t.FinishedAt = &now
-			t.Error = reason
-			t.LoadingPhrase = ""
-			t.ModelStatus = ""
-			t.RetryAt = time.Time{}
-			for j := range t.Events {
-				if t.Events[j].Status == "running" {
-					t.Events[j].Status = "interrupted"
-					t.Events[j].FinishedAt = &now
-				}
-			}
-			if status == "completed" {
-				t.AssistantMessageID = uid()
-				v.Messages = append(v.Messages, Message{ID: t.AssistantMessageID, Role: "assistant", Content: reply, CreatedAt: now})
-			}
-			if t.Origin == OriginWake {
-				settleWakeTurn(v, t, status, now)
-			}
-			return nil
+		t := chatTurn(v, id)
+		if t == nil {
+			return ErrNotFound
 		}
-		return ErrNotFound
+		if t.Status != "running" {
+			return ErrConflict
+		}
+		now := s.now().UTC()
+		t.Status = status
+		t.FinishedAt = &now
+		t.Error = reason
+		t.LoadingPhrase = ""
+		t.ModelStatus = ""
+		t.RetryAt = time.Time{}
+		for j := range t.Events {
+			if t.Events[j].Status == "running" {
+				t.Events[j].Status = "interrupted"
+				t.Events[j].FinishedAt = &now
+			}
+		}
+		if status == "completed" {
+			t.AssistantMessageID = uid()
+			v.Messages = append(v.Messages, Message{ID: t.AssistantMessageID, Role: "assistant", Content: reply, CreatedAt: now})
+		}
+		if t.Origin == OriginWake {
+			settleWakeTurn(v, t, status, now)
+		}
+		return nil
 	})
 }
 
@@ -274,37 +268,43 @@ func (s *Service) RecordChatTool(ctx context.Context, turnID, eventID, tool, lab
 		return errors.New("invalid chat tool status")
 	}
 	return s.store.update(ctx, func(v *Snapshot) error {
-		for i := range v.ChatTurns {
-			t := &v.ChatTurns[i]
-			if t.ID != turnID {
+		t := chatTurn(v, turnID)
+		if t == nil {
+			return ErrNotFound
+		}
+		if t.Status != "running" {
+			return ErrConflict
+		}
+		now := s.now().UTC()
+		for j := range t.Events {
+			e := &t.Events[j]
+			if e.ID != eventID {
 				continue
 			}
-			if t.Status != "running" {
+			if e.Tool != tool || e.Status != "running" || status == "running" {
 				return ErrConflict
 			}
-			now := s.now().UTC()
-			for j := range t.Events {
-				e := &t.Events[j]
-				if e.ID != eventID {
-					continue
-				}
-				if e.Tool != tool || e.Status != "running" || status == "running" {
-					return ErrConflict
-				}
-				e.Status = status
-				e.FinishedAt = &now
-				return nil
-			}
-			if status != "running" {
-				return ErrNotFound
-			}
-			t.Events = append(t.Events, ChatToolEvent{ID: eventID, Tool: tool, Label: label, Status: status, StartedAt: now})
+			e.Status = status
+			e.FinishedAt = &now
 			return nil
 		}
-		return ErrNotFound
+		if status != "running" {
+			return ErrNotFound
+		}
+		t.Events = append(t.Events, ChatToolEvent{ID: eventID, Tool: tool, Label: label, Status: status, StartedAt: now})
+		return nil
 	})
 }
 
 // OriginWake marks a chat turn and message the daemon wrote to deliver
 // wake-ups to the assistant.
 const OriginWake = "wake"
+
+func chatTurn(v *Snapshot, id string) *ChatTurn {
+	for i := range v.ChatTurns {
+		if v.ChatTurns[i].ID == id {
+			return &v.ChatTurns[i]
+		}
+	}
+	return nil
+}
