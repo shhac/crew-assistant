@@ -28,6 +28,41 @@ func ownerGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// ownerRepo is the owner's repository: main, with one commit.
+func ownerRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	ownerGit(t, dir, "init", "-q", "-b", "main")
+	ownerGit(t, dir, "config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ownerGit(t, dir, "add", "-A")
+	ownerGit(t, dir, "commit", "-q", "-m", "start")
+	return dir
+}
+
+// codeProject is a project with a code team on source. The writing task
+// loopApp queued is stopped: these tests are about code work.
+func codeProject(t *testing.T, a *Loop, source string) core.Project {
+	t.Helper()
+	ctx := context.Background()
+	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{source}, Brief: core.BriefInput{Goal: "Add features"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	for _, task := range snap.Tasks {
+		if task.ProjectID != p.ID {
+			a.StopTask(ctx, task.ProjectID, task.ID)
+		}
+	}
+	return p
+}
+
 // codeRunner edits the clone as an implementer would, and answers checks from
 // a script, recording which kinds of role ran where.
 type codeRunner struct {
@@ -69,12 +104,7 @@ func (r *codeRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, er
 }
 
 func TestCodeTaskRunsInACloneAndDeliversALocalBranch(t *testing.T) {
-	source := t.TempDir()
-	ownerGit(t, source, "init", "-q", "-b", "main")
-	ownerGit(t, source, "config", "commit.gpgsign", "false")
-	os.WriteFile(filepath.Join(source, "main.go"), []byte("package main\n"), 0600)
-	ownerGit(t, source, "add", "-A")
-	ownerGit(t, source, "commit", "-q", "-m", "start")
+	source := ownerRepo(t)
 	os.WriteFile(filepath.Join(source, "wip.txt"), []byte("owner's own work"), 0600)
 	start := ownerGit(t, source, "rev-parse", "HEAD")
 
@@ -208,26 +238,14 @@ func TestBranchNamesKeepWholeWords(t *testing.T) {
 // point and touched the same file, catches up, resolves the conflict with its
 // team and asks again, building on what landed. The owner only approves.
 func TestTheSecondChangeCatchesUpWhenTheFirstLands(t *testing.T) {
-	source := t.TempDir()
-	ownerGit(t, source, "init", "-q", "-b", "main")
-	ownerGit(t, source, "config", "commit.gpgsign", "false")
-	os.WriteFile(filepath.Join(source, "main.go"), []byte("package main\n"), 0600)
-	ownerGit(t, source, "add", "-A")
-	ownerGit(t, source, "commit", "-q", "-m", "start")
+	source := ownerRepo(t)
 
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass, pass, pass, pass, pass}}}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
 	a.runner = runner
 	ctx := context.Background()
-	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{source}, Brief: core.BriefInput{Goal: "Add features"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
-		t.Fatal(err)
-	}
-	snap, _ := a.Core.Snapshot(ctx)
-	a.StopTask(ctx, snap.Tasks[0].ProjectID, snap.Tasks[0].ID)
+	p := codeProject(t, a, source)
+	var err error
 	first, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
 	second, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add B"})
 	current := func(id string) core.Task {
@@ -254,7 +272,7 @@ func TestTheSecondChangeCatchesUpWhenTheFirstLands(t *testing.T) {
 	if first.Status != core.TaskDelivered || first.DeliveredTo != "paul/add-a" {
 		t.Fatalf("the first change did not land: %+v", first)
 	}
-	snap, _ = a.Core.Snapshot(ctx)
+	snap, _ := a.Core.Snapshot(ctx)
 	if d, _ := findDecision(snap, stale.ID); d.Status != "dismissed" {
 		t.Fatalf("the out-of-date approval is still open: %+v", d)
 	}
@@ -295,12 +313,7 @@ func TestTheSecondChangeCatchesUpWhenTheFirstLands(t *testing.T) {
 // main later under a new landing policy: in order, catching up with the
 // owner's own commits, never forcing, and never touching uncommitted work.
 func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
-	source := t.TempDir()
-	ownerGit(t, source, "init", "-q", "-b", "main")
-	ownerGit(t, source, "config", "commit.gpgsign", "false")
-	os.WriteFile(filepath.Join(source, "main.go"), []byte("package main\n"), 0600)
-	ownerGit(t, source, "add", "-A")
-	ownerGit(t, source, "commit", "-q", "-m", "start")
+	source := ownerRepo(t)
 
 	reviews := make([]string, 12)
 	for i := range reviews {
@@ -310,15 +323,8 @@ func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
 	a.runner = runner
 	ctx := context.Background()
-	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{source}, Brief: core.BriefInput{Goal: "Add features"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
-		t.Fatal(err)
-	}
-	snap, _ := a.Core.Snapshot(ctx)
-	a.StopTask(ctx, snap.Tasks[0].ProjectID, snap.Tasks[0].ID)
+	p := codeProject(t, a, source)
+	var err error
 	first, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
 	second, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add B"})
 	current := func(id string) core.Task {
@@ -421,12 +427,7 @@ func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
 // after a bounded number of catch-ups, instead of looping; their retry starts
 // the count again.
 func TestATargetThatKeepsMovingComesToTheOwner(t *testing.T) {
-	source := t.TempDir()
-	ownerGit(t, source, "init", "-q", "-b", "main")
-	ownerGit(t, source, "config", "commit.gpgsign", "false")
-	os.WriteFile(filepath.Join(source, "main.go"), []byte("package main\n"), 0600)
-	ownerGit(t, source, "add", "-A")
-	ownerGit(t, source, "commit", "-q", "-m", "start")
+	source := ownerRepo(t)
 	reviews := make([]string, 40)
 	for i := range reviews {
 		reviews[i] = pass
@@ -490,25 +491,15 @@ func TestATargetThatKeepsMovingComesToTheOwner(t *testing.T) {
 }
 
 func TestLandingRefusesWhenItCannotTellTheOrder(t *testing.T) {
-	source := t.TempDir()
-	ownerGit(t, source, "init", "-q", "-b", "main")
-	ownerGit(t, source, "config", "commit.gpgsign", "false")
-	os.WriteFile(filepath.Join(source, "main.go"), []byte("package main\n"), 0600)
-	ownerGit(t, source, "add", "-A")
-	ownerGit(t, source, "commit", "-q", "-m", "start")
+	source := ownerRepo(t)
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass}}}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
 	a.runner = runner
 	ctx := context.Background()
-	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{source}, Brief: core.BriefInput{Goal: "x"}})
-	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
-		t.Fatal(err)
-	}
-	snap, _ := a.Core.Snapshot(ctx)
-	a.StopTask(ctx, snap.Tasks[0].ProjectID, snap.Tasks[0].ID)
+	p := codeProject(t, a, source)
 	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
 	settle(t, a)
-	snap, _ = a.Core.Snapshot(ctx)
+	snap, _ := a.Core.Snapshot(ctx)
 	for _, candidate := range snap.Tasks {
 		if candidate.ID == task.ID {
 			task = candidate
@@ -533,12 +524,7 @@ func TestLandingRefusesWhenItCannotTellTheOrder(t *testing.T) {
 // A project whose owner lets checked changes land unasked gets no approval
 // question, and a change already on the target is recorded, not pushed again.
 func TestNoApprovalStepAndAlreadyLanded(t *testing.T) {
-	source := t.TempDir()
-	ownerGit(t, source, "init", "-q", "-b", "main")
-	ownerGit(t, source, "config", "commit.gpgsign", "false")
-	os.WriteFile(filepath.Join(source, "main.go"), []byte("package main\n"), 0600)
-	ownerGit(t, source, "add", "-A")
-	ownerGit(t, source, "commit", "-q", "-m", "start")
+	source := ownerRepo(t)
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass, pass, pass}}}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
 	a.runner = runner

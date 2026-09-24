@@ -109,12 +109,7 @@ type prScenario struct {
 
 func newPRScenario(t *testing.T, reviews int) *prScenario {
 	t.Helper()
-	source := t.TempDir()
-	ownerGit(t, source, "init", "-q", "-b", "main")
-	ownerGit(t, source, "config", "commit.gpgsign", "false")
-	os.WriteFile(filepath.Join(source, "main.go"), []byte("package main\n"), 0600)
-	ownerGit(t, source, "add", "-A")
-	ownerGit(t, source, "commit", "-q", "-m", "start")
+	source := ownerRepo(t)
 	remote := t.TempDir()
 	ownerGit(t, remote, "init", "-q", "--bare")
 	ownerGit(t, source, "push", "-q", remote, "main")
