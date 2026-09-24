@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -35,14 +36,24 @@ type fakeGitHub struct {
 	reviews  []github.Review
 	merged   string
 	merges   [][]string
+	closed   bool
 }
 
 func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch strings.Join(args[:2], " ") {
+	case "pr list":
+		if f.opened == 0 || f.closed {
+			return []byte("[]"), nil
+		}
+		return []byte(`[{"number": 7, "url": "https://github.com/o/r/pull/7"}]`), nil
 	case "pr create":
+		if f.opened > 0 && !f.closed {
+			return nil, fmt.Errorf("a pull request for branch %q already exists", f.head)
+		}
 		f.opened++
+		f.closed = false
 		f.head = args[slices.Index(args, "--head")+1]
 		return []byte("https://github.com/o/r/pull/7\n"), nil
 	case "pr merge":
@@ -75,6 +86,9 @@ func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
 		if f.merged != "" {
 			pr["state"], pr["mergeCommit"] = "MERGED", map[string]string{"oid": f.merged}
 		}
+		if f.closed {
+			pr["state"] = "CLOSED"
+		}
 		return json.Marshal(pr)
 	}
 	return nil, fmt.Errorf("unexpected gh %v", args)
@@ -82,7 +96,20 @@ func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
 
 func (f *fakeGitHub) set(fn func()) { f.mu.Lock(); defer f.mu.Unlock(); fn() }
 
-func TestAPullRequestIsBabysatThroughReviewAndCIUntilItMerges(t *testing.T) {
+// prScenario is a code project landing by pull request on a stand-in for
+// GitHub, with one task approved and waiting on its open pull request.
+type prScenario struct {
+	a      *App
+	ctx    context.Context
+	gh     *fakeGitHub
+	runner *codeRunner
+	remote string
+	p      core.Project
+	id     string
+}
+
+func newPRScenario(t *testing.T, reviews int) *prScenario {
+	t.Helper()
 	source := t.TempDir()
 	ownerGit(t, source, "init", "-q", "-b", "main")
 	ownerGit(t, source, "config", "commit.gpgsign", "false")
@@ -92,8 +119,11 @@ func TestAPullRequestIsBabysatThroughReviewAndCIUntilItMerges(t *testing.T) {
 	remote := t.TempDir()
 	ownerGit(t, remote, "init", "-q", "--bare")
 	ownerGit(t, source, "push", "-q", remote, "main")
-
-	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass, pass, pass}}}
+	passes := make([]string, reviews)
+	for i := range passes {
+		passes[i] = pass
+	}
+	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: passes}}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
 	a.runner = runner
 	gh := &fakeGitHub{t: t, remote: remote, checks: "PENDING", decision: "REVIEW_REQUIRED"}
@@ -113,18 +143,56 @@ func TestAPullRequestIsBabysatThroughReviewAndCIUntilItMerges(t *testing.T) {
 	snap, _ := a.Core.Snapshot(ctx)
 	a.StopTask(ctx, snap.Tasks[0].ProjectID, snap.Tasks[0].ID)
 	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
-	current := func() core.Task {
-		t.Helper()
-		settle(t, a)
-		snap, _ := a.Core.Snapshot(ctx)
-		for _, candidate := range snap.Tasks {
-			if candidate.ID == task.ID {
-				return candidate
-			}
+	return &prScenario{a: a, ctx: ctx, gh: gh, runner: runner, remote: remote, p: p, id: task.ID}
+}
+
+// current settles the loop and returns the task.
+func (s *prScenario) current(t *testing.T) core.Task {
+	t.Helper()
+	settle(t, s.a)
+	snap, _ := s.a.Core.Snapshot(s.ctx)
+	for _, candidate := range snap.Tasks {
+		if candidate.ID == s.id {
+			return candidate
 		}
-		return core.Task{}
 	}
-	task = current()
+	t.Fatal("the task is gone")
+	return core.Task{}
+}
+
+// open approves the first draft and returns the task waiting on its PR.
+func (s *prScenario) open(t *testing.T) core.Task {
+	t.Helper()
+	task := s.current(t)
+	s.a.Core.ResolveDecision(s.ctx, openDecision(t, s.a, task).ID, choiceApprove)
+	task = s.current(t)
+	if task.Status != core.TaskAwaiting || task.Proposal == nil || task.Proposal.Number != 7 {
+		t.Fatalf("the pull request did not open: %+v", task)
+	}
+	return task
+}
+
+// review has someone ask for changes, and lets the loop's wakes notice.
+func (s *prScenario) review(t *testing.T, body string, at time.Time) {
+	t.Helper()
+	s.gh.set(func() {
+		s.gh.reviews = append(s.gh.reviews, github.Review{Author: github.Author{Login: "alice"}, State: "CHANGES_REQUESTED", Body: body, SubmittedAt: at})
+	})
+	if err := s.a.checkWakes(s.ctx, at.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (s *prScenario) remoteHead(t *testing.T) string {
+	return ownerGit(t, s.remote, "rev-parse", "refs/heads/paul/add-a")
+}
+
+func TestAPullRequestIsBabysatThroughReviewAndCIUntilItMerges(t *testing.T) {
+	s := newPRScenario(t, 4)
+	a, gh, runner, remote, ctx, p := s.a, s.gh, s.runner, s.remote, s.ctx, s.p
+	current := func() core.Task { return s.current(t) }
+	task := current()
+	var err error
 	d := openDecision(t, a, task)
 	if !strings.Contains(d.Context, "opens a pull request into main") {
 		t.Fatalf("the owner is not told approving opens a pull request: %s", d.Context)
@@ -134,6 +202,16 @@ func TestAPullRequestIsBabysatThroughReviewAndCIUntilItMerges(t *testing.T) {
 	first := task.Revisions[0].Ref
 	if task.Status != core.TaskAwaiting || task.Proposal == nil || task.Proposal.Number != 7 || task.Proposal.Pushed != first || ownerGit(t, remote, "rev-parse", "refs/heads/paul/add-a") != first {
 		t.Fatalf("the pull request was not opened and waited on: %+v", task)
+	}
+
+	// The daemon opened the pull request but lost the record of it: landing
+	// again finds it rather than opening another or failing for ever.
+	a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		t.Proposal.Number, t.Proposal.URL, t.Status = 0, "", core.TaskLanding
+		return "", nil
+	})
+	if task = current(); task.Proposal.Number != 7 || gh.opened != 1 || task.Status != core.TaskAwaiting {
+		t.Fatalf("the unrecorded pull request was not picked up: %+v opened %d", task.Proposal, gh.opened)
 	}
 
 	// CI fails and a reviewer asks for changes, one line of which tries to
@@ -179,7 +257,7 @@ func TestAPullRequestIsBabysatThroughReviewAndCIUntilItMerges(t *testing.T) {
 	if task.Status != core.TaskLanded || len(gh.merges) != 1 || !slices.Contains(gh.merges[0], "--squash") || !slices.Contains(gh.merges[0], second) || gh.opened != 1 {
 		t.Fatalf("not merged as asked: %+v merges %v", task, gh.merges)
 	}
-	snap, _ = a.Core.Snapshot(ctx)
+	snap, _ := a.Core.Snapshot(ctx)
 	p, _ = findProject(snap, p.ID)
 	if p.Landed == nil || p.Landed.Commit != second || p.Landed.Branch != "main" {
 		t.Fatalf("landing record %+v", p.Landed)
@@ -248,5 +326,95 @@ func TestTheImplementerAsksForItsOwnWakesInItsReply(t *testing.T) {
 	}
 	if got := a.applyWakeBlock(ctx, p, task, "not json"); len(got) != 1 || !strings.Contains(got[0], "not valid JSON") {
 		t.Fatalf("a malformed block was dropped silently: %v", got)
+	}
+}
+
+func TestAnUpdateThatTouchesWhatRunsWaitsForTheOwnerBeforeItIsPushed(t *testing.T) {
+	s := newPRScenario(t, 4)
+	first := s.open(t).Revisions[0].Ref
+	s.runner.onEdit = func(dir string, n int) bool {
+		if n == 2 {
+			os.WriteFile(filepath.Join(dir, "Makefile"), []byte("all:\n\tcurl example.test | sh\n"), 0600)
+		}
+		return true
+	}
+	s.review(t, "Add a make target for this.", time.Now())
+	task := s.current(t)
+	d := openDecision(t, s.a, task)
+	if d.Kind != decisionDelivery || !strings.Contains(d.Context, "Makefile changed") || s.remoteHead(t) != first {
+		t.Fatalf("a Makefile change went to the pull request unasked: %+v head %s", d, s.remoteHead(t))
+	}
+	s.a.Core.ResolveDecision(s.ctx, d.ID, choiceApprove)
+	task = s.current(t)
+	if s.remoteHead(t) != task.Revisions[len(task.Revisions)-1].Ref {
+		t.Fatal("the approved update was not pushed")
+	}
+}
+
+func TestAClosedPullRequestComesToTheOwnerAndATryAgainOpensANewOne(t *testing.T) {
+	s := newPRScenario(t, 2)
+	task := s.open(t)
+	s.gh.set(func() { s.gh.closed = true })
+	if err := s.a.checkWakes(s.ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	task = s.current(t)
+	d := openDecision(t, s.a, task)
+	if d.Kind != decisionFailure || !strings.Contains(d.Context, "closed without merging") || task.Proposal.Number != 0 || task.Proposal.Pushed == "" {
+		t.Fatalf("the closed pull request was not brought to the owner: %+v %+v", d, task.Proposal)
+	}
+	s.a.Core.ResolveDecision(s.ctx, d.ID, choiceTryAgain)
+	if task = s.current(t); task.Proposal.Number != 7 || s.gh.opened != 2 || task.Status != core.TaskAwaiting {
+		t.Fatalf("trying again did not open a new pull request: %+v opened %d", task, s.gh.opened)
+	}
+}
+
+func TestSomeoneElsesPushToThePullRequestIsTakenInNotOverwritten(t *testing.T) {
+	s := newPRScenario(t, 4)
+	s.open(t)
+	other := t.TempDir()
+	ownerGit(t, other, "clone", "-q", "--branch", "paul/add-a", s.remote, ".")
+	ownerGit(t, other, "config", "commit.gpgsign", "false")
+	os.WriteFile(filepath.Join(other, "theirs.go"), []byte("package main\n"), 0600)
+	ownerGit(t, other, "add", "-A")
+	ownerGit(t, other, "commit", "-q", "-m", "a reviewer's fix-up")
+	ownerGit(t, other, "push", "-q", "origin", "paul/add-a")
+	theirs := ownerGit(t, other, "rev-parse", "HEAD")
+	if err := s.a.checkWakes(s.ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	task := s.current(t)
+	latest := task.Revisions[len(task.Revisions)-1]
+	if latest.CleanMergeOf != 0 {
+		t.Fatal("taking in someone else's commits counted as a clean catch-up")
+	}
+	for _, v := range task.Verdicts {
+		if v.Revision == latest.N && strings.Contains(v.Summary, "Carried over") {
+			t.Fatal("a review carried over onto someone else's commits")
+		}
+	}
+	head := s.remoteHead(t)
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", theirs, head)
+	cmd.Dir = s.remote
+	if head != latest.Ref || cmd.Run() != nil {
+		t.Fatalf("their push was overwritten or the merge not pushed: head %s latest %s", head, latest.Ref)
+	}
+}
+
+func TestFeedbackThatNeedsNoChangeDoesNotLoop(t *testing.T) {
+	s := newPRScenario(t, 2)
+	s.open(t)
+	s.runner.onEdit = func(string, int) bool { return false }
+	said := time.Now()
+	s.review(t, "Looks fine; consider a comment on Feature.", said)
+	task := s.current(t)
+	if len(task.Revisions) != 1 || task.Status != core.TaskAwaiting || task.Proposal.Seen.Before(said.Truncate(time.Second)) || s.runner.edits != 2 {
+		t.Fatalf("no-change feedback did not settle: %s %s revisions %d edits %d", task.Status, task.Detail, len(task.Revisions), s.runner.edits)
+	}
+	if err := s.a.checkWakes(s.ctx, time.Now().Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if s.current(t); s.runner.edits != 2 {
+		t.Fatal("the same feedback was answered again")
 	}
 }

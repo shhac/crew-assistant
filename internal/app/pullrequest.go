@@ -71,8 +71,15 @@ func (a *App) landPR(ctx context.Context, p core.Project, t core.Task, m gitMedi
 		}
 		err := m.repo.PushOwned(ctx, m.url(), r.Ref, prop.Branch, prop.Pushed, github.CredentialConfig())
 		if errors.Is(err, gitrepo.ErrLeaseLost) {
-			if l, lineErr := m.behind(ctx, t); lineErr == nil && l != nil {
-				return a.catchUpRound(ctx, t, *l)
+			// Someone else pushed to the branch. If this revision already took
+			// their commits in, lease on what it took in; otherwise catch up.
+			head, fetchErr := m.repo.FetchFrom(ctx, m.url(), prop.Branch, github.CredentialConfig())
+			if fetchErr == nil {
+				if in, _ := m.repo.Contains(ctx, r.Ref, head); in {
+					err = m.repo.PushOwned(ctx, m.url(), r.Ref, prop.Branch, head, github.CredentialConfig())
+				} else if l, lineErr := m.behind(ctx, t); lineErr == nil && l != nil {
+					return a.catchUpRound(ctx, t, *l)
+				}
 			}
 		}
 		if err != nil {
@@ -84,10 +91,15 @@ func (a *App) landPR(ctx context.Context, p core.Project, t core.Task, m gitMedi
 		}
 	}
 	if prop.Number == 0 {
-		body := clip(r.Summary, 3000) + "\n\nOpened by crew-assistant for its owner, who approved it. Its team answers reviews and CI here."
-		n, url, err := a.github.Open(ctx, land.GitHub, land.Target, prop.Branch, t.Objective, body)
+		n, url, found, err := a.github.FindOpen(ctx, land.GitHub, prop.Branch)
 		if err != nil {
 			return a.landingFailed(ctx, t, r, err)
+		}
+		if !found {
+			body := clip(r.Summary, 3000) + "\n\nOpened by crew-assistant for its owner, who approved it. Its team answers reviews and CI here."
+			if n, url, err = a.github.Open(ctx, land.GitHub, land.Target, prop.Branch, t.Objective, body); err != nil {
+				return a.landingFailed(ctx, t, r, err)
+			}
 		}
 		prop.Number, prop.URL = n, url
 		if err = a.saveProposal(ctx, t.ID, prop, "Opened pull request #"+fmt.Sprint(n)); err != nil {
@@ -241,8 +253,10 @@ func (a *App) awaitPR(ctx context.Context, t core.Task, repo string, pr github.P
 	return a.setStatus(ctx, t.ID, core.TaskAwaiting, fmt.Sprintf("Waiting on pull request #%d: checks %s, %s", pr.Number, strings.ToLower(pr.CheckState()), review))
 }
 
+// prChecksValue changes when the checks, the head, mergeability or the pull
+// request's own state do: a pull request closed on GitHub wakes the task too.
 func prChecksValue(pr github.PR) string {
-	return pr.CheckState() + "@" + short(pr.HeadRefOid) + "/" + pr.MergeStateStatus
+	return pr.CheckState() + "@" + short(pr.HeadRefOid) + "/" + pr.MergeStateStatus + "/" + pr.State
 }
 
 func prReviewValue(pr github.PR) string {

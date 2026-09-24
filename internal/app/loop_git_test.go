@@ -36,6 +36,9 @@ type codeRunner struct {
 	edits int
 	// onCheck runs before each check, to change the world between rounds.
 	onCheck func()
+	// onEdit, when set, runs in the implementer's workspace first; returning
+	// false skips the usual change, so the round changes nothing else.
+	onEdit func(dir string, n int) bool
 }
 
 func (r *codeRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
@@ -46,6 +49,9 @@ func (r *codeRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, er
 		r.seen = append(r.seen, spec)
 		n := r.edits
 		r.mu.Unlock()
+		if r.onEdit != nil && !r.onEdit(spec.WorkDir, n) {
+			return roles.Result{Text: "Nothing needed changing.", Session: []byte(`{"engine":"claude","id":"impl"}`)}, nil
+		}
 		body := "package main\n\n// Feature, attempt " + string(rune('0'+n)) + "\nfunc Feature() {}\n"
 		if err := os.WriteFile(filepath.Join(spec.WorkDir, "feature.go"), []byte(body), 0600); err != nil {
 			return roles.Result{}, err

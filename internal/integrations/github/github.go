@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -154,23 +155,27 @@ func (p PR) FeedbackSince(since time.Time) []Feedback {
 			out = append(out, Feedback{Author: c.Author.Login, Kind: "comment", Body: c.Body, At: c.CreatedAt})
 		}
 	}
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j].At.Before(out[j-1].At); j-- {
-			out[j], out[j-1] = out[j-1], out[j]
-		}
-	}
+	slices.SortStableFunc(out, func(a, b Feedback) int { return a.At.Compare(b.At) })
 	return out
 }
 
 // Latest is the time of the newest review or comment.
 func (p PR) Latest() time.Time {
 	var latest time.Time
-	for _, f := range p.FeedbackSince(time.Time{}) {
-		if f.At.After(latest) {
-			latest = f.At
-		}
+	for _, r := range p.Reviews {
+		latest = later(latest, r.SubmittedAt)
+	}
+	for _, c := range p.Comments {
+		latest = later(latest, c.CreatedAt)
 	}
 	return latest
+}
+
+func later(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 // Ready reports a pull request the platform would merge now: approved (or
@@ -225,6 +230,29 @@ func (c Client) Open(ctx context.Context, repo, base, head, title, body string) 
 	}
 	n, _ := strconv.Atoi(match[1])
 	return n, url, nil
+}
+
+// FindOpen returns the open pull request from head, if there is one, so an
+// opening that happened but was never recorded is picked up, not repeated.
+func (c Client) FindOpen(ctx context.Context, repo, head string) (int, string, bool, error) {
+	if !repoName.MatchString(repo) {
+		return 0, "", false, errors.New("not a GitHub repository name")
+	}
+	out, err := c.Run(ctx, "pr", "list", "--repo", repo, "--head", head, "--state", "open", "--json", "number,url", "--limit", "1")
+	if err != nil {
+		return 0, "", false, err
+	}
+	var found []struct {
+		Number int    `json:"number"`
+		URL    string `json:"url"`
+	}
+	if err = json.Unmarshal(out, &found); err != nil {
+		return 0, "", false, fmt.Errorf("gh gave an unreadable pull request list: %w", err)
+	}
+	if len(found) == 0 {
+		return 0, "", false, nil
+	}
+	return found[0].Number, found[0].URL, true, nil
 }
 
 // Merge merges the pull request only if its head is still head, so nothing
