@@ -67,21 +67,33 @@ func (a *App) startDrawing(ctx context.Context, key, character string, done func
 		defer cancel()
 		a.paint.Lock()
 		defer a.paint.Unlock()
-		data, err := a.Painter.Paint(ctx, character)
-		image := ""
-		if err == nil {
-			image, err = a.Avatars().Put(data)
-		}
-		if err == nil {
-			err = done(ctx, image)
-		}
-		failure := ""
-		if err != nil {
-			failure = "Couldn't draw it: " + err.Error()
-		}
-		a.setDrawing(key, drawing{failure: failure})
+		a.setDrawing(key, finished(a.draw(ctx, character, done)))
 	}()
 	return nil
+}
+
+// draw paints a character, stores the picture and hands it to done.
+func (a *App) draw(ctx context.Context, character string, done func(context.Context, string) error) error {
+	data, err := a.Painter.Paint(ctx, character)
+	if err != nil {
+		return err
+	}
+	image, err := a.Avatars().Put(data)
+	if err != nil {
+		return err
+	}
+	return done(ctx, image)
+}
+
+// drawSoon starts a drawing that is a side effect of something else, such
+// as adding a member; when it cannot start, that is shown as its status. A
+// conflict means one is already under way, whose status stands.
+func (a *App) drawSoon(key string, start func() error) {
+	err := start()
+	if err == nil || errors.Is(err, core.ErrConflict) {
+		return
+	}
+	a.setDrawing(key, finished(err))
 }
 
 // drawingAssistant keys the assistant's own picture in the drawing status.
@@ -90,6 +102,19 @@ const drawingAssistant = "assistant"
 type drawing struct {
 	busy    bool
 	failure string
+}
+
+func finished(err error) drawing {
+	if err == nil {
+		return drawing{}
+	}
+	return drawing{failure: "Couldn't draw it: " + err.Error()}
+}
+
+func (a *App) drawingOf(key string) drawing {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.drawing[key]
 }
 
 // markDrawing claims a picture for one drawing; checking and claiming under
@@ -179,9 +204,7 @@ func (a *App) CreateMember(ctx context.Context, in core.MemberInput) (core.Membe
 	if err != nil {
 		return m, err
 	}
-	if drawErr := a.DrawMember(ctx, m.ID, ""); drawErr != nil {
-		a.setDrawing(m.ID, drawing{failure: "Couldn't draw it: " + drawErr.Error()})
-	}
+	a.drawSoon(m.ID, func() error { return a.DrawMember(ctx, m.ID, "") })
 	return m, nil
 }
 

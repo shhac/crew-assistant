@@ -267,57 +267,53 @@ func proposal(cfg config.Config, arguments string) (*IdentityRecommendation, err
 }
 
 // ApplyIdentity makes an accepted proposal the assistant's identity, then
-// has Codex draw how it said it looks.
-func (a *App) ApplyIdentity(ctx context.Context, id string, accepted bool) (config.Assistant, error) {
-	applied, fresh, err := a.applyIdentity(ctx, id, accepted)
-	if err == nil && fresh && applied.Avatar.Look != "" {
-		// The stand-in shows until the drawing is done; a drawing that cannot
-		// start is shown as its status, and the identity stands either way.
-		if drawErr := a.DrawAssistant(ctx, ""); drawErr != nil {
-			a.setDrawing(drawingAssistant, drawing{failure: "Couldn't draw it: " + drawErr.Error()})
-		}
-	}
-	return applied, err
-}
-
-func (a *App) applyIdentity(ctx context.Context, id string, accepted bool) (config.Assistant, bool, error) {
+// has Codex draw how it said it looks, unless that is drawn or being drawn.
+// The stand-in shows until then, and the identity stands either way.
+func (a *App) ApplyIdentity(ctx context.Context, id string, accepted bool) (applied config.Assistant, err error) {
 	if !accepted || strings.TrimSpace(id) == "" {
-		return config.Assistant{}, false, errors.New("accept the previewed identity recommendation explicitly")
+		return config.Assistant{}, errors.New("accept the previewed identity recommendation explicitly")
 	}
 	select {
 	case a.chat <- struct{}{}:
 		defer func() { <-a.chat }()
 	case <-ctx.Done():
-		return config.Assistant{}, false, ctx.Err()
+		return config.Assistant{}, ctx.Err()
 	}
+	// Drawing reads the config, so it starts only once the lock below is
+	// let go.
+	defer func() {
+		if err == nil && applied.Avatar.Image == "" && applied.Avatar.Look != "" && !a.drawingOf(drawingAssistant).busy {
+			a.drawSoon(drawingAssistant, func() error { return a.DrawAssistant(ctx, "") })
+		}
+	}()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	state, err := a.loadIdentitySetup()
 	if err != nil {
-		return config.Assistant{}, false, err
+		return config.Assistant{}, err
 	}
 	rec := state.Recommendation
 	if rec == nil || rec.ID != id {
-		return config.Assistant{}, false, errors.New("identity recommendation is missing or has been replaced; review the latest preview")
+		return config.Assistant{}, errors.New("identity recommendation is missing or has been replaced; review the latest preview")
 	}
 	if rec.Applied {
-		return a.cfg.Assistant, false, nil
+		return a.cfg.Assistant, nil
 	}
 	next := a.cfg
 	next.Assistant = config.Assistant{Name: rec.Name, Personality: rec.Personality, Theme: a.cfg.Assistant.Theme, Avatar: rec.Avatar}
 	if err = next.Validate(); err != nil {
-		return config.Assistant{}, false, err
+		return config.Assistant{}, err
 	}
 	if err = config.Save(a.configPath, next); err != nil {
-		return config.Assistant{}, false, err
+		return config.Assistant{}, err
 	}
 	if err = a.Core.UpdateConfig(next); err != nil {
-		return config.Assistant{}, false, err
+		return config.Assistant{}, err
 	}
 	a.cfg = next
 	rec.Applied = true
 	if err = a.saveIdentitySetup(state); err != nil {
-		return next.Assistant, true, fmt.Errorf("identity applied, but setup receipt could not be saved: %w", err)
+		return next.Assistant, fmt.Errorf("identity applied, but setup receipt could not be saved: %w", err)
 	}
-	return next.Assistant, true, nil
+	return next.Assistant, nil
 }

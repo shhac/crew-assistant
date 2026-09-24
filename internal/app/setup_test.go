@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -177,6 +178,39 @@ func TestSetupRejectsProjectToolsAndUnsafeAvatar(t *testing.T) {
 
 // A drawing that is not usable is sent back once with the reason, so the
 // owner is not asked to try again for a slip in the path data.
+// Whether to draw follows the state: an identity whose drawing failed is
+// drawn when applied again, and one already drawn is left as it is.
+func TestReapplyingAnIdentityDrawsItOnlyWhileItHasNoPicture(t *testing.T) {
+	a := testApp(t)
+	ctx := context.Background()
+	setupModel(t, a, func(w http.ResponseWriter, r *http.Request) {
+		writeSetupCall(w, "propose_identity", fixtureProposal())
+	})
+	state, err := a.InterviewIdentity(ctx, "Choose your identity")
+	if err != nil || state.Recommendation == nil {
+		t.Fatal(state, err)
+	}
+	a.Painter = &fakePainter{fail: errors.New("no image tool")}
+	if _, err := a.ApplyIdentity(ctx, state.Recommendation.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	a.WaitForDrawings()
+	if snap, _ := a.Snapshot(ctx); !strings.Contains(snap.Assistant.DrawError, "no image tool") {
+		t.Fatalf("the failed drawing should show: %+v", snap.Assistant)
+	}
+	painter := &fakePainter{}
+	a.Painter = painter
+	for i := 0; i < 2; i++ {
+		if _, err := a.ApplyIdentity(ctx, state.Recommendation.ID, true); err != nil {
+			t.Fatal(err)
+		}
+		a.WaitForDrawings()
+	}
+	if a.Config().Assistant.Avatar.Image == "" || len(painter.seen) != 1 {
+		t.Fatalf("drawn %d times, picture %q", len(painter.seen), a.Config().Assistant.Avatar.Image)
+	}
+}
+
 func TestSetupRetriesAnUnusableDrawingOnce(t *testing.T) {
 	a := testApp(t)
 	var calls atomic.Int32
