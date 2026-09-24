@@ -1,6 +1,5 @@
-// Package quota holds one subscription-headroom policy for every worker
-// admission decision, whether the broker runs inside the daemon or as a
-// standalone process.
+// Package quota holds one subscription-headroom policy for deciding whether
+// a team role may start a turn now.
 //
 // This measures the native CLI login's own reported allowance windows. It is a
 // headroom guard for a shared account, not a token count, a currency budget or

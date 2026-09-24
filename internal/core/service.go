@@ -52,9 +52,9 @@ func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	return v, err
 }
 
-// sortActivity presents the feed newest first. Recorded times come from several
-// clocks, including broker-supplied update times, so append order is not a
-// reliable proxy for recency; the identifier only breaks ties deterministically.
+// sortActivity presents the feed newest first. Recorded times can come from
+// more than one clock, so append order is not a reliable proxy for recency;
+// the identifier only breaks ties deterministically.
 func sortActivity(entries []Activity) {
 	sort.SliceStable(entries, func(i, j int) bool {
 		if !entries[i].CreatedAt.Equal(entries[j].CreatedAt) {

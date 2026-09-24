@@ -22,9 +22,7 @@ export function Overview({
 }) {
   const [fullActivity, setFullActivity] = useState(false);
   const decisions = pendingDecisions(state.decisions);
-  const active = state.projects.filter(
-    (p) => !["completed", "cancelled", "archived"].includes(p.status),
-  );
+  const active = state.projects;
   return (
     <section>
       <PageHeading

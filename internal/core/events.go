@@ -47,22 +47,6 @@ func (s *Service) PendingEvents(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-// ReleaseEvent is only for a proven no-effect deferral (for example a busy
-// inference lock or rejected capacity reservation), never an uncertain request.
-func (s *Service) ReleaseEvent(ctx context.Context, id string) error {
-	return s.store.update(ctx, func(v *Snapshot) error {
-		done, ok := v.Events[id]
-		if !ok {
-			return ErrNotFound
-		}
-		if done {
-			return ErrConflict
-		}
-		delete(v.Events, id)
-		return nil
-	})
-}
-
 // AcknowledgeEvent records an owner's inspection without replaying the operation.
 func (s *Service) AcknowledgeEvent(ctx context.Context, id, note string) error {
 	if !required(note) {

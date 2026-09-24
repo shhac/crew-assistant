@@ -122,8 +122,8 @@ export function fullDateLabel(value?: string) {
 export function sinceLabel(value?: string) {
   const then = recordedTime(value);
   if (!then) return "";
-  // Recorded times come from several clocks, including broker-supplied ones,
-  // so a stamp slightly ahead of this one is an expected input. Reporting it as
+  // Recorded times can come from more than one clock, so a stamp slightly
+  // ahead of this one is an expected input. Reporting it as
   // unusable would make work that just reported look abandoned.
   const minutes = Math.round((Date.now() - then.valueOf()) / 60000);
   if (minutes < 1) return "just now";

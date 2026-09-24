@@ -151,11 +151,6 @@ func (a *App) once(ctx context.Context, key string, fn func() error) error {
 		return err
 	}
 	if err = fn(); err != nil {
-		var deferErr *noEffect
-		if errors.As(err, &deferErr) {
-			_ = a.Core.ReleaseEvent(ctx, key)
-			return err
-		}
 		_ = a.Core.RecordActivity(ctx, "", "operation.interrupted", "An operation needs inspection before any repeat: "+key)
 		return err
 	}
@@ -175,17 +170,4 @@ func (a *App) notify(ctx context.Context, send func(context.Context, string) err
 			return send(ctx, d.Title+"\nRecommendation: "+d.Recommendation+"\n"+d.Context+"\nResolve this decision in the dashboard.")
 		})
 	}
-	for _, p := range snap.Projects {
-		if p.Status != "completed" {
-			continue
-		}
-		_ = a.once(ctx, "notify:completed:"+p.ID, func() error {
-			return send(ctx, "Completed: "+p.Title+". Acceptance evidence is recorded in the dashboard.")
-		})
-	}
 }
-
-type noEffect struct{ err error }
-
-func (e *noEffect) Error() string { return e.err.Error() }
-func (e *noEffect) Unwrap() error { return e.err }
