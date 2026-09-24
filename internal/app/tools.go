@@ -101,6 +101,12 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 			return nil, err
 		}
 		return a.Work.StopTask(ctx, in.ProjectID, in.TaskID)
+	case "order_tasks":
+		var in engine.OrderTasksArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		return a.Core.OrderTasks(ctx, in.ProjectID, in.TaskIDs)
 	case "resolve_decision":
 		var in engine.ResolveDecisionArgs
 		if err := args(raw, &in); err != nil {

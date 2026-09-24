@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -17,8 +18,11 @@ type Task struct {
 	Objective string   `json:"objective"`
 	Criteria  []string `json:"criteria"`
 	Status    string   `json:"status"`
-	Detail    string   `json:"detail,omitempty"`
-	Roles     []Role   `json:"roles,omitempty"`
+	// Stage is where the task sits on its project's board, derived from the
+	// rest of the record; see stage.go.
+	Stage  string `json:"stage,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	Roles  []Role `json:"roles,omitempty"`
 	// Playbook is the team's setup as it was when the task started: its
 	// medium and, for code, the repository, check and branch prefix.
 	Playbook  *Playbook `json:"playbook,omitempty"`
@@ -155,7 +159,7 @@ func (s *Service) QueueTask(ctx context.Context, projectID string, in TaskInput)
 		return Task{}, errors.New("a task needs an objective")
 	}
 	now := s.now().UTC()
-	out := Task{ID: uid(), ProjectID: projectID, Objective: strings.TrimSpace(in.Objective), Criteria: cleanList(in.Criteria), Status: TaskQueued, Revisions: []Revision{}, Verdicts: []Verdict{}, CreatedAt: now, UpdatedAt: now}
+	out := Task{ID: uid(), ProjectID: projectID, Objective: strings.TrimSpace(in.Objective), Criteria: cleanList(in.Criteria), Status: TaskQueued, Stage: StageTodo, Revisions: []Revision{}, Verdicts: []Verdict{}, CreatedAt: now, UpdatedAt: now}
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		p := project(v, projectID)
 		if p == nil {
@@ -216,6 +220,45 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 	return out, found, err
 }
 
+// OrderTasks sets the order a project's queued tasks start in. ids must be
+// exactly the project's queued tasks, so one that started or arrived since
+// the owner or assistant looked is never silently left out. Other projects'
+// tasks keep their places.
+func (s *Service) OrderTasks(ctx context.Context, projectID string, ids []string) ([]Task, error) {
+	var out []Task
+	err := s.store.update(ctx, func(v *Snapshot) error {
+		if project(v, projectID) == nil {
+			return ErrNotFound
+		}
+		var slots []int
+		queued := map[string]Task{}
+		for i, t := range v.Tasks {
+			if t.ProjectID == projectID && t.Status == TaskQueued {
+				slots = append(slots, i)
+				queued[t.ID] = t
+			}
+		}
+		changed := fmt.Errorf("the to-do list has changed since it was read; read it again: %w", ErrConflict)
+		if len(ids) != len(slots) {
+			return changed
+		}
+		for _, id := range ids {
+			t, ok := queued[id]
+			if !ok {
+				return changed
+			}
+			delete(queued, id)
+			out = append(out, t)
+		}
+		for i, slot := range slots {
+			v.Tasks[slot] = out[i]
+		}
+		record(v, s.now().UTC(), projectID, "task.reordered", "To-do list reordered")
+		return nil
+	})
+	return out, err
+}
+
 // UpdateTask applies one loop transition atomically. The loop decides what
 // happens next; the store makes sure it happens to the current record.
 func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Project) (activity string, err error)) (Task, error) {
@@ -240,6 +283,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Pro
 		if activity != "" {
 			record(v, t.UpdatedAt, t.ProjectID, "task."+t.Status, activity)
 		}
+		t.Stage = stageOf(v, *t)
 		out = *t
 		return nil
 	})

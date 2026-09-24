@@ -71,6 +71,20 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		a.Work.Nudge()
 		respond(w, 201, v)
 	})
+	mux.HandleFunc("PUT /api/projects/{id}/tasks/order", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			TaskIDs []string `json:"task_ids"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Core.OrderTasks(r.Context(), r.PathValue("id"), in.TaskIDs)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/stop", func(w http.ResponseWriter, r *http.Request) {
 		v, err := a.Work.StopTask(r.Context(), r.PathValue("id"), r.PathValue("task"))
 		if err != nil {

@@ -66,6 +66,10 @@ type StopTaskArgs struct {
 	ProjectID string `json:"project_id"`
 	TaskID    string `json:"task_id"`
 }
+type OrderTasksArgs struct {
+	ProjectID string   `json:"project_id"`
+	TaskIDs   []string `json:"task_ids"`
+}
 type ResolveDecisionArgs struct {
 	DecisionID string `json:"decision_id"`
 	Answer     string `json:"answer"`
@@ -133,6 +137,7 @@ var tools = []labelled{
 	{Tool: tool("cancel_wake", "Cancel a wake-up by its handle when it is no longer needed.", []string{"handle"}, nil), label: "Cancel a wake-up"},
 	{Tool: tool("queue_task", "Ask the project's team for one outcome. The writer drafts it, reviewers check it against the brief, and the owner approves delivery. Criteria are specific to this task and add to the brief's.", []string{"project_id", "objective"}, []string{"criteria"}), label: "Ask the team for an outcome"},
 	{Tool: tool("stop_task", "Stop a queued or running task when the owner asks. A turn already under way finishes but changes nothing; any decision it was waiting on is closed.", []string{"project_id", "task_id"}, nil), label: "Stop a task"},
+	{Tool: tool("order_tasks", "Set the order a project's queued tasks start in: task_ids lists every queued task of the project, first to start first. You decide the order as the project's manager, putting what unblocks or matters most first; the owner may also ask for an order. Tasks already started are not included. If the list has changed since you read it, read the state again and retry.", []string{"project_id"}, []string{"task_ids"}), label: "Reorder the to-do list"},
 	{Tool: tool("resolve_decision", "Answer an open decision with the owner's choice, in their words. Use it only when the owner has just given that answer in this conversation.", []string{"decision_id", "answer"}, nil), label: "Answer a decision"},
 	{Tool: tool("ask_decision", "Prepare an unresolved owner decision. Include recommendation, viable alternatives, consequences and evidence.", []string{"project_id", "question", "recommendation", "why"}, []string{"options", "evidence"}), label: "Prepare a decision"},
 	{Tool: tool("remember_preference", "Remember an owner preference. This cannot grant permissions or change budgets.", []string{"key", "value"}, nil), label: "Remember a preference"},

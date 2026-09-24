@@ -149,6 +149,7 @@ func readState(ctx context.Context, conn *sql.Conn) (Snapshot, error) {
 	if d.Snapshot.ModelCalls == nil {
 		d.Snapshot.ModelCalls = map[string]int{}
 	}
+	deriveStages(&d.Snapshot)
 	return d.Snapshot, nil
 }
 func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
@@ -178,6 +179,7 @@ func (s *Store) update(ctx context.Context, fn func(*Snapshot) error) error {
 	if err = fn(&state); err != nil {
 		return err
 	}
+	deriveStages(&state)
 	// A task's status can pass through a value within one change; checking
 	// here, not by polling, means a wake waiting on it never misses it.
 	settleTaskWakes(&state, time.Now().UTC())
