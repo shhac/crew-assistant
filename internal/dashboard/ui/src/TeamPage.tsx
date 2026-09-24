@@ -72,7 +72,11 @@ function MemberCard({ member, state }: { member: Member; state: State }) {
         <span className="member-card-text">
           <span className="member-name">{member.name}</span>
           <span className="soft small">{memberSummary(member)}</span>
-          {usage && <span className="muted small">{usage}</span>}
+          {member.drawing ? (
+            <span className="muted small">Drawing…</span>
+          ) : (
+            usage && <span className="muted small">{usage}</span>
+          )}
         </span>
       </a>
     </li>

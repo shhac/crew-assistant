@@ -189,6 +189,12 @@ export function AssistantSetup({
               )}
             </div>
           </div>
+          {proposal.avatar.look && (
+            <p className="soft small">How I'll look: {proposal.avatar.look}</p>
+          )}
+          {!isApplied && (
+            <p className="muted small">Codex draws this once you use it.</p>
+          )}
           <p>{proposal.personality}</p>
           <p className="muted small">{proposal.rationale}</p>
           <div className="actions">

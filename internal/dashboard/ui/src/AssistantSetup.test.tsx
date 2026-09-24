@@ -105,6 +105,29 @@ it("previews the avatar the server drew, and at tab-icon size", async () => {
   expect(screen.getByText("As the tab icon")).toBeTruthy();
   expect(document.querySelector(".setup-proposal svg")).toBeNull();
 });
+it("says how the proposal will look and that Codex draws it once used", async () => {
+  response = () => ({
+    messages: [],
+    questions: [],
+    recommendation: {
+      ...recommendation,
+      avatar: {
+        ...recommendation.avatar,
+        look: "Short silver hair, calm eyes",
+      },
+    },
+  });
+  render(
+    <AssistantSetup currentName="Iris" demo={false} onApplied={vi.fn()} />,
+  );
+  expect(
+    await screen.findByText("How I'll look: Short silver hair, calm eyes"),
+  ).toBeTruthy();
+  expect(screen.getByText("Codex draws this once you use it.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Use this" }));
+  await screen.findByRole("button", { name: "In use" });
+  expect(screen.queryByText("Codex draws this once you use it.")).toBeNull();
+});
 it("restores a previously applied recommendation without offering to apply it again", async () => {
   response = () => ({
     messages: [],

@@ -60,6 +60,10 @@ export interface Member {
   instructions?: string;
   avatar?: AvatarSpec;
   avatar_svg?: string;
+  /** Codex is drawing its picture. */
+  drawing?: boolean;
+  /** Why the last drawing failed. */
+  draw_error?: string;
   learnings: Learning[];
   created_at?: string;
 }
@@ -323,6 +327,8 @@ export interface State {
     theme?: string;
     avatar?: AvatarSpec;
     avatar_svg?: string;
+    drawing?: boolean;
+    draw_error?: string;
   };
   projects: Project[];
   members: Member[];
@@ -592,6 +598,20 @@ export function saveMember(id: string, input: MemberInput) {
 }
 export function deleteMember(id: string) {
   return api<{ deleted: boolean }>(memberPath(id), { method: "DELETE" });
+}
+/** Draws a member again; an empty look keeps the last one. */
+export function redrawMember(id: string, look: string) {
+  return api<{ drawing: boolean }>(`${memberPath(id)}/avatar`, {
+    method: "POST",
+    body: JSON.stringify({ look }),
+  });
+}
+/** Draws the assistant again; an empty look keeps the last one. */
+export function redrawAssistant(look: string) {
+  return api<{ drawing: boolean }>("/api/assistant/avatar", {
+    method: "POST",
+    body: JSON.stringify({ look }),
+  });
 }
 export function addLearning(id: string, text: string, projectId: string) {
   return api<Member>(`${memberPath(id)}/learnings`, {

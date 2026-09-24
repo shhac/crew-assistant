@@ -514,6 +514,73 @@ describe("settings", () => {
       ).toBeNull(),
     );
   });
+  it("redraws the assistant with the look the owner gives", async () => {
+    state.assistant.avatar = {
+      image: "0123456789abcdef0123456789abcdef",
+      look: "Short silver hair",
+    };
+    respond = (path) => ({
+      body:
+        path === "/api/config"
+          ? { assistant: state.assistant }
+          : path === "/api/assistant/avatar"
+            ? { drawing: true }
+            : state,
+    });
+    window.history.replaceState(null, "", "/#/settings");
+    render(<App />);
+    const panel = await screen.findByRole("region", { name: "Assistant" });
+    expect(
+      [...panel.querySelectorAll("img")].map((i) => i.getAttribute("width")),
+    ).toContain("96");
+    const look = within(panel).getByLabelText(/^Look/);
+    expect(look).toHaveProperty("value", "Short silver hair");
+    expect(
+      within(panel).getByText("Leave it as it is to redraw the same look."),
+    ).toBeTruthy();
+    fireEvent.change(look, {
+      target: { value: " Short silver hair, round glasses " },
+    });
+    state.assistant = { ...state.assistant, drawing: true };
+    fireEvent.click(within(panel).getByRole("button", { name: "Redraw" }));
+    expect(
+      await within(panel).findByText("Drawing… this takes a few minutes."),
+    ).toBeTruthy();
+    expect(within(panel).queryByRole("button", { name: "Redraw" })).toBeNull();
+    const redraw = writes().find((c) => c.path === "/api/assistant/avatar")!;
+    expect(redraw.options?.method).toBe("POST");
+    expect(JSON.parse(String(redraw.options?.body))).toEqual({
+      look: "Short silver hair, round glasses",
+    });
+    expect(writes().some((c) => c.path === "/api/config")).toBe(false);
+  });
+  it("shows why the last drawing failed, and why a redraw was refused", async () => {
+    state.assistant.draw_error = "Codex didn't save a picture";
+    respond = (path) =>
+      path === "/api/assistant/avatar"
+        ? {
+            status: 400,
+            body: { error: "demo mode doesn't draw; the pictures are fixed" },
+          }
+        : {
+            body:
+              path === "/api/config" ? { assistant: state.assistant } : state,
+          };
+    window.history.replaceState(null, "", "/#/settings");
+    render(<App />);
+    const panel = await screen.findByRole("region", { name: "Assistant" });
+    expect(within(panel).getByRole("alert").textContent).toBe(
+      "Codex didn't save a picture",
+    );
+    fireEvent.click(within(panel).getByRole("button", { name: "Redraw" }));
+    await waitFor(() =>
+      expect(
+        within(panel)
+          .getAllByRole("alert")
+          .map((a) => a.textContent),
+      ).toContain("demo mode doesn't draw; the pictures are fixed"),
+    );
+  });
   it("saves the model without touching credentials or settings it doesn't show", async () => {
     const model = {
       engine: "codex",
@@ -827,6 +894,50 @@ describe("the team", () => {
       "There is already a member called Ada",
     );
     expect(window.location.hash).toBe("#/team");
+  });
+  it("says a member is being drawn in place of how much it is used", async () => {
+    state.members = [{ ...ada(), drawing: true }];
+    state.projects = [staffed("p1")];
+    window.history.replaceState(null, "", "/#/team");
+    render(<App />);
+    const card = await screen.findByRole("link", { name: /^Ada/ });
+    expect(within(card).getByText("Drawing…")).toBeTruthy();
+    expect(card.textContent).not.toMatch(/project|learning/);
+  });
+  it("redraws a member with a new look, then says it is drawing", async () => {
+    state.members = [
+      { ...ada(), avatar: { shape: "orb", look: "Curly red hair" } },
+    ];
+    respond = (path) => ({
+      body: path === "/api/members/m1/avatar" ? { drawing: true } : state,
+    });
+    window.history.replaceState(null, "", "/#/team/m1");
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Redraw" }));
+    const look = screen.getByLabelText(/^Look/);
+    expect(look).toHaveProperty("value", "Curly red hair");
+    fireEvent.change(look, { target: { value: "Curly red hair, freckles" } });
+    state.members = [{ ...state.members[0], drawing: true }];
+    fireEvent.click(screen.getByRole("button", { name: "Redraw" }));
+    expect(
+      await screen.findByText("Drawing… this takes a few minutes."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Redraw" })).toBeNull();
+    expect(screen.queryByLabelText(/^Look/)).toBeNull();
+    const redraw = writes().find((c) => c.path === "/api/members/m1/avatar")!;
+    expect(redraw.options?.method).toBe("POST");
+    expect(JSON.parse(String(redraw.options?.body))).toEqual({
+      look: "Curly red hair, freckles",
+    });
+  });
+  it("shows why a member's drawing failed", async () => {
+    state.members = [{ ...ada(), draw_error: "Codex didn't save a picture" }];
+    window.history.replaceState(null, "", "/#/team/m1");
+    render(<App />);
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Codex didn't save a picture",
+    );
+    expect(screen.getByRole("button", { name: "Redraw" })).toBeTruthy();
   });
   it("shows a member's projects and learnings, newest first, and adds and forgets them", async () => {
     state.members = [ada()];

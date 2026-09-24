@@ -53,6 +53,24 @@
   flex: 1;
 }
 
+.member-head .actions {
+  flex-wrap: nowrap;
+}
+
+/* A face beside how it should look, to draw it again */
+.face-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.look-form {
+  flex: 1;
+  min-width: 220px;
+  gap: 10px;
+}
+
 .member-project {
   display: block;
   padding: 10px 16px;

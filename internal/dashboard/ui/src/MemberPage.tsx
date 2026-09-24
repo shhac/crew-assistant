@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { MemberForm } from "./MemberForm";
+import { DrawingStatus, LookForm } from "./Redraw";
 import { href, projectHref } from "./router";
 import { memberProjects, memberSummary } from "./stages";
 import {
@@ -13,6 +14,7 @@ import {
   addLearning,
   deleteMember,
   forgetLearning,
+  redrawMember,
   type Learning,
   type Member,
   type State,
@@ -28,6 +30,7 @@ export function MemberPage({
   refresh: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
+  const [redrawing, setRedrawing] = useState(false);
   const projects = memberProjects(member, state.projects);
   return (
     <div className="page team">
@@ -55,15 +58,43 @@ export function MemberPage({
               <h1>{member.name}</h1>
               <p className="soft">{memberSummary(member)}</p>
             </div>
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => setEditing(true)}
-            >
-              Edit
-            </button>
+            <div className="actions">
+              {!member.drawing && !redrawing && (
+                <button
+                  type="button"
+                  className="btn btn-quiet btn-sm"
+                  onClick={() => setRedrawing(true)}
+                >
+                  Redraw
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setEditing(true)}
+              >
+                Edit
+              </button>
+            </div>
           </div>
         )}
+        {!editing &&
+          (redrawing && !member.drawing ? (
+            <section className="card team-form">
+              <LookForm
+                id="member-look"
+                face={member}
+                onCancel={() => setRedrawing(false)}
+                onRedraw={async (look) => {
+                  await redrawMember(member.id, look);
+                  await refresh();
+                  setRedrawing(false);
+                }}
+              />
+            </section>
+          ) : (
+            <DrawingStatus face={member} />
+          ))}
       </header>
       {projects.length > 0 && (
         <section className="section" aria-label="Projects">

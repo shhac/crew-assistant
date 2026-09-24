@@ -8,11 +8,13 @@ import { AdvancedSettings } from "./AdvancedSettings";
 import { Panel } from "./SettingsPanel";
 import { appearanceOf, applyAppearance, type Appearance } from "./appearance";
 import { href } from "./router";
-import { ErrorNotice, Pill, humanStatus, useAction } from "./ui";
+import { LookForm } from "./Redraw";
+import { Avatar, ErrorNotice, Pill, humanStatus, useAction } from "./ui";
 import {
   errorText,
   getConfig,
   putConfig,
+  redrawAssistant,
   type Config,
   type State,
 } from "./api";
@@ -120,6 +122,7 @@ export function Settings({
               {current === "assistant" && (
                 <AssistantSection
                   state={state}
+                  refresh={refresh}
                   config={draft}
                   onChange={setDraft}
                   onApplied={async () => {
@@ -240,11 +243,13 @@ export function Settings({
 
 function AssistantSection({
   state,
+  refresh,
   config,
   onChange,
   onApplied,
 }: {
   state: State;
+  refresh: () => Promise<void>;
   config: Config;
   onChange: (next: Config) => void;
   onApplied: () => Promise<void>;
@@ -255,6 +260,18 @@ function AssistantSection({
   return (
     <>
       <Panel title="Assistant">
+        <div className="face-edit">
+          <Avatar of={state.assistant} size={96} />
+          <LookForm
+            key={state.assistant.avatar?.look ?? ""}
+            id="assistant-look"
+            face={state.assistant}
+            onRedraw={async (look) => {
+              await redrawAssistant(look);
+              await refresh();
+            }}
+          />
+        </div>
         <label htmlFor="assistant-name">
           Name
           <input
