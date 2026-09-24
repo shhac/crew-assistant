@@ -90,6 +90,15 @@
   padding: 12px 16px;
 }
 
+.learning-when {
+  font-weight: 600;
+}
+
+.learning-body {
+  color: var(--soft);
+  white-space: pre-line;
+}
+
 .learning-add {
   gap: 10px;
   padding: 12px 14px;

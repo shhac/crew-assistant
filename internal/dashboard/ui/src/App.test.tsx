@@ -954,7 +954,7 @@ describe("the team", () => {
     const learnings = screen.getByRole("region", { name: "Learnings" });
     expect(
       within(learnings).getByText(
-        "They go with Ada into every task it starts, in any project.",
+        "Ada starts each task knowing when each one applies, and reads it only then. It adds its own too, never about one project.",
       ),
     ).toBeTruthy();
     const rows = within(learnings).getAllByRole("listitem");
@@ -962,8 +962,11 @@ describe("the team", () => {
       "Keep commits small.",
       "Run the linter first.",
     ]);
-    expect(rows[0].textContent).toContain("Launch note · ");
-    fireEvent.change(within(learnings).getByLabelText("Add a learning"), {
+    expect(rows[0].textContent).toContain("You added this on Launch note · ");
+    fireEvent.change(within(learnings).getByLabelText(/^When it applies/), {
+      target: { value: " Finishing a change " },
+    });
+    fireEvent.change(within(learnings).getByLabelText("Learning"), {
       target: { value: " Say which tests ran. " },
     });
     fireEvent.change(within(learnings).getByLabelText("Learned on"), {
@@ -978,14 +981,19 @@ describe("the team", () => {
     const add = writes().find((c) => c.path === "/api/members/m1/learnings")!;
     expect(add.options?.method).toBe("POST");
     expect(JSON.parse(String(add.options?.body))).toEqual({
+      when: "Finishing a change",
       text: "Say which tests ran.",
       project_id: "p1",
     });
     await waitFor(() =>
-      expect(within(learnings).getByLabelText("Add a learning")).toHaveProperty(
+      expect(within(learnings).getByLabelText("Learning")).toHaveProperty(
         "value",
         "",
       ),
+    );
+    expect(within(learnings).getByLabelText(/^When it applies/)).toHaveProperty(
+      "value",
+      "",
     );
     fireEvent.click(within(rows[1]).getByRole("button", { name: "Forget" }));
     await waitFor(() =>
@@ -998,6 +1006,56 @@ describe("the team", () => {
         ?.method,
     ).toBe("DELETE");
   });
+  it("reads each learning like a skill: when it applies, what to do, and who learned it", async () => {
+    const long = `Check that every error is wrapped with what was being done. ${"Name the operation and the input that failed. ".repeat(6)}`;
+    state.members = [
+      {
+        ...ada(),
+        learnings: [
+          {
+            id: "l1",
+            when: "Reviewing error handling",
+            text: long,
+            source: "member",
+            project_id: "p1",
+            at: "2026-09-22T10:00:00Z",
+          },
+          {
+            id: "l2",
+            text: "Keep commits small. One idea each.",
+            source: "assistant",
+            at: "2026-09-21T10:00:00Z",
+          },
+        ],
+      },
+    ];
+    state.projects = [staffed("p1")];
+    window.history.replaceState(null, "", "/#/team/m1");
+    render(<App />);
+    const learnings = await screen.findByRole("region", { name: "Learnings" });
+    const rows = within(learnings).getAllByRole("listitem");
+    const lines = (row: HTMLElement) =>
+      [...row.querySelectorAll("p")].map((p) => p.textContent);
+    expect(lines(rows[0])[0]).toBe("Reviewing error handling");
+    expect(lines(rows[0])[1]).toMatch(/^Check that every error is wrapped.*…/);
+    expect(lines(rows[0])[1]).not.toContain(long.trim());
+    expect(lines(rows[0])[2]).toMatch(/^Ada learned this on Launch note · /);
+    fireEvent.click(within(rows[0]).getByRole("button", { name: "Show all" }));
+    expect(lines(rows[0])[1]).toBe(long.trim());
+    expect(lines(rows[1])).toEqual([
+      "Keep commits small.",
+      "One idea each.",
+      expect.stringMatching(/^Added by Iris · /),
+    ]);
+    const when = within(learnings).getByLabelText(/^When it applies/);
+    expect(when.getAttribute("maxlength")).toBe("160");
+    expect(when.getAttribute("placeholder")).toBe(
+      "e.g. Reviewing error handling",
+    );
+    expect(
+      within(learnings).getByLabelText("Learning").getAttribute("maxlength"),
+    ).toBe("1500");
+  });
   it("shows why a learning was refused", async () => {
     state.members = [ada()];
     respond = (path) =>
@@ -1009,14 +1067,14 @@ describe("the team", () => {
         : { body: state };
     window.history.replaceState(null, "", "/#/team/m1");
     render(<App />);
-    fireEvent.change(await screen.findByLabelText("Add a learning"), {
+    fireEvent.change(await screen.findByLabelText("Learning"), {
       target: { value: "One more." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect((await screen.findByRole("alert")).textContent).toBe(
       "Ada already keeps 30 learnings; forget one first",
     );
-    expect(screen.getByLabelText("Add a learning")).toHaveProperty(
+    expect(screen.getByLabelText("Learning")).toHaveProperty(
       "value",
       "One more.",
     );

@@ -3,6 +3,7 @@ import {
   pendingDecisions,
   type Decision,
   type LandPolicy,
+  type Learning,
   type Member,
   type MemberKind,
   type Playbook,
@@ -77,6 +78,33 @@ export const memberProjects = (member: Member, projects: Project[]) =>
       p.status !== "completed" &&
       p.playbook?.roles.some((r) => r.member === member.id),
   );
+
+/**
+ * A learning's heading is when it applies. One without that is headed by
+ * its first sentence, and the rest follows, so nothing is said twice.
+ */
+export function learningParts(learning: Learning) {
+  const text = learning.text.trim();
+  if (learning.when) return { heading: learning.when, body: text };
+  const first = /^[\s\S]*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
+  return { heading: first, body: text.slice(first.length).trim() };
+}
+
+/** Who recorded a learning, and where. */
+export function learnedBy(
+  learning: Learning,
+  member: string,
+  assistant: string,
+  project?: string,
+) {
+  const who =
+    learning.source === "member"
+      ? `${member} learned this`
+      : learning.source === "assistant"
+        ? `Added by ${assistant}`
+        : "You added this";
+  return project ? `${who} on ${project}` : who;
+}
 
 export const isOpenMessage = (m: TeamMessage) =>
   m.status === "waiting" || m.status === "working";

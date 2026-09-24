@@ -46,9 +46,18 @@ export interface Role {
 export type MemberKind = "implementer" | "reviewer" | "qa";
 export interface Learning {
   id: string;
+  /** The situation it applies to, like a skill's description. */
+  when?: string;
   text: string;
+  source?: "owner" | "assistant" | "member";
   project_id?: string;
+  task_id?: string;
   at?: string;
+}
+export interface LearningInput {
+  when: string;
+  text: string;
+  project_id: string;
 }
 export interface Member {
   id: string;
@@ -613,10 +622,10 @@ export function redrawAssistant(look: string) {
     body: JSON.stringify({ look }),
   });
 }
-export function addLearning(id: string, text: string, projectId: string) {
+export function addLearning(id: string, input: LearningInput) {
   return api<Member>(`${memberPath(id)}/learnings`, {
     method: "POST",
-    body: JSON.stringify({ text, project_id: projectId }),
+    body: JSON.stringify(input),
   });
 }
 export function forgetLearning(id: string, learningId: string) {

@@ -2,7 +2,12 @@ import { useState, type FormEvent } from "react";
 import { MemberForm } from "./MemberForm";
 import { DrawingStatus, LookForm } from "./Redraw";
 import { href, projectHref } from "./router";
-import { memberProjects, memberSummary } from "./stages";
+import {
+  learnedBy,
+  learningParts,
+  memberProjects,
+  memberSummary,
+} from "./stages";
 import {
   Avatar,
   ErrorNotice,
@@ -121,6 +126,8 @@ export function MemberPage({
 const newestFirst = (a: Learning, b: Learning) =>
   (b.at ?? "").localeCompare(a.at ?? "");
 
+const foldAt = 240;
+
 function Learnings({
   member,
   state,
@@ -130,6 +137,7 @@ function Learnings({
   state: State;
   refresh: () => Promise<void>;
 }) {
+  const [when, setWhen] = useState("");
   const [text, setText] = useState("");
   const [projectId, setProjectId] = useState("");
   const [forgetting, setForgetting] = useState("");
@@ -141,7 +149,12 @@ function Learnings({
   async function add(e: FormEvent) {
     e.preventDefault();
     await adding.run(async () => {
-      await addLearning(member.id, text.trim(), projectId);
+      await addLearning(member.id, {
+        when: when.trim(),
+        text: text.trim(),
+        project_id: projectId,
+      });
+      setWhen("");
       setText("");
       setProjectId("");
       await refresh();
@@ -164,7 +177,8 @@ function Learnings({
         )}
       </div>
       <p className="hint">
-        They go with {member.name} into every task it starts, in any project.
+        {member.name} starts each task knowing when each one applies, and reads
+        it only then. It adds its own too, never about one project.
       </p>
       <ErrorNotice error={forget.error} />
       {learnings.length > 0 && (
@@ -173,7 +187,12 @@ function Learnings({
             <LearningRow
               key={l.id}
               learning={l}
-              project={projectTitle(l.project_id)}
+              by={learnedBy(
+                l,
+                member.name,
+                state.assistant.name || "Assistant",
+                projectTitle(l.project_id),
+              )}
               busy={forgetting === l.id}
               onForget={() => void remove(l.id)}
             />
@@ -181,13 +200,25 @@ function Learnings({
         </ul>
       )}
       <form className="card form learning-add" onSubmit={add}>
+        <label htmlFor="learning-when">
+          When it applies
+          <input
+            id="learning-when"
+            className="field"
+            maxLength={160}
+            placeholder="e.g. Reviewing error handling"
+            value={when}
+            onChange={(e) => setWhen(e.target.value)}
+          />
+          <span className="hint">Optional.</span>
+        </label>
         <label htmlFor="learning-text">
-          Add a learning
+          Learning
           <textarea
             id="learning-text"
             className="field"
-            rows={2}
-            maxLength={300}
+            rows={3}
+            maxLength={1500}
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
@@ -224,31 +255,33 @@ function Learnings({
 
 function LearningRow({
   learning,
-  project,
+  by,
   busy,
   onForget,
 }: {
   learning: Learning;
-  project?: string;
+  by: string;
   busy: boolean;
   onForget: () => void;
 }) {
-  const when = sinceLabel(learning.at);
+  const since = sinceLabel(learning.at);
+  const { heading, body } = learningParts(learning);
   return (
     <li className="learning-row">
       <div className="learning-text">
-        <p>{learning.text}</p>
-        {(project || when) && (
-          <p className="muted small">
-            {project}
-            {project && when && " · "}
-            {when && (
+        <p className="learning-when">{heading}</p>
+        {body && <Folded text={body} />}
+        <p className="muted small">
+          {by}
+          {since && (
+            <>
+              {" · "}
               <time dateTime={learning.at} title={fullDateLabel(learning.at)}>
-                {when}
+                {since}
               </time>
-            )}
-          </p>
-        )}
+            </>
+          )}
+        </p>
       </div>
       <button
         type="button"
@@ -259,6 +292,25 @@ function LearningRow({
         Forget
       </button>
     </li>
+  );
+}
+
+/** Long text shows its start until the owner asks for the rest. */
+function Folded({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  if (open || text.length <= foldAt)
+    return <p className="learning-body">{text}</p>;
+  return (
+    <p className="learning-body">
+      {text.slice(0, foldAt).replace(/\s+\S*$/, "")}…{" "}
+      <button
+        type="button"
+        className="link-button small"
+        onClick={() => setOpen(true)}
+      >
+        Show all
+      </button>
+    </p>
   );
 }
 
