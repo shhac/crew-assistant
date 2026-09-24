@@ -72,28 +72,35 @@ func (a *App) land(ctx context.Context, p core.Project, t core.Task, m medium) e
 	if taskPlaybook(p, t).Land.AsksFirst() && !approvalStands(t) && !proposed(t) {
 		return a.setStatus(ctx, t.ID, core.TaskDeciding, "Checks are in")
 	}
-	if gm, ok := m.(gitMedium); ok && gm.playbook.Land.Way() == core.LandPullRequest {
+	playbook := taskPlaybook(p, t)
+	if playbook.Land.Way() == core.LandPullRequest {
+		gm, err := a.gitMediumFor(ctx, p, playbook)
+		if err != nil {
+			return a.roleFailed(ctx, t, "The workspace", err)
+		}
 		return a.landPR(ctx, p, t, gm)
 	}
 	r := t.Revisions[len(t.Revisions)-1]
-	done, err := m.alreadyLanded(ctx, t, r)
-	if err != nil {
-		return a.landingFailed(ctx, t, r, err)
+	if c, ok := m.(catcher); ok {
+		done, err := c.alreadyLanded(ctx, t, r)
+		if err != nil {
+			return a.landingFailed(ctx, t, r, err)
+		}
+		if done {
+			return a.recordLanded(ctx, t, r, playbook.Land.Target, "it was already there")
+		}
 	}
-	if done {
-		return a.recordLanded(ctx, t, r, taskPlaybook(p, t).Land.Target, "it was already there")
-	}
-	l, err := m.behind(ctx, t)
+	c, l, err := lag(ctx, m, t)
 	if err != nil {
 		return a.landingFailed(ctx, t, r, err)
 	}
 	if l != nil {
-		return a.catchUpRound(ctx, t, *l)
+		return a.catchUpRound(ctx, t, c, *l)
 	}
 	target, err := m.deliver(ctx, t, r)
 	if errors.Is(err, gitrepo.ErrTargetMoved) {
-		if l, lineErr := m.behind(ctx, t); lineErr == nil && l != nil {
-			return a.catchUpRound(ctx, t, *l)
+		if c, l, lagErr := lag(ctx, m, t); lagErr == nil && l != nil {
+			return a.catchUpRound(ctx, t, c, *l)
 		}
 	}
 	if err != nil {
@@ -162,26 +169,39 @@ func (a *App) landingFailed(ctx context.Context, t core.Task, r core.Revision, c
 // catchUpRound sends a task back to take in work that landed after it
 // started. A clean merge is recorded by the daemon; only conflicts need the
 // implementer. A target that keeps moving is brought to the owner.
-func (a *App) catchUpRound(ctx context.Context, t core.Task, l line) error {
+func (a *App) catchUpRound(ctx context.Context, t core.Task, c catcher, l line) error {
 	tooMany := false
-	_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+	t, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.CatchUps++
 		if t.CatchUps > maxCatchUps {
 			tooMany = true
 			t.ResumeStatus = core.TaskLanding
-			return "", nil
 		}
-		t.Status, t.DecisionID, t.CatchUp, t.Detail = core.TaskWriting, "", true, "Catching up: "+l.What
-		return t.Objective + " is catching up: " + l.What, nil
+		return "", nil
 	})
-	if err != nil || !tooMany {
+	if err != nil {
 		return err
 	}
-	_, err = a.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
-		Title:          fmt.Sprintf("%s keeps having to catch up", t.Objective),
-		Context:        fmt.Sprintf("It caught up %d times and the target moved again each time: %s. Nothing was forced.", maxCatchUps, l.What),
-		Recommendation: choiceTryAgain + " once the target is quiet",
-		Choices:        []string{choiceTryAgain, choiceStop},
+	if tooMany {
+		_, err = a.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
+			Title:          fmt.Sprintf("%s keeps having to catch up", t.Objective),
+			Context:        fmt.Sprintf("It caught up %d times and the target moved again each time: %s. Nothing was forced.", maxCatchUps, l.What),
+			Recommendation: choiceTryAgain + " once the target is quiet",
+			Choices:        []string{choiceTryAgain, choiceStop},
+		})
+		return err
+	}
+	moved, commit, err := c.cleanMerge(ctx, t, l)
+	if err != nil {
+		return a.roleFailed(ctx, t, "The workspace", fmt.Errorf("catching up: %s: %w", l.What, err))
+	}
+	if commit != "" {
+		return a.recordCatchUp(ctx, moved, c, commit, l)
+	}
+	// A conflict is the implementer's to resolve, in a round of its own.
+	_, err = a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", "Catching up: "+l.What
+		return t.Objective + " is catching up: " + l.What, nil
 	})
 	return err
 }
@@ -190,8 +210,8 @@ func (a *App) catchUpRound(ctx context.Context, t core.Task, l line) error {
 // implementer. The task's own change is unchanged, so the reviewers' passes
 // against the current brief carry over and an approval still stands; QA runs
 // again on the merged result.
-func (a *App) recordCatchUp(ctx context.Context, moved core.Task, m medium, commit string, l line) error {
-	files, err := m.files(ctx, moved, commit)
+func (a *App) recordCatchUp(ctx context.Context, moved core.Task, c catcher, commit string, l line) error {
+	files, err := c.files(ctx, moved, commit)
 	if err != nil {
 		return a.roleFailed(ctx, moved, "The workspace", err)
 	}
@@ -206,31 +226,34 @@ func (a *App) recordCatchUp(ctx context.Context, moved core.Task, m medium, comm
 		prev := t.Revisions[len(t.Revisions)-1]
 		n := prev.N + 1
 		now := time.Now().UTC()
+		revision := core.Revision{N: n, BriefVersion: p.Brief.Version, Files: files, Ref: commit, Summary: "Merged in without conflicts: " + l.What + ".", At: now}
+		// Someone else's commits are new work: nothing carries over from them.
 		if !l.Foreign {
 			t.Base, t.From = moved.Base, moved.From
-		}
-		revision := core.Revision{N: n, BriefVersion: p.Brief.Version, Files: files, Ref: commit, CleanMergeOf: prev.N, Summary: "Merged in without conflicts: " + l.What + ".", At: now}
-		if l.Foreign {
-			// Someone else's commits are new work: nothing carries over.
-			revision.CleanMergeOf = 0
+			revision.CleanMergeOf = prev.N
+			t.Verdicts = append(t.Verdicts, carriedOver(t.Verdicts, prev.N, n, reviewers, p.Brief.Version, now)...)
 		}
 		t.Revisions = append(t.Revisions, revision)
-		for _, v := range t.Verdicts {
-			if l.Foreign {
-				break
-			}
-			if v.Revision != prev.N || !reviewers[v.Role] || v.Outcome != core.VerdictPass || v.BriefVersion != p.Brief.Version {
-				continue
-			}
-			v.Revision, v.At = n, now
-			v.Summary = fmt.Sprintf("Carried over from draft %d, which this only merges with work that landed since: %s", prev.N, v.Summary)
-			t.Verdicts = append(t.Verdicts, v)
-		}
-		t.CatchUp, t.Failures, t.RetryAt = false, 0, time.Time{}
+		t.DecisionID, t.Failures, t.RetryAt = "", 0, time.Time{}
 		t.Status, t.Detail = core.TaskReviewing, fmt.Sprintf("Draft %d merges in %s cleanly; checking it again", n, l.Name)
 		return fmt.Sprintf("%s caught up cleanly: %s", t.Objective, l.What), nil
 	})
 	return err
+}
+
+// carriedOver is the reviewers' passes on draft from, against the current
+// brief, restated for draft to, which only merges from with landed work.
+func carriedOver(verdicts []core.Verdict, from, to int, reviewers map[string]bool, brief int, now time.Time) []core.Verdict {
+	var out []core.Verdict
+	for _, v := range verdicts {
+		if v.Revision != from || !reviewers[v.Role] || v.Outcome != core.VerdictPass || v.BriefVersion != brief {
+			continue
+		}
+		v.Revision, v.At = to, now
+		v.Summary = fmt.Sprintf("Carried over from draft %d, which this only merges with work that landed since: %s", from, v.Summary)
+		out = append(out, v)
+	}
+	return out
 }
 
 // supersedeStaleApprovals replaces any approval another task in the project
@@ -257,14 +280,14 @@ func (a *App) supersedeStaleApprovals(ctx context.Context, projectID string) err
 		if err != nil {
 			return err
 		}
-		l, err := m.behind(ctx, t)
+		c, l, err := lag(ctx, m, t)
 		if err != nil {
 			return err
 		}
 		if l == nil {
 			continue
 		}
-		if err = a.catchUpRound(ctx, t, *l); err != nil {
+		if err = a.catchUpRound(ctx, t, c, *l); err != nil {
 			return err
 		}
 		if _, err = a.Core.DismissDecision(ctx, d.ID, "Out of date: "+l.What+". It is catching up and will ask again."); err != nil && !errors.Is(err, core.ErrConflict) {
@@ -299,7 +322,7 @@ func (a *App) LandTask(ctx context.Context, projectID, taskID string) (core.Task
 	}
 	pinned := *t.Playbook
 	pinned.Land = p.Playbook.Land
-	m, err := a.mediumFor(ctx, p, &pinned)
+	m, err := a.gitMediumFor(ctx, p, &pinned)
 	if err != nil {
 		return core.Task{}, err
 	}
@@ -311,7 +334,7 @@ func (a *App) LandTask(ctx context.Context, projectID, taskID string) (core.Task
 		theirs := other.Revisions[len(other.Revisions)-1]
 		// Anything uncertain refuses: landing out of order would take the
 		// other change with it.
-		builtOn, err := m.(gitMedium).repo.Contains(ctx, tip.Ref, theirs.Ref)
+		builtOn, err := m.repo.Contains(ctx, tip.Ref, theirs.Ref)
 		if err != nil {
 			return core.Task{}, fmt.Errorf("could not tell whether %q is built on %q: %w", t.Objective, other.Objective, err)
 		}

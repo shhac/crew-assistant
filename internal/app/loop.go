@@ -224,17 +224,20 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 		return err
 	}
 	caughtUp := ""
-	l, err := m.behind(ctx, t)
+	c, l, err := lag(ctx, m, t)
 	if err != nil {
 		return a.roleFailed(ctx, t, "The workspace", err)
 	}
 	if l != nil {
-		moved, clean, conflicts, err := m.catchUp(ctx, t, *l)
+		// The implementer works on top of what landed: merged cleanly if it
+		// can be, otherwise with the conflicts left for it to resolve.
+		moved, commit, err := c.cleanMerge(ctx, t, *l)
+		var conflicts []string
+		if err == nil && commit == "" {
+			moved, conflicts, err = c.conflictMerge(ctx, t, *l)
+		}
 		if err != nil {
 			return a.roleFailed(ctx, t, "The workspace", fmt.Errorf("catching up: %s: %w", l.What, err))
-		}
-		if clean != "" && t.CatchUp {
-			return a.recordCatchUp(ctx, moved, m, clean, *l)
 		}
 		if t, err = a.updateOpen(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
 			task.Base, task.From = moved.Base, moved.From
@@ -278,7 +281,7 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 		revision.BriefVersion, revision.Summary, revision.At = p.Brief.Version, clip(reply, 2000), time.Now().UTC()
 		t.Revisions = append(t.Revisions, revision)
 		t.WriterSession, t.WakeErrors = result.Session, wakeErrors
-		t.Failures, t.RetryAt, t.CatchUp = 0, time.Time{}, false
+		t.Failures, t.RetryAt = 0, time.Time{}
 		t.Status, t.Detail = core.TaskReviewing, fmt.Sprintf("Draft %d written; reviewing", n)
 		return fmt.Sprintf("%s wrote draft %d of %s", writers[0].Name, n, t.Objective), nil
 	})
@@ -426,12 +429,12 @@ func (a *App) askForDelivery(ctx context.Context, p core.Project, t core.Task, r
 	if err != nil {
 		return a.roleFailed(ctx, t, "The workspace", err)
 	}
-	l, err := m.behind(ctx, t)
+	c, l, err := lag(ctx, m, t)
 	if err != nil {
 		return a.roleFailed(ctx, t, "The workspace", err)
 	}
 	if l != nil {
-		return a.catchUpRound(ctx, t, *l)
+		return a.catchUpRound(ctx, t, c, *l)
 	}
 	if approvalStands(t) || !taskPlaybook(p, t).Land.AsksFirst() || proposed(t) {
 		return a.resumeLanding(ctx, t)

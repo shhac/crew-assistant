@@ -290,9 +290,6 @@ type Task struct {
 	From        string `json:"from,omitempty"`
 	Branch      string `json:"branch,omitempty"`
 	DeliveredTo string `json:"delivered_to,omitempty"`
-	// CatchUp marks a round that only takes in work that landed since; a
-	// clean merge needs no implementer.
-	CatchUp bool `json:"catch_up,omitempty"`
 	// CatchUps counts catch-ups while landing, so a target that keeps moving
 	// comes to the owner instead of looping.
 	CatchUps int `json:"catch_ups,omitempty"`

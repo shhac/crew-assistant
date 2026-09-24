@@ -46,7 +46,7 @@ func (a *App) landPR(ctx context.Context, p core.Project, t core.Task, m gitMedi
 		if l, err := m.behind(ctx, t); err != nil {
 			return a.landingFailed(ctx, t, r, err)
 		} else if l != nil {
-			return a.catchUpRound(ctx, t, *l)
+			return a.catchUpRound(ctx, t, m, *l)
 		}
 		if prop.Number > 0 && !approvalStands(t) {
 			notes, err := m.repo.Attention(ctx, prop.Pushed, r.Ref)
@@ -72,7 +72,7 @@ func (a *App) landPR(ctx context.Context, p core.Project, t core.Task, m gitMedi
 				if in, _ := m.repo.Contains(ctx, r.Ref, head); in {
 					err = m.repo.PushOwned(ctx, m.url(), r.Ref, prop.Branch, head, github.CredentialConfig())
 				} else if l, lineErr := m.behind(ctx, t); lineErr == nil && l != nil {
-					return a.catchUpRound(ctx, t, *l)
+					return a.catchUpRound(ctx, t, m, *l)
 				}
 			}
 		}
@@ -119,7 +119,7 @@ func (a *App) landPR(ctx context.Context, p core.Project, t core.Task, m gitMedi
 		return a.landingFailed(ctx, t, r, fmt.Errorf("pull request #%d was closed without merging; trying again opens a new one", pr.Number))
 	case pr.HeadRefOid != prop.Pushed:
 		if l, err := m.behind(ctx, t); err == nil && l != nil {
-			return a.catchUpRound(ctx, t, *l)
+			return a.catchUpRound(ctx, t, m, *l)
 		}
 	}
 	if feedback := prFeedback(pr, prop, r); len(feedback) > 0 {
@@ -129,7 +129,7 @@ func (a *App) landPR(ctx context.Context, p core.Project, t core.Task, m gitMedi
 		if l, err := m.behind(ctx, t); err != nil {
 			return a.landingFailed(ctx, t, r, err)
 		} else if l != nil {
-			return a.catchUpRound(ctx, t, *l)
+			return a.catchUpRound(ctx, t, m, *l)
 		}
 	}
 	if pr.Ready() {
