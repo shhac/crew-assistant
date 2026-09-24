@@ -135,7 +135,7 @@ func (a *Auth) Middleware(next http.Handler) http.Handler {
 				return
 			}
 			if !a.recognized(r) {
-				fail(w, 401, "sign in with a code from crew-assistant dashboard open")
+				fail(w, 401, "This browser isn't paired. Run crew-assistant dashboard open --print for a pairing code.")
 				return
 			}
 		}

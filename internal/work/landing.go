@@ -120,12 +120,12 @@ func proposed(t core.Task) bool { return t.Proposal != nil && t.Proposal.Number 
 func (lp *Loop) recordLanded(ctx context.Context, t core.Task, r core.Revision, target, note string) error {
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 		t.Status, t.DecisionID, t.DeliveredTo, t.CatchUps = core.TaskDelivered, "", target, 0
-		t.Detail = fmt.Sprintf("Draft %d approved", r.N)
+		t.Detail = "Approved"
 		if target != "" {
-			t.Detail += " and delivered to " + target
+			t.Detail = "Delivered to " + target
 		}
 		if t.Playbook != nil && t.Playbook.Land.Way() != core.LandBranch {
-			t.Status, t.Detail = core.TaskLanded, fmt.Sprintf("Draft %d landed on %s", r.N, target)
+			t.Status, t.Detail = core.TaskLanded, "Landed on "+target
 		}
 		if note != "" {
 			t.Detail += " (" + note + ")"
@@ -162,7 +162,7 @@ func (lp *Loop) landingFailed(ctx context.Context, t core.Task, r core.Revision,
 		return err
 	}
 	_, err := lp.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
-		Title:          fmt.Sprintf("Draft %d of %s couldn't land", r.N, t.Objective),
+		Title:          fmt.Sprintf("“%s” couldn't land", t.Objective),
 		Context:        text.Clip(reason, 900),
 		Recommendation: choiceTryAgain + " once the cause is fixed",
 		Choices:        []string{choiceTryAgain, choiceStop},
@@ -188,7 +188,7 @@ func (lp *Loop) catchUpRound(ctx context.Context, t core.Task, c catcher, l line
 	}
 	if tooMany {
 		_, err = lp.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
-			Title:          fmt.Sprintf("%s keeps having to catch up", t.Objective),
+			Title:          fmt.Sprintf("“%s” keeps having to catch up", t.Objective),
 			Context:        fmt.Sprintf("It caught up %d times and the target moved again each time: %s. Nothing was forced.", maxCatchUps, l.What),
 			Recommendation: choiceTryAgain + " once the target is quiet",
 			Choices:        []string{choiceTryAgain, choiceStop},
@@ -239,7 +239,7 @@ func (lp *Loop) recordCatchUp(ctx context.Context, moved core.Task, c catcher, c
 		}
 		t.Revisions = append(t.Revisions, revision)
 		t.DecisionID, t.Failures, t.RetryAt = "", 0, time.Time{}
-		t.Status, t.Detail = core.TaskReviewing, fmt.Sprintf("Draft %d merges in %s cleanly; checking it again", n, l.Name)
+		t.Status, t.Detail = core.TaskReviewing, fmt.Sprintf("Took in %s cleanly; checking it again", l.Name)
 		return fmt.Sprintf("%s caught up cleanly: %s", t.Objective, l.What), nil
 	})
 	return err

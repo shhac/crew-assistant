@@ -63,7 +63,7 @@ func (lp *Loop) wokenRound(ctx context.Context, t core.Task) (bool, error) {
 		}
 		_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.NextRound()
-			t.Status, t.Detail = core.TaskWriting, "Woken: "+w.Event
+			t.Status, t.Detail = core.TaskWriting, "Picking up: "+w.Event
 			return "", nil
 		})
 		return true, err
@@ -98,7 +98,7 @@ func (lp *Loop) publish(ctx context.Context, t core.Task, m gitMedium, r core.Re
 		}
 		if len(notes) > 0 {
 			_, err = lp.Core.OpenTaskDecision(ctx, t.ID, decisionDelivery, core.DecisionInput{
-				Title:          fmt.Sprintf("Before draft %d of %s goes to its pull request", r.N, t.Objective),
+				Title:          fmt.Sprintf("Check “%s” before it goes to its pull request", t.Objective),
 				Context:        "This update touches things that run or instruct on your side:\n- " + strings.Join(notes, "\n- ") + "\n\nApproving pushes it to " + prop.Branch + " on " + m.playbook.Land.GitHub + ".",
 				Recommendation: choiceApprove + " if these changes are expected",
 				Choices:        []string{choiceApprove, choiceChanges},

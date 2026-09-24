@@ -314,7 +314,7 @@ func TestNearlyUsedSubscriptionHoldsTheRoleWithoutFailing(t *testing.T) {
 		return session.Inspection{Quota: session.QuotaSnapshot{Observation: observation, Complete: true, Windows: []session.QuotaWindow{{Observation: observation, ID: "codex/primary", Scope: "codex", UsedPercent: &used, ResetsAt: &resets}}}}, nil
 	}}
 	task := settle(t, a)
-	if task.Status != core.TaskReviewing || task.Failures != 0 || !task.RetryAt.Equal(resets.UTC()) || !strings.Contains(task.Detail, "headroom") {
+	if task.Status != core.TaskReviewing || task.Failures != 0 || !task.RetryAt.Equal(resets.UTC()) || !strings.Contains(task.Detail, "usage to reset") {
 		t.Fatalf("expected the codex reviewer to wait for its window: %+v", task)
 	}
 	if len(runner.seen) != 1 || !runner.seen[0].Write {

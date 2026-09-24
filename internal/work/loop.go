@@ -328,7 +328,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 		t.AnswerDirection(seen, n, reply, revision.At)
 		t.WriterSession, t.WakeErrors = result.Session, wakeErrors
 		t.Failures, t.RetryAt = 0, time.Time{}
-		t.Status, t.Detail = core.TaskReviewing, fmt.Sprintf("Draft %d written; reviewing", n)
+		t.Status, t.Detail = core.TaskReviewing, ""
 		return fmt.Sprintf("%s wrote draft %d of %s", writer, n, t.Objective), nil
 	})
 	return err
@@ -461,28 +461,42 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 	case len(questions) > 0:
 		q := questions[0]
 		_, err := lp.Core.OpenTaskDecision(ctx, t.ID, decisionQuestion, core.DecisionInput{
-			Title:          fmt.Sprintf("%s has a question about %s", q.Role, t.Objective),
-			Context:        q.Question + "\n\nAnswer in your own words; the writer revises with your answer.",
-			Recommendation: "Answer the question so the next draft can meet the brief",
-			Choices:        []string{"Use your judgement", choiceStop},
+			Title:          fmt.Sprintf("%s has a question about “%s”", q.Role, t.Objective),
+			Context:        q.Question,
+			Recommendation: "Answer it, or let the team decide",
+			Choices:        []string{"Use your judgment", choiceStop},
 		})
 		return err
 	case t.Round >= t.MaxRounds:
 		_, err := lp.Core.OpenTaskDecision(ctx, t.ID, decisionEscalation, core.DecisionInput{
-			Title:          fmt.Sprintf("%s still has review points after %d rounds", t.Objective, t.Round),
+			Title:          fmt.Sprintf("“%s” still has review points after %d rounds", t.Objective, t.Round),
 			Context:        reviewDigest(changes),
-			Recommendation: "Another round if the points matter; otherwise accept this draft",
+			Recommendation: "Another round if these points matter; otherwise accept it as it is",
 			Choices:        []string{choiceAnotherRound, choiceAcceptDraft, choiceStop},
 		})
 		return err
 	default:
 		_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.NextRound()
-			t.Status, t.Detail = core.TaskWriting, fmt.Sprintf("Revising (round %d of %d)", t.Round, t.MaxRounds)
+			t.Status, t.Detail = core.TaskWriting, ""
 			return fmt.Sprintf("Round %d of %s: revising after review", t.Round, t.Objective), nil
 		})
 		return err
 	}
+}
+
+// approvalTitle says what approving does.
+func approvalTitle(t core.Task, playbook *core.Playbook) string {
+	if playbook == nil || playbook.Medium != core.MediumGit {
+		return fmt.Sprintf("Approve “%s”", t.Objective)
+	}
+	switch playbook.Land.Way() {
+	case core.LandPush:
+		return fmt.Sprintf("Land “%s” on %s", t.Objective, playbook.Land.Target)
+	case core.LandPullRequest:
+		return fmt.Sprintf("Open a pull request for “%s”", t.Objective)
+	}
+	return fmt.Sprintf("Create a branch for “%s”", t.Objective)
 }
 
 func reviewDigest(verdicts []core.Verdict) string {
@@ -513,8 +527,8 @@ func (lp *Loop) askForDelivery(ctx context.Context, p core.Project, t core.Task,
 	}
 	where := m.deliveryNote(t)
 	_, err = lp.Core.OpenTaskDecision(ctx, t.ID, decisionDelivery, core.DecisionInput{
-		Title:          fmt.Sprintf("Ready to approve: %s (draft %d)", t.Objective, r.N),
-		Context:        text.Clip(r.Summary, 600) + "\n\nReviews:\n" + reviewDigest(verdicts) + "\n\n" + where,
+		Title:          approvalTitle(t, taskPlaybook(p, t)),
+		Context:        text.Clip(r.Summary, 600) + "\n\n" + where,
 		Recommendation: choiceApprove,
 		Choices:        []string{choiceApprove, choiceChanges},
 	})
@@ -551,7 +565,7 @@ func (lp *Loop) roleFailed(ctx context.Context, t core.Task, role string, cause 
 		return err
 	}
 	_, err = lp.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
-		Title:          fmt.Sprintf("%s couldn't work on %s", role, t.Objective),
+		Title:          fmt.Sprintf("%s couldn't work on “%s”", role, t.Objective),
 		Context:        text.Clip(cause.Error(), 600),
 		Recommendation: choiceTryAgain + " once the cause is fixed",
 		Choices:        []string{choiceTryAgain, choiceStop},
@@ -623,7 +637,7 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 			t.Direction = append(t.Direction, answer)
 		}
 		t.NextRound()
-		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", fmt.Sprintf("Revising with your direction (round %d)", t.Round)
+		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", "Revising with your answer"
 		return fmt.Sprintf("Revising %s with the owner's direction", t.Objective), nil
 	})
 	return err
@@ -663,7 +677,7 @@ func (lp *Loop) usageWait(ctx context.Context, r core.Role) (time.Time, string) 
 		if !wait.After(now) {
 			wait = now.Add(10 * time.Minute)
 		}
-		return wait, fmt.Sprintf("Waiting for %s subscription headroom (%s)", r.Engine, verdict.Detail)
+		return wait, fmt.Sprintf("Waiting for %s usage to reset (%s)", r.Engine, verdict.Detail)
 	case !verdict.Known && cfg.Limits.RoleUsage.OnUnavailable == "pause":
 		return now.Add(5 * time.Minute), "Waiting until " + r.Engine + " usage can be checked"
 	}

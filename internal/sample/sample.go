@@ -162,7 +162,7 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 		Messages: []core.Message{
 			{ID: "demo-m1", Role: "user", Content: "Land the signing change once QA passes.", CreatedAt: ago(40 * time.Minute)},
 			{ID: "demo-m2", Role: "assistant", Content: "QA is running `make check` on round 2. I've set a wake-up for when it finishes and will put the landing in your inbox.", CreatedAt: ago(39 * time.Minute)},
-			{ID: "demo-m3", Role: "user", Origin: "wake", Content: "Wake-up wake-3f9a12c0: QA finished on round 2 of “Sign commits as your git config says”. Set 12:31, fired 12:36.", CreatedAt: ago(5 * time.Minute)},
+			{ID: "demo-m3", Role: "user", Origin: "wake", Content: wakeMessage(ago), CreatedAt: ago(5 * time.Minute)},
 			{ID: "demo-m4", Role: "assistant", Content: "`make check` passed. It's in your inbox, ready to land on main.", CreatedAt: ago(4 * time.Minute)},
 		},
 		Memories: []core.Memory{
@@ -178,6 +178,18 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 			{ID: "demo-a5", ProjectID: memo.ID, Kind: "decision.opened", Summary: "Approve “One-page Q4 plan”", CreatedAt: ago(10 * time.Minute)},
 		},
 	}
+}
+
+// wakeMessage is a wake-up as the assistant receives one.
+func wakeMessage(ago func(time.Duration) time.Time) string {
+	stamp := func(d time.Duration) string { return ago(d).Format(time.RFC3339) }
+	return "[Wake-up from the daemon, not a message from the owner. You asked to be woken; act on your continuation if it still applies, and tell the owner only what they need to know.]\n\n" +
+		"wake-3f9a12c0 — waiting on task demo-signing\n" +
+		"  registered " + stamp(39*time.Minute) + " · seen " + stamp(6*time.Minute) + " · delivered " + stamp(5*time.Minute) + " (1m0s after it was seen)\n" +
+		"  before: \"reviewing\" · after: \"waiting\"\n" +
+		"  what happened: QA passed round 2 of “Sign commits as your git config says”\n" +
+		"  your continuation: put the landing in the owner's inbox\n" +
+		"Things may have changed since each was seen; check the current state before acting on it."
 }
 
 // writeDrafts puts the writing project's drafts where its team keeps them, so

@@ -194,7 +194,7 @@ func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
 // to take in what it was told.
 func (t *Task) ReviseWithDirection() {
 	t.NextRound()
-	t.Status, t.DecisionID, t.Detail = TaskWriting, "", fmt.Sprintf("Revising with your note (round %d)", t.Round)
+	t.Status, t.DecisionID, t.Detail = TaskWriting, "", "Revising with your note"
 }
 
 // AnswerTeamMessage records a reviewer's or QA's reply to a message, in the
