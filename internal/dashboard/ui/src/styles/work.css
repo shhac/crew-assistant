@@ -791,6 +791,18 @@
     0 0 0 1px var(--line);
 }
 
+@media (max-width: 700px) {
+  .board {
+    scroll-snap-type: x mandatory;
+  }
+  .board-column {
+    scroll-snap-align: start;
+  }
+  .board-column:not(.empty) {
+    flex: 0 0 78%;
+  }
+}
+
 @media (max-width: 1000px) {
   .shell.pane-open .request-panel {
     right: 0;

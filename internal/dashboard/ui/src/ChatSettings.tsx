@@ -37,11 +37,11 @@ export function ChatSettings({
           onChange={(event) => change({ enabled: event.target.checked })}
           aria-describedby="loading-phrases-hint"
         />
-        <span>Loading messages</span>
+        <span>Show a line while it works</span>
       </label>
       <p className="hint" id="loading-phrases-hint">
-        While the assistant works, a small model writes a short line about it,
-        from the last two messages only. It counts toward your model-call limit.
+        A small model writes it from the last two messages. It counts toward
+        your daily model calls.
       </p>
       <p className="hint">
         {local

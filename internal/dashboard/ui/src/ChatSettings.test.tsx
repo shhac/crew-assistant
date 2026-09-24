@@ -21,9 +21,15 @@ it("toggles loading phrases without fetching a model catalog", () => {
   const changed = vi.fn();
   render(<ChatSettings config={config} onChange={changed} />);
   const toggle = screen.getByRole<HTMLInputElement>("checkbox", {
-    name: "Loading messages",
+    name: "Show a line while it works",
   });
   expect(toggle.checked).toBe(true);
+  expect(
+    document.getElementById(toggle.getAttribute("aria-describedby")!)
+      ?.textContent,
+  ).toBe(
+    "A small model writes it from the last two messages. It counts toward your daily model calls.",
+  );
   expect(fetch).not.toHaveBeenCalled();
   fireEvent.click(toggle);
   expect(changed).toHaveBeenCalledWith({

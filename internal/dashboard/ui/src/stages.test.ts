@@ -125,6 +125,9 @@ describe("the board", () => {
     expect(requestStep(task({ status: "waiting" }), decision("delivery"))).toBe(
       "Waiting for your approval",
     );
+    expect(requestStep(task({ status: "waiting" }), decision("update"))).toBe(
+      "Update waiting for you",
+    );
     expect(requestStep(task({ status: "waiting" }), decision("question"))).toBe(
       "Question for you",
     );

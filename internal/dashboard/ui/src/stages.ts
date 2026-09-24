@@ -90,6 +90,8 @@ export function requestStep(task: Task, decision?: Decision): string {
       switch (decision?.kind) {
         case "delivery":
           return "Waiting for your approval";
+        case "update":
+          return "Update waiting for you";
         case "question":
           return "Question for you";
         case "escalation":
@@ -203,7 +205,7 @@ export function whatHappens(playbook?: Playbook): string[] {
   if (land?.via === "push")
     return [
       `${land.target} moves forward to include this change. Nothing already on it is replaced.`,
-      `If ${land.target} is checked out and has no uncommitted changes, your checkout updates too.`,
+      `If ${land.target} is checked out, your checkout updates too; if it has uncommitted changes, landing stops and asks you first.`,
     ];
   if (land?.via === "pull-request")
     return [

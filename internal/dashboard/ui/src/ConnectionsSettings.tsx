@@ -46,8 +46,7 @@ export function ConnectionsSettings({
     >
       <h2 id="connections-title">Connections</h2>
       <p className="soft">
-        Optional. They let the assistant read from services you use. Keep work
-        and personal accounts separate.
+        Optional. They let the assistant read from services you use.
       </p>
       {!connections.length && <p className="muted">No connections.</p>}
       {connections.map((connection, index) => (
@@ -84,9 +83,7 @@ export function ConnectionsSettings({
         </button>
       </div>
       <p className="hint">
-        Each signs in through that service's own CLI, so no passwords go in
-        here. Linear, Slack and Fathom need at least one account chosen; Notion
-        uses the one its CLI has.
+        Sign in with each service's own CLI; no passwords go in here.
       </p>
     </section>
   );

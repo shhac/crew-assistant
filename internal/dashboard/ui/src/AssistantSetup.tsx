@@ -109,10 +109,10 @@ export function AssistantSetup({
       className="tab-panel card settings-panel"
       aria-labelledby="setup-title"
     >
-      <h2 id="setup-title">Get a suggestion</h2>
+      <h2 id="setup-title">Suggest a name and personality</h2>
       <p className="soft">
-        Answer a question or two, and the assistant suggests a name, a way of
-        working and an avatar. Nothing changes until you use it.
+        Answer a question or two, and the assistant suggests a name, a
+        personality and an avatar.
       </p>
       <ErrorNotice error={error} />
       {demo && <p className="muted small">Not available in the demo.</p>}

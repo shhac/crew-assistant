@@ -100,7 +100,7 @@ export function ModelSettings({
           }
         >
           <option value="codex">Codex</option>
-          <option value="claude">Claude Code</option>
+          <option value="claude">Claude</option>
           <option value="openai-compatible">Another API</option>
         </select>
       </label>
@@ -127,7 +127,7 @@ export function ModelSettings({
                   {option.id === catalog?.default.model
                     ? " (recommended)"
                     : option.is_default
-                      ? " (its default)"
+                      ? ` (${value("engine") === "claude" ? "Claude" : "Codex"} default)`
                       : ""}
                 </option>
               ))}

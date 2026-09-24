@@ -215,7 +215,7 @@ describe("the shell", () => {
   it("says so when it is a demo", async () => {
     state.demo = true;
     render(<App />);
-    expect(await screen.findByText(/^Demo: sample projects/)).toBeTruthy();
+    expect(await screen.findByText(/^Demo mode: no models run/)).toBeTruthy();
   });
 });
 

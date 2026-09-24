@@ -11,7 +11,7 @@ import {
 import {
   ChatPanel,
   SUGGESTION_DELAY,
-  wakeReport,
+  wakeHappenings,
   wakeSummary,
 } from "./ChatPanel";
 import { ConversationMarkdown } from "./ConversationMarkdown";
@@ -171,10 +171,13 @@ describe("conversation", () => {
     const log = screen.getByRole("log");
     expect(within(log).getByText("Wake-up")).toBeTruthy();
     expect(within(log).getAllByText("You")).toHaveLength(1);
-    const wake = log.querySelector<HTMLDetailsElement>("details.wake")!;
-    expect(wake.open).toBe(false);
-    expect(wake.querySelector(".wake-line")?.textContent).toBe("Checked in");
-    expect(wake.querySelector("pre")?.textContent).toBe("wake-1 fired");
+    const wake = log.querySelector("div.wake")!;
+    expect(wake.querySelector(".wake-head .wake-line")?.textContent).toBe(
+      "Checked in",
+    );
+    // The note written for the model is never shown to the owner.
+    expect(log.textContent).not.toContain("wake-1 fired");
+    expect(log.querySelector("details")).toBeNull();
     expect(log.querySelectorAll("article.message")).toHaveLength(1);
   });
   it("does not submit Shift+Enter or an IME composition", async () => {
@@ -207,9 +210,7 @@ describe("conversation", () => {
     await tick(0);
     expect(screen.getByText("Not confirmed yet")).toBeTruthy();
     expect(
-      screen.getByText(
-        "It stays here until it's confirmed. Retrying can't start a second reply.",
-      ),
+      screen.getByText("Retrying is safe: it can't start a second reply."),
     ).toBeTruthy();
     expect(input.value).toBe("A second thought");
     await tick(6000);
@@ -349,9 +350,7 @@ describe("conversation", () => {
     await tick(0);
     expect(screen.getByText("Not sent")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Put it back in the message box" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(input.value).toBe("A next draft\n\nOne more thing");
     expect(document.activeElement).toBe(input);
     expect(server.posts()).toHaveLength(1);
@@ -441,9 +440,7 @@ describe("conversation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await tick(0);
     expect(screen.getByText("Not confirmed yet")).toBeTruthy();
-    expect(
-      screen.queryByRole("button", { name: "Put it back in the message box" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
     expect(server.posts()).toHaveLength(2);
   });
   it("waits only for the first acknowledgement before delivering the next optimistic message", async () => {
@@ -561,6 +558,9 @@ describe("conversation", () => {
       screen.getAllByText("· Stopped; outcome not confirmed").length,
     ).toBeGreaterThan(0);
     expect(screen.queryByText("· Failed")).toBeNull();
+    expect(
+      document.querySelector(".tools-summary summary")?.textContent,
+    ).not.toContain("Creating project");
   });
   it("times out only the enqueue acknowledgement and keeps delivery uncertain", async () => {
     const server = backend();
@@ -579,9 +579,7 @@ describe("conversation", () => {
     typeAndSend("Keep this next");
     await tick(15_000);
     expect(screen.getByText("Not confirmed yet")).toBeTruthy();
-    expect(
-      screen.getByText("No confirmation yet. Checking whether it arrived."),
-    ).toBeTruthy();
+    expect(screen.getByText("Checking whether it arrived.")).toBeTruthy();
     expect(
       screen.getByText(
         "The next messages wait until this one is confirmed. Keep this page open.",
@@ -811,9 +809,7 @@ describe("composer attachments", () => {
     await tick(0);
     expect(screen.getByText("Not sent")).toBeTruthy();
     expect(attachments()).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Put it back in the message box" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(input.value).toBe("Review this");
     expect(within(attachments()!).getByText("draft.md")).toBeTruthy();
   });
@@ -1246,7 +1242,9 @@ describe("chat layout", () => {
     ]);
     expect(
       articles.map((a) => a.querySelector(".message-by span")?.textContent),
-    ).toEqual(["You", "Status", "Iris"]);
+    ).toEqual(["You", "Iris", "Iris"]);
+    // The key hint is for a first message only.
+    expect(document.querySelector(".composer-hint")?.textContent).toBe("");
   });
 
   it("describes the composer's keys when no suggestion shows", () => {
@@ -1279,7 +1277,7 @@ describe("chat layout", () => {
     render(panel());
     await tick(0);
     expect(screen.getByText("Waiting for the model").textContent).toBe(
-      `Waiting for the model · trying again after ${fullDateLabel(retryAt)}; nothing already done is repeated`,
+      `Waiting for the model · retrying at ${fullDateLabel(retryAt)}`,
     );
     expect(screen.queryByText("Gathering the threads…")).toBeNull();
     // A running turn needs no delivery line.
@@ -1291,7 +1289,7 @@ describe("chat layout", () => {
     };
     await tick();
     expect(screen.getByText("Gathering the threads…")).toBeTruthy();
-    expect(screen.queryByText(/trying again after/)).toBeNull();
+    expect(screen.queryByText(/retrying at/)).toBeNull();
   });
 
   it("says when live updates fail, and clears it once they return", async () => {
@@ -1305,9 +1303,7 @@ describe("chat layout", () => {
     render(panel());
     await tick(0);
     expect(
-      screen.getByText(
-        "Can't get live updates (offline). Your messages are saved; trying again…",
-      ),
+      screen.getByText("Can't get live updates (offline). Trying again…"),
     ).toBeTruthy();
     offline = false;
     await tick();
@@ -1316,48 +1312,47 @@ describe("chat layout", () => {
 });
 describe("wake-ups", () => {
   const note = "[A scheduled wake-up. Decide what to do.]\n";
-  it("summarises what happened when the report says", () => {
+  it("lists what each wake-up saw happen, and nothing meant for the model", () => {
+    expect(
+      wakeHappenings(
+        `${note}wake-1 — check the build\nwhat happened: the build passed\nwake-2 — chase the review\nwhat happened: a PR was merged`,
+      ),
+    ).toEqual(["the build passed", "a PR was merged"]);
+    expect(wakeHappenings(`${note}wake-1 — check the build`)).toEqual([]);
+  });
+  it("summarises what happened, or says it checked in", () => {
     expect(
       wakeSummary(
         `${note}wake-1 — check the build\nwhat happened: the build passed\nwhat happened: a PR was merged`,
       ),
     ).toBe("the build passed · a PR was merged");
-  });
-  it("falls back to each wake's line, then to a plain check-in", () => {
+    // The wake's own line is written for the model, so it is not used.
     expect(
       wakeSummary(`${note}wake-1 — check the build\nwake-2 — chase the review`),
-    ).toBe("check the build · chase the review");
+    ).toBe("Checked in");
     expect(wakeSummary(`${note}Nothing was due.`)).toBe("Checked in");
   });
-  it("reports without the note addressed to the assistant", () => {
-    expect(wakeReport(`${note}wake-1 — check the build\n`)).toBe(
-      "wake-1 — check the build",
-    );
-    expect(wakeReport("wake-1 — check the build [soon]")).toBe(
-      "wake-1 — check the build [soon]",
-    );
-  });
-  it("shows the summary and the report in a wake-up message", () => {
+  it("shows a wake-up message as its summary and time, with no report", () => {
     backend();
     const state = initial();
+    const at = "2026-09-24T09:18:23Z";
     state.messages = [
       {
         id: "w1",
         role: "user",
         origin: "wake",
         content: `${note}wake-1 — check the build\nwhat happened: the build passed`,
-        created_at: "2026-09-24T09:18:23Z",
+        created_at: at,
       },
     ];
     render(panel(state));
-    const wake = screen.getByRole("log").querySelector("details.wake")!;
-    const summary = wake.querySelector("summary")!;
-    expect(within(summary as HTMLElement).getByText("Wake-up")).toBeTruthy();
-    expect(
-      within(summary as HTMLElement).getByText("the build passed"),
-    ).toBeTruthy();
-    expect(wake.querySelector("pre")?.textContent).toBe(
-      "wake-1 — check the build\nwhat happened: the build passed",
-    );
+    const log = screen.getByRole("log");
+    const head = log.querySelector<HTMLElement>("div.wake > p.wake-head")!;
+    expect(within(head).getByText("Wake-up")).toBeTruthy();
+    expect(within(head).getByText("the build passed")).toBeTruthy();
+    expect(head.querySelector("time")?.getAttribute("dateTime")).toBe(at);
+    expect(log.textContent).not.toContain("check the build");
+    expect(log.textContent).not.toContain("Decide what to do");
+    expect(log.querySelector("pre")).toBeNull();
   });
 });

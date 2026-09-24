@@ -64,7 +64,7 @@ export function LandingTab({
       <dl className="facts">
         {land?.means && (
           <div className="fact-row">
-            <dt>Means</dt>
+            <dt>Landing means</dt>
             <dd>{land.means}</dd>
           </div>
         )}

@@ -1,21 +1,19 @@
 import { useState, type FormEvent } from "react";
 import { requestHref, projectHref } from "./router";
-import { approveLabel, isCode, reversibility, whatHappens } from "./stages";
+import { approveLabel, isCode, reversibility } from "./stages";
 import { ErrorNotice, Pill, sinceLabel } from "./ui";
 import { api, errorText, type Decision, type Project, type Task } from "./api";
 
 const kindLabel: Record<string, string> = {
   delivery: "Ready to approve",
+  update: "Update to check",
   question: "Question",
-  escalation: "Out of rounds",
+  escalation: "Review points left",
   failure: "Stuck",
 };
 
-const outcomeLabel: Record<string, string> = {
-  pass: "Passed",
-  revise: "Asked for changes",
-  question: "Asked a question",
-};
+/** Kinds where approving sends the work on, and changes can be asked for. */
+const approvals = new Set(["delivery", "update"]);
 
 /** Choices whose words the owner needs to add: picking one opens the answer. */
 const withWords = new Set(["Request changes"]);
@@ -29,7 +27,9 @@ function choiceLabel(
 ) {
   if (decision.kind === "delivery" && choice === "Approve")
     return approveLabel(task?.playbook ?? project?.playbook);
-  if (choice === "Stop") return "Stop the request";
+  if (decision.kind === "update" && choice === "Approve")
+    return "Push the update";
+  if (choice === "Stop") return "Stop request";
   if (choice === "Use your judgment" || choice === "Use your judgement")
     return "Let the team decide";
   if (choice === "Accept this draft") return "Accept it as it is";
@@ -37,8 +37,9 @@ function choiceLabel(
 }
 
 /**
- * One decision the owner is asked for. Compact on the inbox; in full, with
- * the evidence and what approving does, beside the request it holds.
+ * One decision the owner is asked for: compact on the inbox, in full beside
+ * the request it holds. A request's decision is never closed without an
+ * answer, since that would stop the request; "Stop request" says so.
  */
 export function DecisionCard({
   decision,
@@ -60,7 +61,8 @@ export function DecisionCard({
   );
   const [draft, setDraft] = useState("");
   const playbook = task?.playbook ?? project?.playbook;
-  const delivery = decision.kind === "delivery";
+  const delivery = approvals.has(decision.kind ?? "");
+  const closable = !task;
   async function send(value: string, action: "choice" | "answer" | "dismiss") {
     setBusy(action === "choice" ? value : action);
     setError("");
@@ -101,11 +103,6 @@ export function DecisionCard({
       : delivery
         ? "What should change?"
         : "Your answer";
-  const latest = task?.revisions?.at(-1);
-  const evidence =
-    full && latest
-      ? (task?.verdicts ?? []).filter((v) => v.revision === latest.n)
-      : [];
   return (
     <article className={`decision card${full ? " decision-full" : ""}`}>
       <div className="decision-meta">
@@ -120,7 +117,7 @@ export function DecisionCard({
         {decision.created_at && (
           <span className="muted small">{sinceLabel(decision.created_at)}</span>
         )}
-        {delivery && isCode(playbook) && (
+        {decision.kind === "delivery" && isCode(playbook) && (
           <span className="decision-reversible">
             <Pill tone="wait">{reversibility(playbook?.land)}</Pill>
           </span>
@@ -136,39 +133,6 @@ export function DecisionCard({
         <p className="decision-recommendation">
           <span className="label">Recommended</span> {decision.recommendation}
         </p>
-      )}
-      {full && evidence.length > 0 && (
-        <section className="decision-section" aria-label="Checks">
-          <h4 className="label">Checks on draft {latest?.n}</h4>
-          <ul className="evidence">
-            {evidence.map((v, i) => (
-              <li key={`${v.role}-${i}`}>
-                <Pill tone={v.outcome === "pass" ? "done" : "needs"}>
-                  {outcomeLabel[v.outcome] ?? v.outcome}
-                </Pill>
-                <span>
-                  <strong>{v.role}</strong> {v.summary}
-                </span>
-              </li>
-            ))}
-            {!!latest?.files?.length && isCode(playbook) && (
-              <li>
-                <Pill>{latest.files.length} files</Pill>
-                <span className="muted">changed in this draft</span>
-              </li>
-            )}
-          </ul>
-        </section>
-      )}
-      {full && delivery && (
-        <section className="decision-section" aria-label="When you approve">
-          <h4 className="label">When you approve</h4>
-          <ol className="happens">
-            {whatHappens(playbook).map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ol>
-        </section>
       )}
       {mode ? (
         <form className="decision-answer" onSubmit={submit}>
@@ -217,17 +181,19 @@ export function DecisionCard({
                 </button>
               ))}
             {decision.kind === "question" && mode === "answer" ? (
-              <button
-                type="button"
-                className="btn btn-quiet decision-close"
-                disabled={!!busy}
-                onClick={() => {
-                  setMode("dismiss");
-                  setDraft("");
-                }}
-              >
-                Close without deciding
-              </button>
+              closable && (
+                <button
+                  type="button"
+                  className="btn btn-quiet decision-close"
+                  disabled={!!busy}
+                  onClick={() => {
+                    setMode("dismiss");
+                    setDraft("");
+                  }}
+                >
+                  Close without deciding
+                </button>
+              )
             ) : (
               <button
                 type="button"
@@ -279,17 +245,19 @@ export function DecisionCard({
               Review
             </a>
           )}
-          <button
-            type="button"
-            className="btn btn-quiet decision-close"
-            disabled={!!busy}
-            onClick={() => {
-              setMode("dismiss");
-              setDraft("");
-            }}
-          >
-            Close without deciding
-          </button>
+          {closable && (
+            <button
+              type="button"
+              className="btn btn-quiet decision-close"
+              disabled={!!busy}
+              onClick={() => {
+                setMode("dismiss");
+                setDraft("");
+              }}
+            >
+              Close without deciding
+            </button>
+          )}
         </div>
       )}
       <ErrorNotice error={error} />

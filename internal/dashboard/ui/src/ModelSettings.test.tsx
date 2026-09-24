@@ -32,6 +32,7 @@ const catalog = {
       name: "Test Builder",
       default_effort: "low",
       efforts: [{ id: "low" }],
+      is_default: true,
     },
   ],
 };
@@ -47,7 +48,9 @@ it("uses discovered friendly models and only their supported efforts", async () 
   render(<ModelSettings config={config} onChange={changed} />);
   await screen.findByRole("option", { name: "Test Thinker (recommended)" });
   expect(screen.getByLabelText("Model").tagName).toBe("SELECT");
-  expect(screen.getByRole("option", { name: "Test Builder" })).toBeTruthy();
+  expect(
+    screen.getByRole("option", { name: "Test Builder (Codex default)" }),
+  ).toBeTruthy();
   expect(
     screen.getByRole("option", { name: "The model's default (high)" }),
   ).toBeTruthy();
@@ -130,6 +133,13 @@ it("lists Claude models and effort choices from CLI initialization", async () =>
         default_effort: "",
         efforts: [{ id: "high" }, { id: "max" }],
       },
+      {
+        id: "sonnet",
+        name: "Sonnet",
+        default_effort: "",
+        efforts: [{ id: "high" }],
+        is_default: true,
+      },
     ],
   });
   const changed = vi.fn();
@@ -142,6 +152,9 @@ it("lists Claude models and effort choices from CLI initialization", async () =>
     />,
   );
   await screen.findByRole("option", { name: "Opus" });
+  expect(
+    screen.getByRole("option", { name: "Sonnet (Claude default)" }),
+  ).toBeTruthy();
   expect(screen.getByRole("option", { name: "max" })).toBeTruthy();
   expect(screen.queryByRole("option", { name: "ultra" })).toBeNull();
   expect(fetch).toHaveBeenCalledWith(
@@ -156,7 +169,7 @@ it("switches CLI engines without retaining an incompatible model identifier", as
   render(<ModelSettings config={config} onChange={changed} />);
   await screen.findByRole("option", { name: "Test Thinker (recommended)" });
   expect(screen.getByRole("option", { name: "Codex" })).toBeTruthy();
-  expect(screen.getByRole("option", { name: "Claude Code" })).toBeTruthy();
+  expect(screen.getByRole("option", { name: "Claude" })).toBeTruthy();
   expect(screen.getByRole("option", { name: "Another API" })).toBeTruthy();
   fireEvent.change(screen.getByLabelText("Runs on"), {
     target: { value: "claude" },

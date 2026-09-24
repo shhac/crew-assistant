@@ -56,6 +56,14 @@ export function RequestPanel({
       prior?.focus?.();
     };
   }, [onClose]);
+  // Direction that came from the team thread is already shown there.
+  const messaged = (task?.messages ?? [])
+    .filter((m) => m.kind === "implementer")
+    .map((m) => m.text);
+  const said = (task?.direction ?? []).filter(
+    (line) =>
+      !messaged.some((text) => line === text || line.endsWith(`: ${text}`)),
+  );
   const decision = task?.decision_id
     ? pendingDecisions(state.decisions).find((d) => d.id === task.decision_id)
     : undefined;
@@ -100,18 +108,22 @@ export function RequestPanel({
               full
             />
           )}
-          <TeamThread project={project} task={task} refresh={refresh} />
-          <Drafts project={project} task={task} />
-          {(criteriaLines(task.criteria).length > 0 ||
-            (task.direction?.length ?? 0) > 0) && (
+          <TeamThread
+            project={project}
+            task={task}
+            waitingOn={decision?.kind}
+            refresh={refresh}
+          />
+          <Drafts project={project} task={task} collapsed={!!decision} />
+          {(criteriaLines(task.criteria).length > 0 || said.length > 0) && (
             <section className="section" aria-label="What was asked">
               <h3>What was asked</h3>
               <CriteriaList criteria={task.criteria} empty="" marker />
-              {!!task.direction?.length && (
+              {said.length > 0 && (
                 <>
-                  <p className="label">Said along the way</p>
+                  <p className="label">Your answers along the way</p>
                   <ul className="said">
-                    {task.direction.map((line, i) => (
+                    {said.map((line, i) => (
                       <li key={i}>{line}</li>
                     ))}
                   </ul>
@@ -178,7 +190,16 @@ function RequestActions({
 }
 
 /** Each draft, newest first, with what every checker said about it. */
-function Drafts({ project, task }: { project: Project; task: Task }) {
+function Drafts({
+  project,
+  task,
+  collapsed,
+}: {
+  project: Project;
+  task: Task;
+  /** The decision above already shows the latest checks. */
+  collapsed: boolean;
+}) {
   const revisions = [...(task.revisions ?? [])].reverse();
   if (!revisions.length) return null;
   const code = isCode(task.playbook ?? project.playbook);
@@ -186,7 +207,7 @@ function Drafts({ project, task }: { project: Project; task: Task }) {
     <section className="section" aria-label="Drafts">
       <h3>{code ? "Changes" : "Drafts"}</h3>
       {revisions.map((r, i) => (
-        <details key={r.n} className="draft card" open={i === 0}>
+        <details key={r.n} className="draft card" open={i === 0 && !collapsed}>
           <summary>
             <span className="draft-name">
               {code ? "Change" : "Draft"} {r.n}
@@ -239,10 +260,15 @@ function DraftDetail({
     <div className="draft-detail">
       {revision.summary && (
         <p>
-          <strong>
-            {task.roles?.find((r) => r.kind === "implementer")?.name ??
-              "Implementer"}
-          </strong>{" "}
+          {/* A clean catch-up merge is crew-assistant's own, not the team's. */}
+          {!revision.clean_merge_of && (
+            <>
+              <strong>
+                {task.roles?.find((r) => r.kind === "implementer")?.name ??
+                  "Implementer"}
+              </strong>{" "}
+            </>
+          )}
           {revision.summary}
         </p>
       )}

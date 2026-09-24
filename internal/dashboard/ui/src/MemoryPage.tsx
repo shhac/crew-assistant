@@ -6,12 +6,12 @@ const groups = [
   {
     kind: "preference",
     title: "Your preferences",
-    note: "Hold until you change them.",
+    note: "",
   },
   {
     kind: "observation",
     title: "Observations",
-    note: "True when noted. They can go out of date.",
+    note: "Can go out of date",
   },
   { kind: "", title: "Other notes", note: "" },
 ];
@@ -94,10 +94,7 @@ export function MemoryView({
     <div className="page memory">
       <header className="page-header">
         <h1>Memory</h1>
-        <p className="muted">
-          What the assistant carries between conversations. It shapes how work
-          is done; it never grants permission to do more.
-        </p>
+        <p className="muted">What the assistant remembers between chats.</p>
       </header>
       <form className="memory-add card" onSubmit={add}>
         <label className="sr-only" htmlFor="memory">

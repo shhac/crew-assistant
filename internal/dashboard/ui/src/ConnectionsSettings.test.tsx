@@ -139,6 +139,16 @@ it("keeps new Linear connections as resources until imports are explicitly enabl
     <ConnectionsSettings connections={[]} onChange={changed} />,
   );
   expect(screen.getByText("No connections.")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Optional. They let the assistant read from services you use.",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Sign in with each service's own CLI; no passwords go in here.",
+    ),
+  ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Add a connection" }));
   const added = changed.mock.calls.at(-1)![0] as Connection[];
   expect(added[0].tool).toBe("lin");

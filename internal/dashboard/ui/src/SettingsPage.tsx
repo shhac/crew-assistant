@@ -291,26 +291,6 @@ function AssistantSection({
         demo={state.demo}
         onApplied={onApplied}
       />
-      <section
-        className="tab-panel card settings-panel"
-        aria-label="What never changes"
-      >
-        <h2>What never changes</h2>
-        <ul className="plain-list soft">
-          <li>
-            The assistant plans and coordinates. It doesn't change code itself.
-          </li>
-          <li>
-            Teams change code only in a private copy of your repository, in a
-            sandbox with no network.
-          </li>
-          <li>
-            Nothing reaches your repository except by landing, as each project's
-            Landing tab says.
-          </li>
-          <li>A branch the team doesn't own is never overwritten.</li>
-        </ul>
-      </section>
     </>
   );
 }
@@ -342,7 +322,7 @@ function LimitsSection({
     });
   return (
     <>
-      <Panel title="Model calls">
+      <Panel title="Assistant model calls">
         <div className="form-row">
           <label htmlFor="limits-max_model_calls_per_day">
             Per day
@@ -358,7 +338,7 @@ function LimitsSection({
             />
           </label>
           <label htmlFor="limits-max_model_turns">
-            Per request
+            Steps per chat reply
             <input
               id="limits-max_model_turns"
               type="number"

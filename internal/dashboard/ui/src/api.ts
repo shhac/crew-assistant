@@ -111,6 +111,7 @@ export interface Revision {
   brief_version: number;
   files: string[] | null;
   ref?: string;
+  clean_merge_of?: number;
   summary?: string;
   at?: string;
 }
@@ -312,7 +313,7 @@ export async function api<T>(
     const detail = body?.error;
     const message = typeof detail === "string" ? detail : detail?.message;
     throw new APIError(
-      [message || `Request failed (${response.status})`, body?.hint]
+      [message || `Something went wrong (${response.status})`, body?.hint]
         .filter(Boolean)
         .join(" "),
       response.status,
@@ -345,7 +346,7 @@ export function pendingDecisions(decisions: Decision[]) {
 export function errorText(error: unknown) {
   return error instanceof Error
     ? error.message
-    : "Something went wrong. Please try again.";
+    : "Something went wrong. Try again.";
 }
 export function criteriaLines(criteria: string[] | string | null): string[] {
   return (Array.isArray(criteria) ? criteria : (criteria || "").split("\n"))

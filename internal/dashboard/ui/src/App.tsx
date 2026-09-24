@@ -118,7 +118,7 @@ export function App() {
       memory: "Memory",
       settings: "Settings",
     };
-    const name = state?.assistant.name || "Crew";
+    const name = state?.assistant.name || "Assistant";
     document.title = `${needs ? `(${needs}) ` : ""}${titles[route.page]} · ${name}`;
   }, [route.page, project?.title, needs, state?.assistant.name]);
   const toggleChat = useCallback(() => {
@@ -247,11 +247,7 @@ export function App() {
         onPause={() => void togglePause()}
       />
       <div className="workspace" inert={drawerOpen || chatExpanded}>
-        {state.demo && (
-          <p className="banner">
-            Demo: sample projects, and no models run. Nothing here is saved.
-          </p>
-        )}
+        {state.demo && <p className="banner">Demo mode: no models run.</p>}
         {connectionError && (
           <p className="banner banner-alert" role="status">
             Can't reach crew-assistant. Showing what it last sent.{" "}

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { finished } from "./stages";
+import { finished, isCode } from "./stages";
 import { ErrorNotice, Pill, sinceLabel, useAction } from "./ui";
 import {
   messageTeam,
@@ -16,14 +16,18 @@ const outcomeLabel: Record<string, string> = {
 };
 
 /** What a message to each kind of team member does. */
-function effect(role: Role | undefined, task: Task) {
+function effect(role: Role | undefined, task: Task, waitingOn?: string) {
   if (!role) return "";
-  if (role.kind === "implementer")
-    return task.status === "waiting" || task.status === "awaiting"
-      ? "Sends the request back for another round with your note."
-      : `Goes into the ${role.name.toLowerCase()}'s next round. Nothing is approved or landed until it has been taken in.`;
+  if (role.kind === "implementer") {
+    if (task.status === "landing")
+      return "It's landing now. Message again once it has landed.";
+    if (waitingOn === "failure") return "Goes into the round after you retry.";
+    if (task.status === "waiting" || task.status === "awaiting")
+      return "Sends it back for another round with your note.";
+    return "Goes into the next round.";
+  }
   if (!task.revisions?.length)
-    return "There's nothing to check until the first draft is done.";
+    return "There's nothing to check until the first version is done.";
   return `${role.name} checks the latest draft now, with your note.`;
 }
 
@@ -34,10 +38,13 @@ function effect(role: Role | undefined, task: Task) {
 export function TeamThread({
   project,
   task,
+  waitingOn,
   refresh,
 }: {
   project: Project;
   task: Task;
+  /** The kind of decision the request waits on, if any. */
+  waitingOn?: string;
   refresh: () => Promise<void>;
 }) {
   const team = task.roles?.length
@@ -60,11 +67,17 @@ export function TeamThread({
   if (!team.length) return null;
   return (
     <section className="section thread" aria-label="Team">
-      <h3>Team</h3>
+      <h3>Message the team</h3>
       {messages.length > 0 && (
         <ol className="thread-messages">
           {messages.map((m) => (
-            <MessageView key={m.id} message={m} />
+            <MessageView
+              key={m.id}
+              message={m}
+              made={
+                isCode(task.playbook ?? project.playbook) ? "change" : "draft"
+              }
+            />
           ))}
         </ol>
       )}
@@ -109,7 +122,7 @@ export function TeamThread({
             }
             onChange={(e) => setText(e.target.value)}
           />
-          <p className="hint">{effect(role, task)}</p>
+          <p className="hint">{effect(role, task, waitingOn)}</p>
           <ErrorNotice error={error} />
           <div className="actions">
             <button className="btn btn-primary" disabled={busy || !text.trim()}>
@@ -122,7 +135,14 @@ export function TeamThread({
   );
 }
 
-function MessageView({ message: m }: { message: TeamMessage }) {
+function MessageView({
+  message: m,
+  made,
+}: {
+  message: TeamMessage;
+  /** What a round makes: a draft, or a change for code. */
+  made: string;
+}) {
   return (
     <li className="thread-message">
       <p className="thread-line">
@@ -132,12 +152,12 @@ function MessageView({ message: m }: { message: TeamMessage }) {
         {m.at && <span className="muted small">{sinceLabel(m.at)}</span>}
       </p>
       <p className="thread-text">{m.text}</p>
-      <Reply message={m} />
+      <Reply message={m} made={made} />
     </li>
   );
 }
 
-function Reply({ message: m }: { message: TeamMessage }) {
+function Reply({ message: m, made }: { message: TeamMessage; made: string }) {
   switch (m.status) {
     case "waiting":
       return <p className="thread-reply muted small">Not picked up yet</p>;
@@ -173,7 +193,7 @@ function Reply({ message: m }: { message: TeamMessage }) {
         {m.revision ? (
           <span className="muted">
             {" "}
-            · {m.kind === "implementer" ? "in" : "on"} draft {m.revision}
+            · {m.kind === "implementer" ? "in" : "on"} {made} {m.revision}
           </span>
         ) : null}
       </p>

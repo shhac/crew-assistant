@@ -45,7 +45,6 @@ export function ChatQueue({
   turns,
   revision,
   hold,
-  running,
   cancelling,
   onCancel,
   onChanged,
@@ -53,8 +52,6 @@ export function ChatQueue({
   turns: QueuedTurn[];
   revision: number;
   hold?: QueueHold | null;
-  /** A reply is in progress, so the owner can keep writing behind it. */
-  running?: boolean;
   cancelling?: Set<string>;
   onCancel?: (id: string) => void;
   onChanged: () => Promise<void> | void;
@@ -171,18 +168,13 @@ export function ChatQueue({
     void commit(next);
   }
 
-  if (!turns.length)
-    return running ? (
-      <p className="queue-hint">
-        Keep writing if you like. Each message gets its own reply.
-      </p>
-    ) : null;
+  if (!turns.length) return null;
   return (
     <section className="queue" aria-label="Queued messages">
       <p className="label">Up next ({turns.length})</p>
       {hold && (
         <p className="queue-hint" role="status">
-          Paused while you change it. It picks up again on its own.
+          Held while you edit.
         </p>
       )}
       {error && (

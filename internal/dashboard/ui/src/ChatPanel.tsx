@@ -20,7 +20,8 @@ type VisibleTurn = Omit<ChatTurn, "status"> & {
 };
 // A turn has spoken once its reply is in the thread; until then its newest
 // tool step is still the most recent thing the owner has to look at.
-const turnReplied = (turn?: VisibleTurn) => !!turn?.assistant_message_id;
+const turnLive = (turn?: VisibleTurn) =>
+  turn?.status === "queued" || turn?.status === "running";
 const active = (turn: VisibleTurn) =>
   ["waiting", "sending", "queued", "running"].includes(turn.status);
 // A turn in any of these states means the conversation is not waiting on the
@@ -62,18 +63,13 @@ function latestTurn(
  * details line by line.
  */
 export function wakeSummary(content: string) {
-  const happened = [...content.matchAll(/what happened: (.+)/g)].map(
-    (m) => m[1],
-  );
-  if (happened.length) return happened.join(" · ");
-  const waits = [...content.matchAll(/^wake-\S+ — (.+)$/gm)].map((m) => m[1]);
-  if (waits.length) return waits.join(" · ");
-  return "Checked in";
+  const happened = wakeHappenings(content);
+  return happened.length ? happened.join(" · ") : "Checked in";
 }
 
-/** The wake-up's report without the note addressed to the assistant. */
-export function wakeReport(content: string) {
-  return content.replace(/^\[[^\]]*\]\s*/, "").trim();
+/** What each wake-up in the message saw happen, and nothing meant for the model. */
+export function wakeHappenings(content: string) {
+  return [...content.matchAll(/what happened: (.+)/g)].map((m) => m[1]);
 }
 
 /** A message's delivery, in a few words; nothing once all is well. */
@@ -152,8 +148,7 @@ function TurnStatus({
       {turn.status === "unconfirmed" && (
         <div className="turn-recovery">
           <p className="muted small">
-            It stays here until it's confirmed. Retrying can't start a second
-            reply.
+            Retrying is safe: it can't start a second reply.
           </p>
           <button
             type="button"
@@ -171,7 +166,7 @@ function TurnStatus({
             className="btn btn-sm"
             onClick={() => onRestore(turn)}
           >
-            Put it back in the message box
+            Edit
           </button>
           <button
             type="button"
@@ -189,12 +184,7 @@ function TurnStatus({
         <p className="turn-working" role="status">
           <span className="dot" aria-hidden="true" />
           {turn.model_status || turn.loading_phrase || `${name} is working`}
-          {retry && (
-            <span className="muted small">
-              {" "}
-              · trying again after {retry}; nothing already done is repeated
-            </span>
-          )}
+          {retry && <span className="muted small"> · retrying at {retry}</span>}
         </p>
       )}
     </div>
@@ -299,7 +289,6 @@ export function ChatPanel({
   const turnsByMessage = new Map(
     turns.map((t) => [t.user_message_id || t.id, t]),
   );
-  const running = turns.find((t) => t.status === "running");
   // Settled: the newest message is the assistant's reply and nothing is being
   // sent, queued or answered. Only then is a next message suggested, and only
   // while the draft is empty. Pending or loading attachments are a draft too.
@@ -493,7 +482,7 @@ export function ChatPanel({
                 ...t,
                 status: rejected ? "rejected" : "unconfirmed",
                 error: timedOut
-                  ? "No confirmation yet. Checking whether it arrived."
+                  ? "Checking whether it arrived."
                   : errorText(err),
               }
             : t,
@@ -599,7 +588,7 @@ export function ChatPanel({
             const status = (
               <TurnStatus
                 turn={turn}
-                live={m.id === newestMessageID && !turnReplied(turn)}
+                live={m.id === newestMessageID && turnLive(turn)}
                 name={name}
                 cancelling={cancelling}
                 onCancel={cancel}
@@ -627,8 +616,8 @@ export function ChatPanel({
             );
             if (wake)
               return (
-                <details key={m.id} className="wake">
-                  <summary>
+                <div key={m.id} className="wake">
+                  <p className="wake-head">
                     <span className="pill">Wake-up</span>
                     <span className="wake-line">{wakeSummary(m.content)}</span>
                     {m.created_at && (
@@ -636,10 +625,9 @@ export function ChatPanel({
                         {dateLabel(m.created_at)}
                       </time>
                     )}
-                  </summary>
-                  <pre className="wake-report">{wakeReport(m.content)}</pre>
+                  </p>
                   {status}
-                </details>
+                </div>
               );
             return (
               <article
@@ -647,13 +635,7 @@ export function ChatPanel({
                 className={`message ${m.role === "user" ? "from-you" : "from-assistant"}`}
               >
                 <p className="message-by">
-                  <span>
-                    {m.role === "user"
-                      ? "You"
-                      : m.role === "system"
-                        ? "Status"
-                        : name}
-                  </span>
+                  <span>{m.role === "user" ? "You" : name}</span>
                   {m.created_at && (
                     <time dateTime={m.created_at}>
                       {dateLabel(m.created_at)}
@@ -706,7 +688,7 @@ export function ChatPanel({
         )}
         {pollError && (
           <p className="muted small" role="status">
-            {pollError} Your messages are saved; trying again…
+            {pollError} Trying again…
           </p>
         )}
         {turns.some((t) => t.status === "waiting") &&
@@ -720,7 +702,6 @@ export function ChatPanel({
           turns={turns.filter((t) => t.status === "queued")}
           revision={queue.revision}
           hold={queue.hold}
-          running={!!running}
           cancelling={cancelling}
           onCancel={(id) => {
             const turn = turns.find((t) => t.id === id);
@@ -841,7 +822,7 @@ export function ChatPanel({
               <>
                 <span className="kbd">Tab</span> takes the suggestion
               </>
-            ) : (
+            ) : messages.length > 0 ? null : (
               <>
                 <span className="kbd">Enter</span> sends ·{" "}
                 <span className="kbd">Shift Enter</span> new line · drop text

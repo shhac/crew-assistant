@@ -47,8 +47,19 @@ it("keeps a proposed identity unchanged until the owner applies it", async () =>
   );
   const button = await screen.findByRole("button", { name: "Use this" });
   expect(
-    screen.getByRole("heading", { level: 2, name: "Get a suggestion" }),
+    screen.getByRole("heading", {
+      level: 2,
+      name: "Suggest a name and personality",
+    }),
   ).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Answer a question or two, and the assistant suggests a name, a personality and an avatar.",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getAllByText(/Nothing changes until you use it\./),
+  ).toHaveLength(1);
   expect(screen.getByRole("heading", { level: 3, name: "Rowan" })).toBeTruthy();
   expect(screen.getByText("Calm, direct, and thoughtful.")).toBeTruthy();
   expect(

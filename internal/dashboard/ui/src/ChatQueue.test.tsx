@@ -119,7 +119,7 @@ describe("queued messages", () => {
     });
   });
 
-  it("says the queue is paused while a change is open", () => {
+  it("says the queue is held while a change is open", () => {
     render(
       <ChatQueue
         turns={turns}
@@ -128,9 +128,7 @@ describe("queued messages", () => {
         onChanged={vi.fn()}
       />,
     );
-    expect(screen.getByRole("status").textContent).toBe(
-      "Paused while you change it. It picks up again on its own.",
-    );
+    expect(screen.getByRole("status").textContent).toBe("Held while you edit.");
   });
 
   it("labels the queue with how many messages are up next", () => {
@@ -164,18 +162,6 @@ describe("queued messages", () => {
         name: "Remove queued message: Then the third",
       }),
     ).toHaveProperty("disabled", true);
-  });
-
-  it("invites more writing while a reply runs and nothing is queued", () => {
-    render(<ChatQueue turns={[]} revision={0} running onChanged={vi.fn()} />);
-    expect(
-      screen.getByText(
-        "Keep writing if you like. Each message gets its own reply.",
-      ),
-    ).toBeTruthy();
-    expect(
-      screen.queryByRole("region", { name: "Queued messages" }),
-    ).toBeNull();
   });
 
   it("renders nothing when no message is waiting", () => {

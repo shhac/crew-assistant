@@ -74,7 +74,7 @@ export function InboxPage({
         <p className="muted">
           {[
             needs ? `${needs} need you` : "Nothing needs you",
-            working ? `${working} under way` : "",
+            working ? `${working} working` : "",
           ]
             .filter(Boolean)
             .join(" · ")}
@@ -104,7 +104,7 @@ export function InboxPage({
       {working > 0 && (
         <section className="section" aria-labelledby="inbox-progress">
           <div className="section-title">
-            <h2 id="inbox-progress">Under way</h2>
+            <h2 id="inbox-progress">Working</h2>
           </div>
           <ul className="card rows">
             {inProgress.slice(0, shownInProgress).map((t) => (
@@ -202,8 +202,7 @@ function InterruptedCard({
       </div>
       <h3 className="decision-title">{operation.summary}</h3>
       <p className="decision-context">
-        crew-assistant stopped before it could confirm this finished. Check it
-        yourself, then note what you found. Noting it doesn't retry anything.
+        Check it yourself, then note what you found. Nothing is retried.
       </p>
       <label className="control">
         What did you find?

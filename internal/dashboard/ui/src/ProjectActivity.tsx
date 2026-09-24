@@ -26,9 +26,7 @@ export function ActivityTab({
             className="btn btn-quiet btn-sm"
             onClick={() => setEverything(!everything)}
           >
-            {everything
-              ? "Hide steps of work"
-              : `Show every step (${routine} more)`}
+            {everything ? "Hide steps" : `Show all steps (${routine})`}
           </button>
         )}
       </div>

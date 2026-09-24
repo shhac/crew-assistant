@@ -237,7 +237,7 @@ describe("the board", () => {
   });
   it("says what's missing before anything can be asked", () => {
     show(project({ brief: { version: 0, goal: "", criteria: [] } }));
-    expect(screen.getByText(/Write a brief first/)).toBeTruthy();
+    expect(screen.getByText(/Needs a brief first/)).toBeTruthy();
     expect(
       screen
         .getByRole("link", { name: "Write the brief" })
@@ -305,11 +305,49 @@ describe("a request", () => {
       name: "Cache the lookups",
     });
     expect(within(panel).getByText("Undoable with effort")).toBeTruthy();
-    expect(within(panel).getByText(/main moves forward/)).toBeTruthy();
-    expect(within(panel).getByText("2 files")).toBeTruthy();
+    expect(panel.querySelector(".decision-context")?.textContent).toBe(
+      "Added a cache.",
+    );
+    // The latest change is folded while its approval is showing.
+    expect(panel.querySelector("details.draft")?.hasAttribute("open")).toBe(
+      false,
+    );
+    expect(
+      within(panel).queryByRole("button", { name: "Close without deciding" }),
+    ).toBeNull();
     fireEvent.click(
       within(panel).getByRole("button", { name: "Land on main" }),
     );
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/decisions/d1/resolve",
+        method: "POST",
+        body: { choice: "Approve" },
+      },
+    ]);
+  });
+  it("asks before pushing an update that changes what runs, in its own words", async () => {
+    const update: Decision = {
+      ...delivery,
+      kind: "update",
+      title: "Check the update to “Cache the lookups” before it's pushed",
+    };
+    show(
+      project({
+        playbook: codeTeam({
+          via: "pull-request",
+          target: "main",
+          github: "o/r",
+        }),
+      }),
+      { tasks: [waiting()], decisions: [update] },
+      { request: "t1" },
+    );
+    expect(
+      screen.queryByRole("button", { name: "Open pull request" }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Push the update" }));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(writes()).toEqual([
       {
@@ -595,9 +633,7 @@ describe("the project's tabs", () => {
     expect(screen.getByText("Cache the lookups landed on main")).toBeTruthy();
     expect(screen.queryByText("Reviewer checked draft 1")).toBeNull();
     expect(screen.queryByText("Something elsewhere")).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Show every step (1 more)" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Show all steps (1)" }));
     expect(screen.getByText("Reviewer checked draft 1")).toBeTruthy();
   });
 });

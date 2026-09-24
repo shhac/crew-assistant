@@ -44,7 +44,7 @@ export function Sidebar({
         <span className="brand-mark" aria-hidden="true">
           C
         </span>
-        <span>{state.assistant.name || "Crew"}</span>
+        <span>{state.assistant.name || "Assistant"}</span>
       </a>
       <div className="nav-group">
         <a

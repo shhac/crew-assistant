@@ -273,14 +273,14 @@ function AskForm({
   if (!project.brief.goal)
     return (
       <p className="ask-blocked card">
-        Write a brief first, so the team knows what the project is for.{" "}
+        Needs a brief first.{" "}
         <a href={projectHref(project.id, "brief")}>Write the brief</a>
       </p>
     );
   if (!project.playbook)
     return (
       <p className="ask-blocked card">
-        Choose a team first, so someone can do the work.{" "}
+        Needs a team first.{" "}
         <a href={projectHref(project.id, "team")}>Choose a team</a>
       </p>
     );

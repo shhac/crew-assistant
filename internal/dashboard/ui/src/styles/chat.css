@@ -83,16 +83,10 @@
   font-size: 13px;
 }
 
-.wake > summary {
+.wake-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
-  list-style: none;
-}
-
-.wake > summary::-webkit-details-marker {
-  display: none;
 }
 
 .wake-line {
@@ -101,17 +95,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.wake-report {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  white-space: pre-wrap;
-}
-
-.wake[open] > summary {
-  margin-bottom: 8px;
 }
 
 .turn-status {
