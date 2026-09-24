@@ -29,9 +29,16 @@ type Task struct {
 	MaxRounds int       `json:"max_rounds,omitempty"`
 	Round     int       `json:"round"`
 	// Direction is what the owner asked for along the way, in their words.
-	Direction []string   `json:"direction,omitempty"`
-	Revisions []Revision `json:"revisions"`
-	Verdicts  []Verdict  `json:"verdicts"`
+	// DirectionPending counts the entries the implementer has not yet had in
+	// view: until it has, the task goes back to the implementer rather than
+	// on to approval or landing.
+	Direction        []string `json:"direction,omitempty"`
+	DirectionPending int      `json:"direction_pending,omitempty"`
+	// Messages is what the owner or assistant said directly to a member of
+	// the team, with their replies.
+	Messages  []TeamMessage `json:"messages,omitempty"`
+	Revisions []Revision    `json:"revisions"`
+	Verdicts  []Verdict     `json:"verdicts"`
 	// WriterSession resumes the implementer across rounds. Reviewers always
 	// start fresh, so no earlier judgement anchors the next.
 	WriterSession json.RawMessage `json:"writer_session,omitempty"`
@@ -125,7 +132,9 @@ type Verdict struct {
 	Summary      string    `json:"summary"`
 	Findings     []Finding `json:"findings,omitempty"`
 	Question     string    `json:"question,omitempty"`
-	At           time.Time `json:"at"`
+	// Asked is the message this check answered, when someone asked for it.
+	Asked string    `json:"asked,omitempty"`
+	At    time.Time `json:"at"`
 }
 
 const (
@@ -276,10 +285,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Pro
 		if err != nil {
 			return err
 		}
+		t.UpdatedAt = s.now().UTC()
 		if t.Finished() {
 			cancelTaskWakes(v, t.ID)
+			closeMessages(t, t.UpdatedAt)
 		}
-		t.UpdatedAt = s.now().UTC()
 		if activity != "" {
 			record(v, t.UpdatedAt, t.ProjectID, "task."+t.Status, activity)
 		}

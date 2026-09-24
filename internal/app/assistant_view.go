@@ -47,6 +47,15 @@ func assistantView(s core.Snapshot) core.Snapshot {
 			}
 		}
 		t.Verdicts = verdicts
+		if n := len(t.Messages); n > 5 {
+			t.Messages = t.Messages[n-5:]
+		}
+		messages := make([]core.TeamMessage, len(t.Messages))
+		for i, m := range t.Messages {
+			m.Text, m.Reply = text.Clip(m.Text, 300), text.Clip(m.Reply, 300)
+			messages[i] = m
+		}
+		t.Messages = messages
 		tasks = append(tasks, t)
 	}
 	s.Tasks = tasks

@@ -85,6 +85,21 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		}
 		respond(w, 200, v)
 	})
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/messages", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			To   string `json:"to"`
+			Text string `json:"text"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.MessageTeam(r.Context(), r.PathValue("id"), r.PathValue("task"), in.To, core.FromOwner, in.Text)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 201, v)
+	})
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/stop", func(w http.ResponseWriter, r *http.Request) {
 		v, err := a.Work.StopTask(r.Context(), r.PathValue("id"), r.PathValue("task"))
 		if err != nil {

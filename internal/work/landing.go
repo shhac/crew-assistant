@@ -70,6 +70,9 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 	if len(t.Revisions) == 0 {
 		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
 	}
+	if t.DirectionPending > 0 {
+		return lp.takeDirection(ctx, t)
+	}
 	if taskPlaybook(p, t).Land.AsksFirst() && !approvalStands(t) && !proposed(t) {
 		return lp.setStatus(ctx, t.ID, core.TaskDeciding, "Checks are in")
 	}
@@ -246,8 +249,15 @@ func (lp *Loop) recordCatchUp(ctx context.Context, moved core.Task, c catcher, c
 // brief, restated for draft to, which only merges from with landed work.
 func carriedOver(verdicts []core.Verdict, from, to int, reviewers map[string]bool, brief int, now time.Time) []core.Verdict {
 	var out []core.Verdict
-	for _, v := range verdicts {
-		if v.Revision != from || !reviewers[v.Role] || v.Outcome != core.VerdictPass || v.BriefVersion != brief {
+	carried := map[string]bool{}
+	// Latest first: a reviewer asked again has its newest word carried.
+	for i := len(verdicts) - 1; i >= 0; i-- {
+		v := verdicts[i]
+		if v.Revision != from || !reviewers[v.Role] || carried[v.Role] || v.BriefVersion != brief {
+			continue
+		}
+		carried[v.Role] = true
+		if v.Outcome != core.VerdictPass {
 			continue
 		}
 		v.Revision, v.At = to, now

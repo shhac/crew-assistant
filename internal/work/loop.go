@@ -113,6 +113,9 @@ func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 	if progressed, err := lp.settleAnswers(ctx, snap); progressed || err != nil {
 		return progressed, err
 	}
+	if progressed, err := lp.answerMessage(ctx, snap); progressed || err != nil {
+		return progressed, err
+	}
 	t, ok, err := lp.Core.NextTask(ctx)
 	if err != nil || !ok {
 		return false, err
@@ -154,13 +157,6 @@ func (lp *Loop) updateOpen(ctx context.Context, id string, fn func(*core.Task, *
 		}
 		return fn(t, p)
 	})
-}
-
-// nextRound starts another round. max_rounds is where the owner is asked,
-// not a cap on work, so it moves up with the round.
-func nextRound(t *core.Task) {
-	t.Round++
-	t.MaxRounds = max(t.MaxRounds, t.Round)
 }
 
 // findTask finds a task in a project; an empty projectID matches any project.
@@ -249,13 +245,14 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 	if err != nil {
 		return err
 	}
+	seen := len(t.Direction)
 	spec := lp.roleSpec(writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp)+prompt)
 	spec.Resume = t.WriterSession
 	result, err := lp.runner.Run(ctx, spec)
 	if err != nil {
 		return lp.roleFailed(ctx, t, writers[0].Name, err)
 	}
-	return lp.recordDraft(ctx, p, t, m, writers[0].Name, result)
+	return lp.recordDraft(ctx, p, t, m, writers[0].Name, result, seen)
 }
 
 // prepareWorkspace starts the task's workspace on its first round, then puts
@@ -303,8 +300,8 @@ func (lp *Loop) takeInLanded(ctx context.Context, t core.Task, m medium) (core.T
 
 // recordDraft records what the implementer's round produced: a new draft for
 // review, or, answering a pull request, the team's word that nothing needed
-// to change.
-func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m medium, writer string, result roles.Result) error {
+// to change. seen is how much of the owner's direction its prompt carried.
+func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m medium, writer string, result roles.Result, seen int) error {
 	reply, block := splitWakeBlock(result.Text)
 	wakeErrors := lp.applyWakeBlock(ctx, p, t, block)
 	n := len(t.Revisions) + 1
@@ -312,6 +309,11 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	if errors.Is(err, gitrepo.ErrNoChange) && proposed(t) {
 		_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.WriterSession, t.WakeErrors, t.Failures, t.RetryAt = result.Session, wakeErrors, 0, time.Time{}
+			t.AnswerDirection(seen, 0, "No change needed: "+reply, time.Now().UTC())
+			if t.DirectionPending > 0 {
+				t.ReviseWithDirection()
+				return fmt.Sprintf("%s: no change needed for the pull request; revising with your note", t.Objective), nil
+			}
 			t.Status, t.Detail = core.TaskLanding, "No change needed: "+text.Clip(reply, 300)
 			return fmt.Sprintf("%s: no change needed for the pull request's feedback", t.Objective), nil
 		})
@@ -323,6 +325,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 		revision.BriefVersion, revision.Summary, revision.At = p.Brief.Version, text.Clip(reply, 2000), time.Now().UTC()
 		t.Revisions = append(t.Revisions, revision)
+		t.AnswerDirection(seen, n, reply, revision.At)
 		t.WriterSession, t.WakeErrors = result.Session, wakeErrors
 		t.Failures, t.RetryAt = 0, time.Time{}
 		t.Status, t.Detail = core.TaskReviewing, fmt.Sprintf("Draft %d written; reviewing", n)
@@ -337,15 +340,18 @@ func (lp *Loop) review(ctx context.Context, p core.Project, t core.Task, m mediu
 	if len(t.Revisions) == 0 {
 		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
 	}
+	if t.DirectionPending > 0 {
+		return lp.takeDirection(ctx, t)
+	}
 	r := t.Revisions[len(t.Revisions)-1]
-	for _, checker := range append(roleOf(t, core.RoleReviewer), roleOf(t, core.RoleQA)...) {
+	for _, checker := range checkers(t) {
 		if judged(t, checker.Name, r.N, p.Brief.Version) {
 			continue
 		}
 		if held, err := lp.holdForUsage(ctx, t, checker); held || err != nil {
 			return err
 		}
-		verdict, err := lp.runChecker(ctx, p, t, r, checker, m)
+		verdict, err := lp.runChecker(ctx, p, t, r, checker, m, "")
 		if err != nil {
 			return lp.roleFailed(ctx, t, checker.Name, err)
 		}
@@ -360,6 +366,24 @@ func (lp *Loop) review(ctx context.Context, p core.Project, t core.Task, m mediu
 	return lp.setStatus(ctx, t.ID, core.TaskDeciding, "Checks are in")
 }
 
+func checkers(t core.Task) []core.Role {
+	return append(roleOf(t, core.RoleReviewer), roleOf(t, core.RoleQA)...)
+}
+
+// takeDirection sends a task back to the implementer when the owner has told
+// it something it has not yet had in view, so the task never reaches approval
+// or landing without it.
+func (lp *Loop) takeDirection(ctx context.Context, t core.Task) error {
+	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.DirectionPending == 0 {
+			return "", nil
+		}
+		t.ReviseWithDirection()
+		return fmt.Sprintf("Revising %s with your note", t.Objective), nil
+	})
+	return err
+}
+
 func judged(t core.Task, role string, revision, briefVersion int) bool {
 	for _, v := range t.Verdicts {
 		if v.Role == role && v.Revision == revision && v.BriefVersion == briefVersion {
@@ -372,14 +396,14 @@ func judged(t core.Task, role string, revision, briefVersion int) bool {
 // runChecker gives a fresh checking session the revision to judge. Only QA
 // may write, to run the check; the medium discards whatever it wrote. A reply
 // that is not a usable verdict gets one plain retry.
-func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium) (core.Verdict, error) {
+func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium, note string) (core.Verdict, error) {
 	dir, cleanup, err := m.checkDir(ctx, t, r)
 	if err != nil {
 		return core.Verdict{}, err
 	}
 	defer cleanup()
 	playbook := taskPlaybook(p, t)
-	base := checkerPrompt(p, t, r, checker, playbook)
+	base := checkerPrompt(p, t, r, checker, playbook) + note
 	prompt := base
 	var parseErr error
 	for attempt := 0; attempt < 2; attempt++ {
@@ -404,6 +428,9 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 	if len(t.Revisions) == 0 {
 		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
 	}
+	if t.DirectionPending > 0 {
+		return lp.takeDirection(ctx, t)
+	}
 	r := t.Revisions[len(t.Revisions)-1]
 	var current []core.Verdict
 	for _, v := range t.Verdicts {
@@ -411,9 +438,11 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 			current = append(current, v)
 		}
 	}
-	if len(current) < len(roleOf(t, core.RoleReviewer)) {
-		// The brief changed after some reviews: judge again against it.
-		return lp.setStatus(ctx, t.ID, core.TaskReviewing, "Re-checking against the updated brief")
+	for _, checker := range checkers(t) {
+		if !judged(t, checker.Name, r.N, p.Brief.Version) {
+			// The brief changed after some checks: judge again against it.
+			return lp.setStatus(ctx, t.ID, core.TaskReviewing, "Checking again against the updated brief")
+		}
 	}
 	var questions, changes []core.Verdict
 	for _, v := range current {
@@ -448,7 +477,7 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 		return err
 	default:
 		_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-			nextRound(t)
+			t.NextRound()
 			t.Status, t.Detail = core.TaskWriting, fmt.Sprintf("Revising (round %d of %d)", t.Round, t.MaxRounds)
 			return fmt.Sprintf("Round %d of %s: revising after review", t.Round, t.Objective), nil
 		})
@@ -593,7 +622,7 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 		case !strings.EqualFold(answer, choiceAnotherRound) && !strings.EqualFold(answer, choiceChanges):
 			t.Direction = append(t.Direction, answer)
 		}
-		nextRound(t)
+		t.NextRound()
 		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", fmt.Sprintf("Revising with your direction (round %d)", t.Round)
 		return fmt.Sprintf("Revising %s with the owner's direction", t.Objective), nil
 	})
@@ -605,25 +634,8 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 // counted against the task, and it resumes by itself when the window resets
 // or the threshold is raised.
 func (lp *Loop) holdForUsage(ctx context.Context, t core.Task, r core.Role) (bool, error) {
-	cfg := lp.Config()
-	threshold, supported := quota.Threshold(cfg.Limits.RoleUsage, r.Engine)
-	if !supported || threshold == 0 {
-		return false, nil
-	}
-	model := cfg.Model
-	model.Engine, model.Model = r.Engine, r.Model
-	now := time.Now()
-	verdict := quota.Evaluate(lp.meter.Read(ctx, model), model, threshold, now)
-	wait, detail := time.Time{}, ""
-	switch {
-	case verdict.Held:
-		wait, detail = verdict.ResetsAt, fmt.Sprintf("Waiting for %s subscription headroom (%s)", r.Engine, verdict.Detail)
-		if !wait.After(now) {
-			wait = now.Add(10 * time.Minute)
-		}
-	case !verdict.Known && cfg.Limits.RoleUsage.OnUnavailable == "pause":
-		wait, detail = now.Add(5*time.Minute), "Waiting until "+r.Engine+" usage can be checked"
-	default:
+	wait, detail := lp.usageWait(ctx, r)
+	if wait.IsZero() {
 		return false, nil
 	}
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
@@ -631,6 +643,31 @@ func (lp *Loop) holdForUsage(ctx context.Context, t core.Task, r core.Role) (boo
 		return "", nil
 	})
 	return true, err
+}
+
+// usageWait is when the role may run again, and why, while its subscription
+// is past the owner's threshold; zero when it may run now.
+func (lp *Loop) usageWait(ctx context.Context, r core.Role) (time.Time, string) {
+	cfg := lp.Config()
+	threshold, supported := quota.Threshold(cfg.Limits.RoleUsage, r.Engine)
+	if !supported || threshold == 0 {
+		return time.Time{}, ""
+	}
+	model := cfg.Model
+	model.Engine, model.Model = r.Engine, r.Model
+	now := time.Now()
+	verdict := quota.Evaluate(lp.meter.Read(ctx, model), model, threshold, now)
+	switch {
+	case verdict.Held:
+		wait := verdict.ResetsAt
+		if !wait.After(now) {
+			wait = now.Add(10 * time.Minute)
+		}
+		return wait, fmt.Sprintf("Waiting for %s subscription headroom (%s)", r.Engine, verdict.Detail)
+	case !verdict.Known && cfg.Limits.RoleUsage.OnUnavailable == "pause":
+		return now.Add(5 * time.Minute), "Waiting until " + r.Engine + " usage can be checked"
+	}
+	return time.Time{}, ""
 }
 
 // StopTask ends a task at the owner's request. A turn already running

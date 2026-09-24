@@ -62,7 +62,7 @@ func (lp *Loop) wokenRound(ctx context.Context, t core.Task) (bool, error) {
 			continue
 		}
 		_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-			nextRound(t)
+			t.NextRound()
 			t.Status, t.Detail = core.TaskWriting, "Woken: "+w.Event
 			return "", nil
 		})
@@ -236,7 +236,7 @@ func (lp *Loop) answerPR(ctx context.Context, t core.Task, r core.Revision, pr g
 			t.Verdicts = append(t.Verdicts, v)
 		}
 		t.Proposal = &prop
-		nextRound(t)
+		t.NextRound()
 		t.Status, t.Detail = core.TaskWriting, fmt.Sprintf("Answering pull request #%d", prop.Number)
 		return fmt.Sprintf("%s: answering %d item(s) of feedback on pull request #%d", t.Objective, len(feedback), prop.Number), nil
 	})

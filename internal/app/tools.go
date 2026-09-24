@@ -107,6 +107,12 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 			return nil, err
 		}
 		return a.Core.OrderTasks(ctx, in.ProjectID, in.TaskIDs)
+	case "message_team":
+		var in engine.MessageTeamArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		return a.Work.MessageTeam(ctx, in.ProjectID, in.TaskID, in.To, core.FromAssistant, in.Message)
 	case "resolve_decision":
 		var in engine.ResolveDecisionArgs
 		if err := args(raw, &in); err != nil {
