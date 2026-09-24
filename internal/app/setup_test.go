@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -85,7 +86,7 @@ func TestIdentityInterviewPreviewsThenAppliesOnlyAcceptedRecommendation(t *testi
 	if state.Recommendation == nil || state.Recommendation.ID == "" || state.Recommendation.Applied || !strings.Contains(state.Recommendation.AvatarSVG, "<svg") {
 		t.Fatalf("missing preview: %+v", state)
 	}
-	if a.Config().Assistant != original {
+	if !reflect.DeepEqual(a.Config().Assistant, original) {
 		t.Fatal("recommendation applied without acceptance")
 	}
 	restored, err := a.IdentitySetup()
@@ -116,7 +117,7 @@ func TestIdentityInterviewPreviewsThenAppliesOnlyAcceptedRecommendation(t *testi
 		t.Fatal(identity)
 	}
 	persisted, err := config.Load(a.configPath)
-	if err != nil || persisted.Assistant != identity {
+	if err != nil || !reflect.DeepEqual(persisted.Assistant, identity) {
 		t.Fatal("applied identity missing from config", err)
 	}
 	snap, err := a.Core.Snapshot(ctx)
@@ -153,7 +154,7 @@ func TestSetupRejectsProjectToolsAndUnsafeAvatar(t *testing.T) {
 				t.Fatal("unsafe proposal persisted", err)
 			}
 			snap, _ := a.Core.Snapshot(context.Background())
-			if len(snap.Projects) != 0 || a.Config().Assistant != original {
+			if len(snap.Projects) != 0 || !reflect.DeepEqual(a.Config().Assistant, original) {
 				t.Fatal("setup escaped identity scope")
 			}
 		})
@@ -171,20 +172,6 @@ func TestSetupDemoDoesNotInvokeModel(t *testing.T) {
 		t.Fatal("demo contacted model")
 	}
 }
-func TestAvatarRendererUsesOnlyBoundedDeclarativeValues(t *testing.T) {
-	for _, shape := range []string{"orb", "spark", "leaf"} {
-		svg, err := AvatarSVG(config.Avatar{Shape: shape, Background: "#123456", Accent: "#abcdef"})
-		if err != nil || !strings.Contains(svg, `fill="#123456"`) || strings.Contains(svg, "<script") || strings.Contains(svg, "href=") {
-			t.Fatal(svg, err)
-		}
-	}
-	for _, avatar := range []config.Avatar{{Shape: "script", Background: "#123456", Accent: "#abcdef"}, {Shape: "orb", Background: "url(https://example.com)", Accent: "#abcdef"}} {
-		if _, err := AvatarSVG(avatar); err == nil {
-			t.Fatal("untrusted graphic accepted")
-		}
-	}
-}
-
 func TestSetupRefinementInvalidatesPreviousProposal(t *testing.T) {
 	a := testApp(t)
 	var calls atomic.Int32

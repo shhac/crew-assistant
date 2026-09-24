@@ -181,7 +181,7 @@ func (a *App) InterviewIdentity(ctx context.Context, message string) (IdentitySe
 			if strings.TrimSpace(in.Rationale) == "" || len(in.Rationale) > 4000 {
 				return state, errors.New("setup rationale is empty or too long")
 			}
-			svg, err := AvatarSVG(in.Avatar)
+			svg, err := in.Avatar.SVG()
 			if err != nil {
 				return state, err
 			}
@@ -258,35 +258,4 @@ func (a *App) ApplyIdentity(ctx context.Context, id string, accepted bool) (conf
 		return next.Assistant, fmt.Errorf("identity applied, but setup receipt could not be saved: %w", err)
 	}
 	return next.Assistant, nil
-}
-
-// AvatarSVG generates a constrained vector symbol. No model-supplied markup,
-// URLs, fonts or scripts are accepted or rendered.
-func AvatarSVG(avatar config.Avatar) (string, error) {
-	validColor := func(s string) bool {
-		if len(s) != 7 || s[0] != '#' {
-			return false
-		}
-		_, err := hex.DecodeString(s[1:])
-		return err == nil
-	}
-	if !validColor(avatar.Background) || !validColor(avatar.Accent) {
-		return "", errors.New("avatar colors must be #RRGGBB values")
-	}
-	var shape string
-	switch avatar.Shape {
-	case "orb":
-		shape = `<circle cx="64" cy="64" r="29" fill="%s"/><ellipse cx="64" cy="64" rx="48" ry="17" fill="none" stroke="%s" stroke-width="5" transform="rotate(-30 64 64)"/>`
-	case "spark":
-		shape = `<path d="M64 18 75 49 106 64 75 78 64 110 50 78 20 64 50 49Z" fill="%s"/><circle cx="96" cy="28" r="6" fill="%s"/>`
-	case "leaf":
-		shape = `<path d="M28 92C18 39 65 21 106 23 108 77 76 108 28 92Z" fill="%s"/><path d="M31 91 83 43" fill="none" stroke="%s" stroke-width="6" stroke-linecap="round"/>`
-	default:
-		return "", errors.New("avatar shape must be orb, spark or leaf")
-	}
-	second := avatar.Accent
-	if avatar.Shape == "leaf" {
-		second = avatar.Background
-	}
-	return fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Assistant avatar"><rect width="128" height="128" rx="32" fill="%s"/>%s</svg>`, avatar.Background, fmt.Sprintf(shape, avatar.Accent, second)), nil
 }

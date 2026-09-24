@@ -2,6 +2,7 @@ package cli
 
 import (
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -79,10 +80,13 @@ func completionConfigKeys(t reflect.Type, prefix string) []string {
 	var keys []string
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		name := strings.Split(field.Tag.Get("json"), ",")[0]
-		if name == "" || name == "-" {
+		tag := strings.Split(field.Tag.Get("json"), ",")
+		// Optional keys, such as an avatar's drawn marks, are written by the
+		// setup interview rather than typed, and are absent until then.
+		if tag[0] == "" || tag[0] == "-" || slices.Contains(tag[1:], "omitempty") {
 			continue
 		}
+		name := tag[0]
 		key := prefix + name
 		keys = append(keys, key)
 		if field.Type.Kind() == reflect.Struct {

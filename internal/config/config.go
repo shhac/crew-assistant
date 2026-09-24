@@ -101,11 +101,6 @@ type Assistant struct {
 	Theme       string `json:"theme"`
 	Avatar      Avatar `json:"avatar"`
 }
-type Avatar struct {
-	Shape      string `json:"shape"`
-	Background string `json:"background"`
-	Accent     string `json:"accent"`
-}
 type Connection struct {
 	ImportAssignments bool     `json:"import_assignments"`
 	ID                string   `json:"id"`
@@ -332,14 +327,8 @@ func (c Config) Validate() error {
 	default:
 		return errors.New("assistant.theme must be system, light or dark")
 	}
-	switch c.Assistant.Avatar.Shape {
-	case "orb", "spark", "leaf":
-	default:
-		return errors.New("assistant.avatar.shape must be orb, spark or leaf")
-	}
-	hex := regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
-	if !hex.MatchString(c.Assistant.Avatar.Background) || !hex.MatchString(c.Assistant.Avatar.Accent) {
-		return errors.New("assistant avatar colors must be #RRGGBB")
+	if err := c.Assistant.Avatar.Validate(); err != nil {
+		return fmt.Errorf("assistant.avatar: %w", err)
 	}
 	if err := validateConnections(c.Connections); err != nil {
 		return err
