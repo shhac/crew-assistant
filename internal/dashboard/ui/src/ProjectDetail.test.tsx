@@ -235,6 +235,13 @@ describe("project page", () => {
       within(team).getByLabelText("Ignored folders to copy in (optional)"),
       { target: { value: "ui/node_modules, vendor" } },
     );
+    expect(within(team).getByLabelText("Sign commits")).toHaveProperty(
+      "value",
+      "",
+    );
+    fireEvent.change(within(team).getByLabelText("Sign commits"), {
+      target: { value: "never" },
+    });
     fireEvent.click(within(team).getByRole("button", { name: "Save team" }));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(writes()).toEqual([
@@ -251,6 +258,7 @@ describe("project page", () => {
           branch_prefix: "paul/",
           check: "make check",
           prepare: ["ui/node_modules", "vendor"],
+          sign: "never",
         },
       },
     ]);

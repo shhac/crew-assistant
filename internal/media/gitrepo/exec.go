@@ -26,10 +26,16 @@ var fetchQuietly = []string{"fetch", "--quiet", "--no-tags", "--no-recurse-submo
 // run is the only way this package runs git. Hooks, fsmonitor and system
 // configuration are off for every command, wherever it runs.
 func run(ctx context.Context, dir string, args ...string) (string, error) {
+	return runIn(ctx, dir, gitEnvironment(), args...)
+}
+
+// runIn is run with a chosen environment, for the commands that sign as the
+// owner would.
+func runIn(ctx context.Context, dir string, env []string, args ...string) (string, error) {
 	full := append(append([]string(nil), safety...), args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Dir = dir
-	cmd.Env = gitEnvironment()
+	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

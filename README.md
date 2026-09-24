@@ -74,6 +74,8 @@ Only one daemon can own a state file. `serve --no-dispatch` observes without run
   - a GitHub pull request, opened with your `gh` login. The team answers its reviews and CI, and it merges once GitHub says it is approved and green.
 
   Before landing, a change catches up with whatever landed since. A clean merge keeps your approval; a conflict goes back to the implementer and comes back to you. Nothing the project does not own is ever forced, and a change built on another lands after it.
+
+  The team's commits are signed exactly when your own commits in that repository would be: your global, system and repository git config decide, including the key, `gpg.format` and signing program. A project can instead always or never sign, set by you or the assistant with the team. Commits are authored as `crew-assistant`, so a host that checks the signer against the committer's email may show them as unverified.
 - **Wake-ups** let an agent wait instead of checking back: the assistant (`wake_me_when`) and implementers (a `wake` block in their reply) can wait on a task, a branch, a time, or a pull request's checks or reviews. Each has its own note for later, a handle to cancel it, and a timeout. Each is delivered with when it was registered, seen and delivered, so a stale one can be recognised.
 
 Failures resolve at the lowest level that can: a failing role is retried twice with growing waits before you hear about it; a sandbox or login problem comes to you at once. When a subscription is past its threshold (`limits.role_usage`, default 90%), the task waits for the window to reset instead of failing.

@@ -25,6 +25,7 @@ type TeamChoice struct {
 	BranchPrefix string   `json:"branch_prefix"`
 	Check        string   `json:"check"`
 	Prepare      []string `json:"prepare"`
+	Sign         string   `json:"sign"`
 }
 
 // teamFrom builds a playbook from a template and the few choices the assistant
@@ -62,6 +63,7 @@ func teamFrom(in TeamChoice) (core.Playbook, error) {
 		}
 		playbook.Check = in.Check
 		playbook.Prepare = append([]string(nil), in.Prepare...)
+		playbook.Sign = in.Sign
 	}
 	return playbook, nil
 }

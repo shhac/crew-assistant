@@ -57,7 +57,7 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		return a.Work.SetTeam(ctx, in.ProjectID, work.TeamChoice{Template: in.Template, WriterEngine: in.WriterEngine, ReviewerEngine: in.ReviewerEngine, MaxRounds: in.MaxRounds, DeliverTo: in.DeliverTo, Repo: in.Repo, BranchPrefix: in.BranchPrefix, Check: in.Check, Prepare: in.Prepare})
+		return a.Work.SetTeam(ctx, in.ProjectID, work.TeamChoice{Template: in.Template, WriterEngine: in.WriterEngine, ReviewerEngine: in.ReviewerEngine, MaxRounds: in.MaxRounds, DeliverTo: in.DeliverTo, Repo: in.Repo, BranchPrefix: in.BranchPrefix, Check: in.Check, Prepare: in.Prepare, Sign: in.Sign})
 	case "set_landing":
 		var in engine.SetLandingArgs
 		if err := args(raw, &in); err != nil {

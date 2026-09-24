@@ -49,6 +49,9 @@ type Playbook struct {
 	BranchPrefix string   `json:"branch_prefix,omitempty"`
 	Check        string   `json:"check,omitempty"`
 	Prepare      []string `json:"prepare,omitempty"`
+	// Sign is whether the team's commits are signed: "" as the owner's git
+	// config for the repository says, SignAlways or SignNever.
+	Sign string `json:"sign,omitempty"`
 	// Land says what landing an approved change means for this project. Only
 	// the owner or the assistant sets it; nothing inside the project can.
 	Land LandPolicy `json:"land,omitzero"`
@@ -144,6 +147,8 @@ func branchName(name string) bool {
 const (
 	MediumDocuments = "documents"
 	MediumGit       = "git"
+	SignAlways      = "always"
+	SignNever       = "never"
 )
 
 // Templates are the playbooks the assistant starts a project from.
@@ -189,6 +194,9 @@ func (p Playbook) Validate() error {
 			if filepath.IsAbs(rel) || strings.HasPrefix(filepath.Clean(rel), "..") {
 				return fmt.Errorf("prepare path %q must be inside the repository", rel)
 			}
+		}
+		if p.Sign != "" && p.Sign != SignAlways && p.Sign != SignNever {
+			return errors.New(`sign must be empty (follow your git config), "always" or "never"`)
 		}
 		if err := p.Land.validate(); err != nil {
 			return err

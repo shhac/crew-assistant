@@ -94,12 +94,14 @@ func (lp *Loop) gitMediumFor(ctx context.Context, p core.Project, playbook *core
 	if playbook.Medium != core.MediumGit {
 		return gitMedium{}, fmt.Errorf("unsupported medium %q", playbook.Medium)
 	}
-	repo, err := gitrepo.Open(ctx, p.ScratchDirectory, playbook.Repo, playbook.Prepare)
+	repo, err := gitrepo.Open(ctx, p.ScratchDirectory, playbook.Repo, playbook.Prepare, signing[playbook.Sign])
 	if err != nil {
 		return gitMedium{}, err
 	}
 	return gitMedium{repo: repo, playbook: *playbook, landed: p.Landed, remote: lp.githubURL, way: wayFor(playbook.Land)}, nil
 }
+
+var signing = map[string]gitrepo.Signing{"": gitrepo.SignAsOwner, core.SignAlways: gitrepo.SignAlways, core.SignNever: gitrepo.SignNever}
 
 func tipOf(t core.Task) string {
 	if n := len(t.Revisions); n > 0 {

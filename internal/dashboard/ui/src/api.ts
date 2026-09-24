@@ -33,6 +33,7 @@ export interface Playbook {
   branch_prefix?: string;
   check?: string;
   prepare?: string[];
+  sign?: string;
   land?: LandPolicy;
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -86,6 +87,7 @@ export interface TeamInput {
   branch_prefix?: string;
   check?: string;
   prepare?: string[];
+  sign?: string;
 }
 export interface TaskInput {
   objective: string;

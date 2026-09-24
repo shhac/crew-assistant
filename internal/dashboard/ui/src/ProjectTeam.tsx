@@ -11,6 +11,17 @@ const engines = [
 const engineLabel = (id: string) =>
   engines.find((e) => e.id === id)?.label ?? id;
 
+const signings = [
+  { id: "", label: "As your git config says" },
+  { id: "always", label: "Always" },
+  { id: "never", label: "Never" },
+];
+const signingNote: Record<string, string> = {
+  "": "Commits are signed as your git config for the repository says.",
+  always: "Commits are always signed.",
+  never: "Commits are never signed.",
+};
+
 export function TeamCard({
   project,
   refresh,
@@ -81,7 +92,8 @@ function TeamView({ playbook }: { playbook: Playbook }) {
       {playbook.medium === "git" ? (
         <p className="field-hint">
           Works in a private copy of <code>{playbook.repo}</code>; QA runs{" "}
-          <code>{playbook.check}</code>. {rounds}
+          <code>{playbook.check}</code>. {signingNote[playbook.sign ?? ""]}{" "}
+          {rounds}
         </p>
       ) : (
         <p className="field-hint">
@@ -120,6 +132,7 @@ function TeamEditor({
   );
   const [check, setCheck] = useState(playbook?.check ?? "");
   const [prepare, setPrepare] = useState((playbook?.prepare ?? []).join(", "));
+  const [sign, setSign] = useState(playbook?.sign ?? "");
   const [writer, setWriter] = useState(
     firstEngine(playbook?.roles, "implementer", "claude"),
   );
@@ -148,6 +161,7 @@ function TeamEditor({
                 .split(/[,\n]/)
                 .map((p) => p.trim())
                 .filter(Boolean),
+              sign,
             }
           : { deliver_to: deliverTo }),
       });
@@ -245,6 +259,20 @@ function TeamEditor({
                 placeholder="node_modules"
                 onChange={(e) => setPrepare(e.target.value)}
               />
+            </label>
+            <label htmlFor="team-sign">
+              Sign commits
+              <select
+                id="team-sign"
+                value={sign}
+                onChange={(e) => setSign(e.target.value)}
+              >
+                {signings.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
         ) : (

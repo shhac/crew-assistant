@@ -120,6 +120,17 @@ func TestOneTaskRunsAtATimeWithRolesCopiedAtStart(t *testing.T) {
 	}
 }
 
+func TestACodeTeamSignsAsGitSaysOrAsTheProjectChose(t *testing.T) {
+	code := Templates["code"]
+	code.Repo, code.BranchPrefix, code.Check = "/work/repo", "crew/", "make check"
+	for sign, ok := range map[string]bool{"": true, SignAlways: true, SignNever: true, "sometimes": false} {
+		code.Sign = sign
+		if err := code.Validate(); (err == nil) != ok {
+			t.Errorf("sign %q: err %v, want ok=%v", sign, err, ok)
+		}
+	}
+}
+
 func TestLandingPoliciesSayOnlyWhatTheWayNeeds(t *testing.T) {
 	code := Templates["code"]
 	code.Repo, code.BranchPrefix, code.Check = "/work/repo", "crew/", "make check"

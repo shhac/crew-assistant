@@ -34,15 +34,16 @@ type Repo struct {
 	root    string
 	source  string
 	prepare []string
+	sign    Signing
 }
 
 // Open prepares the clone under the project's private directory. The owner's
 // repository is read from, never written to, until an approved delivery.
-func Open(ctx context.Context, projectDir, source string, prepare []string) (Repo, error) {
+func Open(ctx context.Context, projectDir, source string, prepare []string, sign Signing) (Repo, error) {
 	if !filepath.IsAbs(projectDir) || !filepath.IsAbs(source) {
 		return Repo{}, errors.New("project and repository paths must be absolute")
 	}
-	r := Repo{root: projectDir, source: source, prepare: prepare}
+	r := Repo{root: projectDir, source: source, prepare: prepare, sign: sign}
 	if _, err := run(ctx, source, "rev-parse", "--git-dir"); err != nil {
 		return Repo{}, fmt.Errorf("%s is not a git repository", source)
 	}
@@ -123,8 +124,6 @@ func (r Repo) configure(ctx context.Context) error {
 	for _, kv := range [][2]string{
 		{"core.hooksPath", "/dev/null"},
 		{"core.fsmonitor", "false"},
-		{"commit.gpgsign", "false"},
-		{"tag.gpgsign", "false"},
 		{"user.name", author},
 		{"user.email", authorKey},
 	} {
@@ -253,7 +252,7 @@ func (r Repo) MergeClean(ctx context.Context, tip, commit, message string) (stri
 	if len(lines) == 0 {
 		return "", errors.New("git merge-tree wrote no tree")
 	}
-	out, err := run(ctx, r.Workspace(), "commit-tree", lines[0], "-p", tip, "-p", commit, "-m", message)
+	out, err := r.commit(ctx, "commit-tree", lines[0], "-p", tip, "-p", commit, "-m", message)
 	return strings.TrimSpace(out), err
 }
 
@@ -304,7 +303,7 @@ func (r Repo) Snapshot(ctx context.Context, base, previous, message string) (str
 	// A merge is recorded even when it changes no files: the task must then
 	// contain what it merged, or it would try to catch up forever.
 	if _, err := run(ctx, r.Workspace(), "diff", "--cached", "--quiet"); err != nil || merging {
-		if _, err = run(ctx, r.Workspace(), "commit", "--quiet", "--no-verify", "-m", message); err != nil {
+		if _, err = r.commit(ctx, "commit", "--quiet", "--no-verify", "-m", message); err != nil {
 			return "", nil, err
 		}
 	}
