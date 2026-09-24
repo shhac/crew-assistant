@@ -541,8 +541,9 @@ describe("settings", () => {
   it("follows the saved appearance when the dashboard loads", async () => {
     state.assistant = { ...state.assistant, theme: "light" };
     render(<App />);
-    await screen.findByRole("heading", { name: "Inbox" });
-    expect(document.documentElement.dataset.theme).toBe("light");
+    await waitFor(() =>
+      expect(document.documentElement.dataset.theme).toBe("light"),
+    );
   });
   it("tells Slack reading apart from the Slack bot", async () => {
     state.integrations = [
