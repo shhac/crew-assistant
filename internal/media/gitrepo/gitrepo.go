@@ -9,7 +9,6 @@
 package gitrepo
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -20,8 +19,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-
-	"github.com/shhac/crew-assistant/internal/media"
 )
 
 const (
@@ -201,19 +198,6 @@ func CurrentBranch(ctx context.Context, dir string) (string, error) {
 	return strings.TrimSpace(current), nil
 }
 
-// validBranch refuses anything git would not take as a branch name, before it
-// reaches a ref or a refspec.
-func validBranch(ctx context.Context, dir, name string) error {
-	if _, err := run(ctx, dir, "check-ref-format", "--branch", name); err != nil {
-		return fmt.Errorf("%q is not a valid branch name", name)
-	}
-	return nil
-}
-
-// fetchQuietly is every fetch the daemon makes: no tags, no submodules, no
-// housekeeping.
-var fetchQuietly = []string{"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-auto-gc"}
-
 // BranchTip reads a branch's tip in a repository without changing anything.
 func BranchTip(ctx context.Context, dir, branch string) (string, error) {
 	if err := validBranch(ctx, dir, branch); err != nil {
@@ -361,150 +345,8 @@ func (r Repo) Reset(ctx context.Context, branch, commit string) error {
 	return err
 }
 
-// Preview shows the owner what a revision changes, cut at limit bytes.
-func (r Repo) Preview(ctx context.Context, base, commit string, limit int) ([]media.File, error) {
-	stat, err := run(ctx, r.Workspace(), "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--stat", "--summary", base+".."+commit)
-	if err != nil {
-		return nil, err
-	}
-	patch, err := run(ctx, r.Workspace(), "diff", "--no-ext-diff", "--no-textconv", "--no-color", base+".."+commit)
-	if err != nil {
-		return nil, err
-	}
-	diff := media.File{Path: "changes.diff", Content: patch, Size: int64(len(patch))}
-	if len(patch) > limit {
-		diff.Content, diff.Truncated = patch[:limit], true
-	}
-	files := []media.File{{Path: "summary", Content: stat, Size: int64(len(stat))}, diff}
-	if attention, err := r.Attention(ctx, base, commit); err == nil && len(attention) > 0 {
-		note := "Look at these before running anything on this branch:\n- " + strings.Join(attention, "\n- ") + "\n"
-		files = append([]media.File{{Path: "attention", Content: note, Size: int64(len(note))}}, files...)
-	}
-	return files, nil
-}
-
-// sensitive names files that run, or instruct agents, when someone next works
-// in the repository: build and package scripts, hooks and editor settings,
-// agent instructions, git attributes and submodules.
-var sensitive = []string{"Makefile", "makefile", "GNUmakefile", "package.json", ".envrc", ".gitattributes", ".gitmodules", "AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", "go.mod", "Dockerfile", ".npmrc"}
-var sensitiveDirs = []string{".claude/", ".codex/", ".agents/", ".husky/", ".vscode/", ".github/", ".githooks/", ".devcontainer/"}
-
-// Attention lists what a change touches that deserves a look before the owner
-// runs anything on the delivered branch: sensitive files, and any change that
-// adds a symlink or makes a file executable.
-func (r Repo) Attention(ctx context.Context, base, commit string) ([]string, error) {
-	out, err := run(ctx, r.Workspace(), "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--raw", base+".."+commit)
-	if err != nil {
-		return nil, err
-	}
-	var notes []string
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 6 {
-			continue
-		}
-		newMode, path := fields[1], fields[len(fields)-1]
-		name := filepath.Base(path)
-		switch {
-		case newMode == "120000":
-			notes = append(notes, path+" is a symlink")
-		case newMode == "100755" && fields[0] != ":100755":
-			notes = append(notes, path+" is executable")
-		}
-		for _, s := range sensitive {
-			if name == s {
-				notes = append(notes, path+" changed")
-			}
-		}
-		for _, d := range sensitiveDirs {
-			if strings.HasPrefix(path, d) || strings.Contains(path, "/"+d) {
-				notes = append(notes, path+" changed")
-				break
-			}
-		}
-	}
-	return notes, nil
-}
-
-// Deliver puts commit on a new branch in the owner's repository without
-// checking anything out there. A branch already at commit counts as
-// delivered, so a retried delivery settles; one pointing elsewhere is left
-// alone and a numbered name is used instead.
-func (r Repo) Deliver(ctx context.Context, taskBranch, commit, name string) (string, error) {
-	tip, err := run(ctx, r.Workspace(), "rev-parse", "refs/heads/"+taskBranch)
-	if err != nil || strings.TrimSpace(tip) != commit {
-		return "", errors.New("the task branch is not at the approved revision")
-	}
-	current, _ := run(ctx, r.source, "symbolic-ref", "--quiet", "--short", "HEAD")
-	for attempt := 1; attempt <= 100; attempt++ {
-		candidate := name
-		if attempt > 1 {
-			candidate = fmt.Sprintf("%s-%d", name, attempt)
-		}
-		if candidate == strings.TrimSpace(current) {
-			continue
-		}
-		if err := validBranch(ctx, r.source, candidate); err != nil {
-			return "", err
-		}
-		existing, err := run(ctx, r.source, "rev-parse", "--verify", "--quiet", "refs/heads/"+candidate)
-		if err == nil {
-			if strings.TrimSpace(existing) == commit {
-				return candidate, nil
-			}
-			continue
-		}
-		// Bring the objects over without naming any branch, then create the
-		// branch only if it still does not exist: a branch that appeared in
-		// between is never moved.
-		if _, err = run(ctx, r.source, append(fetchQuietly, "--no-write-fetch-head", r.Workspace(), "refs/heads/"+taskBranch+":refs/crew-assistant/incoming")...); err != nil {
-			return "", fmt.Errorf("the revision could not be fetched: %w", err)
-		}
-		_, err = run(ctx, r.source, "update-ref", "-m", "crew-assistant delivery", "refs/heads/"+candidate, commit, strings.Repeat("0", len(commit)))
-		_, _ = run(ctx, r.source, "update-ref", "-d", "refs/crew-assistant/incoming")
-		if err != nil {
-			continue
-		}
-		return candidate, nil
-	}
-	return "", errors.New("no free branch name")
-}
-
-// Why a push to a branch the project does not own was refused. None of them
-// is ever answered by forcing: the branch moved, or the owner's checkout of it
-// is theirs to deal with.
-var (
-	ErrTargetMoved   = errors.New("the branch has moved on since this change was checked")
-	ErrCheckedOut    = errors.New("the branch is checked out in the owner's repository, which refuses updates to it")
-	ErrDirtyCheckout = errors.New("the owner's checkout of the branch has uncommitted changes")
-)
-
 // ErrNoChange means a round left the task exactly as it was.
 var ErrNoChange = errors.New("the implementer changed nothing")
-
-// ErrLeaseLost means someone else pushed to a branch the project owns since
-// the project last did. Their commits are taken in, never overwritten.
-var ErrLeaseLost = errors.New("someone else pushed to the branch since the project last did")
-
-// PushOwned updates a branch the project owns on a remote, with a lease on the
-// commit it last pushed there. An empty lease means the project never pushed
-// it, so the branch must not exist yet.
-func (r Repo) PushOwned(ctx context.Context, url, commit, branch, lease string, config []string) error {
-	if err := validBranch(ctx, r.source, branch); err != nil {
-		return err
-	}
-	args := append(append([]string(nil), config...), "push", "--porcelain", "--no-verify", "--force-with-lease=refs/heads/"+branch+":"+lease, url, commit+":refs/heads/"+branch)
-	out, err := run(ctx, r.Workspace(), args...)
-	if err == nil {
-		return nil
-	}
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "!") && strings.Contains(strings.ToLower(line), "stale info") {
-			return ErrLeaseLost
-		}
-	}
-	return err
-}
 
 // FetchFrom brings a remote branch into the clone and returns its tip.
 func (r Repo) FetchFrom(ctx context.Context, url, branch string, config []string) (string, error) {
@@ -518,113 +360,4 @@ func (r Repo) FetchFrom(ctx context.Context, url, branch string, config []string
 	}
 	tip, err := run(ctx, r.Workspace(), "rev-parse", ref)
 	return strings.TrimSpace(tip), err
-}
-
-// receivePack runs the receiving side of a push into the owner's repository
-// with their hooks and file-system monitor off. It also lets this push, and
-// only this push, update a checked-out target in place when the checkout is
-// clean: the project's landing policy is the owner's say-so, so their
-// repository's own config is left alone and every other push into it keeps
-// git's default refusal.
-var receivePack = "git " + strings.Join(append(append([]string(nil), safety...), "-c", "receive.autogc=false", "-c", "receive.denyCurrentBranch=updateInstead"), " ") + " receive-pack"
-
-// PushFastForward lands commit on target in the owner's repository by a plain
-// push: never forced, so it only succeeds when target has not moved past what
-// commit was built on. A checked-out target is updated in place only when the
-// checkout has no uncommitted changes to tracked files.
-func (r Repo) PushFastForward(ctx context.Context, taskBranch, commit, target string) error {
-	tip, err := run(ctx, r.Workspace(), "rev-parse", "refs/heads/"+taskBranch)
-	if err != nil || strings.TrimSpace(tip) != commit {
-		return errors.New("the task branch is not at the approved revision")
-	}
-	if err = validBranch(ctx, r.source, target); err != nil {
-		return err
-	}
-	out, err := run(ctx, r.Workspace(), "push", "--porcelain", "--no-verify", "--receive-pack="+receivePack, r.source, commit+":refs/heads/"+target)
-	if err == nil {
-		return nil
-	}
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.HasPrefix(line, "!") {
-			continue
-		}
-		switch reason := strings.ToLower(line); {
-		case strings.Contains(reason, "non-fast-forward"), strings.Contains(reason, "fetch first"), strings.Contains(reason, "stale info"):
-			return ErrTargetMoved
-		case strings.Contains(reason, "currently checked out"):
-			return ErrCheckedOut
-		case strings.Contains(reason, "working directory"), strings.Contains(reason, "working tree"):
-			return fmt.Errorf("%w: %s", ErrDirtyCheckout, strings.TrimSpace(line[strings.LastIndex(line, "\t")+1:]))
-		}
-	}
-	return err
-}
-
-// run is the only way this package runs git. Hooks, fsmonitor and system
-// configuration are off for every command, wherever it runs.
-func run(ctx context.Context, dir string, args ...string) (string, error) {
-	full := append(append([]string(nil), safety...), args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
-	cmd.Dir = dir
-	cmd.Env = gitEnvironment()
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if len(detail) > 300 {
-			detail = detail[:300]
-		}
-		code := -1
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			code = exit.ExitCode()
-		}
-		return stdout.String(), &gitError{command: args[0], detail: detail, code: code}
-	}
-	return stdout.String(), nil
-}
-
-type gitError struct {
-	command, detail string
-	code            int
-}
-
-func (e *gitError) Error() string { return "git " + e.command + ": " + e.detail }
-
-// safety is prepended to every git command: nothing configured in a
-// repository, the operator's global config or the system can make git run a
-// program as the daemon.
-var safety = []string{
-	"-c", "core.hooksPath=/dev/null",
-	"-c", "core.fsmonitor=false",
-	"-c", "core.attributesFile=/dev/null",
-	"-c", "core.excludesFile=/dev/null",
-	"-c", "core.sshCommand=false",
-	"-c", "gc.auto=0",
-	"-c", "maintenance.auto=false",
-	"-c", "submodule.recurse=false",
-	"-c", "fetch.recurseSubmodules=false",
-	"-c", "diff.external=",
-}
-
-// gitEnvironment keeps the process's ordinary environment but none of its GIT_
-// settings, and ignores global and system git configuration.
-func gitEnvironment() []string {
-	env := []string{}
-	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, "GIT_") {
-			env = append(env, entry)
-		}
-	}
-	return append(env,
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_ATTR_NOSYSTEM=1",
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_PAGER=cat",
-		"GIT_NO_REPLACE_OBJECTS=1",
-		"GIT_OPTIONAL_LOCKS=0",
-		// Refusals are read from git's own words.
-		"LC_ALL=C",
-	)
 }

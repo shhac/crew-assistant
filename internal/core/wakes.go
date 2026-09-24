@@ -236,40 +236,6 @@ func settleTaskWakes(v *Snapshot, now time.Time) {
 	}
 }
 
-// queueWakeTurn adds the wake to the assistant's queued wake-up turn, so
-// several that fire while it is busy arrive together, each with its own times.
-func queueWakeTurn(v *Snapshot, id string, now time.Time) {
-	for i := range v.ChatTurns {
-		t := &v.ChatTurns[i]
-		if t.Status == "queued" && t.Origin == OriginWake {
-			t.WakeIDs = append(t.WakeIDs, id)
-			return
-		}
-	}
-	v.ChatTurns = append(v.ChatTurns, ChatTurn{ID: uid(), Message: "Wake-up", Status: "queued", CreatedAt: now, Origin: OriginWake, WakeIDs: []string{id}})
-	v.ChatQueueRevision++
-}
-
-func removeFromWakeTurns(v *Snapshot, id string, now time.Time) {
-	for i := range v.ChatTurns {
-		t := &v.ChatTurns[i]
-		if t.Status != "queued" || t.Origin != OriginWake {
-			continue
-		}
-		kept := t.WakeIDs[:0]
-		for _, w := range t.WakeIDs {
-			if w != id {
-				kept = append(kept, w)
-			}
-		}
-		t.WakeIDs = kept
-		if len(kept) == 0 {
-			t.Status, t.FinishedAt = "cancelled", &now
-			v.ChatQueueRevision++
-		}
-	}
-}
-
 // cancelTaskWakes ends a finished task's wakes: nobody is left to wake.
 func cancelTaskWakes(v *Snapshot, taskID string) {
 	for i := range v.Wakes {
