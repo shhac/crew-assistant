@@ -1,14 +1,10 @@
 import { recordedTime } from "./ui";
+import { approveLabel } from "./landing";
 import {
   pendingDecisions,
   type Decision,
-  type LandPolicy,
-  type Learning,
-  type Member,
-  type MemberKind,
   type Playbook,
   type Project,
-  type Role,
   type Stage,
   type Task,
   type TeamMessage,
@@ -49,89 +45,6 @@ export const projectKind = (playbook?: Playbook) =>
 /** A request keeps the team it started with after the project's changes. */
 export const taskPlaybook = (task?: Task, project?: Project) =>
   task?.playbook ?? project?.playbook;
-
-export const engines = [
-  { id: "claude", label: "Claude" },
-  { id: "codex", label: "Codex" },
-];
-export const engineLabel = (id: string) =>
-  engines.find((e) => e.id === id)?.label ?? id;
-
-export const memberKinds: { id: MemberKind; label: string }[] = [
-  { id: "implementer", label: "Implementer" },
-  { id: "reviewer", label: "Reviewer" },
-  { id: "qa", label: "QA" },
-];
-export const kindLabel = (kind: string) =>
-  memberKinds.find((k) => k.id === kind)?.label ?? kind;
-
-/** "Implementer · Claude opus": what a member is and what it runs on. */
-export const memberSummary = (m: Member) =>
-  [
-    kindLabel(m.kind),
-    [engineLabel(m.engine), m.model].filter(Boolean).join(" "),
-  ].join(" · ");
-
-/** The open projects whose team has this member in a role. */
-export const memberProjects = (member: Member, projects: Project[]) =>
-  projects.filter(
-    (p) =>
-      p.status !== "completed" &&
-      p.playbook?.roles.some((r) => r.member === member.id),
-  );
-
-/**
- * A learning's heading is when it applies. One without that is headed by
- * its first sentence, and the rest follows, so nothing is said twice.
- */
-export function learningParts(learning: Learning) {
-  const text = learning.text.trim();
-  if (learning.when) return { heading: learning.when, body: text };
-  const first = /^[\s\S]*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
-  return { heading: first, body: text.slice(first.length).trim() };
-}
-
-/** Who recorded a learning, and where. */
-export function learnedBy(
-  learning: Learning,
-  member: string,
-  assistant: string,
-  project?: string,
-) {
-  const who =
-    learning.source === "member"
-      ? `${member} learned this`
-      : learning.source === "assistant"
-        ? `Added by ${assistant}`
-        : "You added this";
-  return project ? `${who} on ${project}` : who;
-}
-
-/** The member behind the role of a request's team with this name. */
-export function roleMember(
-  roles: Role[] | undefined,
-  name: string | undefined,
-  members: Member[],
-) {
-  const id = roles?.find((r) => r.name === name)?.member;
-  return id ? members.find((m) => m.id === id) : undefined;
-}
-
-/**
- * The member at work on a request now: the implementer while it writes,
- * the checker named while it is checked, and no one otherwise.
- */
-export function atWork(task: Task, members: Member[]) {
-  if (task.status === "writing")
-    return roleMember(
-      task.roles,
-      task.roles?.find((r) => r.kind === "implementer")?.name,
-      members,
-    );
-  if (task.status === "reviewing" || task.status === "deciding")
-    return roleMember(task.roles, task.checking, members);
-  return undefined;
-}
 
 export const isOpenMessage = (m: TeamMessage) =>
   m.status === "waiting" || m.status === "working";
@@ -338,91 +251,4 @@ export function leadRequest(own: Task[]) {
   return own
     .filter((t) => !finished(t))
     .sort((a, b) => groupOrder[a.status] - groupOrder[b.status])[0];
-}
-
-/** How a pull request merges, when the owner hasn't said. */
-export const mergeMethod = (land?: LandPolicy) => land?.method || "squash";
-
-export interface LandingWay {
-  /** The way itself, as the landing settings name it. */
-  label: string;
-  landsBy: (land: LandPolicy) => string;
-  reversibility: string;
-  approve: (land: LandPolicy) => string;
-  happens: (land: LandPolicy, playbook: Playbook) => string[];
-  /** The merge method saved for this way, from the one the owner chose. */
-  method: (chosen: string) => string;
-}
-
-export const landingWays: Record<string, LandingWay> = {
-  branch: {
-    label: "A new local branch",
-    landsBy: () => "New local branch",
-    reversibility: "Undoable",
-    approve: () => "Create branch",
-    happens: (_, playbook) => [
-      `A new branch starting ${playbook.branch_prefix ?? "crew/"} is created in your repository.`,
-      "Nothing is pushed.",
-    ],
-    method: () => "",
-  },
-  push: {
-    label: "Fast-forward a branch",
-    landsBy: (land) => `Fast-forward ${land.target}`,
-    reversibility: "Undoable with effort",
-    approve: (land) => `Land on ${land.target}`,
-    happens: (land) => [
-      `${land.target} moves forward to include this change. Nothing already on it is replaced.`,
-      `If ${land.target} is checked out, your checkout updates too; if it has uncommitted changes, landing stops and asks you first.`,
-    ],
-    method: () => "fast-forward",
-  },
-  "pull-request": {
-    label: "A pull request on GitHub",
-    landsBy: (land) => `Pull request · ${mergeMethod(land)}`,
-    reversibility: "Permanent once merged",
-    approve: () => "Open pull request",
-    happens: (land) => [
-      `A pull request opens on ${land.github} into ${land.target}.`,
-      "The team answers its reviews and fixes failing checks.",
-      `It merges by ${mergeMethod(land)} once GitHub says it's approved and green.`,
-    ],
-    method: (chosen) => chosen,
-  },
-};
-
-/** The way named, if this dashboard knows it. */
-export const wayFor = (via?: string): LandingWay | undefined =>
-  via && Object.hasOwn(landingWays, via) ? landingWays[via] : undefined;
-
-/** How a policy lands; one with no way it knows lands as a new branch. */
-const landingWay = (land?: LandPolicy) =>
-  wayFor(land?.via) ?? landingWays.branch;
-
-/** How a project's approved work leaves it, in a few words. */
-export function landsBy(playbook?: Playbook): string {
-  if (!playbook) return "No team yet";
-  if (!isCode(playbook))
-    return playbook.deliver_to ? "Copied to a folder" : "Stays on its page";
-  return landingWay(playbook.land).landsBy(playbook.land ?? {});
-}
-
-export function reversibility(land?: LandPolicy): string {
-  return landingWay(land).reversibility;
-}
-
-/** The approve button's words: what approving actually does. */
-export function approveLabel(playbook?: Playbook): string {
-  if (!playbook || !isCode(playbook))
-    return playbook?.deliver_to ? "Approve and copy" : "Approve";
-  return landingWay(playbook.land).approve(playbook.land ?? {});
-}
-
-/** What approving leads to, step by step. */
-export function whatHappens(playbook?: Playbook): string[] {
-  if (!playbook || !isCode(playbook))
-    return playbook?.deliver_to
-      ? [`The draft is copied into ${playbook.deliver_to}.`]
-      : ["The draft stays here, marked approved."];
-  return landingWay(playbook.land).happens(playbook.land ?? {}, playbook);
 }

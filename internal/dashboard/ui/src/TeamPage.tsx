@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { MemberForm } from "./MemberForm";
 import { memberHref } from "./router";
-import { memberProjects, memberSummary } from "./stages";
+import { memberProjects, memberSummary } from "./members";
 import { Avatar, counted } from "./ui";
 import type { Member, State } from "./api";
 

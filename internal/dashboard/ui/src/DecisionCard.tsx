@@ -3,10 +3,10 @@ import { requestHref, projectHref } from "./router";
 import {
   decisionKind,
   isCode,
-  reversibility,
   taskPlaybook,
   type DecisionKindWords,
 } from "./stages";
+import { reversibility } from "./landing";
 import { ErrorNotice, Pill, sinceLabel, useAction } from "./ui";
 import {
   dismissDecision,

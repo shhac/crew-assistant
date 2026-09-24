@@ -1,25 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
-  approveLabel,
   boardColumns,
   decisionFor,
   decisionKind,
   isOpenMessage,
-  landsBy,
-  learnedBy,
-  learningParts,
   leadRequest,
-  mergeMethod,
   projectGroup,
   projectKind,
   projectTasks,
   requestStep,
   requestTone,
-  reversibility,
   taskPlaybook,
   underWay,
-  wayFor,
-  whatHappens,
 } from "./stages";
 import type { Decision, Playbook, Project, Task } from "./api";
 
@@ -301,96 +293,5 @@ describe("projects", () => {
     expect(taskPlaybook(task({ playbook: pb }), project(writing))).toBe(pb);
     expect(taskPlaybook(task({}), project(writing))).toBe(writing);
     expect(taskPlaybook(undefined, undefined)).toBeUndefined();
-  });
-  it("says how approved work leaves a project, and what approving does", () => {
-    expect(landsBy(undefined)).toBe("No team yet");
-    expect(landsBy(writing)).toBe("Stays on its page");
-    expect(landsBy(code())).toBe("Fast-forward main");
-    expect(
-      landsBy(code({ via: "pull-request", target: "main", method: "merge" })),
-    ).toBe("Pull request · merge");
-    expect(landsBy(code({}))).toBe("New local branch");
-    expect(approveLabel(code())).toBe("Land on main");
-    expect(approveLabel(code({ via: "pull-request", target: "main" }))).toBe(
-      "Open pull request",
-    );
-    expect(approveLabel(code({}))).toBe("Create branch");
-    expect(approveLabel(writing)).toBe("Approve");
-    expect(approveLabel({ ...writing, deliver_to: "/out" })).toBe(
-      "Approve and copy",
-    );
-    expect(reversibility({ via: "push" })).toBe("Undoable with effort");
-    expect(reversibility({ via: "pull-request" })).toBe(
-      "Permanent once merged",
-    );
-    expect(reversibility({})).toBe("Undoable");
-    expect(whatHappens(code())[0]).toContain("main moves forward");
-    expect(
-      whatHappens(
-        code({ via: "pull-request", target: "main", github: "o/r" }),
-      )[0],
-    ).toBe("A pull request opens on o/r into main.");
-    expect(whatHappens({ ...writing, deliver_to: "/out" })).toEqual([
-      "The draft is copied into /out.",
-    ]);
-    expect(whatHappens(code({}))).toEqual([
-      "A new branch starting crew/ is created in your repository.",
-      "Nothing is pushed.",
-    ]);
-    expect(
-      whatHappens(
-        code({ via: "pull-request", target: "main", github: "o/r" }),
-      )[2],
-    ).toBe("It merges by squash once GitHub says it's approved and green.");
-    // A way this dashboard doesn't know lands as a new branch.
-    expect(landsBy(code({ via: "carrier-pigeon" }))).toBe("New local branch");
-    expect(reversibility({ via: "carrier-pigeon" })).toBe("Undoable");
-    expect(wayFor("carrier-pigeon")).toBeUndefined();
-    expect(wayFor("push")?.method("squash")).toBe("fast-forward");
-    expect(wayFor("pull-request")?.method("rebase")).toBe("rebase");
-    expect(wayFor("branch")?.method("squash")).toBe("");
-    expect(mergeMethod({ method: "merge" })).toBe("merge");
-    expect(mergeMethod(undefined)).toBe("squash");
-  });
-});
-
-describe("learnings", () => {
-  const at = "2026-09-20T10:00:00Z";
-  it("heads a learning with when it applies, then its text", () => {
-    expect(
-      learningParts({
-        id: "l1",
-        when: "Reviewing error handling",
-        text: "Check every error is wrapped. Say where.",
-        at,
-      }),
-    ).toEqual({
-      heading: "Reviewing error handling",
-      body: "Check every error is wrapped. Say where.",
-    });
-  });
-  it("heads one without a when by its first sentence, without repeating it", () => {
-    expect(
-      learningParts({ id: "l1", text: "Run the linter first. It's fast.", at }),
-    ).toEqual({ heading: "Run the linter first.", body: "It's fast." });
-    expect(learningParts({ id: "l1", text: "Keep commits small", at })).toEqual(
-      { heading: "Keep commits small", body: "" },
-    );
-    expect(
-      learningParts({ id: "l1", text: "Use v1.2 of the API. Always.", at }),
-    ).toEqual({ heading: "Use v1.2 of the API.", body: "Always." });
-  });
-  it("says who recorded a learning and where", () => {
-    const l = { id: "l1", text: "x", at };
-    expect(learnedBy({ ...l, source: "owner" }, "Ada", "Iris")).toBe(
-      "You added this",
-    );
-    expect(learnedBy(l, "Ada", "Iris")).toBe("You added this");
-    expect(learnedBy({ ...l, source: "assistant" }, "Ada", "Iris")).toBe(
-      "Added by Iris",
-    );
-    expect(
-      learnedBy({ ...l, source: "member" }, "Ada", "Iris", "Launch note"),
-    ).toBe("Ada learned this on Launch note");
   });
 });

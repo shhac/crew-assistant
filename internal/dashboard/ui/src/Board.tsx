@@ -5,8 +5,8 @@ import {
   type ReactNode,
 } from "react";
 import { projectHref, requestHref } from "./router";
+import { atWork } from "./members";
 import {
-  atWork,
   boardColumns,
   decisionFor,
   isOpenMessage,

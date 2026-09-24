@@ -5,7 +5,7 @@ import {
   reversibility,
   wayFor,
   whatHappens,
-} from "./stages";
+} from "./landing";
 import { ErrorNotice, useAction } from "./ui";
 import { setLanding, type Project } from "./api";
 

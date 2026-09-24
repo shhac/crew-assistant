@@ -2,7 +2,8 @@ import { useState, type FormEvent } from "react";
 import { FileSystemPicker } from "./FileSystemPicker";
 import { Folders } from "./ProjectFolders";
 import { memberHref } from "./router";
-import { engineLabel, engines, isCode } from "./stages";
+import { isCode } from "./stages";
+import { engineLabel, engines } from "./members";
 import { Avatar, ErrorNotice, useAction } from "./ui";
 import {
   setTeam,

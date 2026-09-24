@@ -5,7 +5,8 @@ import { LandingTab } from "./ProjectLanding";
 import { ActivityTab } from "./ProjectActivity";
 import { RequestPanel } from "./RequestPanel";
 import { href, projectHref, type ProjectTab, type Route } from "./router";
-import { isCode, landsBy, needsYou, projectKind, projectTasks } from "./stages";
+import { isCode, needsYou, projectKind, projectTasks } from "./stages";
+import { landsBy } from "./landing";
 import { Icon, Pill } from "./ui";
 import type { Project, State } from "./api";
 

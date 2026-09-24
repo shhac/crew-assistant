@@ -3,7 +3,6 @@ import { projectHref } from "./router";
 import {
   decisionFor,
   finished,
-  landsBy,
   leadRequest,
   needsYou,
   projectGroup,
@@ -12,6 +11,7 @@ import {
   projectTasks,
   requestStep,
 } from "./stages";
+import { landsBy } from "./landing";
 import { Pill, sinceLabel } from "./ui";
 import type { Project, State } from "./api";
 

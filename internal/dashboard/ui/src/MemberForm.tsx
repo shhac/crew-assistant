@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { engines, memberKinds } from "./stages";
+import { engines, memberKinds } from "./members";
 import { ErrorNotice, useAction } from "./ui";
 import { saveMember, type Member, type MemberKind } from "./api";
 

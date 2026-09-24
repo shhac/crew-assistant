@@ -7,7 +7,7 @@ import {
   learningParts,
   memberProjects,
   memberSummary,
-} from "./stages";
+} from "./members";
 import {
   Avatar,
   ErrorNotice,
