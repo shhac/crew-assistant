@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/engine"
 )
 
 func call(t *testing.T, a *App, tool string, in any) any {
@@ -94,5 +95,13 @@ func TestTheAssistantWaitsOnSeveralThingsAndCancelsWhatItNoLongerNeeds(t *testin
 	raw, _ := json.Marshal(map[string]string{"on": "pr_checks", "project_id": "", "target": "shhac/x#1", "match": "", "prompt": "", "timeout": ""})
 	if _, err = a.Execute(ctx, "wake_me_when", raw); err == nil {
 		t.Fatal("waiting on a pull request was accepted before it is built")
+	}
+}
+
+func TestEveryAssistantToolHasALabelTheOwnerCanRead(t *testing.T) {
+	for _, tool := range engine.Tools() {
+		if _, ok := core.ChatToolLabel(tool.Function.Name); !ok {
+			t.Errorf("%s has no label, so any turn that uses it fails", tool.Function.Name)
+		}
 	}
 }

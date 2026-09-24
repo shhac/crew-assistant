@@ -44,10 +44,10 @@ func TestChatQueueIdempotencyContextAndAtomicMessages(t *testing.T) {
 	if _, err = s.StartNextChat(ctx); !errors.Is(err, ErrConflict) {
 		t.Fatal(err)
 	}
-	if err = s.RecordChatTool(ctx, turn.ID, "event-1", "prepare_worker", "running"); err != nil {
+	if err = s.RecordChatTool(ctx, turn.ID, "event-1", "set_team", "running"); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.RecordChatTool(ctx, turn.ID, "event-1", "prepare_worker", "completed"); err != nil {
+	if err = s.RecordChatTool(ctx, turn.ID, "event-1", "set_team", "completed"); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.FinishChat(ctx, turn.ID, "completed", "The worker is ready.", ""); err != nil {
@@ -58,7 +58,7 @@ func TestChatQueueIdempotencyContextAndAtomicMessages(t *testing.T) {
 	if len(snap.Messages) != 2 || turns[0].AssistantMessageID != snap.Messages[1].ID || turns[0].UserMessageID != snap.Messages[0].ID {
 		t.Fatal(turns, snap.Messages)
 	}
-	if turns[0].Events[0].Label != "Prepare a worker" || turns[0].Events[0].FinishedAt == nil {
+	if turns[0].Events[0].Label != "Choose the project's team" || turns[0].Events[0].FinishedAt == nil {
 		t.Fatal(turns[0].Events)
 	}
 	if _, err = s.CancelChat(ctx, "second"); err != nil {
@@ -120,7 +120,7 @@ func TestChatRestartInterruptsOnlyStartedTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.RecordChatTool(ctx, t1.ID, "event", "prepare_worker", "running"); err != nil {
+	if err = s.RecordChatTool(ctx, t1.ID, "event", "set_team", "running"); err != nil {
 		t.Fatal(err)
 	}
 	if err = st.Close(); err != nil {

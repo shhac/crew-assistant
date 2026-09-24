@@ -304,11 +304,18 @@ func (s *Service) RecordChatTool(ctx context.Context, turnID, eventID, tool, sta
 }
 
 var chatToolLabels = map[string]string{
-	"list_worker_models": "Check available worker models", "configure_worker": "Configure the project worker",
-	"queue_work_item": "Queue the next outcome", "unqueue_work_item": "Withdraw queued work", "create_work_item": "Define an outcome", "steer_work_item": "Record direction for the outcome", "accept_work_item": "Accept reviewed work",
-	"prepare_worker": "Prepare a worker", "list_connections": "Check available connections", "query_connection": "Read connected information",
-	"read_state": "Check project context", "create_project": "Add a project", "update_project": "Update the project brief", "delegate": "Coordinate an agent",
-	"ask_decision": "Prepare a decision", "remember_preference": "Remember a preference", "message_agent": "Message an agent", "inspect_agent": "Inspect a worker", "control_agent": "Control a worker", "complete_project": "Confirm project completion", "report_status": "Record a progress update",
+	"list_connections": "Check available connections", "query_connection": "Read connected information",
+	"read_state": "Check project context", "create_project": "Add a project", "update_brief": "Update the project brief",
+	"set_team": "Choose the project's team", "set_landing": "Set where changes land", "queue_task": "Ask the team for an outcome",
+	"stop_task": "Stop a task", "land_task": "Land a delivered change", "resolve_decision": "Answer a decision",
+	"ask_decision": "Prepare a decision", "remember_preference": "Remember a preference", "report_status": "Record a progress update",
+	"wake_me_when": "Ask to be woken later", "list_wakes": "Check wake-ups", "cancel_wake": "Cancel a wake-up",
+}
+
+// ChatToolLabel is what the owner sees while the assistant uses a tool.
+func ChatToolLabel(tool string) (string, bool) {
+	label, ok := chatToolLabels[tool]
+	return label, ok
 }
 
 // OriginWake marks a chat turn and message the daemon wrote to deliver
