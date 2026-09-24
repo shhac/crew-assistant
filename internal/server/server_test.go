@@ -17,6 +17,12 @@ import (
 // ownerServer is a dashboard over a fresh store, called as the owner.
 func ownerServer(t *testing.T) (*core.Service, func(method, path, body string) *httptest.ResponseRecorder) {
 	t.Helper()
+	a, call := ownerApp(t)
+	return a.Core, call
+}
+
+func ownerApp(t *testing.T) (*app.App, func(method, path, body string) *httptest.ResponseRecorder) {
+	t.Helper()
 	dir := t.TempDir()
 	cfg := config.Default()
 	store, err := core.Open(filepath.Join(dir, "state.db"))
@@ -28,7 +34,7 @@ func ownerServer(t *testing.T) (*core.Service, func(method, path, body string) *
 	a := app.New(s, cfg, filepath.Join(dir, "config.json"), false)
 	auth, _ := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
 	h := New(a, auth)
-	return s, func(method, path, body string) *httptest.ResponseRecorder {
+	return a, func(method, path, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://127.0.0.1:8340"+path, strings.NewReader(body))
 		r.RemoteAddr = "127.0.0.1:4321"
 		r.Header.Set("Authorization", "Bearer "+auth.admin)

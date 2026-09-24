@@ -14,6 +14,8 @@ type Assistant struct {
 	Avatar      config.Avatar `json:"avatar"`
 	// AvatarSVG is the avatar drawn, for the dashboard's tab icon and chat.
 	AvatarSVG string `json:"avatar_svg,omitempty"`
+	Drawing   bool   `json:"drawing,omitempty"`
+	DrawError string `json:"draw_error,omitempty"`
 }
 
 // Project is an ongoing area of the owner's work: what it is for (its brief),

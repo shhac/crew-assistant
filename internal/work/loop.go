@@ -661,6 +661,12 @@ func (lp *Loop) holdForUsage(ctx context.Context, t core.Task, r core.Role) (boo
 
 // usageWait is when the role may run again, and why, while its subscription
 // is past the owner's threshold; zero when it may run now.
+// UsageWait is when an engine may be used again, if the owner's usage limit
+// holds it now, and why.
+func (lp *Loop) UsageWait(ctx context.Context, engine string) (time.Time, string) {
+	return lp.usageWait(ctx, core.Role{Engine: engine})
+}
+
 func (lp *Loop) usageWait(ctx context.Context, r core.Role) (time.Time, string) {
 	cfg := lp.Config()
 	threshold, supported := quota.Threshold(cfg.Limits.RoleUsage, r.Engine)

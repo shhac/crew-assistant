@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/shhac/crew-assistant/internal/avatars"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,6 +37,11 @@ type App struct {
 	statuses         map[string]core.Integration
 	// Work runs the teams' tasks and wakes agents.
 	Work *work.Loop
+	// Painter draws avatars; nil draws with Codex.
+	Painter  avatars.Painter
+	paint    sync.Mutex      // One drawing at a time.
+	life     context.Context // The daemon's run; drawings stop with it.
+	drawings sync.WaitGroup
 }
 
 func New(s *core.Service, cfg config.Config, path string, demo bool) *App {
@@ -43,6 +49,10 @@ func New(s *core.Service, cfg config.Config, path string, demo bool) *App {
 	a.Work = work.New(s, a.Config, demo)
 	return a
 }
+
+// Avatars keeps the pictures Codex draws.
+func (a *App) Avatars() avatars.Store { return avatars.NewStore(a.Core.StateDirectory()) }
+
 func (a *App) Config() config.Config { a.mu.RLock(); defer a.mu.RUnlock(); return a.cfg }
 func (a *App) UpdateConfig(cfg config.Config) error {
 	a.mu.Lock()

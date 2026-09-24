@@ -22,6 +22,33 @@ type Service struct {
 	mu    sync.RWMutex
 	cfg   config.Config
 	now   func() time.Time
+	// drawing is each picture being drawn or that failed, by member id or
+	// DrawingAssistant. It is not stored: a restart forgets a drawing it
+	// could not finish.
+	drawing map[string]Drawing
+}
+
+// DrawingAssistant keys the assistant's own picture in the drawing status.
+const DrawingAssistant = "assistant"
+
+type Drawing struct {
+	Busy  bool
+	Error string
+}
+
+func (s *Service) SetDrawing(key string, d Drawing) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.drawing == nil {
+		s.drawing = map[string]Drawing{}
+	}
+	s.drawing[key] = d
+}
+
+func (s *Service) DrawingOf(key string) Drawing {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.drawing[key]
 }
 
 func NewService(store *Store, cfg config.Config) *Service {
@@ -43,8 +70,13 @@ func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	// A loaded configuration is valid, so its avatar always draws.
 	svg, _ := cfg.Assistant.Avatar.SVG()
 	v.Assistant = Assistant{Name: cfg.Assistant.Name, Personality: cfg.Assistant.Personality, Theme: cfg.Assistant.Theme, Avatar: cfg.Assistant.Avatar, AvatarSVG: svg}
+	d := s.DrawingOf(DrawingAssistant)
+	v.Assistant.Drawing, v.Assistant.DrawError = d.Busy, d.Error
 	for i := range v.Members {
-		v.Members[i].AvatarSVG, _ = v.Members[i].Avatar.SVG()
+		m := &v.Members[i]
+		m.AvatarSVG, _ = m.Avatar.SVG()
+		d := s.DrawingOf(m.ID)
+		m.Drawing, m.DrawError = d.Busy, d.Error
 	}
 	v.PendingOperations = []PendingOperation{}
 	for id, done := range v.Events {

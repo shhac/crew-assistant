@@ -41,7 +41,7 @@ func fixtureDrawing() map[string]any {
 	}}
 }
 func fixtureProposal() map[string]any {
-	return map[string]any{"name": "Juniper", "personality": "Be concise and calm; bring a recommendation with the evidence.", "avatar": fixtureDrawing(), "rationale": "A calm botanical identity suits the preference for measured communication."}
+	return map[string]any{"name": "Juniper", "personality": "Be concise and calm; bring a recommendation with the evidence.", "avatar": fixtureDrawing(), "look": "Short silver hair and a green scarf", "rationale": "A calm botanical identity suits the preference for measured communication."}
 }
 
 func TestIdentityInterviewPreviewsThenAppliesOnlyAcceptedRecommendation(t *testing.T) {
@@ -115,14 +115,21 @@ func TestIdentityInterviewPreviewsThenAppliesOnlyAcceptedRecommendation(t *testi
 	if err = a.UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
+	painter := &fakePainter{}
+	a.Painter = painter
 	identity, err := a.ApplyIdentity(ctx, state.Recommendation.ID, true)
 	if err != nil {
 		t.Fatal(err)
+	}
+	a.WaitForDrawings()
+	if drawn := a.Config().Assistant.Avatar; drawn.Image == "" || drawn.Look != "Short silver hair and a green scarf" || !strings.Contains(painter.seen[0], "green scarf") {
+		t.Fatalf("applying should have Codex draw the assistant: %+v", drawn)
 	}
 	if identity.Name != "Juniper" || len(identity.Avatar.Marks) != 2 || identity.Avatar.Marks[1].D != "M31 91 83 43" || identity.Avatar.Accent != "#91b5e8" || a.Config().Limits.MaxModelTurns != 7 {
 		t.Fatal(identity)
 	}
 	persisted, err := config.Load(a.configPath)
+	identity.Avatar.Image = a.Config().Assistant.Avatar.Image
 	if err != nil || !reflect.DeepEqual(persisted.Assistant, identity) {
 		t.Fatal("applied identity missing from config", err)
 	}

@@ -60,6 +60,15 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 			return nil, err
 		}
 		return a.Work.SetTeam(ctx, in.ProjectID, work.TeamChoice{Template: in.Template, WriterEngine: in.WriterEngine, ReviewerEngine: in.ReviewerEngine, MaxRounds: in.MaxRounds, DeliverTo: in.DeliverTo, Repo: in.Repo, BranchPrefix: in.BranchPrefix, Check: in.Check, Prepare: in.Prepare, Sign: in.Sign, Implementer: in.ImplementerMember, Reviewer: in.ReviewerMember, QA: in.QAMember})
+	case "draw_member":
+		var in engine.DrawMemberArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		if err := a.DrawMember(ctx, in.MemberID, in.Look); err != nil {
+			return nil, err
+		}
+		return map[string]string{"status": "Drawing; it takes a few minutes."}, nil
 	case "record_learning":
 		var in engine.RecordLearningArgs
 		if err := args(raw, &in); err != nil {

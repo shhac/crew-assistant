@@ -18,7 +18,8 @@ import (
 func (a *App) Run(ctx context.Context, noDispatch bool) error {
 	ctx, cancel := context.WithCancel(ctx)
 	var listeners sync.WaitGroup
-	defer func() { cancel(); listeners.Wait() }()
+	a.setLife(ctx)
+	defer func() { cancel(); listeners.Wait(); a.WaitForDrawings() }()
 	if a.Demo {
 		<-ctx.Done()
 		return nil

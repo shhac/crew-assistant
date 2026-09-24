@@ -17,6 +17,11 @@ type Avatar struct {
 	Background string `json:"background"`
 	Accent     string `json:"accent"`
 	Marks      []Mark `json:"marks,omitempty"`
+	// Image is a picture Codex drew, by its id in the avatar store; it is
+	// shown in place of the preset or marks, which stay as the fallback.
+	Image string `json:"image,omitempty"`
+	// Look is how the picture was described when it was drawn.
+	Look string `json:"look,omitempty"`
 }
 
 // Mark is one path on a 128-unit square. A zero stroke width fills it.
@@ -49,9 +54,17 @@ func (a Avatar) Normalized() Avatar {
 	return a
 }
 
+var imageID = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
 func (a Avatar) Validate() error {
 	if !hexColor.MatchString(a.Background) || !hexColor.MatchString(a.Accent) {
 		return errors.New("colors must be #RRGGBB")
+	}
+	if a.Image != "" && !imageID.MatchString(a.Image) {
+		return errors.New("image must name a drawn picture")
+	}
+	if len(a.Look) > 600 {
+		return errors.New("look must be at most 600 characters")
 	}
 	if len(a.Marks) == 0 {
 		if _, ok := presets[a.Shape]; !ok {

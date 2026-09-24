@@ -25,8 +25,11 @@ type Member struct {
 	Effort       string        `json:"effort,omitempty"`
 	Instructions string        `json:"instructions,omitempty"`
 	Avatar       config.Avatar `json:"avatar"`
-	// AvatarSVG is drawn when the state is read, never stored.
+	// AvatarSVG and the drawing status are filled in when the state is
+	// read, never stored.
 	AvatarSVG string     `json:"avatar_svg,omitempty"`
+	Drawing   bool       `json:"drawing,omitempty"`
+	DrawError string     `json:"draw_error,omitempty"`
 	Learnings []Learning `json:"learnings"`
 	CreatedAt time.Time  `json:"created_at"`
 }
@@ -134,8 +137,11 @@ func (s *Service) SaveMember(ctx context.Context, id string, in MemberInput) (Me
 		}
 		m.Name, m.Kind, m.Engine = strings.TrimSpace(in.Name), in.Kind, in.Engine
 		m.Model, m.Effort, m.Instructions = strings.TrimSpace(in.Model), strings.TrimSpace(in.Effort), strings.TrimSpace(in.Instructions)
+		// A drawn picture is changed only by drawing again.
 		if in.Avatar != nil {
-			m.Avatar = in.Avatar.Normalized()
+			next := in.Avatar.Normalized()
+			next.Image, next.Look = m.Avatar.Image, m.Avatar.Look
+			m.Avatar = next
 		}
 		out = *m
 		return nil
@@ -284,4 +290,17 @@ func withLearnings(v *Snapshot, roles []Role) []Role {
 		}
 	}
 	return out
+}
+
+// SetMemberPicture records a picture drawn for a member, and how it was
+// described.
+func (s *Service) SetMemberPicture(ctx context.Context, id, image, look string) error {
+	return s.store.update(ctx, func(v *Snapshot) error {
+		m := member(v, id)
+		if m == nil {
+			return ErrNotFound
+		}
+		m.Avatar.Image, m.Avatar.Look = image, look
+		return nil
+	})
 }
