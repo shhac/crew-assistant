@@ -100,7 +100,12 @@ func (lp *Loop) SetTeam(ctx context.Context, projectID string, in TeamChoice) (c
 	if err = playbook.Validate(); err != nil {
 		return core.Project{}, err
 	}
-	return lp.Core.SetPlaybook(ctx, projectID, playbook)
+	// Queued work may have been waiting on a team, so look again now.
+	p, err := lp.Core.SetPlaybook(ctx, projectID, playbook)
+	if err == nil {
+		lp.Nudge()
+	}
+	return p, err
 }
 
 // SetLanding sets what landing means for a code project. The owner and the

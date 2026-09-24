@@ -354,3 +354,34 @@ func TestStoppingATaskSticksEvenMidTurn(t *testing.T) {
 		t.Fatalf("stopping twice: %v", err)
 	}
 }
+
+// Choosing a team wakes the loop, whoever chose it, so queued work that was
+// waiting on a team starts now rather than at the next tick.
+func TestChoosingATeamWakesTheLoop(t *testing.T) {
+	a := testLoop(t)
+	ctx := context.Background()
+	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Notes", Brief: core.BriefInput{Goal: "Notes", Criteria: []string{"Short"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-a.loopWake:
+	default:
+	}
+	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-a.loopWake:
+	default:
+		t.Fatal("setting a team did not wake the loop")
+	}
+	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "nonsense"}); err == nil {
+		t.Fatal("an unknown template was accepted")
+	}
+	select {
+	case <-a.loopWake:
+		t.Fatal("a refused team woke the loop")
+	default:
+	}
+}

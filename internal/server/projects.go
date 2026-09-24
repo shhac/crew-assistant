@@ -35,7 +35,6 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 			problem(w, err)
 			return
 		}
-		a.Work.Nudge()
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("PUT /api/projects/{id}/landing", func(w http.ResponseWriter, r *http.Request) {

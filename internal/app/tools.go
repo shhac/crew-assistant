@@ -50,7 +50,9 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 			return nil, err
 		}
 		project, err := a.Core.UpdateBrief(ctx, in.ProjectID, core.BriefInput{Goal: in.Goal, Audience: in.Audience, Constraints: in.Constraints, Criteria: in.Criteria})
-		a.Work.Nudge()
+		if err == nil {
+			a.Work.Nudge()
+		}
 		return project, err
 	case "set_team":
 		var in engine.SetTeamArgs
@@ -93,7 +95,9 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 			return nil, err
 		}
 		queued, err := a.Core.QueueTask(ctx, in.ProjectID, core.TaskInput{Objective: in.Objective, Criteria: in.Criteria})
-		a.Work.Nudge()
+		if err == nil {
+			a.Work.Nudge()
+		}
 		return queued, err
 	case "stop_task":
 		var in engine.StopTaskArgs
