@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/shhac/crew-assistant/internal/config"
 )
@@ -170,6 +171,11 @@ func (in LearningInput) clean() (LearningInput, error) {
 	}
 	if len(in.When) > 160 {
 		return in, errors.New("when it applies is at most 160 characters")
+	}
+	// A when becomes a line of every later task's instructions; a second
+	// line there could pass for another learning or an instruction.
+	if strings.ContainsFunc(in.When, unicode.IsControl) {
+		return in, errors.New("when it applies must be one line")
 	}
 	return in, nil
 }

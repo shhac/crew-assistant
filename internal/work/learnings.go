@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/text"
@@ -38,13 +39,14 @@ func (lp *Loop) learningsIndex(t core.Task, r core.Role) (string, string, error)
 	for i := len(r.Learnings) - 1; i >= 0; i-- {
 		l := r.Learnings[i]
 		path := filepath.Join(dir, fmt.Sprintf("%02d.md", i+1))
-		body := []byte(fmt.Sprintf("When: %s\n\n%s\n", when(l), l.Text))
+		situation := oneLine(when(l))
+		body := []byte(fmt.Sprintf("When: %s\n\n%s\n", situation, l.Text))
 		if old, err := os.ReadFile(path); err != nil || !bytes.Equal(old, body) {
 			if err := os.WriteFile(path, body, 0o600); err != nil {
 				return "", "", err
 			}
 		}
-		fmt.Fprintf(&b, "- %s: %s\n", when(l), path)
+		fmt.Fprintf(&b, "- %s: %s\n", situation, path)
 	}
 	return dir, strings.TrimRight(b.String(), "\n"), nil
 }
@@ -60,6 +62,17 @@ func when(l core.Learning) string {
 		first = first[:i]
 	}
 	return text.Clip(first, 120)
+}
+
+// oneLine keeps a learning to its own line of the index, whatever an older
+// state let its when hold.
+func oneLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 // sweepLearnings removes the copies kept for tasks that have finished.

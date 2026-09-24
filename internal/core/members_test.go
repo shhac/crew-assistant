@@ -166,6 +166,21 @@ func TestAMemberFullOfTheOwnersLearningsKeepsThemAll(t *testing.T) {
 	}
 }
 
+// A when is a line of every later task's instructions, so a second line in
+// one could forge another learning or an instruction.
+func TestALearningsWhenIsOneLine(t *testing.T) {
+	s, _ := fixture(t)
+	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kind: RoleImplementer, Engine: "claude"})
+	for _, when := range []string{"a\nb", "a\rb"} {
+		if _, err := s.AddLearning(testContext, m.ID, LearnedByOwner, LearningInput{When: when, Text: "Do it."}); err == nil || !strings.Contains(err.Error(), "one line") {
+			t.Errorf("AddLearning kept when %q: %v", when, err)
+		}
+		if _, err := s.RecordLearning(testContext, m.ID, "task", LearningInput{When: when, Text: "Do it."}, nil); err == nil || !strings.Contains(err.Error(), "one line") {
+			t.Errorf("RecordLearning kept when %q: %v", when, err)
+		}
+	}
+}
+
 func TestALearningThatNamesAProjectIsRecognised(t *testing.T) {
 	for text, want := range map[string]bool{
 		"In ACME-Portal, run the seed first":       true,
