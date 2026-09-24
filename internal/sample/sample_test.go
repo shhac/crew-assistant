@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shhac/crew-assistant/internal/avatars"
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/media/localdocs"
@@ -39,6 +40,9 @@ func TestTheSampleShowsWorkAtEveryStageAndNeverTouchesRealState(t *testing.T) {
 	for _, m := range snap.Members {
 		if !strings.HasPrefix(m.AvatarSVG, "<svg") {
 			t.Errorf("member %s cannot be drawn: %+v", m.Name, m.Avatar)
+		}
+		if _, ok := avatars.NewStore(s.StateDirectory()).Path(m.Avatar.Image, "small"); !ok || m.Avatar.Look == "" {
+			t.Errorf("member %s has no drawn face: %+v", m.Name, m.Avatar)
 		}
 	}
 	for _, task := range snap.Tasks {

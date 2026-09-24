@@ -5,10 +5,13 @@ package sample
 
 import (
 	"context"
+	"embed"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/shhac/crew-assistant/internal/avatars"
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/media/localdocs"
@@ -20,6 +23,9 @@ func Seed(ctx context.Context, s *core.Service, dir string) error {
 	now := time.Now().UTC()
 	ago := func(d time.Duration) time.Time { return now.Add(-d) }
 	sample := build(dir, ago)
+	if err := drawMembers(sample.Members, avatars.NewStore(s.StateDirectory())); err != nil {
+		return err
+	}
 	for _, p := range sample.Projects {
 		for _, folder := range p.Directories {
 			if err := os.MkdirAll(folder, 0700); err != nil {
@@ -32,6 +38,33 @@ func Seed(ctx context.Context, s *core.Service, dir string) error {
 		return err
 	}
 	return writeDrafts(seeded)
+}
+
+// The sample members' faces, drawn once by Codex in the team's style.
+//
+//go:embed avatars/*.png
+var faces embed.FS
+
+var looks = map[string]string{
+	"demo-ada":  "Short violet bob, determined bright eyes, small round glasses, on yellow.",
+	"demo-rune": "Messy sky-blue hair with a cowlick, calm thoughtful eyes, a pencil behind one ear, on deep teal.",
+}
+
+// drawMembers puts each sample member's face in the avatar store.
+func drawMembers(members []core.Member, store avatars.Store) error {
+	for i := range members {
+		name := strings.TrimPrefix(members[i].ID, "demo-")
+		data, err := faces.ReadFile("avatars/" + name + ".png")
+		if err != nil {
+			continue
+		}
+		image, err := store.Put(data)
+		if err != nil {
+			return err
+		}
+		members[i].Avatar.Image, members[i].Avatar.Look = image, looks[members[i].ID]
+	}
+	return nil
 }
 
 var (
