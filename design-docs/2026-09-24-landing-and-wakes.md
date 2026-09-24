@@ -1,6 +1,6 @@
 # Landing and wake-ups
 
-Proposal date: 2026-09-24. Status: design, being built.
+Proposal date: 2026-09-24. Status: built the same day; see "As built" at the end.
 Pinned to `crew-assistant` at `fadf0a2` and `lib-agent-harness` `v0.3.4`.
 
 Extends [project teams](2026-09-23-project-teams.md). It changes what happens
@@ -211,3 +211,49 @@ limits is reported back in the next round rather than silently dropped.
 
 - The `pull-request` way has only been tested against a stand-in for GitHub
   (a local repository and a scripted `gh`), not a real one.
+
+## As built (2026-09-24)
+
+A review before building, and the build itself, changed a few things. The
+text above is the design as proposed; this section records how the built
+code differs.
+
+- **Catch-up compares against a fresh tip.** For `push` and `pull-request`,
+  what a task must include is the target's current tip, fetched each time.
+  It is never the project's record of what landed: that record had pointed
+  at a stacked branch, and would have merged the second change into the
+  first.
+- **Clean merges need no working tree.** The daemon builds them with
+  `git merge-tree` and `commit-tree`. Only a conflict goes through the clone's
+  working tree, to the implementer. A merge that changes no files is still
+  recorded, or the task would try to catch up forever.
+- **An approval stands only through clean merges.** Walking back from the
+  latest draft, every step must be a clean merge, ending at the approved
+  draft. Reviewer passes carry over only if they were given against the
+  current brief. Commits someone else pushed to a pull request's branch never
+  carry anything over.
+- **Order is enforced.** A change built on another that has not landed is
+  refused. A change already on the target is recorded as landed, with no
+  push.
+- **A moving target has a limit.** After four catch-ups the owner is asked.
+  Landing failures become decisions, never retry timers, because a timer on
+  the running task holds up every other project.
+- **Pushes into the owner's repository** run the receiving side with the full
+  safety list, plus `receive.autogc=false`. Local transport drops `-c`
+  settings, so they are passed through `--receive-pack`. Git's messages are
+  read with `LC_ALL=C`.
+- **Wake-ups.** A wake-up on a task fires inside the state change that
+  matches it. An assistant's wake-ups count as delivered only when its turn
+  completes; a failed turn offers them again, up to three attempts.
+  Cancelling a wake-up turn cancels its wake-ups.
+- **Landing is its own setting.** Choosing a team no longer changes where it
+  lands. Landing is set through `set_landing`, `PUT
+  /api/projects/{id}/landing`, or the team card.
+- **Landing work delivered earlier:** the dashboard's "Land on main" button
+  and the assistant's `land_task`.
+- **What the assistant reads each turn is now compact:** finished tasks show
+  only their outcome. The first live run failed on the full state; see
+  [the first landings](reference/2026-09-24-first-landings.md).
+- **Tool labels.** The table of labels shown for assistant tool calls was
+  still the table from before the rebuild. It is now tested against the
+  tools the assistant is offered.
