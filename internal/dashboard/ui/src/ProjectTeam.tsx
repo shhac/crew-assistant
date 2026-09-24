@@ -1,9 +1,17 @@
 import { useState, type FormEvent } from "react";
 import { FileSystemPicker } from "./FileSystemPicker";
 import { Folders } from "./ProjectFolders";
+import { memberHref } from "./router";
 import { engineLabel, engines, isCode } from "./stages";
-import { ErrorNotice, useAction } from "./ui";
-import { setTeam, type Playbook, type Project, type Role } from "./api";
+import { Avatar, ErrorNotice, useAction } from "./ui";
+import {
+  setTeam,
+  type Member,
+  type MemberKind,
+  type Playbook,
+  type Project,
+  type Role,
+} from "./api";
 
 const signing: Record<string, string> = {
   "": "Signed as your git config says",
@@ -13,9 +21,11 @@ const signing: Record<string, string> = {
 
 export function TeamTab({
   project,
+  members,
   refresh,
 }: {
   project: Project;
+  members: Member[];
   refresh: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -26,6 +36,7 @@ export function TeamTab({
         {editing ? (
           <TeamEditor
             project={project}
+            members={members}
             onDone={() => setEditing(false)}
             refresh={refresh}
           />
@@ -42,7 +53,7 @@ export function TeamTab({
               </button>
             </div>
             {playbook ? (
-              <TeamView playbook={playbook} />
+              <TeamView playbook={playbook} members={members} />
             ) : (
               <p className="muted">No team yet, so nothing can be asked for.</p>
             )}
@@ -54,13 +65,21 @@ export function TeamTab({
   );
 }
 
-function TeamView({ playbook }: { playbook: Playbook }) {
+function TeamView({
+  playbook,
+  members,
+}: {
+  playbook: Playbook;
+  members: Member[];
+}) {
   const code = isCode(playbook);
   return (
     <dl className="facts">
       {playbook.roles.map((role) => (
         <div key={role.name} className="fact-row">
-          <dt>{role.name}</dt>
+          <dt>
+            <RoleName role={role} members={members} />
+          </dt>
           <dd>{engineLabel(role.engine)}</dd>
         </div>
       ))}
@@ -106,18 +125,46 @@ function TeamView({ playbook }: { playbook: Playbook }) {
   );
 }
 
+/**
+ * A role by the name it was given when the team was chosen. Verdicts are
+ * recorded against that name, so a member renamed since keeps its old one
+ * here.
+ */
+function RoleName({ role, members }: { role: Role; members: Member[] }) {
+  const member = members.find((m) => m.id === role.member);
+  if (!member) return <>{role.name}</>;
+  return (
+    <a className="role-member" href={memberHref(member.id)}>
+      <Avatar svg={member.avatar_svg} size={20} />
+      {role.name}
+    </a>
+  );
+}
+
 const firstEngine = (
   roles: Role[] | undefined,
   kind: string,
   fallback: string,
 ) => roles?.find((r) => r.kind === kind)?.engine ?? fallback;
 
+/** The member a slot was filled with, while that member is still on the team. */
+function chosenMember(
+  roles: Role[] | undefined,
+  kind: MemberKind,
+  members: Member[],
+) {
+  const id = roles?.find((r) => r.kind === kind)?.member;
+  return members.some((m) => m.id === id && m.kind === kind) ? (id ?? "") : "";
+}
+
 function TeamEditor({
   project,
+  members,
   onDone,
   refresh,
 }: {
   project: Project;
+  members: Member[];
   onDone: () => void;
   refresh: () => Promise<void>;
 }) {
@@ -138,6 +185,13 @@ function TeamEditor({
   const [reviewer, setReviewer] = useState(
     firstEngine(playbook?.roles, "reviewer", "codex"),
   );
+  const [who, setWho] = useState<Record<MemberKind, string>>(() => ({
+    implementer: chosenMember(playbook?.roles, "implementer", members),
+    reviewer: chosenMember(playbook?.roles, "reviewer", members),
+    qa: chosenMember(playbook?.roles, "qa", members),
+  }));
+  const choose = (kind: MemberKind) => (id: string) =>
+    setWho((current) => ({ ...current, [kind]: id }));
   const [rounds, setRounds] = useState(String(playbook?.max_rounds ?? 3));
   const [deliverTo, setDeliverTo] = useState(playbook?.deliver_to ?? "");
   const [picking, setPicking] = useState(false);
@@ -149,6 +203,9 @@ function TeamEditor({
         template,
         writer_engine: writer,
         reviewer_engine: reviewer,
+        implementer_member: who.implementer,
+        reviewer_member: who.reviewer,
+        qa_member: code ? who.qa : "",
         max_rounds: rounds,
         ...(code
           ? {
@@ -187,18 +244,35 @@ function TeamEditor({
           </label>
         )}
         <div className="form-row">
-          <EngineSelect
-            id="team-writer"
+          <TeamSlot
+            kind="implementer"
             label={code ? "Implementer" : "Writer"}
-            value={writer}
-            onChange={setWriter}
+            members={members}
+            who={who.implementer}
+            onWho={choose("implementer")}
+            engine={{ id: "team-writer", value: writer, onChange: setWriter }}
           />
-          <EngineSelect
-            id="team-reviewer"
+          <TeamSlot
+            kind="reviewer"
             label="Reviewer"
-            value={reviewer}
-            onChange={setReviewer}
+            members={members}
+            who={who.reviewer}
+            onWho={choose("reviewer")}
+            engine={{
+              id: "team-reviewer",
+              value: reviewer,
+              onChange: setReviewer,
+            }}
           />
+          {code && (
+            <TeamSlot
+              kind="qa"
+              label="QA"
+              members={members}
+              who={who.qa}
+              onWho={choose("qa")}
+            />
+          )}
           <label htmlFor="team-rounds">
             Rounds before asking you
             <input
@@ -334,6 +408,60 @@ function TeamEditor({
         />
       )}
     </>
+  );
+}
+
+/**
+ * One place on the team: who fills it, and the engine it runs on. A member
+ * brings its own engine, so the engine is asked only of the template's role.
+ */
+function TeamSlot({
+  kind,
+  label,
+  members,
+  who,
+  onWho,
+  engine,
+}: {
+  kind: MemberKind;
+  label: string;
+  members: Member[];
+  who: string;
+  onWho: (id: string) => void;
+  engine?: { id: string; value: string; onChange: (value: string) => void };
+}) {
+  const options = members.filter((m) => m.kind === kind);
+  if (!options.length && !engine) return null;
+  return (
+    <fieldset className="team-slot">
+      <legend>{label}</legend>
+      {options.length > 0 && (
+        <label htmlFor={`team-${kind}-member`}>
+          Who
+          <select
+            id={`team-${kind}-member`}
+            className="field"
+            value={who}
+            onChange={(e) => onWho(e.target.value)}
+          >
+            <option value="">Template default</option>
+            {options.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {engine && !who && (
+        <EngineSelect
+          id={engine.id}
+          label="Engine"
+          value={engine.value}
+          onChange={engine.onChange}
+        />
+      )}
+    </fieldset>
   );
 }
 

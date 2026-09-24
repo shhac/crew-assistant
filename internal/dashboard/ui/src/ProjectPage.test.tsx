@@ -14,6 +14,7 @@ import {
   normalizeState,
   type Decision,
   type LandPolicy,
+  type Member,
   type Playbook,
   type Project,
   type State,
@@ -113,6 +114,7 @@ function show(
     tasks?: Task[];
     decisions?: Decision[];
     activity?: State["activity"];
+    members?: Member[];
   } = {},
   at: { tab?: ProjectTab; request?: string } = {},
 ) {
@@ -483,6 +485,31 @@ describe("a request", () => {
       },
     ]);
   });
+  it("prompts by the kind of role, never lowercasing a member's name", () => {
+    const roles = [
+      { name: "Ada", kind: "implementer", engine: "claude", member: "m1" },
+      { name: "Rune", kind: "reviewer", engine: "codex", member: "m2" },
+      { name: "QA", kind: "qa", engine: "codex" },
+    ];
+    show(
+      project(),
+      {
+        tasks: [started({ status: "writing", stage: "implementing", roles })],
+      },
+      { request: "t1" },
+    );
+    const box = screen.getByLabelText("Message");
+    expect(box.getAttribute("placeholder")).toBe(
+      "Tell the implementer what to change",
+    );
+    fireEvent.change(screen.getByLabelText("To"), {
+      target: { value: "Rune" },
+    });
+    expect(box.getAttribute("placeholder")).toBe(
+      "Ask the reviewer to check something",
+    );
+    expect(screen.getByRole("button", { name: "Send to Rune" })).toBeTruthy();
+  });
   it("keeps an answer to a decision that repeats a message to the implementer", () => {
     const told = started({
       status: "writing",
@@ -644,6 +671,9 @@ describe("the project's tabs", () => {
           template: "code",
           writer_engine: "claude",
           reviewer_engine: "codex",
+          implementer_member: "",
+          reviewer_member: "",
+          qa_member: "",
           max_rounds: "3",
           deliver_to: "",
           repo: "/work/service",
@@ -664,6 +694,111 @@ describe("the project's tabs", () => {
       within(team).getByText("Signed as your git config says"),
     ).toBeTruthy();
     expect(screen.getByRole("region", { name: "Folders" })).toBeTruthy();
+  });
+  const member = (id: string, name: string, kind: Member["kind"]): Member => ({
+    id,
+    name,
+    kind,
+    engine: "claude",
+    avatar_svg: `<svg xmlns="http://www.w3.org/2000/svg"><title>${name}</title></svg>`,
+    learnings: [],
+  });
+  const crew = [
+    member("m1", "Ada Lovelace", "implementer"),
+    member("m2", "Rune", "reviewer"),
+    member("m3", "Quinn", "qa"),
+  ];
+  const staffed = () =>
+    project({
+      playbook: {
+        ...codeTeam(),
+        roles: [
+          { name: "Ada", kind: "implementer", engine: "claude", member: "m1" },
+          { name: "Reviewer", kind: "reviewer", engine: "codex" },
+          { name: "QA", kind: "qa", engine: "codex" },
+        ],
+      },
+    });
+  it("shows a member by the name its role was given, with its face and page", () => {
+    show(staffed(), { members: crew }, { tab: "team" });
+    const team = screen.getByRole("region", { name: "Team" });
+    const ada = within(team).getByRole("link", { name: "Ada" });
+    expect(ada.getAttribute("href")).toBe("#/team/m1");
+    expect(ada.querySelector("img")?.getAttribute("width")).toBe("20");
+    expect(within(team).queryByText("Ada Lovelace")).toBeNull();
+    expect(within(team).queryByRole("link", { name: "Reviewer" })).toBeNull();
+  });
+  it("keeps a team's members when it is saved again, and asks the engine only of the template's roles", async () => {
+    show(staffed(), { members: crew }, { tab: "team" });
+    fireEvent.click(
+      within(screen.getByRole("region", { name: "Team" })).getByRole("button", {
+        name: "Edit",
+      }),
+    );
+    const team = screen.getByRole("form", { name: "Team" });
+    const implementer = within(team).getByRole("group", {
+      name: "Implementer",
+    });
+    expect(within(implementer).getByLabelText("Who")).toHaveProperty(
+      "value",
+      "m1",
+    );
+    expect(within(implementer).queryByLabelText("Engine")).toBeNull();
+    const reviewer = within(team).getByRole("group", { name: "Reviewer" });
+    expect(
+      within(within(reviewer).getByLabelText("Who"))
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Template default", "Rune"]);
+    expect(within(reviewer).getByLabelText("Engine")).toBeTruthy();
+    fireEvent.change(within(reviewer).getByLabelText("Who"), {
+      target: { value: "m2" },
+    });
+    expect(within(reviewer).queryByLabelText("Engine")).toBeNull();
+    const qa = within(team).getByRole("group", { name: "QA" });
+    fireEvent.change(within(qa).getByLabelText("Who"), {
+      target: { value: "m3" },
+    });
+    fireEvent.click(within(team).getByRole("button", { name: "Save team" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()[0].body).toMatchObject({
+      template: "code",
+      implementer_member: "m1",
+      reviewer_member: "m2",
+      qa_member: "m3",
+    });
+  });
+  it("offers no QA for a writing team and no choice where there are no members", async () => {
+    show(
+      project({ playbook: writingTeam }),
+      { members: crew },
+      { tab: "team" },
+    );
+    fireEvent.click(
+      within(screen.getByRole("region", { name: "Team" })).getByRole("button", {
+        name: "Edit",
+      }),
+    );
+    const team = screen.getByRole("form", { name: "Team" });
+    expect(within(team).getByRole("group", { name: "Writer" })).toBeTruthy();
+    expect(within(team).queryByRole("group", { name: "QA" })).toBeNull();
+    fireEvent.click(within(team).getByRole("button", { name: "Save team" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()[0].body).toMatchObject({
+      implementer_member: "",
+      reviewer_member: "",
+      qa_member: "",
+    });
+    cleanup();
+    show(project(), {}, { tab: "team" });
+    fireEvent.click(
+      within(screen.getByRole("region", { name: "Team" })).getByRole("button", {
+        name: "Edit",
+      }),
+    );
+    expect(screen.queryByLabelText("Who")).toBeNull();
+    expect(screen.queryByRole("group", { name: "QA" })).toBeNull();
+    expect(screen.getAllByLabelText("Engine")).toHaveLength(2);
   });
   it("sets where a code team's changes land, on a tab of its own", async () => {
     show(project({ playbook: codeTeam({}) }), {}, { tab: "landing" });

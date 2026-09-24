@@ -92,3 +92,24 @@
 .member-delete {
   padding-top: 8px;
 }
+
+/* Members in a project's team */
+.role-member {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.team-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.team-slot legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}

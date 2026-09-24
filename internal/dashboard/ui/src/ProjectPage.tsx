@@ -90,7 +90,9 @@ export function ProjectPage({
         <Board project={project} state={state} refresh={refresh} />
       )}
       {tab === "brief" && <BriefTab project={project} refresh={refresh} />}
-      {tab === "team" && <TeamTab project={project} refresh={refresh} />}
+      {tab === "team" && (
+        <TeamTab project={project} members={state.members} refresh={refresh} />
+      )}
       {tab === "landing" && <LandingTab project={project} refresh={refresh} />}
       {tab === "activity" && <ActivityTab project={project} state={state} />}
       {route.request && (

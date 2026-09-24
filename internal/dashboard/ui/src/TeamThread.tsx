@@ -26,6 +26,17 @@ function effect(role: Role | undefined, task: Task, waitingOn?: string) {
 }
 
 /**
+ * The box's prompt, by the kind of role rather than its name: a role can be
+ * a member with a name of its own, which must not be lowercased.
+ */
+function prompt(role: Role | undefined, code: boolean) {
+  if (role?.kind === "implementer")
+    return `Tell the ${code ? "implementer" : "writer"} what to change`;
+  if (role?.kind === "qa") return "Ask QA to check something";
+  return "Ask the reviewer to check something";
+}
+
+/**
  * Talking directly to one member of the team: the implementer takes it as
  * direction; a reviewer or QA checks the latest draft with it in mind.
  */
@@ -50,6 +61,7 @@ export function TeamThread({
   const messages = task.messages ?? [];
   const role = team.find((r) => r.name === to);
   const closed = finished(task);
+  const code = isCode(taskPlaybook(task, project));
   async function send(e: FormEvent) {
     e.preventDefault();
     await run(async () => {
@@ -68,7 +80,7 @@ export function TeamThread({
             <MessageView
               key={m.id}
               message={m}
-              made={isCode(taskPlaybook(task, project)) ? "change" : "draft"}
+              made={code ? "change" : "draft"}
             />
           ))}
         </ol>
@@ -105,13 +117,7 @@ export function TeamThread({
             rows={2}
             value={text}
             maxLength={8192}
-            placeholder={
-              role?.kind === "implementer"
-                ? `Tell the ${role.name.toLowerCase()} what to change`
-                : role?.kind === "qa"
-                  ? "Ask QA to check something"
-                  : "Ask for a review of something"
-            }
+            placeholder={prompt(role, code)}
             onChange={(e) => setText(e.target.value)}
           />
           <p className="hint">{effect(role, task, waitingOn)}</p>
