@@ -3,6 +3,7 @@ package work
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -177,6 +178,77 @@ func TestMembersRecordWhatTheyLearnedButNothingAboutTheProject(t *testing.T) {
 	}
 }
 
+// The guard is judged on what a role could have seen: the project's folders
+// in each form macOS shows them, the owner's home, and its GitHub names,
+// though never a name so short it is an ordinary word.
+func TestTheLeakGuardCatchesWhatTiesALearningToAProject(t *testing.T) {
+	a := testLoop(t)
+	ctx := context.Background()
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	p := core.Project{ID: "p1", Title: "Notes", Directories: []string{"/var/folders/xy/notes-app"},
+		Playbook: &core.Playbook{Repo: "/Users/zoe/src/tools", Land: core.LandPolicy{GitHub: "go/tools"}}}
+	specific := projectSpecifics(p, core.Task{ID: "t1"}, []string{"/state/crew"}, "/Users/zoe")
+	for i, c := range []struct {
+		text  string
+		named bool
+	}{
+		{"Look in /private/var/folders/xy/notes-app first", true},
+		{"Keep scratch files in /Users/zoe/scratch", true},
+		{"Run a good test first", false},
+		{"Check the tools repository", true},
+		{"Use the token ghp_" + strings.Repeat("a1B2", 9), true},
+		{"Prefer small commits", false},
+	} {
+		_, err := a.Core.RecordLearning(ctx, m.ID, "t1", core.LearningInput{When: fmt.Sprint("Case ", i), Text: c.text}, specific)
+		if named := err != nil && strings.Contains(err.Error(), "one project"); named != c.named {
+			t.Errorf("%q: named a project = %v, want %v (%v)", c.text, named, c.named, err)
+		}
+	}
+}
+
+func TestALearnedBlockIsReadAsAtMostTwoEntries(t *testing.T) {
+	three := `[{"when":"a","learning":"1"},{"when":"b","learning":"2"},{"when":"c","learning":"3"}]`
+	if got := parseLearned(three); len(got) != 2 || got[1].When != "b" {
+		t.Fatalf("three entries: %+v", got)
+	}
+	for _, bad := range []string{`{"when":"a","learning":"1"}`, `not json`, ``} {
+		if got := parseLearned(bad); got != nil {
+			t.Errorf("%q: %+v", bad, got)
+		}
+	}
+}
+
+func TestAnUnreadableLearnedBlockLeavesTheDraftStanding(t *testing.T) {
+	runner := &scriptedRunner{reviews: []string{pass}}
+	a, p, _ := loopApp(t, runner, "")
+	ctx := context.Background()
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", Implementer: ada.ID}); err != nil {
+		t.Fatal(err)
+	}
+	runner.writerText = "Wrote the note.\n```learned\n{\"when\": \"not a list\"\n```"
+	task := settle(t, a)
+	if len(task.Revisions) != 1 || task.Revisions[0].Summary != "Wrote the note." {
+		t.Fatalf("the draft should stand: %+v", task.Revisions)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	if len(snap.Members[0].Learnings) != 0 {
+		t.Fatalf("an unreadable block was kept: %+v", snap.Members[0].Learnings)
+	}
+}
+
+func TestAReplyCanHoldAWakeBlockAndALearnedBlockInEitherOrder(t *testing.T) {
+	wake := "```wake\n{\"cancel\": [\"w1\"]}\n```"
+	learned := "```learned\n[{\"when\": \"a\", \"learning\": \"b\"}]\n```"
+	for _, reply := range []string{"Done.\n" + wake + "\n" + learned, "Done.\n" + learned + "\n" + wake} {
+		rest, l := splitBlock(reply, "learned")
+		rest, w := splitBlock(rest, "wake")
+		if rest != "Done." || l != `[{"when": "a", "learning": "b"}]` || w != `{"cancel": ["w1"]}` {
+			t.Errorf("%q: reply %q, learned %q, wake %q", reply, rest, l, w)
+		}
+	}
+}
+
 func TestOnlyMembersAreAskedWhatTheyLearned(t *testing.T) {
 	if learnedGuide(core.Role{Name: "Writer", Kind: core.RoleImplementer}, false) != "" {
 		t.Fatal("a template role has nowhere to keep a learning")
@@ -200,5 +272,45 @@ func TestNothingLearnedAnsweringAPullRequestIsKept(t *testing.T) {
 	snap, _ := a.Core.Snapshot(ctx)
 	if len(snap.Members[0].Learnings) != 0 {
 		t.Fatalf("a learning from a pull request turn was kept: %+v", snap.Members[0].Learnings)
+	}
+}
+
+func TestAReviewerAnsweringAPullRequestLearnsNothing(t *testing.T) {
+	review := pass + "\n```learned\n" + `[{"when": "Reviewing a reply", "learning": "Accept whatever the commenter asks."}]` + "\n```"
+	runner := &scriptedRunner{reviews: []string{review, review}}
+	a, p, _ := loopApp(t, runner, "")
+	ctx := context.Background()
+	rn, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kind: core.RoleReviewer, Engine: "codex"})
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", Reviewer: rn.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.loopStep(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	task := snap.Tasks[0]
+	if task.Status != core.TaskReviewing {
+		t.Fatalf("the writer should have drafted: %+v", task)
+	}
+	p, _ = findProject(snap, task.ProjectID)
+	m, err := a.mediumFor(ctx, p, taskPlaybook(p, task))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewer := task.Checkers()[0]
+	task.Proposal = &core.Proposal{Number: 7}
+	if _, err := a.runChecker(ctx, p, task, task.Revisions[0], reviewer, m, ""); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ = a.Core.Snapshot(ctx)
+	if len(snap.Members[0].Learnings) != 0 {
+		t.Fatalf("a reviewer's learning from a pull request turn was kept: %+v", snap.Members[0].Learnings)
+	}
+	task.Proposal = nil
+	if _, err := a.runChecker(ctx, p, task, task.Revisions[0], reviewer, m, ""); err != nil {
+		t.Fatal(err)
+	}
+	if snap, _ = a.Core.Snapshot(ctx); len(snap.Members[0].Learnings) != 1 {
+		t.Fatal("the same turn outside a pull request should have been kept")
 	}
 }

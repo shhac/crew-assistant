@@ -113,34 +113,62 @@ func (lp *Loop) recordLearned(ctx context.Context, p core.Project, t core.Task, 
 	if block == "" || r.Member == "" || proposed(t) {
 		return
 	}
-	var learned []struct {
-		When     string `json:"when"`
-		Learning string `json:"learning"`
-	}
-	if json.Unmarshal([]byte(block), &learned) != nil {
+	learned := parseLearned(block)
+	if len(learned) == 0 {
 		return
 	}
+	home, _ := os.UserHomeDir()
+	specific := projectSpecifics(p, t, []string{lp.Core.StateDirectory(), m.workspace()}, home)
+	for _, l := range learned {
+		lp.Core.RecordLearning(ctx, r.Member, t.ID, core.LearningInput{When: l.When, Text: l.Learning, ProjectID: p.ID}, specific)
+	}
+}
+
+type learnedEntry struct {
+	When     string `json:"when"`
+	Learning string `json:"learning"`
+}
+
+// parseLearned reads a learned block: at most two entries, and none from a
+// block that is not the list asked for.
+func parseLearned(block string) []learnedEntry {
+	var learned []learnedEntry
+	if json.Unmarshal([]byte(block), &learned) != nil {
+		return nil
+	}
+	return learned[:min(len(learned), 2)]
+}
+
+// minSpecific is the shortest name that counts as naming a project; shorter
+// ones, such as a GitHub owner called "go", are ordinary words.
+const minSpecific = 4
+
+// projectSpecifics are the words that tie a learning to this project: its
+// ids and title, the owner's home, its GitHub owner and repository, and its
+// folders as a role may have seen them. dirs are the other folders the turn
+// could see.
+func projectSpecifics(p core.Project, t core.Task, dirs []string, home string) []string {
 	specific := []string{p.ID, t.ID, t.Branch}
-	if len(p.Title) >= 4 {
+	if len(p.Title) >= minSpecific {
 		specific = append(specific, p.Title)
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		specific = append(specific, pathForms(home)...)
-	}
-	dirs := append([]string{lp.Core.StateDirectory(), m.workspace()}, p.Directories...)
+	specific = append(specific, pathForms(home)...)
+	dirs = append(append([]string(nil), dirs...), p.Directories...)
 	if playbook := taskPlaybook(p, t); playbook != nil {
 		dirs = append(dirs, playbook.Repo)
-		specific = append(specific, strings.Split(playbook.Land.GitHub, "/")...)
+		for _, name := range strings.Split(playbook.Land.GitHub, "/") {
+			if len(name) >= minSpecific {
+				specific = append(specific, name)
+			}
+		}
 	}
 	for _, dir := range dirs {
 		specific = append(specific, pathForms(dir)...)
-		if base := filepath.Base(dir); len(base) >= 4 && dir != "" {
+		if base := filepath.Base(dir); len(base) >= minSpecific {
 			specific = append(specific, base)
 		}
 	}
-	for _, l := range learned[:min(len(learned), 2)] {
-		lp.Core.RecordLearning(ctx, r.Member, t.ID, core.LearningInput{When: l.When, Text: l.Learning, ProjectID: p.ID}, specific)
-	}
+	return specific
 }
 
 // pathForms is a folder as a role may have seen it: as given, with links
