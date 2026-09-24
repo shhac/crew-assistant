@@ -119,3 +119,33 @@ func TestOneTaskRunsAtATimeWithRolesCopiedAtStart(t *testing.T) {
 		}
 	}
 }
+
+func TestLandingPoliciesSayOnlyWhatTheWayNeeds(t *testing.T) {
+	code := Templates["code"]
+	code.Repo, code.BranchPrefix, code.Check = "/work/repo", "crew/", "make check"
+	for _, tc := range []struct {
+		land LandPolicy
+		ok   bool
+	}{
+		{LandPolicy{}, true},
+		{LandPolicy{Via: LandPush, Target: "main", Means: "fast-forward main"}, true},
+		{LandPolicy{Via: LandPush, Target: "main", Method: "squash"}, false},
+		{LandPolicy{Via: LandPush}, false},
+		{LandPolicy{Via: LandPush, Target: "main..x"}, false},
+		{LandPolicy{Via: LandPullRequest, Target: "main", GitHub: "shhac/crew-assistant", Method: "squash"}, true},
+		{LandPolicy{Via: LandPullRequest, Target: "main", GitHub: "not a repo"}, false},
+		{LandPolicy{Via: LandBranch, Target: "main"}, false},
+		{LandPolicy{Via: "carrier-pigeon"}, false},
+		{LandPolicy{Approve: "sometimes"}, false},
+	} {
+		code.Land = tc.land
+		if err := code.Validate(); (err == nil) != tc.ok {
+			t.Errorf("%+v: err %v, want ok=%v", tc.land, err, tc.ok)
+		}
+	}
+	docs := Templates["draft"]
+	docs.Land = LandPolicy{Via: LandPush, Target: "main"}
+	if docs.Validate() == nil {
+		t.Error("a writing team accepted a landing policy")
+	}
+}

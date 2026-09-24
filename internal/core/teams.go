@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -69,6 +70,88 @@ type Playbook struct {
 	BranchPrefix string   `json:"branch_prefix,omitempty"`
 	Check        string   `json:"check,omitempty"`
 	Prepare      []string `json:"prepare,omitempty"`
+	// Land says what landing an approved change means for this project. Only
+	// the owner or the assistant sets it; nothing inside the project can.
+	Land LandPolicy `json:"land,omitzero"`
+}
+
+// LandPolicy is what "landing" means for a code project: prose for people and
+// agents, plus the few fields the loop needs to do it.
+type LandPolicy struct {
+	Means string `json:"means,omitempty"`
+	// Via is LandBranch (a new local branch), LandPush (a fast-forward push
+	// onto Target) or LandPullRequest (a GitHub pull request into Target).
+	Via    string `json:"via,omitempty"`
+	Target string `json:"target,omitempty"`
+	// Method is fast-forward for a push, or squash, merge or rebase for a
+	// pull request.
+	Method string `json:"method,omitempty"`
+	// GitHub is the owner/name repository a pull request is opened on.
+	GitHub string `json:"github,omitempty"`
+	// Approve is ApproveBefore (the owner approves before landing, or before a
+	// pull request opens) or ApproveNone.
+	Approve string `json:"approve,omitempty"`
+}
+
+const (
+	LandBranch      = "branch"
+	LandPush        = "push"
+	LandPullRequest = "pull-request"
+	ApproveBefore   = "before"
+	ApproveNone     = "none"
+)
+
+// Way is how a change lands, defaulting to a new branch.
+func (l LandPolicy) Way() string {
+	if l.Via == "" {
+		return LandBranch
+	}
+	return l.Via
+}
+
+// AsksFirst reports whether the owner approves before a change lands.
+func (l LandPolicy) AsksFirst() bool { return l.Approve != ApproveNone }
+
+var githubRepo = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
+
+func (l LandPolicy) validate() error {
+	if len(l.Means) > 2000 {
+		return errors.New("what landing means must fit in 2000 characters")
+	}
+	if l.Approve != "" && l.Approve != ApproveBefore && l.Approve != ApproveNone {
+		return errors.New("approve must be before or none")
+	}
+	switch l.Way() {
+	case LandBranch:
+		if l.Target != "" || l.Method != "" || l.GitHub != "" {
+			return errors.New("landing on a new branch takes no target, method or github repository")
+		}
+	case LandPush:
+		if !branchName(l.Target) {
+			return errors.New("landing by push needs the target branch, such as main")
+		}
+		if l.Method != "" && l.Method != "fast-forward" {
+			return errors.New("a push only lands by fast-forward")
+		}
+	case LandPullRequest:
+		if !branchName(l.Target) {
+			return errors.New("a pull request needs the branch it merges into, such as main")
+		}
+		if !githubRepo.MatchString(l.GitHub) {
+			return errors.New("a pull request needs the GitHub repository as owner/name")
+		}
+		if l.Method != "" && l.Method != "squash" && l.Method != "merge" && l.Method != "rebase" {
+			return errors.New("a pull request merges by squash, merge or rebase")
+		}
+	default:
+		return errors.New("landing is via branch, push or pull-request")
+	}
+	return nil
+}
+
+func branchName(name string) bool {
+	return name != "" && len(name) <= 200 && !strings.HasPrefix(name, "-") && !strings.HasSuffix(name, "/") && !strings.HasSuffix(name, ".lock") &&
+		!strings.ContainsAny(name, " ~^:?*[\\") && !strings.Contains(name, "..") && !strings.Contains(name, "@{")
 }
 
 const (
@@ -105,6 +188,9 @@ var Templates = map[string]Playbook{
 func (p Playbook) Validate() error {
 	switch p.Medium {
 	case MediumDocuments:
+		if p.Land != (LandPolicy{}) {
+			return errors.New("landing policies are for code teams")
+		}
 	case MediumGit:
 		if !filepath.IsAbs(p.Repo) {
 			return errors.New("a code team needs the repository it works on")
@@ -116,6 +202,9 @@ func (p Playbook) Validate() error {
 			if filepath.IsAbs(rel) || strings.HasPrefix(filepath.Clean(rel), "..") {
 				return fmt.Errorf("prepare path %q must be inside the repository", rel)
 			}
+		}
+		if err := p.Land.validate(); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("unsupported medium %q", p.Medium)
@@ -189,12 +278,18 @@ type Task struct {
 	DecisionID   string    `json:"decision_id,omitempty"`
 	// Base, From and Branch record the commit a code task started from, the
 	// owner's branch it was on, and the branch its revisions are committed to.
-	Base        string    `json:"base,omitempty"`
-	From        string    `json:"from,omitempty"`
-	Branch      string    `json:"branch,omitempty"`
-	DeliveredTo string    `json:"delivered_to,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Base        string `json:"base,omitempty"`
+	From        string `json:"from,omitempty"`
+	Branch      string `json:"branch,omitempty"`
+	DeliveredTo string `json:"delivered_to,omitempty"`
+	// Approved is the revision the owner approved to land. A revision that
+	// only merged it cleanly with landed work keeps that approval.
+	Approved int `json:"approved,omitempty"`
+	// Proposal is the pull request a task lands through, and the branch the
+	// project owns for it.
+	Proposal  *Proposal `json:"proposal,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Task statuses. Writing, reviewing and deciding are the loop's own; waiting
@@ -207,10 +302,31 @@ const (
 	TaskWaiting   = "waiting"
 	TaskDelivered = "delivered"
 	TaskStopped   = "stopped"
+	// TaskLanding is landing an approved change; TaskAwaiting is waiting, idle,
+	// for something outside the team (CI, a review) before it can go on.
+	TaskLanding  = "landing"
+	TaskAwaiting = "awaiting"
+	TaskLanded   = "landed"
 )
 
 func (t Task) Active() bool {
-	return t.Status == TaskWriting || t.Status == TaskReviewing || t.Status == TaskDeciding
+	return t.Status == TaskWriting || t.Status == TaskReviewing || t.Status == TaskDeciding || t.Status == TaskLanding
+}
+
+// Finished reports a task that will do nothing more on its own.
+func (t Task) Finished() bool {
+	return t.Status == TaskDelivered || t.Status == TaskLanded || t.Status == TaskStopped
+}
+
+// Proposal is a task's pull request. Branch is owned by the project: it is
+// only ever updated with a lease on Pushed, the last commit pushed there.
+type Proposal struct {
+	Branch string `json:"branch"`
+	Pushed string `json:"pushed,omitempty"`
+	Number int    `json:"number,omitempty"`
+	URL    string `json:"url,omitempty"`
+	// Seen is the newest review or comment already passed to the team.
+	Seen time.Time `json:"seen,omitzero"`
 }
 
 // Revision is one snapshot of the artifact, stamped with the brief it answers.
@@ -218,6 +334,9 @@ type Revision struct {
 	N            int      `json:"n"`
 	BriefVersion int      `json:"brief_version"`
 	Files        []string `json:"files"`
+	// CleanMergeOf is the revision this one merged, unchanged, with work that
+	// landed since. The daemon made it; the task's own change is the same.
+	CleanMergeOf int `json:"clean_merge_of,omitempty"`
 	// Ref identifies the revision in its medium, such as a commit.
 	Ref     string    `json:"ref,omitempty"`
 	Summary string    `json:"summary,omitempty"`
@@ -404,6 +523,9 @@ func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Pro
 		activity, err := fn(t, p)
 		if err != nil {
 			return err
+		}
+		if t.Finished() {
+			cancelTaskWakes(v, t.ID)
 		}
 		t.UpdatedAt = s.now().UTC()
 		if activity != "" {

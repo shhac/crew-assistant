@@ -23,6 +23,10 @@ type ChatTurn struct {
 	AssistantMessageID string     `json:"assistant_message_id,omitempty"`
 	Error              string     `json:"error,omitempty"`
 	LoadingPhrase      string     `json:"loading_phrase,omitempty"`
+	// Origin is empty for the owner's messages, or OriginWake for a turn the
+	// daemon queued to deliver the wakes named in WakeIDs.
+	Origin  string   `json:"origin,omitempty"`
+	WakeIDs []string `json:"wake_ids,omitempty"`
 	// Revision moves when the owner edits a queued message, so an edit that
 	// lost a race with the daemon starting the turn can be refused.
 	Revision int             `json:"revision"`
@@ -123,7 +127,11 @@ func (s *Service) StartNextChat(ctx context.Context) (ChatTurn, error) {
 			t.StartedAt = &now
 			t.UserMessageID = uid()
 			v.ChatQueueRevision++
-			v.Messages = append(v.Messages, Message{ID: t.UserMessageID, Role: "user", Content: t.Message, CreatedAt: now})
+			if t.Origin == OriginWake {
+				// The report is written now, so its delivered time is true.
+				t.Message = wakeTurnMessage(v, t.WakeIDs, now)
+			}
+			v.Messages = append(v.Messages, Message{ID: t.UserMessageID, Role: "user", Content: t.Message, Origin: t.Origin, CreatedAt: now})
 			out = *t
 			return nil
 		}
@@ -292,4 +300,24 @@ var chatToolLabels = map[string]string{
 	"prepare_worker": "Prepare a worker", "list_connections": "Check available connections", "query_connection": "Read connected information",
 	"read_state": "Check project context", "create_project": "Add a project", "update_project": "Update the project brief", "delegate": "Coordinate an agent",
 	"ask_decision": "Prepare a decision", "remember_preference": "Remember a preference", "message_agent": "Message an agent", "inspect_agent": "Inspect a worker", "control_agent": "Control a worker", "complete_project": "Confirm project completion", "report_status": "Record a progress update",
+}
+
+// OriginWake marks a chat turn and message the daemon wrote to deliver
+// wake-ups to the assistant.
+const OriginWake = "wake"
+
+func wakeTurnMessage(v *Snapshot, ids []string, now time.Time) string {
+	var wakes []Wake
+	for _, id := range ids {
+		for i := range v.Wakes {
+			if w := &v.Wakes[i]; w.ID == id && w.Status == WakeFired {
+				w.Status, w.DeliveredAt = WakeDelivered, &now
+				wakes = append(wakes, *w)
+			}
+		}
+	}
+	if len(wakes) == 0 {
+		return "[Wake-up from the daemon, not a message from the owner] The wake-ups this turn was for were cancelled. Nothing to do."
+	}
+	return "[Wake-up from the daemon, not a message from the owner. You asked to be woken; act on your continuation if it still applies, and tell the owner only what they need to know.]\n\n" + WakeReport(wakes, now)
 }
