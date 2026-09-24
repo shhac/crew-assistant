@@ -95,7 +95,7 @@ func completionConfigKeys(t reflect.Type, prefix string) []string {
 func completionConfigValues(key string) []string {
 	switch key {
 	case "assistant.theme":
-		return []string{"graphite-sage", "ink-blue", "charcoal-amber"}
+		return []string{"system", "light", "dark"}
 	case "assistant.avatar.shape":
 		return []string{"orb", "spark", "leaf"}
 	case "dashboard.tailscale":

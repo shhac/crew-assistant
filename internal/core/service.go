@@ -40,7 +40,7 @@ func (s *Service) configuration() config.Config { s.mu.RLock(); defer s.mu.RUnlo
 func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	v, err := s.store.Snapshot(ctx)
 	cfg := s.configuration()
-	v.Assistant = Assistant{Name: cfg.Assistant.Name, Personality: cfg.Assistant.Personality}
+	v.Assistant = Assistant{Name: cfg.Assistant.Name, Personality: cfg.Assistant.Personality, Theme: cfg.Assistant.Theme, Avatar: cfg.Assistant.Avatar}
 	v.PendingOperations = []PendingOperation{}
 	for id, done := range v.Events {
 		if !done {

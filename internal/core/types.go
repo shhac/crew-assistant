@@ -1,11 +1,17 @@
 // Package core owns durable coordination records and deterministic authority checks.
 package core
 
-import "time"
+import (
+	"time"
+
+	"github.com/shhac/crew-assistant/internal/config"
+)
 
 type Assistant struct {
-	Name        string `json:"name"`
-	Personality string `json:"personality"`
+	Name        string        `json:"name"`
+	Personality string        `json:"personality"`
+	Theme       string        `json:"theme"`
+	Avatar      config.Avatar `json:"avatar"`
 }
 
 // Project is an ongoing area of the owner's work: what it is for (its brief),

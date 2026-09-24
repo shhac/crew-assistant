@@ -52,6 +52,7 @@ func (a *App) UpdateConfig(cfg config.Config) error {
 
 // updateConfigLocked requires a.mu to preserve atomic read-modify-write updates.
 func (a *App) updateConfigLocked(cfg config.Config) error {
+	cfg.Assistant.Theme = config.NormalizeTheme(cfg.Assistant.Theme)
 	if err := cfg.Validate(); err != nil {
 		return err
 	}

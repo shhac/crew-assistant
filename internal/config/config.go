@@ -77,6 +77,25 @@ func ApprovedSmallModel(engine, model string) bool {
 	return ok && approved.model == model
 }
 
+// Themes are the dashboard's appearance: the system's choice, light or dark.
+const (
+	ThemeSystem = "system"
+	ThemeLight  = "light"
+	ThemeDark   = "dark"
+)
+
+// NormalizeTheme reads the dark palettes earlier versions offered as dark, so
+// a config file or an open dashboard from before still saves.
+func NormalizeTheme(theme string) string {
+	switch theme {
+	case "graphite-sage", "ink-blue", "charcoal-amber":
+		return ThemeDark
+	case "":
+		return ThemeSystem
+	}
+	return theme
+}
+
 type Assistant struct {
 	Name        string `json:"name"`
 	Personality string `json:"personality"`
@@ -149,7 +168,7 @@ type FilePaths struct {
 func Default() Config {
 	return Config{
 		Chat:        Chat{LoadingPhrases: LoadingPhrases{Enabled: true}},
-		Assistant:   Assistant{Name: DefaultAssistantName, Personality: "Calm, concise and proactive. Bring clear recommendations and evidence; handle the chasing.", Theme: "graphite-sage", Avatar: Avatar{Shape: "orb", Background: "#16211e", Accent: "#a8c5a8"}},
+		Assistant:   Assistant{Name: DefaultAssistantName, Personality: "Calm, concise and proactive. Bring clear recommendations and evidence; handle the chasing.", Theme: ThemeSystem, Avatar: Avatar{Shape: "orb", Background: "#16211e", Accent: "#a8c5a8"}},
 		Dashboard:   Dashboard{Addr: "127.0.0.1:8340", Tailscale: "off", TailscalePort: 8443, AllowedUsers: []string{}},
 		Model:       defaultModel(),
 		Connections: []Connection{},
@@ -235,6 +254,7 @@ func Load(path string) (Config, error) {
 	if err = dec.Decode(new(any)); err != io.EOF {
 		return c, errors.New("config must contain one JSON object")
 	}
+	c.Assistant.Theme = NormalizeTheme(c.Assistant.Theme)
 	return c, c.Validate()
 }
 
@@ -309,9 +329,9 @@ func (c Config) Validate() error {
 		return errors.New("assistant.personality must not exceed 4000 characters")
 	}
 	switch c.Assistant.Theme {
-	case "graphite-sage", "ink-blue", "charcoal-amber":
+	case ThemeSystem, ThemeLight, ThemeDark:
 	default:
-		return errors.New("assistant.theme must be graphite-sage, ink-blue or charcoal-amber")
+		return errors.New("assistant.theme must be system, light or dark")
 	}
 	switch c.Assistant.Avatar.Shape {
 	case "orb", "spark", "leaf":

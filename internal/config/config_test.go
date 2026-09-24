@@ -276,3 +276,20 @@ func TestLoadDiscardsASavedLoadingModelChoice(t *testing.T) {
 		t.Fatal("unknown loading key accepted")
 	}
 }
+
+func TestAnEarlierDarkPaletteLoadsAsDark(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := Save(p, Default()); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(p)
+	legacy := strings.Replace(string(data), `"theme": "system"`, `"theme": "ink-blue"`, 1)
+	if legacy == string(data) {
+		t.Fatal("the saved config has no theme to replace")
+	}
+	os.WriteFile(p, []byte(legacy), 0600)
+	got, err := Load(p)
+	if err != nil || got.Assistant.Theme != ThemeDark {
+		t.Fatalf("theme %q %v", got.Assistant.Theme, err)
+	}
+}

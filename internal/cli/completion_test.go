@@ -56,7 +56,7 @@ func TestConfigCompletionsMatchSetTraversal(t *testing.T) {
 	}{
 		{"model.effort", "m", []string{"max", "medium", "minimal"}},
 		{"dashboard.tailscale", "", []string{"off", "serve"}},
-		{"assistant.theme", "ink", []string{"ink-blue"}},
+		{"assistant.theme", "da", []string{"dark"}},
 		{"model.api_key_env", "", nil},
 		{"connections", "", nil},
 	} {
