@@ -360,6 +360,49 @@ export function criteriaLines(criteria: string[] | string | null): string[] {
 const projectPath = (projectID: string) =>
   `/api/projects/${encodeURIComponent(projectID)}`;
 
+export function getState() {
+  return api<State>("/api/state");
+}
+export function setPaused(paused: boolean) {
+  return api("/api/control", {
+    method: "POST",
+    body: JSON.stringify({ paused }),
+  });
+}
+export function getConfig() {
+  return api<Config>("/api/config");
+}
+export function putConfig(config: Config) {
+  return api("/api/config", { method: "PUT", body: JSON.stringify(config) });
+}
+export function resolveDecision(
+  id: string,
+  body: { choice: string } | { answer: string },
+) {
+  return api(`/api/decisions/${encodeURIComponent(id)}/resolve`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+export function dismissDecision(id: string, reason: string) {
+  return api(`/api/decisions/${encodeURIComponent(id)}/dismiss`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+export function acknowledgeOperation(id: string, note: string) {
+  return api(`/api/operations/${encodeURIComponent(id)}/acknowledge`, {
+    method: "POST",
+    body: JSON.stringify({ note }),
+  });
+}
+export function setDirectories(projectID: string, paths: string[]) {
+  return api<Project>(`${projectPath(projectID)}/directories`, {
+    method: "PUT",
+    body: JSON.stringify({ directories: paths }),
+  });
+}
+
 export function createProject(input: ProjectInput) {
   return api<Project>("/api/projects", {
     method: "POST",

@@ -2,10 +2,16 @@ import { useState, type FormEvent } from "react";
 import { DecisionCard } from "./DecisionCard";
 import { projectHref, requestHref } from "./router";
 import { finished, requestStep, requestTone } from "./stages";
-import { ErrorNotice, Pill, dateLabel, recordedTime, sinceLabel } from "./ui";
 import {
-  api,
-  errorText,
+  ErrorNotice,
+  Pill,
+  dateLabel,
+  recordedTime,
+  sinceLabel,
+  useAction,
+} from "./ui";
+import {
+  acknowledgeOperation,
   pendingDecisions,
   type Decision,
   type PendingOperation,
@@ -173,24 +179,14 @@ function InterruptedCard({
   refresh: () => Promise<void>;
 }) {
   const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const { busy, error, run } = useAction();
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!note.trim() || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      await api(
-        `/api/operations/${encodeURIComponent(operation.id)}/acknowledge`,
-        { method: "POST", body: JSON.stringify({ note: note.trim() }) },
-      );
+    await run(async () => {
+      await acknowledgeOperation(operation.id, note.trim());
       await refresh();
-    } catch (failure) {
-      setError(errorText(failure));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
   return (
     <form className="decision card" onSubmit={submit}>

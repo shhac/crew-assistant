@@ -5,8 +5,15 @@ import { ChatSettings } from "./ChatSettings";
 import { ModelSettings } from "./ModelSettings";
 import { appearanceOf, applyAppearance, type Appearance } from "./appearance";
 import { href } from "./router";
-import { ErrorNotice, Pill, humanStatus } from "./ui";
-import { api, errorText, section, type Config, type State } from "./api";
+import { ErrorNotice, Pill, humanStatus, useAction } from "./ui";
+import {
+  errorText,
+  getConfig,
+  putConfig,
+  section,
+  type Config,
+  type State,
+} from "./api";
 
 const sections = [
   { id: "assistant", label: "Assistant" },
@@ -39,18 +46,18 @@ export function Settings({
     sections.find((s) => s.id === requested)?.id ?? "assistant";
   const [saved, setSaved] = useState<Config | null>(null);
   const [draft, setDraft] = useState<Config | null>(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const saving = useAction();
   useEffect(() => {
     let alive = true;
-    api<Config>("/api/config")
+    getConfig()
       .then((value) => {
         if (!alive) return;
         setSaved(value);
         setDraft(value);
       })
       .catch((e) => {
-        if (alive) setError(errorText(e));
+        if (alive) setLoadError(errorText(e));
       });
     return () => {
       alive = false;
@@ -58,28 +65,22 @@ export function Settings({
   }, []);
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(saved);
   async function put(next: Config) {
-    await api("/api/config", { method: "PUT", body: JSON.stringify(next) });
+    await putConfig(next);
     await refresh();
   }
   async function save(e: FormEvent) {
     e.preventDefault();
     if (!draft) return;
-    setBusy(true);
-    setError("");
-    try {
+    await saving.run(async () => {
       await put(draft);
       setSaved(draft);
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
   // Appearance is applied and kept at once; it never waits on other edits.
   async function chooseAppearance(theme: Appearance) {
     if (!saved || !draft) return;
     applyAppearance(theme);
-    setError("");
+    saving.setError("");
     const next = { ...saved, assistant: { ...saved.assistant, theme } };
     try {
       await put(next);
@@ -87,7 +88,7 @@ export function Settings({
       setDraft({ ...draft, assistant: { ...draft.assistant, theme } });
     } catch (err) {
       applyAppearance(saved.assistant?.theme);
-      setError(errorText(err));
+      saving.setError(errorText(err));
     }
   }
   return (
@@ -109,9 +110,9 @@ export function Settings({
           ))}
         </nav>
         <form className="settings-body" onSubmit={save} aria-label="Settings">
-          <ErrorNotice error={error} />
+          <ErrorNotice error={loadError || saving.error} />
           {!draft ? (
-            !error && <p className="muted">Loading…</p>
+            !loadError && <p className="muted">Loading…</p>
           ) : (
             <>
               {current === "assistant" && (
@@ -120,7 +121,7 @@ export function Settings({
                   config={draft}
                   onChange={setDraft}
                   onApplied={async () => {
-                    const fresh = await api<Config>("/api/config");
+                    const fresh = await getConfig();
                     setSaved(fresh);
                     setDraft(fresh);
                     await refresh();
@@ -215,14 +216,14 @@ export function Settings({
                 <button
                   type="button"
                   className="btn btn-quiet"
-                  disabled={busy}
+                  disabled={saving.busy}
                   onClick={() => setDraft(saved)}
                 >
                   Discard
                 </button>
                 <button
                   className="btn btn-primary"
-                  disabled={busy || !draft?.assistant?.name?.trim()}
+                  disabled={saving.busy || !draft?.assistant?.name?.trim()}
                 >
                   Save
                 </button>

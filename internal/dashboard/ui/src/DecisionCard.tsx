@@ -1,8 +1,14 @@
 import { useState, type FormEvent } from "react";
 import { requestHref, projectHref } from "./router";
 import { approveLabel, isCode, reversibility } from "./stages";
-import { ErrorNotice, Pill, sinceLabel } from "./ui";
-import { api, errorText, type Decision, type Project, type Task } from "./api";
+import { ErrorNotice, Pill, sinceLabel, useAction } from "./ui";
+import {
+  dismissDecision,
+  resolveDecision,
+  type Decision,
+  type Project,
+  type Task,
+} from "./api";
 
 const kindLabel: Record<string, string> = {
   delivery: "Ready to approve",
@@ -54,8 +60,7 @@ export function DecisionCard({
   refresh: () => Promise<void>;
   full?: boolean;
 }) {
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
+  const { busy, error, run } = useAction();
   const [mode, setMode] = useState<"answer" | "dismiss" | "">(
     decision.kind === "question" ? "answer" : "",
   );
@@ -64,28 +69,15 @@ export function DecisionCard({
   const delivery = approvals.has(decision.kind ?? "");
   const closable = !task;
   async function send(value: string, action: "choice" | "answer" | "dismiss") {
-    setBusy(action === "choice" ? value : action);
-    setError("");
-    try {
-      await api(
-        `/api/decisions/${encodeURIComponent(decision.id)}/${action === "dismiss" ? "dismiss" : "resolve"}`,
-        {
-          method: "POST",
-          body: JSON.stringify(
-            action === "dismiss"
-              ? { reason: value }
-              : action === "answer"
-                ? { answer: value }
-                : { choice: value },
-          ),
-        },
-      );
+    await run(async () => {
+      await (action === "dismiss"
+        ? dismissDecision(decision.id, value)
+        : resolveDecision(
+            decision.id,
+            action === "answer" ? { answer: value } : { choice: value },
+          ));
       await refresh();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy("");
-    }
+    });
   }
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -145,7 +137,7 @@ export function DecisionCard({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               maxLength={mode === "dismiss" ? 4096 : 16384}
-              disabled={!!busy}
+              disabled={busy}
               rows={2}
               required
             />
@@ -154,7 +146,7 @@ export function DecisionCard({
             <button
               className="btn btn-primary"
               type="submit"
-              disabled={!!busy || !draft.trim()}
+              disabled={busy || !draft.trim()}
             >
               {mode === "dismiss"
                 ? "Close it"
@@ -174,7 +166,7 @@ export function DecisionCard({
                   key={choice}
                   type="button"
                   className="btn btn-quiet"
-                  disabled={!!busy}
+                  disabled={busy}
                   onClick={() => void send(choice, "choice")}
                 >
                   {choiceLabel(choice, decision, task, project)}
@@ -185,7 +177,7 @@ export function DecisionCard({
                 <button
                   type="button"
                   className="btn btn-quiet decision-close"
-                  disabled={!!busy}
+                  disabled={busy}
                   onClick={() => {
                     setMode("dismiss");
                     setDraft("");
@@ -198,7 +190,7 @@ export function DecisionCard({
               <button
                 type="button"
                 className="btn btn-quiet"
-                disabled={!!busy}
+                disabled={busy}
                 onClick={() =>
                   setMode(decision.kind === "question" ? "answer" : "")
                 }
@@ -215,7 +207,7 @@ export function DecisionCard({
               key={choice}
               type="button"
               className={`btn${i === 0 ? " btn-primary" : ""}`}
-              disabled={!!busy}
+              disabled={busy}
               onClick={() =>
                 withWords.has(choice)
                   ? setMode("answer")
@@ -231,7 +223,7 @@ export function DecisionCard({
               <button
                 type="button"
                 className="btn btn-quiet"
-                disabled={!!busy}
+                disabled={busy}
                 onClick={() => setMode("answer")}
               >
                 Answer in your own words
@@ -249,7 +241,7 @@ export function DecisionCard({
             <button
               type="button"
               className="btn btn-quiet decision-close"
-              disabled={!!busy}
+              disabled={busy}
               onClick={() => {
                 setMode("dismiss");
                 setDraft("");

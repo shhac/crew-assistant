@@ -2,7 +2,13 @@ import { useState, type FormEvent } from "react";
 import { FileSystemPicker } from "./FileSystemPicker";
 import { DirectoryList } from "./ProjectForms";
 import { ErrorNotice, useAction } from "./ui";
-import { api, setTeam, type Playbook, type Project, type Role } from "./api";
+import {
+  setDirectories,
+  setTeam,
+  type Playbook,
+  type Project,
+  type Role,
+} from "./api";
 
 const engines = [
   { id: "claude", label: "Claude" },
@@ -386,10 +392,7 @@ function Folders({
   const { busy, error, setError, run } = useAction();
   async function save() {
     await run(async () => {
-      await api(`/api/projects/${encodeURIComponent(project.id)}/directories`, {
-        method: "PUT",
-        body: JSON.stringify({ directories: paths }),
-      });
+      await setDirectories(project.id, paths);
       await refresh();
       setEditing(false);
     });

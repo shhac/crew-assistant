@@ -11,15 +11,16 @@ import { Sidebar } from "./Sidebar";
 import { applyAppearance } from "./appearance";
 import { href, parseRoute, type Route } from "./router";
 import {
-  api,
   APIError,
   bootstrapSession,
   errorText,
+  getState,
   normalizeState,
   pendingDecisions,
+  setPaused,
   type State,
 } from "./api";
-import { ErrorNotice } from "./ui";
+import { ErrorNotice, useAction } from "./ui";
 
 const chatKey = "crew-assistant.chat";
 
@@ -48,14 +49,13 @@ export function App() {
   const [paneOpen, setPaneOpen] = useState(rememberedChat);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [chatExpanded, setChatExpanded] = useState(false);
-  const [pausing, setPausing] = useState(false);
-  const [pauseError, setPauseError] = useState("");
+  const pause = useAction();
   const request = useRef(0);
   const conversation = useRef<HTMLElement>(null);
   const refresh = useCallback(async () => {
     const generation = ++request.current;
     try {
-      const value = await api<State>("/api/state");
+      const value = await getState();
       if (generation !== request.current) return;
       setState(normalizeState(value));
       setAuthRequired(false);
@@ -193,19 +193,11 @@ export function App() {
   }, []);
   async function togglePause() {
     if (!state) return;
-    setPausing(true);
-    setPauseError("");
-    try {
-      await api("/api/control", {
-        method: "POST",
-        body: JSON.stringify({ paused: !state.paused }),
-      });
+    const paused = !state.paused;
+    await pause.run(async () => {
+      await setPaused(paused);
       await refresh();
-    } catch (error) {
-      setPauseError(errorText(error));
-    } finally {
-      setPausing(false);
-    }
+    });
   }
   if (authRequired)
     return <Login onSuccess={refresh} initialError={connectionError} />;
@@ -242,8 +234,8 @@ export function App() {
         offline={!!connectionError}
         chatOpen={chatShown}
         onChat={toggleChat}
-        pausing={pausing}
-        pauseError={pauseError}
+        pausing={pause.busy}
+        pauseError={pause.error}
         onPause={() => void togglePause()}
       />
       <div className="workspace" inert={drawerOpen || chatExpanded}>
