@@ -17,93 +17,137 @@ import (
 // the pull request, turns reviews and failing checks into feedback for the
 // team, catches up when the base moves, and merges once GitHub says the pull
 // request is approved and green. Between those, the task waits on wakes.
+//
+// Each step either moves the task on (done) or lets landing continue.
 func (a *App) landPR(ctx context.Context, p core.Project, t core.Task, m gitMedium) error {
-	land := m.playbook.Land
+	if done, err := a.wokenRound(ctx, t); done || err != nil {
+		return err
+	}
 	r := t.Revisions[len(t.Revisions)-1]
 	prop := core.Proposal{Branch: m.branchName(t)}
 	if t.Proposal != nil {
 		prop = *t.Proposal
 	}
-	if _, err := a.Core.TakeTaskWakes(ctx, t.ID, core.WakeLoop); err != nil {
-		return err
-	}
-	// The implementer asked to be woken and something came: that is its round.
-	snap, err := a.Core.Snapshot(ctx)
-	if err != nil {
-		return err
-	}
-	for _, w := range snap.Wakes {
-		if w.TaskID == t.ID && w.Owner == core.WakeTask && w.Status == core.WakeFired {
-			_, err = a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-				nextRound(t)
-				t.Status, t.Detail = core.TaskWriting, "Woken: "+w.Event
-				return "", nil
-			})
-			return err
-		}
-	}
 	if prop.Pushed != r.Ref {
-		if l, err := m.behind(ctx, t); err != nil {
-			return a.landingFailed(ctx, t, r, err)
-		} else if l != nil {
-			return a.catchUpRound(ctx, t, m, *l)
-		}
-		if prop.Number > 0 && !approvalStands(t) {
-			notes, err := m.repo.Attention(ctx, prop.Pushed, r.Ref)
-			if err != nil {
-				return a.landingFailed(ctx, t, r, err)
-			}
-			if len(notes) > 0 {
-				_, err = a.Core.OpenTaskDecision(ctx, t.ID, decisionDelivery, core.DecisionInput{
-					Title:          fmt.Sprintf("Before draft %d of %s goes to its pull request", r.N, t.Objective),
-					Context:        "This update touches things that run or instruct on your side:\n- " + strings.Join(notes, "\n- ") + "\n\nApproving pushes it to " + prop.Branch + " on " + land.GitHub + ".",
-					Recommendation: choiceApprove + " if these changes are expected",
-					Choices:        []string{choiceApprove, choiceChanges},
-				})
-				return err
-			}
-		}
-		err := m.repo.PushOwned(ctx, m.url(), r.Ref, prop.Branch, prop.Pushed, github.CredentialConfig())
-		if errors.Is(err, gitrepo.ErrLeaseLost) {
-			// Someone else pushed to the branch. If this revision already took
-			// their commits in, lease on what it took in; otherwise catch up.
-			head, fetchErr := m.repo.FetchFrom(ctx, m.url(), prop.Branch, github.CredentialConfig())
-			if fetchErr == nil {
-				if in, _ := m.repo.Contains(ctx, r.Ref, head); in {
-					err = m.repo.PushOwned(ctx, m.url(), r.Ref, prop.Branch, head, github.CredentialConfig())
-				} else if l, lineErr := m.behind(ctx, t); lineErr == nil && l != nil {
-					return a.catchUpRound(ctx, t, m, *l)
-				}
-			}
-		}
-		if err != nil {
-			return a.landingFailed(ctx, t, r, err)
-		}
-		prop.Pushed = r.Ref
-		if err = a.saveProposal(ctx, t.ID, prop, ""); err != nil {
+		done, err := a.publish(ctx, t, m, r, &prop)
+		if done || err != nil {
 			return err
 		}
 	}
 	if prop.Number == 0 {
-		n, url, found, err := a.github.FindOpen(ctx, land.GitHub, prop.Branch)
-		if err != nil {
-			return a.landingFailed(ctx, t, r, err)
-		}
-		if !found {
-			body := clip(r.Summary, 3000) + "\n\nOpened by crew-assistant for its owner, who approved it. Its team answers reviews and CI here."
-			if n, url, err = a.github.Open(ctx, land.GitHub, land.Target, prop.Branch, t.Objective, body); err != nil {
-				return a.landingFailed(ctx, t, r, err)
-			}
-		}
-		prop.Number, prop.URL = n, url
-		if err = a.saveProposal(ctx, t.ID, prop, "Opened pull request #"+fmt.Sprint(n)); err != nil {
+		if done, err := a.openPR(ctx, t, m, r, &prop); done || err != nil {
 			return err
 		}
 	}
-	pr, err := a.github.View(ctx, land.GitHub, prop.Number)
+	pr, err := a.github.View(ctx, m.playbook.Land.GitHub, prop.Number)
 	if err != nil {
 		return a.landingFailed(ctx, t, r, err)
 	}
+	return a.reactTo(ctx, t, m, r, prop, pr)
+}
+
+// wokenRound gives the implementer a round when a wake it asked for has come,
+// after clearing the loop's own wakes, which only made it look again.
+func (a *App) wokenRound(ctx context.Context, t core.Task) (bool, error) {
+	if _, err := a.Core.TakeTaskWakes(ctx, t.ID, core.WakeLoop); err != nil {
+		return true, err
+	}
+	snap, err := a.Core.Snapshot(ctx)
+	if err != nil {
+		return true, err
+	}
+	for _, w := range snap.Wakes {
+		if w.TaskID != t.ID || w.Owner != core.WakeTask || w.Status != core.WakeFired {
+			continue
+		}
+		_, err = a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+			nextRound(t)
+			t.Status, t.Detail = core.TaskWriting, "Woken: "+w.Event
+			return "", nil
+		})
+		return true, err
+	}
+	return false, nil
+}
+
+// catchUpIfBehind sends the task to catch up when it lacks what it must
+// include before landing.
+func (a *App) catchUpIfBehind(ctx context.Context, t core.Task, m gitMedium, r core.Revision) (bool, error) {
+	l, err := m.behind(ctx, t)
+	if err != nil {
+		return true, a.landingFailed(ctx, t, r, err)
+	}
+	if l == nil {
+		return false, nil
+	}
+	return true, a.catchUpRound(ctx, t, m, *l)
+}
+
+// publish pushes the revision to the pull request's branch under a lease, after
+// catching up and, for an update to an open pull request, after the owner has
+// seen anything in it that runs or instructs on their side.
+func (a *App) publish(ctx context.Context, t core.Task, m gitMedium, r core.Revision, prop *core.Proposal) (bool, error) {
+	if done, err := a.catchUpIfBehind(ctx, t, m, r); done || err != nil {
+		return true, err
+	}
+	if prop.Number > 0 && !approvalStands(t) {
+		notes, err := m.repo.Attention(ctx, prop.Pushed, r.Ref)
+		if err != nil {
+			return true, a.landingFailed(ctx, t, r, err)
+		}
+		if len(notes) > 0 {
+			_, err = a.Core.OpenTaskDecision(ctx, t.ID, decisionDelivery, core.DecisionInput{
+				Title:          fmt.Sprintf("Before draft %d of %s goes to its pull request", r.N, t.Objective),
+				Context:        "This update touches things that run or instruct on your side:\n- " + strings.Join(notes, "\n- ") + "\n\nApproving pushes it to " + prop.Branch + " on " + m.playbook.Land.GitHub + ".",
+				Recommendation: choiceApprove + " if these changes are expected",
+				Choices:        []string{choiceApprove, choiceChanges},
+			})
+			return true, err
+		}
+	}
+	err := m.repo.PushOwned(ctx, m.url(), r.Ref, prop.Branch, prop.Pushed, github.CredentialConfig())
+	if errors.Is(err, gitrepo.ErrLeaseLost) {
+		// Someone else pushed to the branch. If this revision already took
+		// their commits in, lease on what it took in; otherwise catch up.
+		head, fetchErr := m.repo.FetchFrom(ctx, m.url(), prop.Branch, github.CredentialConfig())
+		if fetchErr != nil {
+			return true, a.landingFailed(ctx, t, r, fetchErr)
+		}
+		if in, _ := m.repo.Contains(ctx, r.Ref, head); !in {
+			return a.catchUpIfBehind(ctx, t, m, r)
+		}
+		err = m.repo.PushOwned(ctx, m.url(), r.Ref, prop.Branch, head, github.CredentialConfig())
+	}
+	if err != nil {
+		return true, a.landingFailed(ctx, t, r, err)
+	}
+	prop.Pushed = r.Ref
+	return false, a.saveProposal(ctx, t.ID, *prop, "")
+}
+
+// openPR opens the pull request, or picks up one that was opened but never
+// recorded.
+func (a *App) openPR(ctx context.Context, t core.Task, m gitMedium, r core.Revision, prop *core.Proposal) (bool, error) {
+	land := m.playbook.Land
+	n, url, found, err := a.github.FindOpen(ctx, land.GitHub, prop.Branch)
+	if err != nil {
+		return true, a.landingFailed(ctx, t, r, err)
+	}
+	if !found {
+		body := clip(r.Summary, 3000) + "\n\nOpened by crew-assistant for its owner, who approved it. Its team answers reviews and CI here."
+		if n, url, err = a.github.Open(ctx, land.GitHub, land.Target, prop.Branch, t.Objective, body); err != nil {
+			return true, a.landingFailed(ctx, t, r, err)
+		}
+	}
+	prop.Number, prop.URL = n, url
+	return false, a.saveProposal(ctx, t.ID, *prop, "Opened pull request #"+fmt.Sprint(n))
+}
+
+// reactTo does what the pull request's state calls for: record a merge, bring
+// a closed one to the owner, take in someone else's push, answer feedback,
+// catch up with a moved base, merge when ready, or wait.
+func (a *App) reactTo(ctx context.Context, t core.Task, m gitMedium, r core.Revision, prop core.Proposal, pr github.PR) error {
+	land := m.playbook.Land
 	switch {
 	case pr.State == "MERGED":
 		landed := r
@@ -113,27 +157,20 @@ func (a *App) landPR(ctx context.Context, p core.Project, t core.Task, m gitMedi
 		return a.recordLanded(ctx, t, landed, land.Target, fmt.Sprintf("pull request #%d", prop.Number))
 	case pr.State == "CLOSED":
 		prop.Number, prop.URL = 0, ""
-		if err = a.saveProposal(ctx, t.ID, prop, ""); err != nil {
+		if err := a.saveProposal(ctx, t.ID, prop, ""); err != nil {
 			return err
 		}
 		return a.landingFailed(ctx, t, r, fmt.Errorf("pull request #%d was closed without merging; trying again opens a new one", pr.Number))
-	case pr.HeadRefOid != prop.Pushed:
-		if l, err := m.behind(ctx, t); err == nil && l != nil {
-			return a.catchUpRound(ctx, t, m, *l)
+	case pr.HeadRefOid != prop.Pushed, pr.Behind():
+		if done, err := a.catchUpIfBehind(ctx, t, m, r); done || err != nil {
+			return err
 		}
 	}
 	if feedback := prFeedback(pr, prop, r); len(feedback) > 0 {
 		return a.answerPR(ctx, t, r, pr, prop, feedback)
 	}
-	if pr.Behind() {
-		if l, err := m.behind(ctx, t); err != nil {
-			return a.landingFailed(ctx, t, r, err)
-		} else if l != nil {
-			return a.catchUpRound(ctx, t, m, *l)
-		}
-	}
 	if pr.Ready() {
-		if err = a.github.Merge(ctx, land.GitHub, prop.Number, land.MergeMethod(), r.Ref); err == nil {
+		if err := a.github.Merge(ctx, land.GitHub, prop.Number, land.MergeMethod(), r.Ref); err == nil {
 			// The next look sees it merged and records the landing.
 			return a.setStatus(ctx, t.ID, core.TaskLanding, fmt.Sprintf("Merging pull request #%d", prop.Number))
 		}
