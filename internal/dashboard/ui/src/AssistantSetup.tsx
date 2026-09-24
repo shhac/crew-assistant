@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Panel } from "./SettingsPanel";
 import { ErrorNotice } from "./ui";
 import { api, errorText, type Config } from "./api";
 import { Avatar, type AvatarSpec } from "./Identity";
@@ -105,11 +106,7 @@ export function AssistantSetup({
   const proposal = state.recommendation;
   const isApplied = applied || proposal?.applied === true;
   return (
-    <section
-      className="tab-panel card settings-panel"
-      aria-labelledby="setup-title"
-    >
-      <h2 id="setup-title">Suggest a name and personality</h2>
+    <Panel title="Suggest a name and personality" id="setup-title">
       <p className="soft">
         Answer a question or two, and the assistant suggests a name, a
         personality and an avatar.
@@ -202,6 +199,6 @@ export function AssistantSetup({
           </div>
         </div>
       )}
-    </section>
+    </Panel>
   );
 }

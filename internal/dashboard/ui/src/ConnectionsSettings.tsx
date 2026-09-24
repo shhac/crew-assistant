@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Panel } from "./SettingsPanel";
 import { api, errorText } from "./api";
 export interface Connection {
   id: string;
@@ -40,11 +41,7 @@ export function ConnectionsSettings({
   onChange: (connections: Connection[]) => void;
 }) {
   return (
-    <section
-      className="tab-panel card settings-panel"
-      aria-labelledby="connections-title"
-    >
-      <h2 id="connections-title">Connections</h2>
+    <Panel title="Connections" id="connections-title">
       <p className="soft">
         Optional. They let the assistant read from services you use.
       </p>
@@ -85,7 +82,7 @@ export function ConnectionsSettings({
       <p className="hint">
         Sign in with each service's own CLI; no passwords go in here.
       </p>
-    </section>
+    </Panel>
   );
 }
 function ConnectionEditor({

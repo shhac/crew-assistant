@@ -1,8 +1,11 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { AssistantSetup } from "./AssistantSetup";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { ChatSettings } from "./ChatSettings";
 import { ModelSettings } from "./ModelSettings";
+import { LimitsSettings } from "./LimitsSettings";
+import { AdvancedSettings } from "./AdvancedSettings";
+import { Panel } from "./SettingsPanel";
 import { appearanceOf, applyAppearance, type Appearance } from "./appearance";
 import { href } from "./router";
 import { ErrorNotice, Pill, humanStatus, useAction } from "./ui";
@@ -10,7 +13,6 @@ import {
   errorText,
   getConfig,
   putConfig,
-  section,
   type Config,
   type State,
 } from "./api";
@@ -198,10 +200,10 @@ export function Settings({
                 </>
               )}
               {current === "limits" && (
-                <LimitsSection config={draft} onChange={setDraft} />
+                <LimitsSettings config={draft} onChange={setDraft} />
               )}
               {current === "advanced" && (
-                <AdvancedSection config={draft} onChange={setDraft} />
+                <AdvancedSettings config={draft} onChange={setDraft} />
               )}
             </>
           )}
@@ -233,15 +235,6 @@ export function Settings({
         </form>
       </div>
     </div>
-  );
-}
-
-function Panel({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="tab-panel card settings-panel" aria-label={title}>
-      <h2>{title}</h2>
-      {children}
-    </section>
   );
 }
 
@@ -292,193 +285,6 @@ function AssistantSection({
         demo={state.demo}
         onApplied={onApplied}
       />
-    </>
-  );
-}
-
-function numberOrEmpty(value: unknown) {
-  return typeof value === "number" ? value : "";
-}
-
-const usageFields = [
-  ["codex_max_used_percent", "Pause Codex teams at (% used)"],
-  ["claude_max_used_percent", "Pause Claude teams at (% used)"],
-] as const;
-
-function LimitsSection({
-  config,
-  onChange,
-}: {
-  config: Config;
-  onChange: (value: Config) => void;
-}) {
-  const limits = section(config.limits);
-  const usage = section(limits.role_usage);
-  const setLimit = (key: string, value: number) =>
-    onChange({ ...config, limits: { ...limits, [key]: value } });
-  const setUsage = (key: string, value: unknown) =>
-    onChange({
-      ...config,
-      limits: { ...limits, role_usage: { ...usage, [key]: value } },
-    });
-  return (
-    <>
-      <Panel title="Assistant model calls">
-        <div className="form-row">
-          <label htmlFor="limits-max_model_calls_per_day">
-            Per day
-            <input
-              id="limits-max_model_calls_per_day"
-              type="number"
-              min={1}
-              max={100000}
-              value={numberOrEmpty(limits.max_model_calls_per_day)}
-              onChange={(e) =>
-                setLimit("max_model_calls_per_day", Number(e.target.value))
-              }
-            />
-          </label>
-          <label htmlFor="limits-max_model_turns">
-            Steps per chat reply
-            <input
-              id="limits-max_model_turns"
-              type="number"
-              min={1}
-              max={32}
-              value={numberOrEmpty(limits.max_model_turns)}
-              onChange={(e) =>
-                setLimit("max_model_turns", Number(e.target.value))
-              }
-            />
-          </label>
-        </div>
-        <p className="hint">These count model calls, not money.</p>
-      </Panel>
-      <Panel title="Subscription use">
-        <div className="form-row">
-          {usageFields.map(([key, label]) => (
-            <label key={key} htmlFor={`role-usage-${key}`}>
-              {label}
-              <input
-                id={`role-usage-${key}`}
-                type="number"
-                min={0}
-                max={100}
-                value={numberOrEmpty(usage[key])}
-                onChange={(e) => setUsage(key, Number(e.target.value))}
-              />
-            </label>
-          ))}
-          <label htmlFor="role-usage-unavailable">
-            If use can't be checked
-            <select
-              id="role-usage-unavailable"
-              value={usage.on_unavailable === "pause" ? "pause" : "allow"}
-              onChange={(e) => setUsage("on_unavailable", e.target.value)}
-            >
-              <option value="allow">Carry on</option>
-              <option value="pause">Wait until it can be</option>
-            </select>
-          </label>
-        </div>
-        <p className="hint">
-          A paused team carries on by itself when its usage window resets. 0
-          never pauses.
-        </p>
-      </Panel>
-    </>
-  );
-}
-
-function AdvancedSection({
-  config,
-  onChange,
-}: {
-  config: Config;
-  onChange: (value: Config) => void;
-}) {
-  const [listDrafts, setListDrafts] = useState<Record<string, string>>({});
-  const linear = section(config.linear);
-  function field(
-    group: string,
-    key: string,
-    label: string,
-    options: { hint?: string; env?: boolean; list?: boolean } = {},
-  ) {
-    const object = section(config[group]);
-    const raw = object[key];
-    const value =
-      options.list && listDrafts[`${group}.${key}`] !== undefined
-        ? listDrafts[`${group}.${key}`]
-        : Array.isArray(raw)
-          ? raw.join(", ")
-          : typeof raw === "string"
-            ? raw
-            : "";
-    return (
-      <label key={`${group}.${key}`} htmlFor={`${group}-${key}`}>
-        {label}
-        <input
-          id={`${group}-${key}`}
-          value={value}
-          pattern={options.env ? "[A-Za-z_][A-Za-z0-9_]*" : undefined}
-          autoComplete="off"
-          onChange={(e) => {
-            const text = e.target.value;
-            if (options.list)
-              setListDrafts({ ...listDrafts, [`${group}.${key}`]: text });
-            onChange({
-              ...config,
-              [group]: {
-                ...object,
-                [key]: options.list
-                  ? text
-                      .split(",")
-                      .map((x) => x.trim())
-                      .filter(Boolean)
-                  : text,
-              },
-            });
-          }}
-        />
-        {options.hint && <span className="hint">{options.hint}</span>}
-      </label>
-    );
-  }
-  return (
-    <>
-      <p className="muted">
-        For a Slack bot of its own, or reading Linear directly. Connections are
-        the simpler way. Changes here need crew-assistant restarted.
-      </p>
-      <Panel title="Slack bot">
-        {field("slack", "owner_user_id", "Your Slack user ID")}
-        {field("slack", "bot_token_env", "Bot token variable", {
-          env: true,
-          hint: "The environment variable's name, never the token.",
-        })}
-        {field("slack", "app_token_env", "App token variable", { env: true })}
-      </Panel>
-      <Panel title="Linear">
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={linear.import_assignments === true}
-            onChange={(e) =>
-              onChange({
-                ...config,
-                linear: { ...linear, import_assignments: e.target.checked },
-              })
-            }
-          />
-          <span>Add issues assigned to you as projects</span>
-        </label>
-        {field("linear", "api_key_env", "API key variable", { env: true })}
-        {field("linear", "team_ids", "Team IDs", {
-          list: true,
-          hint: "Separate with commas. Only these teams are read.",
-        })}
-      </Panel>
     </>
   );
 }
