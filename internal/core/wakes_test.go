@@ -177,3 +177,22 @@ func TestATaskTakesItsWakesAndLosesThemWhenItEnds(t *testing.T) {
 		}
 	}
 }
+
+func TestAWakeFiresOnItsMatchOrAnyChange(t *testing.T) {
+	for _, tc := range []struct {
+		w     Wake
+		value string
+		want  bool
+	}{
+		{Wake{Baseline: "PENDING@abc/BLOCKED/OPEN"}, "PENDING@abc/BLOCKED/OPEN", false},
+		{Wake{Baseline: "PENDING@abc/BLOCKED/OPEN"}, "FAILURE@abc/BLOCKED/OPEN", true},
+		{Wake{Match: "SUCCESS"}, "SUCCESS@abc/CLEAN/OPEN", true},
+		{Wake{Match: "SUCCESS"}, "FAILURE@abc/CLEAN/OPEN", false},
+		{Wake{Match: "landed"}, "landed", true},
+		{Wake{Match: "land"}, "landing", false},
+	} {
+		if got := tc.w.FiresOn(tc.value); got != tc.want {
+			t.Errorf("%+v on %q: got %v", tc.w, tc.value, got)
+		}
+	}
+}

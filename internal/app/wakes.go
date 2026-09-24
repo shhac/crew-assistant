@@ -156,60 +156,76 @@ func (a *App) checkWakes(ctx context.Context, now time.Time) error {
 		return err
 	}
 	for _, w := range waiting {
-		observed, event, fired, timedOut := "", "", false, false
-		switch {
-		case now.After(w.ExpiresAt):
-			observed, event, fired, timedOut = w.Baseline, "timed out with no change", true, true
-		case w.On == core.WakeOnTime:
-			at, err := time.Parse(time.RFC3339, w.Target)
-			if err == nil && !now.Before(at) {
-				observed, event, fired = "reached", "the time came", true
-			}
-		case w.On == core.WakeOnChecks || w.On == core.WakeOnReview:
-			// GitHub is asked about each pull request at most once a minute.
-			if last, ok := a.prSeen.Load(w.On + w.Target); ok && now.Sub(last.(time.Time)) < time.Minute {
-				continue
-			}
-			a.prSeen.Store(w.On+w.Target, now)
-			pr, err := a.viewPR(ctx, w.Target)
-			if err != nil {
-				continue
-			}
-			value := prValue(w.On, pr)
-			if (w.Match == "" && value == w.Baseline) || (w.Match != "" && !strings.HasPrefix(value, w.Match)) {
-				continue
-			}
-			observed, event, fired = value, fmt.Sprintf("pull request %s: %s is now %s", w.Target, strings.TrimPrefix(w.On, "pr_"), value), true
-		case w.On == core.WakeOnBranch:
-			dir, err := projectRepo(snap, w.ProjectID)
-			if err != nil {
-				continue
-			}
-			tip, err := gitrepo.BranchTip(ctx, dir, w.Target)
-			if err != nil || (w.Match == "" && tip == w.Baseline) || (w.Match != "" && tip != w.Match) {
-				continue
-			}
-			observed, event, fired = tip, fmt.Sprintf("%s moved from %s to %s", w.Target, short(w.Baseline), short(tip)), true
-		}
-		if !fired {
+		f, ok := a.observe(ctx, snap, w, now)
+		if !ok {
 			continue
 		}
-		if _, err := a.Core.FireWake(ctx, w.ID, observed, event, timedOut); err != nil && !errors.Is(err, core.ErrConflict) {
+		if _, err := a.Core.FireWake(ctx, w.ID, f.observed, f.event, f.timedOut); err != nil && !errors.Is(err, core.ErrConflict) {
 			return err
 		}
 		if w.Owner != core.WakeAssistant {
-			// A task asleep on the pull request goes back to landing.
-			if _, err := a.Core.UpdateTask(ctx, w.TaskID, func(t *core.Task, _ *core.Project) (string, error) {
-				if t.Status == core.TaskAwaiting {
-					t.Status, t.Detail = core.TaskLanding, "Looking again: "+event
-				}
-				return "", nil
-			}); err != nil && !errors.Is(err, core.ErrNotFound) {
+			if err := a.wakeTask(ctx, w.TaskID, f.event); err != nil {
 				return err
 			}
-			a.nudgeLoop()
 		}
 	}
+	return nil
+}
+
+// firing is a change the watcher saw.
+type firing struct {
+	observed, event string
+	timedOut        bool
+}
+
+// observe looks at what w waits on and reports a change that fires it.
+func (a *App) observe(ctx context.Context, snap core.Snapshot, w core.Wake, now time.Time) (firing, bool) {
+	if now.After(w.ExpiresAt) {
+		return firing{observed: w.Baseline, event: "timed out with no change", timedOut: true}, true
+	}
+	switch w.On {
+	case core.WakeOnTime:
+		at, err := time.Parse(time.RFC3339, w.Target)
+		return firing{observed: "reached", event: "the time came"}, err == nil && !now.Before(at)
+	case core.WakeOnChecks, core.WakeOnReview:
+		// GitHub is asked about each pull request at most once a minute.
+		if last, ok := a.prSeen.Load(w.On + w.Target); ok && now.Sub(last.(time.Time)) < time.Minute {
+			return firing{}, false
+		}
+		a.prSeen.Store(w.On+w.Target, now)
+		pr, err := a.viewPR(ctx, w.Target)
+		if err != nil {
+			return firing{}, false
+		}
+		value := prValue(w.On, pr)
+		return firing{observed: value, event: fmt.Sprintf("pull request %s: %s is now %s", w.Target, strings.TrimPrefix(w.On, "pr_"), value)}, w.FiresOn(value)
+	case core.WakeOnBranch:
+		dir, err := projectRepo(snap, w.ProjectID)
+		if err != nil {
+			return firing{}, false
+		}
+		tip, err := gitrepo.BranchTip(ctx, dir, w.Target)
+		if err != nil {
+			return firing{}, false
+		}
+		return firing{observed: tip, event: fmt.Sprintf("%s moved from %s to %s", w.Target, short(w.Baseline), short(tip))}, w.FiresOn(tip)
+	}
+	return firing{}, false
+}
+
+// wakeTask sends a task asleep on something outside the team back to
+// landing, to look again.
+func (a *App) wakeTask(ctx context.Context, taskID, event string) error {
+	_, err := a.Core.UpdateTask(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.Status == core.TaskAwaiting {
+			t.Status, t.Detail = core.TaskLanding, "Looking again: "+event
+		}
+		return "", nil
+	})
+	if err != nil && !errors.Is(err, core.ErrNotFound) {
+		return err
+	}
+	a.nudgeLoop()
 	return nil
 }
 

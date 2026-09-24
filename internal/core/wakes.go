@@ -199,6 +199,17 @@ func (s *Service) TakeTaskWakes(ctx context.Context, taskID, owner string) ([]Wa
 	return out, err
 }
 
+// FiresOn reports whether an observed value wakes w: it has become Match, or,
+// with no Match, it differs from what was seen at registration. A Match also
+// names a value it heads before an "@", such as SUCCESS for a pull request's
+// "SUCCESS@abc1234/CLEAN/OPEN".
+func (w Wake) FiresOn(value string) bool {
+	if w.Match == "" {
+		return value != w.Baseline
+	}
+	return value == w.Match || strings.HasPrefix(value, w.Match+"@")
+}
+
 // settleTaskWakes fires every waiting wake on a task whose status now
 // matches, or has changed from what was seen when the wake was registered.
 func settleTaskWakes(v *Snapshot, now time.Time) {
@@ -211,7 +222,7 @@ func settleTaskWakes(v *Snapshot, now time.Time) {
 		if t == nil {
 			continue
 		}
-		if (w.Match != "" && t.Status != w.Match) || (w.Match == "" && t.Status == w.Baseline) {
+		if !w.FiresOn(t.Status) {
 			continue
 		}
 		w.Status, w.Observed, w.FiredAt = WakeFired, t.Status, &now
