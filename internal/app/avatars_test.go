@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/shhac/crew-assistant/internal/avatars"
 	"github.com/shhac/crew-assistant/internal/config"
@@ -255,5 +256,96 @@ func TestDrawingsOfDifferentMembersNeverOverlap(t *testing.T) {
 	a.WaitForDrawings()
 	if painter.calls.Load() != 3 || painter.most.Load() != 1 {
 		t.Fatalf("%d drawings, at most %d at once", painter.calls.Load(), painter.most.Load())
+	}
+}
+
+// waitingPainter draws nothing until its drawing is called off.
+type waitingPainter struct{ started chan struct{} }
+
+func (p waitingPainter) Paint(ctx context.Context, _ string) ([]byte, error) {
+	close(p.started)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func waitForDrawings(t *testing.T, a *App) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		a.WaitForDrawings()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("a drawing outlived the daemon")
+	}
+}
+
+func TestStoppingTheDaemonStopsADrawing(t *testing.T) {
+	a := testApp(t)
+	a.Painter = waitingPainter{started: make(chan struct{})}
+	life, stop := context.WithCancel(context.Background())
+	a.setLife(life)
+	ctx := context.Background()
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	if err := a.DrawMember(ctx, m.ID, "Violet bob"); err != nil {
+		t.Fatal(err)
+	}
+	<-a.Painter.(waitingPainter).started
+	stop()
+	waitForDrawings(t, a)
+	snap, _ := a.Snapshot(ctx)
+	if got := snap.Members[0]; got.Avatar.Image != "" || got.Avatar.Look != "" || got.Drawing {
+		t.Fatalf("a drawing called off should change nothing: %+v", got)
+	}
+}
+
+// A drawing's status is not stored, so a daemon that restarts forgets one it
+// could not finish rather than showing it as under way for good.
+func TestARestartedAppDoesNotShowADrawingUnderWay(t *testing.T) {
+	a := testApp(t)
+	painter := &fakePainter{block: make(chan struct{})}
+	a.Painter = painter
+	ctx := context.Background()
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	if err := a.DrawMember(ctx, m.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	restarted := New(a.Core, a.Config(), a.configPath, false)
+	restarted.Painter = &fakePainter{}
+	if snap, _ := restarted.Snapshot(ctx); snap.Members[0].Drawing {
+		t.Fatal("a restarted app shows a drawing it is not doing")
+	}
+	if err := restarted.DrawMember(ctx, m.ID, ""); err != nil {
+		t.Fatalf("a redraw after a restart: %v", err)
+	}
+	restarted.WaitForDrawings()
+	close(painter.block)
+	a.WaitForDrawings()
+	if snap, _ := restarted.Snapshot(ctx); snap.Members[0].Avatar.Image == "" {
+		t.Fatal("the redraw was not kept")
+	}
+}
+
+func TestDeletingAMemberWhileItIsDrawnLeavesNothingBusy(t *testing.T) {
+	a := testApp(t)
+	painter := &fakePainter{block: make(chan struct{})}
+	a.Painter = painter
+	ctx := context.Background()
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	if err := a.DrawMember(ctx, m.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Core.DeleteMember(ctx, m.ID); err != nil {
+		t.Fatal(err)
+	}
+	close(painter.block)
+	a.WaitForDrawings()
+	if a.drawingOf(m.ID).busy {
+		t.Fatal("a deleted member is stuck being drawn")
+	}
+	if snap, _ := a.Snapshot(ctx); len(snap.Members) != 0 {
+		t.Fatalf("the drawing brought a deleted member back: %+v", snap.Members)
 	}
 }

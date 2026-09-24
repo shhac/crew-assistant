@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shhac/crew-assistant/internal/roles"
 )
@@ -29,6 +30,16 @@ func picture(t *testing.T, w, h int) []byte {
 	return b.Bytes()
 }
 
+// blank is a picture quick to make at any size.
+func blank(t *testing.T, img image.Image) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	if err := png.Encode(&b, img); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
 func TestAPictureIsKeptSquareAtEachSize(t *testing.T) {
 	s := NewStore(t.TempDir())
 	src := picture(t, 400, 300)
@@ -36,6 +47,49 @@ func TestAPictureIsKeptSquareAtEachSize(t *testing.T) {
 	if err != nil || !ValidID(id) {
 		t.Fatal(id, err)
 	}
+	keptSquare(t, s, id)
+	if again, err := s.Put(src); err != nil || again != id {
+		t.Fatal("the same picture should keep its id", again, err)
+	}
+}
+
+func TestAPalettedPictureIsKeptSquareAtEachSize(t *testing.T) {
+	s := NewStore(t.TempDir())
+	img := image.NewPaletted(image.Rect(0, 0, 300, 400), color.Palette{color.Black, color.White})
+	img.SetColorIndex(150, 200, 1)
+	id, err := s.Put(blank(t, img))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keptSquare(t, s, id)
+}
+
+func TestAPictureIsKeptOnlyWithinItsBounds(t *testing.T) {
+	s := NewStore(t.TempDir())
+	for _, c := range []struct {
+		w, h int
+		kept bool
+	}{{256, 256, true}, {2048, 2048, true}, {255, 300, false}, {300, 2049, false}} {
+		if _, err := s.Put(blank(t, image.NewGray(image.Rect(0, 0, c.w, c.h)))); (err == nil) != c.kept {
+			t.Errorf("%d×%d: kept = %v, want %v (%v)", c.w, c.h, err == nil, c.kept, err)
+		}
+	}
+}
+
+func TestATruncatedPictureIsRefused(t *testing.T) {
+	s := NewStore(t.TempDir())
+	data := picture(t, 300, 300)
+	data = data[:len(data)/2]
+	if _, err := png.DecodeConfig(bytes.NewReader(data)); err != nil {
+		t.Fatalf("the header should still read: %v", err)
+	}
+	if _, err := s.Put(data); err == nil {
+		t.Fatal("a truncated picture was kept")
+	}
+}
+
+func keptSquare(t *testing.T, s Store, id string) {
+	t.Helper()
 	for name, side := range Sizes {
 		path, ok := s.Path(id, name)
 		if !ok {
@@ -51,8 +105,49 @@ func TestAPictureIsKeptSquareAtEachSize(t *testing.T) {
 			t.Fatalf("%s is %dx%d, want %d: %v", name, cfg.Width, cfg.Height, side, err)
 		}
 	}
-	if again, err := s.Put(src); err != nil || again != id {
-		t.Fatal("the same picture should keep its id", again, err)
+}
+
+func TestTheNewestPlainPictureCodexSavedIsTaken(t *testing.T) {
+	dir := t.TempDir()
+	older, newer := picture(t, 256, 256), picture(t, 300, 300)
+	now := time.Now()
+	for name, c := range map[string]struct {
+		data []byte
+		at   time.Time
+	}{"a.png": {newer, now}, "b.png": {older, now.Add(-time.Hour)}} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, c.data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		os.Chtimes(path, c.at, c.at)
+	}
+	folder := filepath.Join(dir, "c.png")
+	os.Mkdir(folder, 0o700)
+	os.Chtimes(folder, now.Add(time.Hour), now.Add(time.Hour))
+	if got, err := newestPicture(dir); err != nil || !bytes.Equal(got, newer) {
+		t.Fatalf("the newest picture was not taken: %v", err)
+	}
+}
+
+func TestAnOversizedPictureIsRefusedUnread(t *testing.T) {
+	dir := t.TempDir()
+	f, err := os.Create(filepath.Join(dir, "huge.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sparse, so the test writes almost nothing.
+	if err := f.Truncate(26 << 20); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if _, err := newestPicture(dir); err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("a 26 MB picture: %v", err)
+	}
+}
+
+func TestAnEmptyFolderHasNoPicture(t *testing.T) {
+	if _, err := newestPicture(t.TempDir()); err == nil || !strings.Contains(err.Error(), "did not draw") {
+		t.Fatalf("an empty folder: %v", err)
 	}
 }
 

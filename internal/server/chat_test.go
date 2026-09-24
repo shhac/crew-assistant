@@ -43,13 +43,16 @@ func TestChatQueueRoutesAuthenticateValidateAndRetryIdempotently(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w
 	}
-	for _, route := range []struct{ method, path, body string }{{"POST", "/api/chat/messages", `{"id":"one","message":"Hello"}`}, {"GET", "/api/chat/turns", ""}, {"DELETE", "/api/chat/messages/one", ""}} {
+	drawing := []struct{ method, path, body string }{{"POST", "/api/members/m/avatar", `{"look":"Violet bob"}`}, {"POST", "/api/assistant/avatar", `{"look":"Silver hair"}`}}
+	for _, route := range append([]struct{ method, path, body string }{{"POST", "/api/chat/messages", `{"id":"one","message":"Hello"}`}, {"GET", "/api/chat/turns", ""}, {"DELETE", "/api/chat/messages/one", ""}}, drawing...) {
 		if w := call(route.method, route.path, route.body, false, true); w.Code != 401 {
 			t.Fatal(route, w.Code, w.Body.String())
 		}
 	}
-	if w := call("POST", "/api/chat/messages", `{"id":"one","message":"Hello"}`, true, false); w.Code != 403 {
-		t.Fatal(w.Code)
+	for _, route := range append([]struct{ method, path, body string }{{"POST", "/api/chat/messages", `{"id":"one","message":"Hello"}`}}, drawing...) {
+		if w := call(route.method, route.path, route.body, true, false); w.Code != 403 {
+			t.Fatal(route, w.Code)
+		}
 	}
 	for _, body := range []string{`{"id":"one","message":""}`, `{"id":"invalid.id","message":"hello"}`, `{"id":"one","message":"hello","extra":true}`} {
 		if w := call("POST", "/api/chat/messages", body, true, true); w.Code != 400 {

@@ -101,5 +101,11 @@ func newestPicture(dir string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
+	// What was opened must be the plain file looked at, not a link put in
+	// its place since.
+	opened, err := f.Stat()
+	if err != nil || !os.SameFile(opened, newest) {
+		return nil, errors.New("the picture changed while it was being read")
+	}
 	return io.ReadAll(io.LimitReader(f, maxBytes+1))
 }

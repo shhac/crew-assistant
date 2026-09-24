@@ -158,16 +158,20 @@ func TestALearningThatNamesAProjectIsRecognised(t *testing.T) {
 	}
 }
 
-func TestAStoppedTaskLetsGoOfWhatItsRolesWereTold(t *testing.T) {
+// A task that is stopped or has landed never runs again, so it lets go of
+// what its roles were told.
+func TestAFinishedTaskLetsGoOfWhatItsRolesWereTold(t *testing.T) {
 	s, _ := fixture(t)
 	p := newProject(t, s)
-	task, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "A draft"})
-	got, err := s.UpdateTask(testContext, task.ID, func(t *Task, _ *Project) (string, error) {
-		t.Roles = []Role{{Name: "Ada", Kind: RoleImplementer, Member: "m", Learnings: []Learning{{Text: "x"}}}}
-		t.Status = TaskStopped
-		return "", nil
-	})
-	if err != nil || got.Roles[0].Learnings != nil {
-		t.Fatalf("a stopped task should not keep its roles' learnings: %+v %v", got.Roles, err)
+	for _, status := range []string{TaskStopped, TaskLanded} {
+		task, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "A draft " + status})
+		got, err := s.UpdateTask(testContext, task.ID, func(t *Task, _ *Project) (string, error) {
+			t.Roles = []Role{{Name: "Ada", Kind: RoleImplementer, Member: "m", Learnings: []Learning{{Text: "x"}}}}
+			t.Status = status
+			return "", nil
+		})
+		if err != nil || got.Roles[0].Learnings != nil {
+			t.Fatalf("a %s task should not keep its roles' learnings: %+v %v", status, got.Roles, err)
+		}
 	}
 }
