@@ -78,6 +78,9 @@
 }
 
 .thread-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   font-weight: 600;
   color: var(--soft);
@@ -136,6 +139,10 @@
   flex-wrap: wrap;
   gap: 6px;
   flex: 1;
+}
+
+.draft-checks .avatar {
+  margin-left: -5px;
 }
 
 .draft-detail {

@@ -118,6 +118,9 @@
 }
 
 .board-card-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--soft);
   font-size: 12px;
 }

@@ -866,3 +866,136 @@ describe("the project's tabs", () => {
     expect(screen.getByText("Reviewer checked draft 1")).toBeTruthy();
   });
 });
+
+describe("faces of the team at work", () => {
+  const face = (id: string, name: string, image: string): Member => ({
+    id,
+    name,
+    kind: "implementer",
+    engine: "claude",
+    avatar: { image },
+    learnings: [],
+  });
+  const ada = face("m1", "Ada", "a".repeat(32));
+  const rune = face("m2", "Rune", "b".repeat(32));
+  const roles = [
+    { name: "Ada", kind: "implementer", engine: "claude", member: "m1" },
+    { name: "Rune", kind: "reviewer", engine: "codex", member: "m2" },
+    { name: "QA", kind: "qa", engine: "codex" },
+  ];
+  const staffed = (overrides: Partial<Task> = {}) =>
+    task({ roles, playbook: { ...codeTeam(), roles }, ...overrides });
+  const faces = (element: HTMLElement) =>
+    [...element.querySelectorAll("img")].map((i) => i.getAttribute("src"));
+
+  it("shows who is at work on each card: the implementer writing, the checker checking", () => {
+    show(project({ playbook: { ...codeTeam(), roles } }), {
+      members: [ada, rune],
+      tasks: [
+        staffed({
+          id: "t1",
+          objective: "Writes",
+          status: "writing",
+          stage: "implementing",
+        }),
+        staffed({
+          id: "t2",
+          objective: "Reviewed",
+          status: "reviewing",
+          stage: "reviewing",
+          checking: "Rune",
+        }),
+        staffed({
+          id: "t3",
+          objective: "Checked by QA",
+          status: "reviewing",
+          stage: "qa",
+          checking: "QA",
+        }),
+        staffed({ id: "t4", objective: "Waits" }),
+      ],
+    });
+    const card = (name: string) =>
+      screen.getByRole("link", { name }).closest("article")!;
+    expect(faces(card("Writes"))).toEqual([
+      `/api/avatars/${"a".repeat(32)}/small`,
+    ]);
+    expect(card("Writes").querySelector("img")?.getAttribute("width")).toBe(
+      "20",
+    );
+    expect(faces(card("Reviewed"))).toEqual([
+      `/api/avatars/${"b".repeat(32)}/small`,
+    ]);
+    expect(faces(card("Checked by QA"))).toEqual([]);
+    expect(faces(card("Waits"))).toEqual([]);
+  });
+
+  it("shows the member beside its verdicts and the messages sent to it", () => {
+    show(
+      project({ playbook: { ...codeTeam(), roles } }),
+      {
+        members: [ada, rune],
+        tasks: [
+          staffed({
+            status: "reviewing",
+            stage: "qa",
+            revisions: [{ n: 1, brief_version: 2, files: [] }],
+            verdicts: [
+              {
+                revision: 1,
+                role: "Rune",
+                brief_version: 2,
+                outcome: "pass",
+                summary: "Fine.",
+              },
+              {
+                revision: 1,
+                role: "QA",
+                brief_version: 2,
+                outcome: "revise",
+                summary: "Fails.",
+              },
+            ],
+            messages: [
+              {
+                id: "x1",
+                to: "Ada",
+                kind: "implementer",
+                direction: 0,
+                from: "owner",
+                text: "Rename it.",
+                status: "waiting",
+              },
+              {
+                id: "x2",
+                to: "QA",
+                kind: "qa",
+                direction: 0,
+                from: "owner",
+                text: "Run it again.",
+                status: "waiting",
+              },
+            ],
+          }),
+        ],
+      },
+      { request: "t1" },
+    );
+    const chip = (text: string) =>
+      screen.getByText(
+        (_, el) =>
+          el?.classList.contains("pill") === true && el.textContent === text,
+      );
+    expect(faces(chip("Rune: Passed"))).toEqual([
+      `/api/avatars/${"b".repeat(32)}/small`,
+    ]);
+    expect(
+      chip("Rune: Passed").querySelector("img")?.getAttribute("width"),
+    ).toBe("16");
+    expect(faces(chip("QA: Asked for changes"))).toEqual([]);
+    const who = [...document.querySelectorAll<HTMLElement>(".thread-who")];
+    expect(who.map((w) => w.textContent)).toEqual(["You → Ada", "You → QA"]);
+    expect(faces(who[0])).toEqual([`/api/avatars/${"a".repeat(32)}/small`]);
+    expect(faces(who[1])).toEqual([]);
+  });
+});

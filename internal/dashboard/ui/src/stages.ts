@@ -8,6 +8,7 @@ import {
   type MemberKind,
   type Playbook,
   type Project,
+  type Role,
   type Stage,
   type Task,
   type TeamMessage,
@@ -104,6 +105,32 @@ export function learnedBy(
         ? `Added by ${assistant}`
         : "You added this";
   return project ? `${who} on ${project}` : who;
+}
+
+/** The member behind the role of a request's team with this name. */
+export function roleMember(
+  roles: Role[] | undefined,
+  name: string | undefined,
+  members: Member[],
+) {
+  const id = roles?.find((r) => r.name === name)?.member;
+  return id ? members.find((m) => m.id === id) : undefined;
+}
+
+/**
+ * The member at work on a request now: the implementer while it writes,
+ * the checker named while it is checked, and no one otherwise.
+ */
+export function atWork(task: Task, members: Member[]) {
+  if (task.status === "writing")
+    return roleMember(
+      task.roles,
+      task.roles?.find((r) => r.kind === "implementer")?.name,
+      members,
+    );
+  if (task.status === "reviewing" || task.status === "deciding")
+    return roleMember(task.roles, task.checking, members);
+  return undefined;
 }
 
 export const isOpenMessage = (m: TeamMessage) =>

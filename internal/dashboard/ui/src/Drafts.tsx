@@ -1,10 +1,17 @@
 import { useEffect, useState } from "react";
 import { ConversationMarkdown } from "./ConversationMarkdown";
-import { isCode, roleName, taskPlaybook, verdictOutcome } from "./stages";
-import { ErrorNotice, Pill, dateLabel } from "./ui";
+import {
+  isCode,
+  roleMember,
+  roleName,
+  taskPlaybook,
+  verdictOutcome,
+} from "./stages";
+import { Avatar, ErrorNotice, Pill, dateLabel } from "./ui";
 import {
   errorText,
   revisionFiles,
+  type Member,
   type Project,
   type Revision,
   type RevisionFile,
@@ -16,16 +23,20 @@ import {
 export function Drafts({
   project,
   task,
+  members,
   collapsed,
 }: {
   project: Project;
   task: Task;
+  members: Member[];
   /** The decision above already shows the latest checks. */
   collapsed: boolean;
 }) {
   const revisions = [...(task.revisions ?? [])].reverse();
   if (!revisions.length) return null;
-  const code = isCode(taskPlaybook(task, project));
+  const playbook = taskPlaybook(task, project);
+  const code = isCode(playbook);
+  const roles = task.roles?.length ? task.roles : playbook?.roles;
   return (
     <section className="section" aria-label="Drafts">
       <h3>{code ? "Changes" : "Drafts"}</h3>
@@ -39,9 +50,11 @@ export function Drafts({
               {(task.verdicts ?? [])
                 .filter((v) => v.revision === r.n)
                 .map((v, j) => (
-                  <Pill key={j} tone={verdictOutcome[v.outcome]?.tone}>
-                    {v.role}: {verdictOutcome[v.outcome]?.label ?? v.outcome}
-                  </Pill>
+                  <VerdictChip
+                    key={j}
+                    verdict={v}
+                    member={roleMember(roles, v.role, members)}
+                  />
                 ))}
             </span>
             {r.at && (
@@ -60,6 +73,22 @@ export function Drafts({
         </details>
       ))}
     </section>
+  );
+}
+
+function VerdictChip({
+  verdict,
+  member,
+}: {
+  verdict: Verdict;
+  member?: Member;
+}) {
+  return (
+    <Pill tone={verdictOutcome[verdict.outcome]?.tone}>
+      {member && <Avatar of={member} size={16} />}
+      {verdict.role}:{" "}
+      {verdictOutcome[verdict.outcome]?.label ?? verdict.outcome}
+    </Pill>
   );
 }
 

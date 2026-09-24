@@ -1,8 +1,15 @@
 import { useState, type FormEvent } from "react";
-import { finished, isCode, taskPlaybook, verdictOutcome } from "./stages";
-import { ErrorNotice, Pill, sinceLabel, useAction } from "./ui";
+import {
+  finished,
+  isCode,
+  roleMember,
+  taskPlaybook,
+  verdictOutcome,
+} from "./stages";
+import { Avatar, ErrorNotice, Pill, sinceLabel, useAction } from "./ui";
 import {
   messageTeam,
+  type Member,
   type Project,
   type Role,
   type Task,
@@ -43,11 +50,13 @@ function prompt(role: Role | undefined, code: boolean) {
 export function TeamThread({
   project,
   task,
+  members,
   waitingOn,
   refresh,
 }: {
   project: Project;
   task: Task;
+  members: Member[];
   /** The kind of decision the request waits on, if any. */
   waitingOn?: string;
   refresh: () => Promise<void>;
@@ -80,6 +89,7 @@ export function TeamThread({
             <MessageView
               key={m.id}
               message={m}
+              member={roleMember(team, m.to, members)}
               made={code ? "change" : "draft"}
             />
           ))}
@@ -135,9 +145,12 @@ export function TeamThread({
 
 function MessageView({
   message: m,
+  member,
   made,
 }: {
   message: TeamMessage;
+  /** The member the message went to, if it went to one. */
+  member?: Member;
   /** What a round makes: a draft, or a change for code. */
   made: string;
 }) {
@@ -145,7 +158,9 @@ function MessageView({
     <li className="thread-message">
       <p className="thread-line">
         <span className="thread-who">
-          {m.from === "assistant" ? "The assistant" : "You"} → {m.to}
+          {m.from === "assistant" ? "The assistant" : "You"} →{" "}
+          {member && <Avatar of={member} size={16} />}
+          {m.to}
         </span>
         {m.at && <span className="muted small">{sinceLabel(m.at)}</span>}
       </p>

@@ -105,10 +105,16 @@ export function RequestPanel({
           <TeamThread
             project={project}
             task={task}
+            members={state.members}
             waitingOn={decision?.kind}
             refresh={refresh}
           />
-          <Drafts project={project} task={task} collapsed={!!decision} />
+          <Drafts
+            project={project}
+            task={task}
+            members={state.members}
+            collapsed={!!decision}
+          />
           {(criteriaLines(task.criteria).length > 0 || said.length > 0) && (
             <section className="section" aria-label="What was asked">
               <h3>What was asked</h3>

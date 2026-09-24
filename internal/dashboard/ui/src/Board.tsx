@@ -6,6 +6,7 @@ import {
 } from "react";
 import { projectHref, requestHref } from "./router";
 import {
+  atWork,
   boardColumns,
   decisionFor,
   isOpenMessage,
@@ -13,12 +14,13 @@ import {
   projectTasks,
   requestStep,
 } from "./stages";
-import { ErrorNotice, Icon, Pill, useAction } from "./ui";
+import { Avatar, ErrorNotice, Icon, Pill, useAction } from "./ui";
 import {
   askForTask,
   criteriaLines,
   orderTasks,
   type Decision,
+  type Member,
   type Project,
   type State,
   type Task,
@@ -72,6 +74,7 @@ export function Board({
                     }
                     limit={column.stage === "done" ? shownDone : undefined}
                     decisionFor={(t) => decisionFor(t, state.decisions)}
+                    members={state.members}
                   />
                 )}
               </section>
@@ -105,10 +108,12 @@ function CardList({
   tasks,
   limit,
   decisionFor,
+  members,
 }: {
   tasks: Task[];
   limit?: number;
   decisionFor: (t: Task) => Decision | undefined;
+  members: Member[];
 }) {
   const [all, setAll] = useState(false);
   const shown = limit && !all ? tasks.slice(0, limit) : tasks;
@@ -116,7 +121,11 @@ function CardList({
     <ul className="board-cards">
       {shown.map((t) => (
         <li key={t.id}>
-          <BoardCard task={t} decision={decisionFor(t)} />
+          <BoardCard
+            task={t}
+            decision={decisionFor(t)}
+            worker={atWork(t, members)}
+          />
         </li>
       ))}
       {limit && tasks.length > limit && !all && (
@@ -133,10 +142,13 @@ function CardList({
 function BoardCard({
   task,
   decision,
+  worker,
   children,
 }: {
   task: Task;
   decision?: Decision;
+  /** The member at work on it now, if a member is. */
+  worker?: Member;
   children?: ReactNode;
 }) {
   const open = (task.messages ?? []).filter(isOpenMessage).length;
@@ -151,6 +163,7 @@ function BoardCard({
       </a>
       {task.stage !== "todo" && (
         <p className="board-card-step">
+          {worker && <Avatar of={worker} size={20} />}
           {needsYou(task) ? (
             <Pill tone="needs" dot>
               {requestStep(task, decision)}
