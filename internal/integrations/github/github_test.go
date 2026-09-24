@@ -81,3 +81,15 @@ func TestMergeIsPinnedToTheCheckedHeadAndOpenReadsTheNumber(t *testing.T) {
 		t.Fatal("accepted a malformed repository name")
 	}
 }
+
+func TestAPullRequestRefRoundTripsAndRefusesAnythingElse(t *testing.T) {
+	ref, err := ParsePRRef("o/r#12")
+	if err != nil || ref != (PRRef{Repo: "o/r", Number: 12}) || ref.String() != "o/r#12" {
+		t.Fatalf("ref %+v err %v", ref, err)
+	}
+	for _, bad := range []string{"o/r", "o/r#0", "o/r#x", "not a repo#1", "#1"} {
+		if _, err := ParsePRRef(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}

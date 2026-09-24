@@ -118,6 +118,34 @@ func (a *App) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 	return false, nil
 }
 
+// updateOpen changes a task the loop is still working on. A finished task is
+// never changed by the loop; only the owner's own actions reach it.
+func (a *App) updateOpen(ctx context.Context, id string, fn func(*core.Task, *core.Project) (string, error)) (core.Task, error) {
+	return a.Core.UpdateTask(ctx, id, func(t *core.Task, p *core.Project) (string, error) {
+		if t.Finished() {
+			return "", nil
+		}
+		return fn(t, p)
+	})
+}
+
+// nextRound starts another round. max_rounds is where the owner is asked,
+// not a cap on work, so it moves up with the round.
+func nextRound(t *core.Task) {
+	t.Round++
+	t.MaxRounds = max(t.MaxRounds, t.Round)
+}
+
+// findTask finds a task in a project; an empty projectID matches any project.
+func findTask(s core.Snapshot, projectID, taskID string) (core.Task, bool) {
+	for _, t := range s.Tasks {
+		if t.ID == taskID && (projectID == "" || t.ProjectID == projectID) {
+			return t, true
+		}
+	}
+	return core.Task{}, false
+}
+
 func findProject(s core.Snapshot, id string) (core.Project, bool) {
 	for _, p := range s.Projects {
 		if p.ID == id {
@@ -181,7 +209,7 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 			return a.roleFailed(ctx, t, "The workspace", err)
 		}
 		if started.Base != t.Base || started.Branch != t.Branch {
-			if t, err = a.Core.UpdateTask(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
+			if t, err = a.updateOpen(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
 				task.Base, task.From, task.Branch = started.Base, started.From, started.Branch
 				return "", nil
 			}); err != nil {
@@ -208,7 +236,7 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 		if clean != "" && t.CatchUp {
 			return a.recordCatchUp(ctx, moved, m, clean, *l)
 		}
-		if t, err = a.Core.UpdateTask(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
+		if t, err = a.updateOpen(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
 			task.Base, task.From = moved.Base, moved.From
 			return "", nil
 		}); err != nil {
@@ -236,10 +264,7 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 	revision, err := m.snapshot(ctx, t, n)
 	if errors.Is(err, gitrepo.ErrNoChange) && proposed(t) {
 		// Feedback on a pull request can need no change; the team says why.
-		_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-			if t.Finished() {
-				return "", nil
-			}
+		_, err = a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.WriterSession, t.WakeErrors, t.Failures, t.RetryAt = result.Session, wakeErrors, 0, time.Time{}
 			t.Status, t.Detail = core.TaskLanding, "No change needed: "+clip(reply, 300)
 			return fmt.Sprintf("%s: no change needed for the pull request's feedback", t.Objective), nil
@@ -249,10 +274,7 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 	if err != nil {
 		return a.roleFailed(ctx, t, writers[0].Name, fmt.Errorf("the work could not be recorded: %w", err))
 	}
-	_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
-		if t.Status == core.TaskStopped {
-			return "", nil
-		}
+	_, err = a.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 		revision.BriefVersion, revision.Summary, revision.At = p.Brief.Version, clip(reply, 2000), time.Now().UTC()
 		t.Revisions = append(t.Revisions, revision)
 		t.WriterSession, t.WakeErrors = result.Session, wakeErrors
@@ -281,10 +303,7 @@ func (a *App) review(ctx context.Context, p core.Project, t core.Task, m medium)
 		if err != nil {
 			return a.roleFailed(ctx, t, checker.Name, err)
 		}
-		_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
-			if t.Status == core.TaskStopped {
-				return "", nil
-			}
+		_, err = a.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 			verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, checker.Name, p.Brief.Version, time.Now().UTC()
 			t.Verdicts = append(t.Verdicts, verdict)
 			t.Failures, t.RetryAt = 0, time.Time{}
@@ -382,11 +401,8 @@ func (a *App) decide(ctx context.Context, p core.Project, t core.Task) error {
 		})
 		return err
 	default:
-		_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-			if t.Status == core.TaskStopped {
-				return "", nil
-			}
-			t.Round++
+		_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+			nextRound(t)
 			t.Status, t.Detail = core.TaskWriting, fmt.Sprintf("Revising (round %d of %d)", t.Round, t.MaxRounds)
 			return fmt.Sprintf("Round %d of %s: revising after review", t.Round, t.Objective), nil
 		})
@@ -436,10 +452,7 @@ func (a *App) askForDelivery(ctx context.Context, p core.Project, t core.Task, r
 func (a *App) roleFailed(ctx context.Context, t core.Task, role string, cause error) error {
 	permanent := roles.Permanent(cause)
 	var failures int
-	updated, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Status == core.TaskStopped {
-			return "", nil
-		}
+	updated, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Failures++
 		failures = t.Failures
 		if permanent || t.Failures > roleRetries {
@@ -456,10 +469,7 @@ func (a *App) roleFailed(ctx context.Context, t core.Task, role string, cause er
 	if !permanent && failures <= roleRetries {
 		return nil
 	}
-	if _, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Status == core.TaskStopped {
-			return "", nil
-		}
+	if _, err = a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.ResumeStatus = t.Status
 		return "", nil
 	}); err != nil {
@@ -475,10 +485,7 @@ func (a *App) roleFailed(ctx context.Context, t core.Task, role string, cause er
 }
 
 func (a *App) setStatus(ctx context.Context, id, status, detail string) error {
-	_, err := a.Core.UpdateTask(ctx, id, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Status == core.TaskStopped {
-			return "", nil
-		}
+	_, err := a.updateOpen(ctx, id, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Status, t.Detail = status, detail
 		return "", nil
 	})
@@ -486,10 +493,7 @@ func (a *App) setStatus(ctx context.Context, id, status, detail string) error {
 }
 
 func (a *App) stopTask(ctx context.Context, t core.Task, reason string) error {
-	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Status == core.TaskStopped {
-			return "", nil
-		}
+	_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Status, t.Detail = core.TaskStopped, reason
 		return t.Objective + " stopped: " + reason, nil
 	})
@@ -527,10 +531,7 @@ func (a *App) applyAnswer(ctx context.Context, p core.Project, t core.Task, d co
 		d.Kind == decisionEscalation && strings.EqualFold(answer, choiceAcceptDraft):
 		return a.approve(ctx, t)
 	case d.Kind == decisionFailure && strings.EqualFold(answer, choiceTryAgain):
-		_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-			if t.Status == core.TaskStopped {
-				return "", nil
-			}
+		_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.Status, t.ResumeStatus = t.ResumeStatus, ""
 			if t.Status == "" {
 				t.Status = core.TaskWriting
@@ -543,20 +544,14 @@ func (a *App) applyAnswer(ctx context.Context, p core.Project, t core.Task, d co
 	}
 	// Anything else is direction for another round: the owner asked for
 	// changes, answered a reviewer's question or wants one more attempt.
-	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Status == core.TaskStopped {
-			return "", nil
-		}
+	_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		switch {
 		case d.Kind == decisionQuestion:
 			t.Direction = append(t.Direction, "Answer to a reviewer's question ("+clip(d.Context, 300)+"): "+answer)
 		case !strings.EqualFold(answer, choiceAnotherRound) && !strings.EqualFold(answer, choiceChanges):
 			t.Direction = append(t.Direction, answer)
 		}
-		t.Round++
-		if t.MaxRounds < t.Round {
-			t.MaxRounds = t.Round
-		}
+		nextRound(t)
 		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", fmt.Sprintf("Revising with your direction (round %d)", t.Round)
 		return fmt.Sprintf("Revising %s with the owner's direction", t.Objective), nil
 	})
@@ -589,10 +584,7 @@ func (a *App) holdForUsage(ctx context.Context, t core.Task, r core.Role) (bool,
 	default:
 		return false, nil
 	}
-	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Status == core.TaskStopped {
-			return "", nil
-		}
+	_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.RetryAt, t.Detail = wait, detail
 		return "", nil
 	})

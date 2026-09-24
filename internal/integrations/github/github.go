@@ -198,6 +198,24 @@ func (p PR) Behind() bool {
 	return p.MergeStateStatus == "BEHIND" || p.MergeStateStatus == "DIRTY" || p.Mergeable == "CONFLICTING"
 }
 
+// PRRef names a pull request as owner/name#number, the form wakes store.
+type PRRef struct {
+	Repo   string
+	Number int
+}
+
+func (r PRRef) String() string { return r.Repo + "#" + strconv.Itoa(r.Number) }
+
+// ParsePRRef reads owner/name#number.
+func ParsePRRef(s string) (PRRef, error) {
+	repo, number, ok := strings.Cut(s, "#")
+	n, err := strconv.Atoi(number)
+	if !ok || err != nil || n < 1 || !repoName.MatchString(repo) {
+		return PRRef{}, errors.New("a pull request is named as owner/name#number")
+	}
+	return PRRef{Repo: repo, Number: n}, nil
+}
+
 var repoName = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
 
 func (c Client) View(ctx context.Context, repo string, number int) (PR, error) {

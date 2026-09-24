@@ -120,18 +120,17 @@ func (a *App) RevisionPreview(ctx context.Context, projectID, taskID string, n i
 	if !ok {
 		return nil, core.ErrNotFound
 	}
-	for _, t := range snap.Tasks {
-		if t.ID != taskID || t.ProjectID != projectID {
-			continue
-		}
-		for _, r := range t.Revisions {
-			if r.N == n {
-				m, err := a.mediumFor(ctx, p, taskPlaybook(p, t))
-				if err != nil {
-					return nil, err
-				}
-				return m.preview(ctx, t, r)
+	t, ok := findTask(snap, projectID, taskID)
+	if !ok {
+		return nil, core.ErrNotFound
+	}
+	for _, r := range t.Revisions {
+		if r.N == n {
+			m, err := a.mediumFor(ctx, p, taskPlaybook(p, t))
+			if err != nil {
+				return nil, err
 			}
+			return m.preview(ctx, t, r)
 		}
 	}
 	return nil, core.ErrNotFound

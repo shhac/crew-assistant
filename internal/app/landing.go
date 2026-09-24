@@ -17,10 +17,7 @@ const maxCatchUps = 4
 // approve records the owner's approval of the latest revision and moves the
 // task on to landing.
 func (a *App) approve(ctx context.Context, t core.Task) error {
-	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Finished() {
-			return "", nil
-		}
+	_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		if len(t.Revisions) > 0 {
 			t.Approved = t.Revisions[len(t.Revisions)-1].N
 		}
@@ -33,10 +30,7 @@ func (a *App) approve(ctx context.Context, t core.Task) error {
 // resumeLanding moves a task whose approval still stands, or that needs none,
 // back on to landing. Its catch-ups keep counting.
 func (a *App) resumeLanding(ctx context.Context, t core.Task) error {
-	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Finished() {
-			return "", nil
-		}
+	_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Status, t.DecisionID, t.Detail = core.TaskLanding, "", "Landing"
 		return "Landing " + t.Objective, nil
 	})
@@ -113,10 +107,7 @@ func (a *App) land(ctx context.Context, p core.Project, t core.Task, m medium) e
 func proposed(t core.Task) bool { return t.Proposal != nil && t.Proposal.Number > 0 }
 
 func (a *App) recordLanded(ctx context.Context, t core.Task, r core.Revision, target, note string) error {
-	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
-		if t.Finished() {
-			return "", nil
-		}
+	_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 		t.Status, t.DecisionID, t.DeliveredTo, t.CatchUps = core.TaskDelivered, "", target, 0
 		t.Detail = fmt.Sprintf("Draft %d approved", r.N)
 		if target != "" {
@@ -153,10 +144,7 @@ func (a *App) landingFailed(ctx context.Context, t core.Task, r core.Revision, c
 	case errors.Is(cause, gitrepo.ErrDirtyCheckout):
 		reason = fmt.Sprintf("Your checkout of %s has uncommitted changes, so git would not update it. Commit or stash them, then choose Try again. Nothing of yours was changed.", target)
 	}
-	if _, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Finished() {
-			return "", nil
-		}
+	if _, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.ResumeStatus = core.TaskLanding
 		return "", nil
 	}); err != nil {
@@ -176,10 +164,7 @@ func (a *App) landingFailed(ctx context.Context, t core.Task, r core.Revision, c
 // implementer. A target that keeps moving is brought to the owner.
 func (a *App) catchUpRound(ctx context.Context, t core.Task, l line) error {
 	tooMany := false
-	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Finished() {
-			return "", nil
-		}
+	_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.CatchUps++
 		if t.CatchUps > maxCatchUps {
 			tooMany = true
@@ -214,8 +199,8 @@ func (a *App) recordCatchUp(ctx context.Context, moved core.Task, m medium, comm
 	for _, r := range roleOf(moved, core.RoleReviewer) {
 		reviewers[r.Name] = true
 	}
-	_, err = a.Core.UpdateTask(ctx, moved.ID, func(t *core.Task, p *core.Project) (string, error) {
-		if t.Finished() || len(t.Revisions) == 0 {
+	_, err = a.updateOpen(ctx, moved.ID, func(t *core.Task, p *core.Project) (string, error) {
+		if len(t.Revisions) == 0 {
 			return "", nil
 		}
 		prev := t.Revisions[len(t.Revisions)-1]
@@ -302,12 +287,7 @@ func (a *App) LandTask(ctx context.Context, projectID, taskID string) (core.Task
 	if !ok {
 		return core.Task{}, core.ErrNotFound
 	}
-	var t core.Task
-	for _, candidate := range snap.Tasks {
-		if candidate.ID == taskID && candidate.ProjectID == projectID {
-			t, ok = candidate, true
-		}
-	}
+	t, ok := findTask(snap, projectID, taskID)
 	if !ok {
 		return core.Task{}, core.ErrNotFound
 	}

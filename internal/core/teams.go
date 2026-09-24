@@ -109,6 +109,14 @@ func (l LandPolicy) Way() string {
 	return l.Via
 }
 
+// MergeMethod is how a pull request merges, squash unless set.
+func (l LandPolicy) MergeMethod() string {
+	if l.Method == "" {
+		return "squash"
+	}
+	return l.Method
+}
+
 // AsksFirst reports whether the owner approves before a change lands.
 func (l LandPolicy) AsksFirst() bool { return l.Approve != ApproveNone }
 

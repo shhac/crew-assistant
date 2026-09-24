@@ -34,14 +34,8 @@ func (a *App) landPR(ctx context.Context, p core.Project, t core.Task, m gitMedi
 	}
 	for _, w := range snap.Wakes {
 		if w.TaskID == t.ID && w.Owner == core.WakeTask && w.Status == core.WakeFired {
-			_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-				if t.Finished() {
-					return "", nil
-				}
-				t.Round++
-				if t.MaxRounds < t.Round {
-					t.MaxRounds = t.Round
-				}
+			_, err = a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+				nextRound(t)
 				t.Status, t.Detail = core.TaskWriting, "Woken: "+w.Event
 				return "", nil
 			})
@@ -139,11 +133,7 @@ func (a *App) landPR(ctx context.Context, p core.Project, t core.Task, m gitMedi
 		}
 	}
 	if pr.Ready() {
-		method := land.Method
-		if method == "" {
-			method = "squash"
-		}
-		if err = a.github.Merge(ctx, land.GitHub, prop.Number, method, r.Ref); err == nil {
+		if err = a.github.Merge(ctx, land.GitHub, prop.Number, land.MergeMethod(), r.Ref); err == nil {
 			// The next look sees it merged and records the landing.
 			return a.setStatus(ctx, t.ID, core.TaskLanding, fmt.Sprintf("Merging pull request #%d", prop.Number))
 		}
@@ -152,10 +142,7 @@ func (a *App) landPR(ctx context.Context, p core.Project, t core.Task, m gitMedi
 }
 
 func (a *App) saveProposal(ctx context.Context, taskID string, prop core.Proposal, activity string) error {
-	_, err := a.Core.UpdateTask(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Finished() {
-			return "", nil
-		}
+	_, err := a.updateOpen(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Proposal = &prop
 		if prop.URL != "" {
 			t.DeliveredTo = prop.URL
@@ -204,20 +191,14 @@ func (a *App) answerPR(ctx context.Context, t core.Task, r core.Revision, pr git
 	if pr.CheckState() == "FAILURE" {
 		prop.ChecksFor = r.Ref
 	}
-	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
-		if t.Finished() {
-			return "", nil
-		}
+	_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 		now := time.Now().UTC()
 		for _, v := range feedback {
 			v.Revision, v.BriefVersion, v.At = r.N, p.Brief.Version, now
 			t.Verdicts = append(t.Verdicts, v)
 		}
 		t.Proposal = &prop
-		t.Round++
-		if t.MaxRounds < t.Round {
-			t.MaxRounds = t.Round
-		}
+		nextRound(t)
 		t.Status, t.Detail = core.TaskWriting, fmt.Sprintf("Answering pull request #%d", prop.Number)
 		return fmt.Sprintf("%s: answering %d item(s) of feedback on pull request #%d", t.Objective, len(feedback), prop.Number), nil
 	})
@@ -227,7 +208,7 @@ func (a *App) answerPR(ctx context.Context, t core.Task, r core.Revision, pr git
 // awaitPR puts the task to sleep until the pull request's checks or reviews
 // change, through wakes the loop holds itself.
 func (a *App) awaitPR(ctx context.Context, t core.Task, repo string, pr github.PR) error {
-	target := fmt.Sprintf("%s#%d", repo, pr.Number)
+	target := github.PRRef{Repo: repo, Number: pr.Number}.String()
 	snap, err := a.Core.Snapshot(ctx)
 	if err != nil {
 		return err

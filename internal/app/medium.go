@@ -210,7 +210,7 @@ func (m gitMedium) lineFor(ctx context.Context, t core.Task) (*line, error) {
 	if err != nil {
 		return nil, err
 	}
-	what := fmt.Sprintf("%s moved on since this task started (it is now at %s)", land.Target, tip[:7])
+	what := fmt.Sprintf("%s moved on since this task started (it is now at %s)", land.Target, short(tip))
 	if m.landed != nil && m.landed.TaskID != t.ID && m.landed.Commit == tip {
 		what = fmt.Sprintf("%q landed on %s", m.landed.Objective, land.Target)
 	}
@@ -278,10 +278,7 @@ func (m gitMedium) files(ctx context.Context, t core.Task, ref string) ([]string
 }
 
 func (m gitMedium) reset(ctx context.Context, t core.Task) error {
-	ref := t.Base
-	if n := len(t.Revisions); n > 0 {
-		ref = t.Revisions[n-1].Ref
-	}
+	ref := tipOf(t)
 	if ref == "" {
 		return errors.New("the task has no starting point")
 	}
@@ -289,11 +286,7 @@ func (m gitMedium) reset(ctx context.Context, t core.Task) error {
 }
 
 func (m gitMedium) snapshot(ctx context.Context, t core.Task, n int) (core.Revision, error) {
-	previous := t.Base
-	if len(t.Revisions) > 0 {
-		previous = t.Revisions[len(t.Revisions)-1].Ref
-	}
-	commit, files, err := m.repo.Snapshot(ctx, t.Base, previous, fmt.Sprintf("draft %d: %s", n, clip(t.Objective, 60)))
+	commit, files, err := m.repo.Snapshot(ctx, t.Base, tipOf(t), fmt.Sprintf("draft %d: %s", n, clip(t.Objective, 60)))
 	return core.Revision{N: n, Files: files, Ref: commit}, err
 }
 
@@ -323,11 +316,7 @@ func (m gitMedium) branchName(t core.Task) string {
 
 func (m gitMedium) deliveryNote(t core.Task) string {
 	if land := m.playbook.Land; land.Way() == core.LandPullRequest {
-		method := land.Method
-		if method == "" {
-			method = "squash"
-		}
-		note := fmt.Sprintf("Approving pushes it to %s as the branch %s and opens a pull request into %s. From then on the team answers reviews and CI on it, and it merges by %s once GitHub says it is approved and green; you are asked again only if an update touches what runs or instructs on your side.", land.GitHub, m.branchName(t), land.Target, method)
+		note := fmt.Sprintf("Approving pushes it to %s as the branch %s and opens a pull request into %s. From then on the team answers reviews and CI on it, and it merges by %s once GitHub says it is approved and green; you are asked again only if an update touches what runs or instructs on your side.", land.GitHub, m.branchName(t), land.Target, land.MergeMethod())
 		if land.Means != "" {
 			note += " For this project, landing means: " + land.Means
 		}
@@ -351,7 +340,7 @@ func startedFrom(t core.Task) string {
 	if t.From == "" || len(t.Base) < 7 {
 		return "where the task started"
 	}
-	return t.From + " at " + t.Base[:7]
+	return t.From + " at " + short(t.Base)
 }
 
 // slugify keeps whole words, up to 40 characters, so a branch name never ends

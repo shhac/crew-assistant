@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -42,14 +41,11 @@ func (a *App) registerWake(ctx context.Context, owner, taskID string, in engine.
 	}
 	switch in.On {
 	case core.WakeOnTask:
-		for _, t := range snap.Tasks {
-			if t.ID == in.Target {
-				wake.Baseline, wake.ProjectID = t.Status, t.ProjectID
-			}
-		}
-		if wake.Baseline == "" {
+		t, ok := findTask(snap, "", in.Target)
+		if !ok {
 			return core.Wake{}, fmt.Errorf("there is no task %q", in.Target)
 		}
+		wake.Baseline, wake.ProjectID = t.Status, t.ProjectID
 	case core.WakeOnBranch:
 		dir, err := projectRepo(snap, in.ProjectID)
 		if err != nil {
@@ -94,12 +90,11 @@ func (a *App) OpenWakes(ctx context.Context) ([]core.Wake, error) {
 
 // viewPR reads a pull request named as owner/name#number.
 func (a *App) viewPR(ctx context.Context, target string) (github.PR, error) {
-	repo, number, ok := strings.Cut(target, "#")
-	n, err := strconv.Atoi(number)
-	if !ok || err != nil || n < 1 {
-		return github.PR{}, errors.New("a pull request is named as owner/name#number")
+	ref, err := github.ParsePRRef(target)
+	if err != nil {
+		return github.PR{}, err
 	}
-	return a.github.View(ctx, repo, n)
+	return a.github.View(ctx, ref.Repo, ref.Number)
 }
 
 func prValue(on string, pr github.PR) string {
@@ -218,13 +213,6 @@ func (a *App) checkWakes(ctx context.Context, now time.Time) error {
 	return nil
 }
 
-func short(sha string) string {
-	if len(sha) > 7 {
-		return sha[:7]
-	}
-	return sha
-}
-
 // wakeBlock is what an implementer may end its reply with.
 type wakeBlock struct {
 	WakeMeWhen []engine.WakeArgs `json:"wake_me_when"`
@@ -268,7 +256,7 @@ func (a *App) applyWakeBlock(ctx context.Context, p core.Project, t core.Task, b
 				problems = append(problems, "there is no pull request yet, so \"this\" names nothing")
 				continue
 			}
-			req.Target = fmt.Sprintf("%s#%d", t.Playbook.Land.GitHub, t.Proposal.Number)
+			req.Target = github.PRRef{Repo: t.Playbook.Land.GitHub, Number: t.Proposal.Number}.String()
 		}
 		if _, err := a.registerWake(ctx, core.WakeTask, t.ID, req); err != nil {
 			problems = append(problems, fmt.Sprintf("waiting on %s %s: %v", req.On, req.Target, err))

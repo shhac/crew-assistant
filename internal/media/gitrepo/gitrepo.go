@@ -201,10 +201,23 @@ func CurrentBranch(ctx context.Context, dir string) (string, error) {
 	return strings.TrimSpace(current), nil
 }
 
+// validBranch refuses anything git would not take as a branch name, before it
+// reaches a ref or a refspec.
+func validBranch(ctx context.Context, dir, name string) error {
+	if _, err := run(ctx, dir, "check-ref-format", "--branch", name); err != nil {
+		return fmt.Errorf("%q is not a valid branch name", name)
+	}
+	return nil
+}
+
+// fetchQuietly is every fetch the daemon makes: no tags, no submodules, no
+// housekeeping.
+var fetchQuietly = []string{"fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-auto-gc"}
+
 // BranchTip reads a branch's tip in a repository without changing anything.
 func BranchTip(ctx context.Context, dir, branch string) (string, error) {
-	if _, err := run(ctx, dir, "check-ref-format", "--branch", branch); err != nil {
-		return "", fmt.Errorf("%q is not a valid branch name", branch)
+	if err := validBranch(ctx, dir, branch); err != nil {
+		return "", err
 	}
 	tip, err := run(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	if err != nil {
@@ -217,10 +230,10 @@ func BranchTip(ctx context.Context, dir, branch string) (string, error) {
 // fetches from the repository's path, never a configured remote whose
 // settings could name a command to run.
 func (r Repo) Fetch(ctx context.Context, branch string) (string, error) {
-	if _, err := run(ctx, r.source, "check-ref-format", "--branch", branch); err != nil {
-		return "", fmt.Errorf("%q is not a valid branch name", branch)
+	if err := validBranch(ctx, r.source, branch); err != nil {
+		return "", err
 	}
-	if _, err := run(ctx, r.Workspace(), "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-auto-gc", r.source, "+refs/heads/"+branch+":refs/remotes/source/"+branch); err != nil {
+	if _, err := run(ctx, r.Workspace(), append(fetchQuietly, r.source, "+refs/heads/"+branch+":refs/remotes/source/"+branch)...); err != nil {
 		return "", err
 	}
 	tip, err := run(ctx, r.Workspace(), "rev-parse", "refs/remotes/source/"+branch)
@@ -431,8 +444,8 @@ func (r Repo) Deliver(ctx context.Context, taskBranch, commit, name string) (str
 		if candidate == strings.TrimSpace(current) {
 			continue
 		}
-		if _, err := run(ctx, r.source, "check-ref-format", "--branch", candidate); err != nil {
-			return "", fmt.Errorf("%q is not a valid branch name", candidate)
+		if err := validBranch(ctx, r.source, candidate); err != nil {
+			return "", err
 		}
 		existing, err := run(ctx, r.source, "rev-parse", "--verify", "--quiet", "refs/heads/"+candidate)
 		if err == nil {
@@ -444,7 +457,7 @@ func (r Repo) Deliver(ctx context.Context, taskBranch, commit, name string) (str
 		// Bring the objects over without naming any branch, then create the
 		// branch only if it still does not exist: a branch that appeared in
 		// between is never moved.
-		if _, err = run(ctx, r.source, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-auto-gc", "--no-write-fetch-head", r.Workspace(), "refs/heads/"+taskBranch+":refs/crew-assistant/incoming"); err != nil {
+		if _, err = run(ctx, r.source, append(fetchQuietly, "--no-write-fetch-head", r.Workspace(), "refs/heads/"+taskBranch+":refs/crew-assistant/incoming")...); err != nil {
 			return "", fmt.Errorf("the revision could not be fetched: %w", err)
 		}
 		_, err = run(ctx, r.source, "update-ref", "-m", "crew-assistant delivery", "refs/heads/"+candidate, commit, strings.Repeat("0", len(commit)))
@@ -477,8 +490,8 @@ var ErrLeaseLost = errors.New("someone else pushed to the branch since the proje
 // commit it last pushed there. An empty lease means the project never pushed
 // it, so the branch must not exist yet.
 func (r Repo) PushOwned(ctx context.Context, url, commit, branch, lease string, config []string) error {
-	if _, err := run(ctx, r.source, "check-ref-format", "--branch", branch); err != nil {
-		return fmt.Errorf("%q is not a valid branch name", branch)
+	if err := validBranch(ctx, r.source, branch); err != nil {
+		return err
 	}
 	args := append(append([]string(nil), config...), "push", "--porcelain", "--no-verify", "--force-with-lease=refs/heads/"+branch+":"+lease, url, commit+":refs/heads/"+branch)
 	out, err := run(ctx, r.Workspace(), args...)
@@ -495,11 +508,11 @@ func (r Repo) PushOwned(ctx context.Context, url, commit, branch, lease string, 
 
 // FetchFrom brings a remote branch into the clone and returns its tip.
 func (r Repo) FetchFrom(ctx context.Context, url, branch string, config []string) (string, error) {
-	if _, err := run(ctx, r.source, "check-ref-format", "--branch", branch); err != nil {
-		return "", fmt.Errorf("%q is not a valid branch name", branch)
+	if err := validBranch(ctx, r.source, branch); err != nil {
+		return "", err
 	}
 	ref := "refs/remotes/remote/" + branch
-	args := append(append([]string(nil), config...), "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-auto-gc", url, "+refs/heads/"+branch+":"+ref)
+	args := append(append(append([]string(nil), config...), fetchQuietly...), url, "+refs/heads/"+branch+":"+ref)
 	if _, err := run(ctx, r.Workspace(), args...); err != nil {
 		return "", err
 	}
@@ -524,8 +537,8 @@ func (r Repo) PushFastForward(ctx context.Context, taskBranch, commit, target st
 	if err != nil || strings.TrimSpace(tip) != commit {
 		return errors.New("the task branch is not at the approved revision")
 	}
-	if _, err = run(ctx, r.source, "check-ref-format", "--branch", target); err != nil {
-		return fmt.Errorf("%q is not a valid branch name", target)
+	if err = validBranch(ctx, r.source, target); err != nil {
+		return err
 	}
 	out, err := run(ctx, r.Workspace(), "push", "--porcelain", "--no-verify", "--receive-pack="+receivePack, r.source, commit+":refs/heads/"+target)
 	if err == nil {
