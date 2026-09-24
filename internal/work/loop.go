@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -70,6 +71,9 @@ func (lp *Loop) Nudge() {
 // state transition, and every step is recorded before the next begins, so a
 // restart resumes at the step it was on.
 func (lp *Loop) Run(ctx context.Context, noDispatch bool) {
+	// Learnings are copied out only while a turn runs; any left here were
+	// left by a daemon that stopped mid-turn.
+	os.RemoveAll(lp.learningsRoot())
 	tick := time.NewTicker(15 * time.Second)
 	defer tick.Stop()
 	for {
@@ -102,7 +106,6 @@ func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 	if snap.Paused {
 		return false, nil
 	}
-	lp.sweepLearnings(snap)
 	if progressed, err := lp.settleAnswers(ctx, snap); progressed || err != nil {
 		return progressed, err
 	}
@@ -210,16 +213,18 @@ func taskPlaybook(p core.Project, t core.Task) *core.Playbook {
 	return p.Playbook
 }
 
-func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m medium, prompt string) (roles.Spec, error) {
+// roleSpec is how a role runs for one turn. The files it reads its learnings
+// from last only as long as the turn: run it before cleanup.
+func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m medium, prompt string) (spec roles.Spec, cleanup func(), err error) {
 	cfg := lp.Config()
-	spec := roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Write: write, Env: m.env(), Read: m.readable(), Instructions: r.Instructions, Prompt: prompt}
-	dir, index, err := lp.learningsIndex(t, r)
+	spec = roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Write: write, Env: m.env(), Read: m.readable(), Instructions: r.Instructions, Prompt: prompt}
+	learned, err := lp.prepareLearnings(t, r)
 	if err != nil {
-		return spec, err
+		return spec, nil, err
 	}
-	if index != "" {
-		spec.Read = append(append([]string(nil), spec.Read...), dir)
-		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + index)
+	if learned.index != "" {
+		spec.Read = append(append([]string(nil), spec.Read...), learned.dir)
+		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + learned.index)
 	}
 	if r.Engine == "codex" {
 		spec.Binary, spec.Home = cfg.Model.CodexBin, cfg.Model.CodexHome
@@ -227,7 +232,7 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 	} else {
 		spec.Binary, spec.Home = cfg.Model.ClaudeBin, cfg.Model.ClaudeHome
 	}
-	return spec, nil
+	return spec, learned.cleanup, nil
 }
 
 // write runs the implementer for this round and records what it produced.
@@ -258,10 +263,11 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 		return err
 	}
 	seen := len(t.Direction)
-	spec, err := lp.roleSpec(t, writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp)+prompt+learnedGuide(writers[0], false))
+	spec, cleanup, err := lp.roleSpec(t, writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp)+prompt+learnedGuide(writers[0], false))
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
+	defer cleanup()
 	spec.Resume = t.WriterSession
 	result, err := lp.runner.Run(ctx, spec)
 	if err != nil {
@@ -404,10 +410,11 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 	defer cleanup()
 	playbook := taskPlaybook(p, t)
 	base := checkerPrompt(p, t, r, checker, playbook) + note + learnedGuide(checker, true)
-	spec, err := lp.roleSpec(t, checker, dir, checker.Kind == core.RoleQA, m, base)
+	spec, cleanupLearnings, err := lp.roleSpec(t, checker, dir, checker.Kind == core.RoleQA, m, base)
 	if err != nil {
 		return core.Verdict{}, err
 	}
+	defer cleanupLearnings()
 	var parseErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		result, err := lp.runner.Run(ctx, spec)

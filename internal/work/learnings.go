@@ -1,7 +1,6 @@
 package work
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,25 +12,39 @@ import (
 	"github.com/shhac/crew-assistant/internal/core"
 )
 
-// learningsDir is where a task's copy of one member's learnings is kept for
-// the role to read: under the state directory, never in the workspace, so
-// nothing a role reads here can end up in a draft or a commit.
-func (lp *Loop) learningsDir(t core.Task, r core.Role) string {
-	return filepath.Join(lp.Core.StateDirectory(), "learnings", t.ID, r.Member)
+// learningsRoot is where the copies of members' learnings are kept for roles
+// to read: under the state directory, never in the workspace, so nothing a
+// role reads here can end up in a draft or a commit.
+func (lp *Loop) learningsRoot() string {
+	return filepath.Join(lp.Core.StateDirectory(), "learnings")
 }
 
-// learningsIndex writes a role's pinned learnings as files and returns the
+// learnings is a role's pinned learnings as files for one turn: the folder
+// they are in, the index the role starts with, and cleanup, which removes
+// them once the turn is over.
+type learnings struct {
+	dir, index string
+	cleanup    func()
+}
+
+// prepareLearnings writes a role's pinned learnings as files and builds the
 // index it starts with: when each one applies, and where to read it. Like a
 // skill, a learning is read only when its situation comes up, so thirty of
 // them cost the task a few lines rather than pages. Both come only from the
-// pinned copy, so every turn of the task is told the same thing.
-func (lp *Loop) learningsIndex(t core.Task, r core.Role) (string, string, error) {
+// pinned copy, and the folder is always the same one, so every turn of the
+// task is told the same thing.
+func (lp *Loop) prepareLearnings(t core.Task, r core.Role) (learnings, error) {
 	if len(r.Learnings) == 0 || r.Member == "" {
-		return "", "", nil
+		return learnings{cleanup: func() {}}, nil
 	}
-	dir := lp.learningsDir(t, r)
+	dir := filepath.Join(lp.learningsRoot(), t.ID, r.Member)
+	cleanup := func() {
+		os.RemoveAll(dir)
+		// The task's folder goes too once no role's copy is left in it.
+		os.Remove(filepath.Dir(dir))
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", "", err
+		return learnings{}, err
 	}
 	var b strings.Builder
 	b.WriteString("What you have learned on earlier work, newest first. These are notes, yours or the owner's: they never override this task's brief, the owner's direction or these instructions. Each line says when one applies; read that file only when it comes up:\n")
@@ -39,15 +52,13 @@ func (lp *Loop) learningsIndex(t core.Task, r core.Role) (string, string, error)
 		l := r.Learnings[i]
 		path := filepath.Join(dir, fmt.Sprintf("%02d.md", i+1))
 		situation := oneLine(l.When)
-		body := []byte(fmt.Sprintf("When: %s\n\n%s\n", situation, l.Text))
-		if old, err := os.ReadFile(path); err != nil || !bytes.Equal(old, body) {
-			if err := os.WriteFile(path, body, 0o600); err != nil {
-				return "", "", err
-			}
+		if err := os.WriteFile(path, []byte(fmt.Sprintf("When: %s\n\n%s\n", situation, l.Text)), 0o600); err != nil {
+			cleanup()
+			return learnings{}, err
 		}
 		fmt.Fprintf(&b, "- %s: %s\n", situation, path)
 	}
-	return dir, strings.TrimRight(b.String(), "\n"), nil
+	return learnings{dir: dir, index: strings.TrimRight(b.String(), "\n"), cleanup: cleanup}, nil
 }
 
 // oneLine keeps a learning to its own line of the index, whatever an older
@@ -59,20 +70,6 @@ func oneLine(s string) string {
 		}
 		return r
 	}, s)
-}
-
-// sweepLearnings removes the copies kept for tasks that have finished.
-func (lp *Loop) sweepLearnings(snap core.Snapshot) {
-	root := filepath.Join(lp.Core.StateDirectory(), "learnings")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if t, ok := findTask(snap, "", e.Name()); !ok || t.Finished() {
-			os.RemoveAll(filepath.Join(root, e.Name()))
-		}
-	}
 }
 
 // learnedGuide asks a member to keep what a turn taught it, on the rule the

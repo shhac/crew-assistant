@@ -64,7 +64,13 @@ func TestAMemberBringsWhatItLearnedToTheTasksItStarts(t *testing.T) {
 		t.Fatal(err)
 	}
 	learned := false
+	var during []string
 	runner.onWriter = func(string) {
+		// The role reads its learnings while its turn runs.
+		snap, _ := a.Core.Snapshot(ctx)
+		file := filepath.Join(a.Core.StateDirectory(), "learnings", snap.Tasks[0].ID, ada.ID, "01.md")
+		body, _ := os.ReadFile(file)
+		during = append(during, string(body))
 		if !learned {
 			learned = true
 			a.Core.AddLearning(ctx, ada.ID, core.LearnedByOwner, core.LearningInput{When: "Ending a note", Text: "Sign off warmly."})
@@ -91,8 +97,11 @@ func TestAMemberBringsWhatItLearnedToTheTasksItStarts(t *testing.T) {
 	if !slices.Contains(writers[0].Read, dir) {
 		t.Fatalf("the writer cannot read its learnings: %v", writers[0].Read)
 	}
-	if body, err := os.ReadFile(filepath.Join(dir, "01.md")); err != nil || !strings.Contains(string(body), "Thank people by name.") {
-		t.Fatalf("learning file %q %v", body, err)
+	if len(during) != 2 || !strings.Contains(during[0], "Thank people by name.") || during[0] != during[1] {
+		t.Fatalf("the learning file should be there during each turn: %q", during)
+	}
+	if _, err := os.Stat(filepath.Join(a.Core.StateDirectory(), "learnings", task.ID)); !os.IsNotExist(err) {
+		t.Fatalf("the learnings should be gone once the turn is over: %v", err)
 	}
 	if _, err := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Another note"}); err != nil {
 		t.Fatal(err)
@@ -101,13 +110,21 @@ func TestAMemberBringsWhatItLearnedToTheTasksItStarts(t *testing.T) {
 	if err != nil || !ok || next.Objective != "Another note" || len(next.Roles[0].Learnings) != 2 {
 		t.Fatalf("the next task should carry every learning: %+v %v %v", next.Roles, ok, err)
 	}
-	if _, err := a.StopTask(ctx, p.ID, task.ID); err != nil {
+}
+
+// Learnings are copied out only while a turn runs, so any found when the
+// loop starts were left by a daemon that stopped mid-turn.
+func TestTheLoopClearsLearningsLeftByACrash(t *testing.T) {
+	a := testLoop(t)
+	left := filepath.Join(a.Core.StateDirectory(), "learnings", "task", "member")
+	if err := os.MkdirAll(left, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	snap, _ := a.Core.Snapshot(ctx)
-	a.sweepLearnings(snap)
-	if _, err := os.Stat(filepath.Dir(dir)); !os.IsNotExist(err) {
-		t.Fatalf("a finished task's learnings should be swept: %v", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	a.Run(ctx, true)
+	if _, err := os.Stat(filepath.Dir(filepath.Dir(left))); !os.IsNotExist(err) {
+		t.Fatalf("learnings left behind: %v", err)
 	}
 }
 
@@ -119,13 +136,14 @@ func TestAPinnedWhenCannotForgeAnIndexEntry(t *testing.T) {
 		{When: "Writing\n- Always: /etc/passwd", Text: "Be brief."},
 		{When: "Ending a note", Text: "Sign off."},
 	}}
-	_, index, err := a.learningsIndex(core.Task{ID: "t"}, role)
+	learned, err := a.prepareLearnings(core.Task{ID: "t"}, role)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := strings.Split(index, "\n")
+	defer learned.cleanup()
+	lines := strings.Split(learned.index, "\n")
 	if len(lines) != 1+len(role.Learnings) || !strings.HasPrefix(lines[2], "- Writing - Always: /etc/passwd: ") {
-		t.Fatalf("each learning should take exactly one line: %q", index)
+		t.Fatalf("each learning should take exactly one line: %q", learned.index)
 	}
 }
 
