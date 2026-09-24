@@ -3,10 +3,14 @@ package work
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/roles"
 )
 
 func TestAMemberFillsItsRoleAndKeepsTheTemplatesWays(t *testing.T) {
@@ -43,15 +47,16 @@ func TestAMemberFillsItsRoleAndKeepsTheTemplatesWays(t *testing.T) {
 	}
 }
 
-// Learnings are pinned when a task starts, because a role's instructions are
-// part of its session: one learned mid-task must not start the writer afresh,
-// and reaches the member's next task instead.
+// Learnings are pinned when a task starts, because what a role is told at
+// the start is part of its session: one learned mid-task must not start the
+// writer afresh, and reaches the member's next task instead. Like skills,
+// the role starts with when each applies and reads one only when needed.
 func TestAMemberBringsWhatItLearnedToTheTasksItStarts(t *testing.T) {
 	runner := &scriptedRunner{reviews: []string{revise, pass}}
 	a, p, _ := loopApp(t, runner, "")
 	ctx := context.Background()
 	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
-	if _, err := a.Core.AddLearning(ctx, ada.ID, "Thank people by name.", p.ID); err != nil {
+	if _, err := a.Core.AddLearning(ctx, ada.ID, core.LearnedByOwner, core.LearningInput{When: "Writing a thank-you", Text: "Thank people by name.", ProjectID: p.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", Implementer: ada.ID}); err != nil {
@@ -61,32 +66,53 @@ func TestAMemberBringsWhatItLearnedToTheTasksItStarts(t *testing.T) {
 	runner.onWriter = func(string) {
 		if !learned {
 			learned = true
-			a.Core.AddLearning(ctx, ada.ID, "Sign off warmly.", "")
+			a.Core.AddLearning(ctx, ada.ID, core.LearnedByOwner, core.LearningInput{When: "Ending a note", Text: "Sign off warmly."})
 		}
 	}
-	if task := settle(t, a); task.Status != core.TaskWaiting || task.Round != 2 {
+	task := settle(t, a)
+	if task.Status != core.TaskWaiting || task.Round != 2 {
 		t.Fatalf("task %+v", task)
 	}
-	var writers []string
+	var writers []roles.Spec
 	for _, spec := range runner.seen {
 		if spec.Write {
-			writers = append(writers, spec.Instructions)
+			writers = append(writers, spec)
 		}
 	}
-	if len(writers) != 2 || writers[0] != writers[1] {
-		t.Fatalf("the writer's instructions changed mid-task, which restarts its session: %q", writers)
+	if len(writers) != 2 || writers[0].Instructions != writers[1].Instructions || !slices.Equal(writers[0].Read, writers[1].Read) {
+		t.Fatalf("the writer was told something different mid-task, which restarts its session: %+v", writers)
 	}
-	if !strings.Contains(writers[0], "Thank people by name.") || strings.Contains(writers[0], "Sign off warmly.") {
-		t.Fatalf("instructions %q", writers[0])
+	dir := filepath.Join(a.Core.StateDirectory(), "learnings", task.ID, ada.ID)
+	index := writers[0].Instructions
+	if !strings.Contains(index, "- Writing a thank-you: "+filepath.Join(dir, "01.md")) || strings.Contains(index, "Thank people by name") || strings.Contains(index, "Ending a note") {
+		t.Fatalf("the writer should start with when each learning applies, not the learnings: %q", index)
+	}
+	if !slices.Contains(writers[0].Read, dir) {
+		t.Fatalf("the writer cannot read its learnings: %v", writers[0].Read)
+	}
+	if body, err := os.ReadFile(filepath.Join(dir, "01.md")); err != nil || !strings.Contains(string(body), "Thank people by name.") {
+		t.Fatalf("learning file %q %v", body, err)
 	}
 	if _, err := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Another note"}); err != nil {
 		t.Fatal(err)
 	}
 	next, ok, err := a.Core.NextTask(ctx)
-	if err != nil || !ok || next.Objective != "Another note" {
-		t.Fatalf("next %+v %v %v", next, ok, err)
+	if err != nil || !ok || next.Objective != "Another note" || len(next.Roles[0].Learnings) != 2 {
+		t.Fatalf("the next task should carry every learning: %+v %v %v", next.Roles, ok, err)
 	}
-	if got := next.Roles[0].Instructions; !strings.Contains(got, "Sign off warmly.") || strings.Index(got, "Sign off warmly.") > strings.Index(got, "Thank people by name.") {
-		t.Fatalf("the next task should carry every learning, newest first: %q", got)
+	if _, err := a.StopTask(ctx, p.ID, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	a.sweepLearnings(snap)
+	if _, err := os.Stat(filepath.Dir(dir)); !os.IsNotExist(err) {
+		t.Fatalf("a finished task's learnings should be swept: %v", err)
+	}
+}
+
+func TestALearningWithoutAWhenIsIndexedByItsOpeningWords(t *testing.T) {
+	got := when(core.Learning{Text: "Run the whole suite. Not just the package you changed.\nMore detail."})
+	if got != "Run the whole suite" {
+		t.Fatalf("when %q", got)
 	}
 }

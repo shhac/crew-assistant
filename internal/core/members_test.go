@@ -53,23 +53,25 @@ func TestLearningsAreKeptWithinABoundAndCanBeForgotten(t *testing.T) {
 	s, _ := fixture(t)
 	p := newProject(t, s)
 	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Rune", Kind: RoleReviewer, Engine: "codex"})
-	if _, err := s.AddLearning(testContext, m.ID, strings.Repeat("x", 301), ""); err == nil {
+	add := func(when, text, projectID string) (Member, error) {
+		return s.AddLearning(testContext, m.ID, LearnedByOwner, LearningInput{When: when, Text: text, ProjectID: projectID})
+	}
+	if _, err := add("", strings.Repeat("x", 1501), ""); err == nil {
 		t.Fatal("an overlong learning was kept")
 	}
-	if _, err := s.AddLearning(testContext, m.ID, "Check the migrations", "nowhere"); !errors.Is(err, ErrNotFound) {
+	if _, err := add(strings.Repeat("x", 161), "Check them", ""); err == nil {
+		t.Fatal("an overlong when was kept")
+	}
+	if _, err := add("", "Check the migrations", "nowhere"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a learning from a project that does not exist: %v", err)
 	}
 	for i := 0; i < maxLearnings; i++ {
-		if m, _ = s.AddLearning(testContext, m.ID, "Learning "+string(rune('A'+i)), p.ID); len(m.Learnings) != i+1 {
+		if m, _ = add("When "+string(rune('A'+i)), "Learning "+string(rune('A'+i)), p.ID); len(m.Learnings) != i+1 || m.Learnings[i].Source != LearnedByOwner {
 			t.Fatalf("learning %d not kept", i)
 		}
 	}
-	if _, err := s.AddLearning(testContext, m.ID, "One too many", ""); !errors.Is(err, ErrConflict) {
+	if _, err := add("", "One too many", ""); !errors.Is(err, ErrConflict) {
 		t.Fatalf("the cap should ask to forget one first: %v", err)
-	}
-	text := learningsText(m)
-	if !strings.HasPrefix(text, "What you have learned") || strings.Index(text, "Learning "+string(rune('A'+maxLearnings-1))) > strings.Index(text, "Learning A") {
-		t.Fatalf("learnings should read newest first:\n%s", text)
 	}
 	if m, _ = s.ForgetLearning(testContext, m.ID, m.Learnings[0].ID); len(m.Learnings) != maxLearnings-1 {
 		t.Fatal("forgetting did not remove it")

@@ -20,6 +20,8 @@ type Role struct {
 	Instructions string `json:"instructions,omitempty"`
 	// Member is the team member this role was copied from, if any.
 	Member string `json:"member,omitempty"`
+	// Learnings are the member's, as they were when the task started.
+	Learnings []Learning `json:"learnings,omitempty"`
 }
 
 const (

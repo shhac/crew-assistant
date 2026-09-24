@@ -32,14 +32,11 @@ func registerMembers(mux *http.ServeMux, a *app.App) {
 		respond(w, 200, map[string]bool{"deleted": true})
 	})
 	mux.HandleFunc("POST /api/members/{id}/learnings", func(w http.ResponseWriter, r *http.Request) {
-		var in struct {
-			Text      string `json:"text"`
-			ProjectID string `json:"project_id"`
-		}
+		var in core.LearningInput
 		if decode(w, r, &in) != nil {
 			return
 		}
-		v, err := a.Core.AddLearning(r.Context(), r.PathValue("id"), in.Text, in.ProjectID)
+		v, err := a.Core.AddLearning(r.Context(), r.PathValue("id"), core.LearnedByOwner, in)
 		if err != nil {
 			problem(w, err)
 			return

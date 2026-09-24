@@ -29,14 +29,31 @@ type Member struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
-// Learning is one thing a member keeps doing, in every project. Only the
-// owner, or the assistant on the owner's word, records one: it becomes part
-// of the member's instructions everywhere.
+// Learning is one thing a member keeps doing, in every project. When says
+// the situation it applies to, the way a skill's description does: a role
+// sees every When from the start and reads the text only when that
+// situation comes up.
 type Learning struct {
 	ID        string    `json:"id"`
+	When      string    `json:"when,omitempty"`
 	Text      string    `json:"text"`
+	Source    string    `json:"source,omitempty"`
 	ProjectID string    `json:"project_id,omitempty"`
+	TaskID    string    `json:"task_id,omitempty"`
 	At        time.Time `json:"at"`
+}
+
+// Who recorded a learning.
+const (
+	LearnedByOwner     = "owner"
+	LearnedByAssistant = "assistant"
+	LearnedByMember    = "member"
+)
+
+type LearningInput struct {
+	When      string `json:"when"`
+	Text      string `json:"text"`
+	ProjectID string `json:"project_id"`
 }
 
 type MemberInput struct {
@@ -138,13 +155,26 @@ func (s *Service) DeleteMember(ctx context.Context, id string) error {
 	})
 }
 
-func (s *Service) AddLearning(ctx context.Context, memberID, text, projectID string) (Member, error) {
-	text = strings.TrimSpace(text)
-	if text == "" || len(text) > 300 {
-		return Member{}, errors.New("a learning is 1 to 300 characters")
+func (in LearningInput) clean() (LearningInput, error) {
+	in.When, in.Text = strings.TrimSpace(in.When), strings.TrimSpace(in.Text)
+	if in.Text == "" || len(in.Text) > 1500 {
+		return in, errors.New("a learning is 1 to 1500 characters")
+	}
+	if len(in.When) > 160 {
+		return in, errors.New("when it applies is at most 160 characters")
+	}
+	return in, nil
+}
+
+// AddLearning keeps something the owner, or the assistant on the owner's
+// word, wants a member to do everywhere.
+func (s *Service) AddLearning(ctx context.Context, memberID, source string, in LearningInput) (Member, error) {
+	in, err := in.clean()
+	if err != nil {
+		return Member{}, err
 	}
 	var out Member
-	err := s.store.update(ctx, func(v *Snapshot) error {
+	err = s.store.update(ctx, func(v *Snapshot) error {
 		m := member(v, memberID)
 		if m == nil {
 			return ErrNotFound
@@ -152,10 +182,10 @@ func (s *Service) AddLearning(ctx context.Context, memberID, text, projectID str
 		if len(m.Learnings) >= maxLearnings {
 			return fmt.Errorf("%s already keeps %d learnings; forget one first: %w", m.Name, maxLearnings, ErrConflict)
 		}
-		if projectID != "" && project(v, projectID) == nil {
+		if in.ProjectID != "" && project(v, in.ProjectID) == nil {
 			return ErrNotFound
 		}
-		m.Learnings = append(m.Learnings, Learning{ID: uid(), Text: text, ProjectID: projectID, At: s.now().UTC()})
+		m.Learnings = append(m.Learnings, Learning{ID: uid(), When: in.When, Text: in.Text, Source: source, ProjectID: in.ProjectID, At: s.now().UTC()})
 		out = *m
 		return nil
 	})
@@ -181,37 +211,15 @@ func (s *Service) ForgetLearning(ctx context.Context, memberID, learningID strin
 	return out, err
 }
 
-// learningsText is what a member has learned, as instructions for a role it
-// fills: newest first, within a bound so it never crowds out the task.
-func learningsText(m Member) string {
-	if len(m.Learnings) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("What you have learned on earlier work. Keep doing these unless this project's brief says otherwise:\n")
-	for i := len(m.Learnings) - 1; i >= 0; i-- {
-		line := "- " + m.Learnings[i].Text + "\n"
-		if b.Len()+len(line) > 4000 {
-			break
-		}
-		b.WriteString(line)
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
 // withLearnings is the roles a task starts with: each role copied from a
-// member carries what that member has learned so far. They are pinned here,
-// once, because a role's instructions are part of its session; changing them
-// mid-task would start the writer afresh.
+// member carries a copy of what that member has learned so far. They are
+// pinned here, once, because what a role is told at the start is part of its
+// session; changing it mid-task would start the writer afresh.
 func withLearnings(v *Snapshot, roles []Role) []Role {
 	out := append([]Role(nil), roles...)
 	for i, r := range out {
-		m := member(v, r.Member)
-		if m == nil {
-			continue
-		}
-		if learned := learningsText(*m); learned != "" {
-			out[i].Instructions = strings.TrimSpace(r.Instructions + "\n\n" + learned)
+		if m := member(v, r.Member); m != nil && len(m.Learnings) > 0 {
+			out[i].Learnings = append([]Learning(nil), m.Learnings...)
 		}
 	}
 	return out

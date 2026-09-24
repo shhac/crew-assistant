@@ -65,7 +65,7 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		return a.Core.AddLearning(ctx, in.MemberID, in.Text, in.ProjectID)
+		return a.Core.AddLearning(ctx, in.MemberID, core.LearnedByAssistant, core.LearningInput{When: in.When, Text: in.Text, ProjectID: in.ProjectID})
 	case "set_landing":
 		var in engine.SetLandingArgs
 		if err := args(raw, &in); err != nil {

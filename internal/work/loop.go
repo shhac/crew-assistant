@@ -109,8 +109,12 @@ func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 		return progressed, err
 	}
 	t, ok, err := lp.Core.NextTask(ctx)
-	if err != nil || !ok {
+	if err != nil {
 		return false, err
+	}
+	if !ok {
+		lp.sweepLearnings(snap)
+		return false, nil
 	}
 	if t.RetryAt.After(time.Now()) {
 		return false, nil
@@ -206,16 +210,24 @@ func taskPlaybook(p core.Project, t core.Task) *core.Playbook {
 	return p.Playbook
 }
 
-func (lp *Loop) roleSpec(r core.Role, workDir string, write bool, m medium, prompt string) roles.Spec {
+func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m medium, prompt string) (roles.Spec, error) {
 	cfg := lp.Config()
 	spec := roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Write: write, Env: m.env(), Read: m.readable(), Instructions: r.Instructions, Prompt: prompt}
+	dir, index, err := lp.learningsIndex(t, r)
+	if err != nil {
+		return spec, err
+	}
+	if index != "" {
+		spec.Read = append(append([]string(nil), spec.Read...), dir)
+		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + index)
+	}
 	if r.Engine == "codex" {
 		spec.Binary, spec.Home = cfg.Model.CodexBin, cfg.Model.CodexHome
 		spec.RuntimeHome = filepath.Join(lp.Core.StateDirectory(), "roles", "codex")
 	} else {
 		spec.Binary, spec.Home = cfg.Model.ClaudeBin, cfg.Model.ClaudeHome
 	}
-	return spec
+	return spec, nil
 }
 
 // write runs the implementer for this round and records what it produced.
@@ -246,7 +258,10 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 		return err
 	}
 	seen := len(t.Direction)
-	spec := lp.roleSpec(writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp)+prompt)
+	spec, err := lp.roleSpec(t, writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp)+prompt)
+	if err != nil {
+		return lp.roleFailed(ctx, t, "The workspace", err)
+	}
 	spec.Resume = t.WriterSession
 	result, err := lp.runner.Run(ctx, spec)
 	if err != nil {
@@ -385,10 +400,13 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 	defer cleanup()
 	playbook := taskPlaybook(p, t)
 	base := checkerPrompt(p, t, r, checker, playbook) + note
-	prompt := base
+	spec, err := lp.roleSpec(t, checker, dir, checker.Kind == core.RoleQA, m, base)
+	if err != nil {
+		return core.Verdict{}, err
+	}
 	var parseErr error
 	for attempt := 0; attempt < 2; attempt++ {
-		result, err := lp.runner.Run(ctx, lp.roleSpec(checker, dir, checker.Kind == core.RoleQA, m, prompt))
+		result, err := lp.runner.Run(ctx, spec)
 		if err != nil {
 			return core.Verdict{}, err
 		}
@@ -397,7 +415,7 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 			return verdict, nil
 		}
 		parseErr = err
-		prompt = base + "\n\nYour previous reply could not be used (" + err.Error() + "). Reply with only the JSON object."
+		spec.Prompt = base + "\n\nYour previous reply could not be used (" + err.Error() + "). Reply with only the JSON object."
 	}
 	return core.Verdict{}, parseErr
 }

@@ -176,13 +176,13 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 			{ID: "demo-ada", Name: "Ada", Kind: core.RoleImplementer, Engine: "claude", Model: "opus", Instructions: "Prefer small, reviewable commits.", CreatedAt: ago(20 * 24 * time.Hour),
 				Avatar: config.Avatar{Background: "#1d1b2e", Accent: "#c3b1e1", Marks: []config.Mark{{D: "M64 22 L100 104 H80 L72 84 H56 L48 104 H28 Z", Color: "#c3b1e1"}, {D: "M60 70 H68 L64 58 Z", Color: "#1d1b2e"}}},
 				Learnings: []core.Learning{
-					{ID: "demo-l1", Text: "Run the whole test suite before finishing, not only the package you changed.", ProjectID: crew.ID, At: ago(9 * 24 * time.Hour)},
-					{ID: "demo-l2", Text: "Keep user-facing copy plain; the owner rewrites filler.", ProjectID: crew.ID, At: ago(2 * 24 * time.Hour)},
+					{ID: "demo-l1", When: "Finishing a change", Text: "Run the whole test suite before finishing, not only the package you changed. A change in one package often breaks a test in another that imports it.", Source: core.LearnedByOwner, ProjectID: crew.ID, At: ago(9 * 24 * time.Hour)},
+					{ID: "demo-l2", When: "Writing text people will read", Text: "Keep copy plain and specific. Say what happens, in sentence case, and cut any line the layout already makes obvious; filler gets rewritten.", Source: core.LearnedByMember, ProjectID: crew.ID, At: ago(2 * 24 * time.Hour)},
 				}},
 			{ID: "demo-rune", Name: "Rune", Kind: core.RoleReviewer, Engine: "codex", Instructions: "Read the tests before the code.", CreatedAt: ago(20 * 24 * time.Hour),
 				Avatar: config.Avatar{Background: "#10202b", Accent: "#8ecae6", Marks: []config.Mark{{D: "M40 30 H80 A22 22 0 0 1 80 74 H52 L88 104", Color: "#8ecae6", StrokeWidth: 12}, {D: "M40 30 V104", Color: "#8ecae6", StrokeWidth: 12}}},
 				Learnings: []core.Learning{
-					{ID: "demo-l3", Text: "Ask for a test of the failure path, not just the happy one.", ProjectID: crew.ID, At: ago(5 * 24 * time.Hour)},
+					{ID: "demo-l3", When: "Reviewing error handling", Text: "Ask for a test of the failure path, not only the happy one: for example, what a save does when the disk is full.", Source: core.LearnedByMember, ProjectID: crew.ID, At: ago(5 * 24 * time.Hour)},
 				}},
 		},
 		Memories: []core.Memory{
