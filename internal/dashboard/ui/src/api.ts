@@ -35,7 +35,7 @@ export interface Playbook {
   prepare?: string[];
   land?: LandPolicy;
 }
-export function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 /** section reads one group of the loosely typed config, or an empty one. */
@@ -304,12 +304,11 @@ export function normalizeState(raw: Partial<State>): State {
     demo: raw.demo ?? false,
   };
 }
+// pendingDecisions are the ones still waiting on the owner: every decision
+// the daemon has not closed as resolved or dismissed.
 export function pendingDecisions(decisions: Decision[]) {
   return decisions.filter(
-    (d) =>
-      !["resolved", "answered", "cancelled", "closed", "dismissed"].includes(
-        d.status,
-      ),
+    (d) => d.status !== "resolved" && d.status !== "dismissed",
   );
 }
 export function errorText(error: unknown) {

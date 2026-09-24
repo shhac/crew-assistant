@@ -12,8 +12,6 @@ import (
 	"github.com/shhac/crew-assistant/internal/media"
 )
 
-// teamFrom builds a playbook from a template and the few choices the assistant
-// may make about it. Anything left empty keeps the template's choice.
 // TeamChoice is a team as the owner or the assistant chooses it. max_rounds
 // is text, as a form or a tool sends it.
 type TeamChoice struct {
@@ -29,6 +27,8 @@ type TeamChoice struct {
 	Prepare      []string `json:"prepare"`
 }
 
+// teamFrom builds a playbook from a template and the few choices the assistant
+// may make about it. Anything left empty keeps the template's choice.
 func teamFrom(in TeamChoice) (core.Playbook, error) {
 	template := in.Template
 	if template == "" {

@@ -20,7 +20,7 @@ import (
 // request is approved and green. Between those, the task waits on wakes.
 //
 // Each step either moves the task on (done) or lets landing continue.
-func (lp *Loop) landPR(ctx context.Context, p core.Project, t core.Task, m gitMedium) error {
+func (lp *Loop) landPR(ctx context.Context, t core.Task, m gitMedium) error {
 	if done, err := lp.wokenRound(ctx, t); done || err != nil {
 		return err
 	}

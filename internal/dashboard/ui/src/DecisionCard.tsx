@@ -3,6 +3,11 @@ import { ProjectLink } from "./ProjectLink";
 import { ErrorNotice, Icon } from "./ui";
 import { api, errorText, type Decision, type Project } from "./api";
 
+// decisionAnchor is where a decision's card can be scrolled to.
+export function decisionAnchor(decisionID: string) {
+  return `decision-${decisionID}`;
+}
+
 /**
  * A choice that only makes sense with the owner's words attached: picking it
  * opens the answer form, and the words are sent as the answer.
@@ -68,7 +73,7 @@ export function DecisionCard({
   };
   return (
     <article
-      id={`decision-${decision.id}`}
+      id={decisionAnchor(decision.id)}
       className={`decision-card ${compact ? "compact" : ""}`}
     >
       <div className="decision-topline">

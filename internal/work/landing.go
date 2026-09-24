@@ -79,7 +79,7 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 		if err != nil {
 			return lp.roleFailed(ctx, t, "The workspace", err)
 		}
-		return lp.landPR(ctx, p, t, gm)
+		return lp.landPR(ctx, t, gm)
 	}
 	r := t.Revisions[len(t.Revisions)-1]
 	if c, ok := m.(catcher); ok {

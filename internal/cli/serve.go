@@ -105,9 +105,6 @@ func serve(ctx context.Context, o *options, cfg config.Config, demo, open, noDis
 	a := app.New(service, cfg, appConfigPath, demo)
 	a.Diagnostics = o.diagnostics
 	a.Work.Diagnostics = o.diagnostics
-	if noDispatch {
-		a.SetNoDispatch()
-	}
 	publicURL := ""
 	if cfg.Dashboard.Tailscale == "serve" {
 		var cleanup func() error

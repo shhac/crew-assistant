@@ -139,7 +139,7 @@ func projectRepo(snap core.Snapshot, projectID string) (string, error) {
 	return "", errors.New("that project has no repository")
 }
 
-// runWakes watches what cannot tell the daemon it changed: branches, the
+// RunWakes watches what cannot tell the daemon it changed: branches, the
 // clock, and every wake's expiry.
 func (lp *Loop) RunWakes(ctx context.Context) {
 	tick := time.NewTicker(wakeCheckEvery)

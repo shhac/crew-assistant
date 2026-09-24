@@ -62,17 +62,17 @@ func liveHold(v *Snapshot, now time.Time) *ChatHold {
 	return nil
 }
 
-func queuedTurn(v *Snapshot, id string) (int, *ChatTurn, error) {
+func queuedTurn(v *Snapshot, id string) (*ChatTurn, error) {
 	for i := range v.ChatTurns {
 		if v.ChatTurns[i].ID != id {
 			continue
 		}
 		if v.ChatTurns[i].Status != "queued" {
-			return 0, nil, fmt.Errorf("this message already started: %w", ErrConflict)
+			return nil, fmt.Errorf("this message already started: %w", ErrConflict)
 		}
-		return i, &v.ChatTurns[i], nil
+		return &v.ChatTurns[i], nil
 	}
-	return 0, nil, ErrNotFound
+	return nil, ErrNotFound
 }
 
 // HoldChat takes or refreshes the lease on a queued turn. Taking a hold on a
@@ -88,7 +88,7 @@ func (s *Service) HoldChat(ctx context.Context, id, reason string, ttl time.Dura
 	var out ChatHold
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		now := s.now().UTC()
-		if _, _, err := queuedTurn(v, id); err != nil {
+		if _, err := queuedTurn(v, id); err != nil {
 			return err
 		}
 		if live := liveHold(v, now); live != nil && live.TurnID != id {
@@ -123,7 +123,7 @@ func (s *Service) EditChatMessage(ctx context.Context, id, message string, revis
 	}
 	var out ChatTurn
 	err := s.store.update(ctx, func(v *Snapshot) error {
-		_, turn, err := queuedTurn(v, id)
+		turn, err := queuedTurn(v, id)
 		if err != nil {
 			return err
 		}

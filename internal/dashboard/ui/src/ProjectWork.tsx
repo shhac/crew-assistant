@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { decisionAnchor } from "./DecisionCard";
 import { CriteriaList, dateLabel, ErrorNotice, Status, useAction } from "./ui";
 import { taskDetail, taskStatusLine } from "./taskStatus";
 import {
@@ -10,10 +11,6 @@ import {
   type Task,
   type Verdict,
 } from "./api";
-
-export function decisionAnchor(decisionID: string) {
-  return `decision-${decisionID}`;
-}
 
 function askBlocker(project: Project) {
   if (!project.brief.goal)

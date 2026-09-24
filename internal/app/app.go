@@ -22,7 +22,6 @@ type App struct {
 	Diagnostics      *diagnostics.Logger // Set before starting the daemon.
 	small            *smallModels        // Loading captions and suggestions.
 	connectionClient connections.Client
-	dispatchDisabled atomic.Bool
 	Core             *core.Service
 	mu               sync.RWMutex
 	cfg              config.Config
@@ -150,6 +149,3 @@ func (a *App) chatContext(ctx context.Context, currentMessageID string) (json.Ra
 	}{s, cfg.Connections, s.ChatCheckpoint})
 	return raw, history, err
 }
-
-// SetNoDispatch is a boot-only restriction; it cannot be removed by live configuration.
-func (a *App) SetNoDispatch() { a.dispatchDisabled.Store(true) }

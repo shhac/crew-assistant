@@ -22,6 +22,5 @@ func DiscoverModels(ctx context.Context, cfg Config) ([]ModelOption, error) {
 	return completion.DiscoverModels(ctx, harnessConfig(cfg))
 }
 func ValidateCodexHome(home string) error             { return completion.ValidateCodexHome(home) }
-func ValidateClaudeHome(home string) error            { return completion.ValidateClaudeHome(home) }
 func CodexEnvironment(home string) ([]string, error)  { return completion.CodexEnvironment(home) }
 func ClaudeEnvironment(home string) ([]string, error) { return completion.ClaudeEnvironment(home) }

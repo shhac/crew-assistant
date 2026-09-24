@@ -16,9 +16,6 @@ import (
 // Run owns deterministic supervision. noDispatch is fixed at process boot;
 // changing pause or live configuration cannot enable starts or resumes beneath it.
 func (a *App) Run(ctx context.Context, noDispatch bool) error {
-	if noDispatch {
-		a.SetNoDispatch()
-	}
 	ctx, cancel := context.WithCancel(ctx)
 	var listeners sync.WaitGroup
 	defer func() { cancel(); listeners.Wait() }()

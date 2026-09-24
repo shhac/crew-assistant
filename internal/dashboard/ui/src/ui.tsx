@@ -210,8 +210,7 @@ export function CriteriaList({
 
 /**
  * useAction runs one owner action at a time: it marks the component busy,
- * clears the last error, and shows a failure as the error. run resolves to
- * whether the action succeeded.
+ * clears the last error, and shows a failure as the error.
  */
 export function useAction() {
   const [busy, setBusy] = useState(false);
@@ -221,10 +220,8 @@ export function useAction() {
     setError("");
     try {
       await action();
-      return true;
     } catch (err) {
       setError(errorText(err));
-      return false;
     } finally {
       setBusy(false);
     }

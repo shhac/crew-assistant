@@ -74,7 +74,7 @@ func (lp *Loop) Nudge() {
 	}
 }
 
-// runLoop works tasks one step at a time. Each step is one role turn or one
+// Run works tasks one step at a time. Each step is one role turn or one
 // state transition, and every step is recorded before the next begins, so a
 // restart resumes at the step it was on.
 func (lp *Loop) Run(ctx context.Context, noDispatch bool) {
@@ -556,16 +556,12 @@ func (lp *Loop) settleAnswers(ctx context.Context, snap core.Snapshot) (bool, er
 		if !ok || d.Status == "open" {
 			continue
 		}
-		p, ok := findProject(snap, t.ProjectID)
-		if !ok {
-			continue
-		}
-		return true, lp.applyAnswer(ctx, p, t, d)
+		return true, lp.applyAnswer(ctx, t, d)
 	}
 	return false, nil
 }
 
-func (lp *Loop) applyAnswer(ctx context.Context, p core.Project, t core.Task, d core.Decision) error {
+func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) error {
 	if d.Status == "dismissed" {
 		return lp.stopTask(ctx, t, "the owner said it is no longer needed")
 	}

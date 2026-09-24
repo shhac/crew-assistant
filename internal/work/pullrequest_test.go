@@ -347,12 +347,12 @@ func TestAnUpdateThatTouchesWhatRunsWaitsForTheOwnerBeforeItIsPushed(t *testing.
 
 func TestAClosedPullRequestComesToTheOwnerAndATryAgainOpensANewOne(t *testing.T) {
 	s := newPRScenario(t, 2)
-	task := s.open(t)
+	s.open(t)
 	s.gh.set(func() { s.gh.closed = true })
 	if err := s.a.checkWakes(s.ctx, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	task = s.current(t)
+	task := s.current(t)
 	d := openDecision(t, s.a, task)
 	if d.Kind != decisionFailure || !strings.Contains(d.Context, "closed without merging") || task.Proposal.Number != 0 || task.Proposal.Pushed == "" {
 		t.Fatalf("the closed pull request was not brought to the owner: %+v %+v", d, task.Proposal)
