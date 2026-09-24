@@ -39,7 +39,6 @@ func TestTheAssistantWaitsOnSeveralThingsAndCancelsWhatItNoLongerNeeds(t *testin
 	ctx := context.Background()
 	repo := t.TempDir()
 	ownerGit(t, repo, "init", "-q", "-b", "main")
-	ownerGit(t, repo, "config", "commit.gpgsign", "false")
 	os.WriteFile(filepath.Join(repo, "a.txt"), []byte("a"), 0600)
 	ownerGit(t, repo, "add", "-A")
 	ownerGit(t, repo, "commit", "-q", "-m", "start")

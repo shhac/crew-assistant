@@ -42,7 +42,6 @@ func ownerRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	git(t, dir, "init", "-q", "-b", "main")
-	git(t, dir, "config", "commit.gpgsign", "false")
 	write(t, filepath.Join(dir, "main.go"), "package main\n")
 	write(t, filepath.Join(dir, ".gitignore"), "node_modules/\n")
 	git(t, dir, "add", "-A")
@@ -279,7 +278,7 @@ func TestPushLandsOnlyByFastForwardAndFollowsTheOwnersCheckoutRules(t *testing.T
 	git(t, other, "clone", "-q", source, ".")
 	write(t, filepath.Join(other, "other.go"), "package main\n")
 	git(t, other, "add", "-A")
-	git(t, other, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "someone else")
+	git(t, other, "commit", "-q", "-m", "someone else")
 	if out, err := exec.Command("git", "-C", other, "push", "-q", "origin", "main").CombinedOutput(); err == nil || !strings.Contains(string(out), "checked out") {
 		t.Fatalf("an ordinary push into the checked-out main was accepted: %s", out)
 	}
@@ -368,7 +367,7 @@ func TestAnOwnedBranchIsOnlyUpdatedUnderItsLease(t *testing.T) {
 	git(t, other, "clone", "-q", "--branch", "crew/a", remote, ".")
 	write(t, filepath.Join(other, "theirs.go"), "package main\n")
 	git(t, other, "add", "-A")
-	git(t, other, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "reviewer's fix-up")
+	git(t, other, "commit", "-q", "-m", "reviewer's fix-up")
 	git(t, other, "push", "-q", "origin", "crew/a")
 	theirs := git(t, other, "rev-parse", "HEAD")
 	write(t, filepath.Join(r.Workspace(), "a.go"), "package main\n\nfunc A() { _ = 1 }\n")

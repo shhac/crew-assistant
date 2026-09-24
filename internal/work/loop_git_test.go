@@ -33,7 +33,6 @@ func ownerRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	ownerGit(t, dir, "init", "-q", "-b", "main")
-	ownerGit(t, dir, "config", "commit.gpgsign", "false")
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0600); err != nil {
 		t.Fatal(err)
 	}

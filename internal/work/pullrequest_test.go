@@ -271,7 +271,6 @@ func TestTheImplementerAsksForItsOwnWakesInItsReply(t *testing.T) {
 	ownerGit(t, remote, "init", "-q", "--bare", "-b", "main")
 	seed := t.TempDir()
 	ownerGit(t, seed, "init", "-q", "-b", "paul/x")
-	ownerGit(t, seed, "config", "commit.gpgsign", "false")
 	ownerGit(t, seed, "commit", "-q", "--allow-empty", "-m", "x")
 	ownerGit(t, seed, "push", "-q", remote, "paul/x")
 	gh.remote, gh.head = remote, "paul/x"
@@ -369,7 +368,6 @@ func TestSomeoneElsesPushToThePullRequestIsTakenInNotOverwritten(t *testing.T) {
 	s.open(t)
 	other := t.TempDir()
 	ownerGit(t, other, "clone", "-q", "--branch", "paul/add-a", s.remote, ".")
-	ownerGit(t, other, "config", "commit.gpgsign", "false")
 	os.WriteFile(filepath.Join(other, "theirs.go"), []byte("package main\n"), 0600)
 	ownerGit(t, other, "add", "-A")
 	ownerGit(t, other, "commit", "-q", "-m", "a reviewer's fix-up")
