@@ -18,6 +18,7 @@ import {
   Icon,
   Pill,
   dateLabel,
+  focusedElement,
   useAction,
 } from "./ui";
 import {
@@ -47,7 +48,7 @@ export function RequestPanel({
 }) {
   const close = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    const prior = document.activeElement as HTMLElement | null;
+    const prior = focusedElement();
     close.current?.focus();
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.defaultPrevented) onClose();

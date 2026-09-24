@@ -158,6 +158,14 @@ export function CriteriaList({
   );
 }
 
+/** What has keyboard focus now, if it is something focus can return to. */
+export function focusedElement() {
+  const element = document.activeElement;
+  return element instanceof HTMLElement || element instanceof SVGElement
+    ? element
+    : null;
+}
+
 /**
  * useAction runs one owner action at a time: it marks the component busy,
  * clears the last error, and shows a failure as the error.
