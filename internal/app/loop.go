@@ -203,49 +203,16 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 	if len(writers) != 1 {
 		return a.stopTask(ctx, t, "This task's team has no writer")
 	}
-	if len(t.Revisions) == 0 {
-		started, err := m.begin(ctx, t)
-		if err != nil {
-			return a.roleFailed(ctx, t, "The workspace", err)
-		}
-		if started.Base != t.Base || started.Branch != t.Branch {
-			if t, err = a.updateOpen(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
-				task.Base, task.From, task.Branch = started.Base, started.From, started.Branch
-				return "", nil
-			}); err != nil {
-				return err
-			}
-		}
-	}
-	if err := m.reset(ctx, t); err != nil {
+	t, err := a.prepareWorkspace(ctx, t, m)
+	if err != nil {
 		return a.roleFailed(ctx, t, "The workspace", err)
 	}
 	if held, err := a.holdForUsage(ctx, t, writers[0]); held || err != nil {
 		return err
 	}
-	caughtUp := ""
-	c, l, err := lag(ctx, m, t)
+	t, caughtUp, err := a.takeInLanded(ctx, t, m)
 	if err != nil {
 		return a.roleFailed(ctx, t, "The workspace", err)
-	}
-	if l != nil {
-		// The implementer works on top of what landed: merged cleanly if it
-		// can be, otherwise with the conflicts left for it to resolve.
-		moved, commit, err := c.cleanMerge(ctx, t, *l)
-		var conflicts []string
-		if err == nil && commit == "" {
-			moved, conflicts, err = c.conflictMerge(ctx, t, *l)
-		}
-		if err != nil {
-			return a.roleFailed(ctx, t, "The workspace", fmt.Errorf("catching up: %s: %w", l.What, err))
-		}
-		if t, err = a.updateOpen(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
-			task.Base, task.From = moved.Base, moved.From
-			return "", nil
-		}); err != nil {
-			return err
-		}
-		caughtUp = catchUpText(l.What, conflicts)
 	}
 	woken, err := a.Core.TakeTaskWakes(ctx, t.ID, core.WakeTask)
 	if err != nil {
@@ -261,12 +228,61 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 	if err != nil {
 		return a.roleFailed(ctx, t, writers[0].Name, err)
 	}
+	return a.recordDraft(ctx, p, t, m, writers[0].Name, result)
+}
+
+// prepareWorkspace starts the task's workspace on its first round, then puts
+// it back at the last revision.
+func (a *App) prepareWorkspace(ctx context.Context, t core.Task, m medium) (core.Task, error) {
+	if len(t.Revisions) == 0 {
+		started, err := m.begin(ctx, t)
+		if err != nil {
+			return t, err
+		}
+		if started.Base != t.Base || started.Branch != t.Branch {
+			if t, err = a.updateOpen(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
+				task.Base, task.From, task.Branch = started.Base, started.From, started.Branch
+				return "", nil
+			}); err != nil {
+				return t, err
+			}
+		}
+	}
+	return t, m.reset(ctx, t)
+}
+
+// takeInLanded merges what landed since into the workspace, so the
+// implementer works on top of it: cleanly if it can be, otherwise with the
+// conflicts left for it to resolve. It says what happened, for the prompt.
+func (a *App) takeInLanded(ctx context.Context, t core.Task, m medium) (core.Task, string, error) {
+	c, l, err := lag(ctx, m, t)
+	if err != nil || l == nil {
+		return t, "", err
+	}
+	moved, commit, err := c.cleanMerge(ctx, t, *l)
+	var conflicts []string
+	if err == nil && commit == "" {
+		moved, conflicts, err = c.conflictMerge(ctx, t, *l)
+	}
+	if err != nil {
+		return t, "", fmt.Errorf("catching up: %s: %w", l.What, err)
+	}
+	t, err = a.updateOpen(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
+		task.Base, task.From = moved.Base, moved.From
+		return "", nil
+	})
+	return t, catchUpText(l.What, conflicts), err
+}
+
+// recordDraft records what the implementer's round produced: a new draft for
+// review, or, answering a pull request, the team's word that nothing needed
+// to change.
+func (a *App) recordDraft(ctx context.Context, p core.Project, t core.Task, m medium, writer string, result roles.Result) error {
 	reply, block := splitWakeBlock(result.Text)
 	wakeErrors := a.applyWakeBlock(ctx, p, t, block)
 	n := len(t.Revisions) + 1
 	revision, err := m.snapshot(ctx, t, n)
 	if errors.Is(err, gitrepo.ErrNoChange) && proposed(t) {
-		// Feedback on a pull request can need no change; the team says why.
 		_, err = a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.WriterSession, t.WakeErrors, t.Failures, t.RetryAt = result.Session, wakeErrors, 0, time.Time{}
 			t.Status, t.Detail = core.TaskLanding, "No change needed: "+clip(reply, 300)
@@ -275,7 +291,7 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 		return err
 	}
 	if err != nil {
-		return a.roleFailed(ctx, t, writers[0].Name, fmt.Errorf("the work could not be recorded: %w", err))
+		return a.roleFailed(ctx, t, writer, fmt.Errorf("the work could not be recorded: %w", err))
 	}
 	_, err = a.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 		revision.BriefVersion, revision.Summary, revision.At = p.Brief.Version, clip(reply, 2000), time.Now().UTC()
@@ -283,7 +299,7 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 		t.WriterSession, t.WakeErrors = result.Session, wakeErrors
 		t.Failures, t.RetryAt = 0, time.Time{}
 		t.Status, t.Detail = core.TaskReviewing, fmt.Sprintf("Draft %d written; reviewing", n)
-		return fmt.Sprintf("%s wrote draft %d of %s", writers[0].Name, n, t.Objective), nil
+		return fmt.Sprintf("%s wrote draft %d of %s", writer, n, t.Objective), nil
 	})
 	return err
 }
