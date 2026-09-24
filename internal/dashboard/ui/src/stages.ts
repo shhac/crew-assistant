@@ -3,6 +3,8 @@ import {
   pendingDecisions,
   type Decision,
   type LandPolicy,
+  type Member,
+  type MemberKind,
   type Playbook,
   type Project,
   type Stage,
@@ -45,6 +47,36 @@ export const projectKind = (playbook?: Playbook) =>
 /** A request keeps the team it started with after the project's changes. */
 export const taskPlaybook = (task?: Task, project?: Project) =>
   task?.playbook ?? project?.playbook;
+
+export const engines = [
+  { id: "claude", label: "Claude" },
+  { id: "codex", label: "Codex" },
+];
+export const engineLabel = (id: string) =>
+  engines.find((e) => e.id === id)?.label ?? id;
+
+export const memberKinds: { id: MemberKind; label: string }[] = [
+  { id: "implementer", label: "Implementer" },
+  { id: "reviewer", label: "Reviewer" },
+  { id: "qa", label: "QA" },
+];
+export const kindLabel = (kind: string) =>
+  memberKinds.find((k) => k.id === kind)?.label ?? kind;
+
+/** "Implementer · Claude opus": what a member is and what it runs on. */
+export const memberSummary = (m: Member) =>
+  [
+    kindLabel(m.kind),
+    [engineLabel(m.engine), m.model].filter(Boolean).join(" "),
+  ].join(" · ");
+
+/** The open projects whose team has this member in a role. */
+export const memberProjects = (member: Member, projects: Project[]) =>
+  projects.filter(
+    (p) =>
+      p.status !== "completed" &&
+      p.playbook?.roles.some((r) => r.member === member.id),
+  );
 
 export const isOpenMessage = (m: TeamMessage) =>
   m.status === "waiting" || m.status === "working";

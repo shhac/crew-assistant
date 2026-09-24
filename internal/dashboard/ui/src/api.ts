@@ -31,6 +31,36 @@ export interface Role {
   model?: string;
   effort?: string;
   instructions?: string;
+  /** The member this role was copied from, if any. */
+  member?: string;
+}
+export type MemberKind = "implementer" | "reviewer" | "qa";
+export interface Learning {
+  id: string;
+  text: string;
+  project_id?: string;
+  at?: string;
+}
+export interface Member {
+  id: string;
+  name: string;
+  kind: MemberKind;
+  engine: string;
+  model?: string;
+  effort?: string;
+  instructions?: string;
+  avatar?: AvatarSpec;
+  avatar_svg?: string;
+  learnings: Learning[];
+  created_at?: string;
+}
+export interface MemberInput {
+  name: string;
+  kind: MemberKind;
+  engine: string;
+  model: string;
+  effort: string;
+  instructions: string;
 }
 export interface Playbook {
   template: string;
@@ -91,6 +121,9 @@ export interface TeamInput {
   template: string;
   writer_engine: string;
   reviewer_engine: string;
+  implementer_member?: string;
+  reviewer_member?: string;
+  qa_member?: string;
   max_rounds: string;
   deliver_to: string;
   repo?: string;
@@ -282,6 +315,7 @@ export interface State {
     avatar_svg?: string;
   };
   projects: Project[];
+  members: Member[];
   tasks: Task[];
   decisions: Decision[];
   messages: Message[];
@@ -340,6 +374,10 @@ export function normalizeState(raw: Partial<State>): State {
     assistant: raw.assistant ?? { name: "", personality: "" },
     pending_operations: raw.pending_operations ?? [],
     projects: raw.projects ?? [],
+    members: (raw.members ?? []).map((m) => ({
+      ...m,
+      learnings: m.learnings ?? [],
+    })),
     tasks: raw.tasks ?? [],
     decisions: raw.decisions ?? [],
     messages: raw.messages ?? [],
@@ -484,6 +522,31 @@ export async function revisionFiles(
     { signal },
   );
   return body.files ?? [];
+}
+
+const memberPath = (id: string) => `/api/members/${encodeURIComponent(id)}`;
+
+/** saveMember creates a member when id is empty, and changes it otherwise. */
+export function saveMember(id: string, input: MemberInput) {
+  return api<Member>(id ? memberPath(id) : "/api/members", {
+    method: id ? "PUT" : "POST",
+    body: JSON.stringify(input),
+  });
+}
+export function deleteMember(id: string) {
+  return api<{ deleted: boolean }>(memberPath(id), { method: "DELETE" });
+}
+export function addLearning(id: string, text: string, projectId: string) {
+  return api<Member>(`${memberPath(id)}/learnings`, {
+    method: "POST",
+    body: JSON.stringify({ text, project_id: projectId }),
+  });
+}
+export function forgetLearning(id: string, learningId: string) {
+  return api<Member>(
+    `${memberPath(id)}/learnings/${encodeURIComponent(learningId)}`,
+    { method: "DELETE" },
+  );
 }
 
 let pairingRequest: Promise<void> | null = null;

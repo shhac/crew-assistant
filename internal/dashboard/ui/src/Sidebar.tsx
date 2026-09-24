@@ -35,7 +35,9 @@ export function Sidebar({
 }) {
   const projects = state.projects.filter((p) => p.status !== "completed");
   const current = (page: Route["page"]) =>
-    route.page === page || (page === "projects" && route.page === "project")
+    route.page === page ||
+    (page === "projects" && route.page === "project") ||
+    (page === "team" && route.page === "member")
       ? "page"
       : undefined;
   return (
@@ -71,6 +73,14 @@ export function Sidebar({
         >
           <Icon name="Projects" />
           <span className="nav-text">Projects</span>
+        </a>
+        <a
+          className="nav-link"
+          href={href({ page: "team" })}
+          aria-current={current("team")}
+        >
+          <Icon name="Team" />
+          <span className="nav-text">Team</span>
         </a>
         <a
           className="nav-link"

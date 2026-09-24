@@ -6,6 +6,7 @@ const icons: Record<string, string> = {
     "M22 12h-6l-2 3h-4l-2-3H2M5.5 5.1L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.5-6.9A2 2 0 0016.8 4H7.2a2 2 0 00-1.7 1.1z",
   Projects:
     "M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z",
+  Team: "M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M9 3a4 4 0 100 8 4 4 0 000-8zM22 21v-2a4 4 0 00-3-3.9M16 3.1a4 4 0 010 7.8",
   Memory: "M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z",
   Settings:
     "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
@@ -134,6 +135,10 @@ export function fullDateLabel(value?: string) {
     }) || ""
   );
 }
+
+/** "1 learning", "6 learnings". */
+export const counted = (n: number, word: string) =>
+  `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Elapsed time in the owner's terms; exact timestamps stay available alongside. */
 export function sinceLabel(value?: string) {

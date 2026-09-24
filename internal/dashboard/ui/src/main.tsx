@@ -16,6 +16,7 @@ import "./styles/project.css";
 import "./styles/board.css";
 import "./styles/request.css";
 import "./styles/chat.css";
+import "./styles/team.css";
 import "./styles/pages.css";
 
 applyAppearance(rememberedAppearance());

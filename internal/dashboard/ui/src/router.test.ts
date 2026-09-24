@@ -8,6 +8,8 @@ describe("addresses", () => {
     expect(parseRoute("#/decisions")).toEqual({ page: "inbox" });
     expect(parseRoute("#/projects")).toEqual({ page: "projects" });
     expect(parseRoute("#/memory")).toEqual({ page: "memory" });
+    expect(parseRoute("#/team")).toEqual({ page: "team" });
+    expect(parseRoute("#/team/m%201")).toEqual({ page: "member", id: "m 1" });
     expect(parseRoute("#/settings/model")).toEqual({
       page: "settings",
       section: "model",
@@ -39,6 +41,8 @@ describe("addresses", () => {
       "#/inbox",
       "#/projects",
       "#/memory",
+      "#/team",
+      "#/team/m1",
       "#/settings",
       "#/settings/chat",
       "#/projects/p1",

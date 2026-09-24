@@ -5,6 +5,8 @@ import { InboxPage } from "./InboxPage";
 import { ProjectsPage } from "./ProjectsPage";
 import { ProjectPage } from "./ProjectPage";
 import { MemoryView } from "./MemoryPage";
+import { TeamPage } from "./TeamPage";
+import { MemberPage } from "./MemberPage";
 import { Settings } from "./SettingsPage";
 import { Login } from "./LoginScreen";
 import { Sidebar } from "./Sidebar";
@@ -96,17 +98,23 @@ export function App() {
     route.page === "project"
       ? state?.projects.find((p) => p.id === route.id)
       : undefined;
+  const member =
+    route.page === "member"
+      ? state?.members.find((m) => m.id === route.id)
+      : undefined;
   useEffect(() => {
     const titles: Record<Route["page"], string> = {
       inbox: "Inbox",
       projects: "Projects",
       project: project?.title ?? "Project",
+      team: "Team",
+      member: member?.name ?? "Team",
       memory: "Memory",
       settings: "Settings",
     };
     const name = state?.assistant.name || "Assistant";
     document.title = `${needs ? `(${needs}) ` : ""}${titles[route.page]} · ${name}`;
-  }, [route.page, project?.title, needs, state?.assistant.name]);
+  }, [route.page, project?.title, member?.name, needs, state?.assistant.name]);
   async function togglePause() {
     if (!state) return;
     const paused = !state.paused;
@@ -134,7 +142,10 @@ export function App() {
         )}
       </div>
     );
-  const view = route.page === "project" ? `project/${route.id}` : route.page;
+  const view =
+    route.page === "project" || route.page === "member"
+      ? `${route.page}/${route.id}`
+      : route.page;
   return (
     <div
       className={`shell${chat.paneOpen ? " pane-open" : ""}${chat.expanded ? " chat-expanded" : ""}${chat.drawerOpen ? " drawer-open" : ""}`}
@@ -188,6 +199,25 @@ export function App() {
                 <p className="muted">
                   This project isn't here any more.{" "}
                   <a href={href({ page: "projects" })}>See all projects</a>
+                </p>
+              </div>
+            ))}
+          {route.page === "team" && (
+            <TeamPage state={state} refresh={refresh} />
+          )}
+          {route.page === "member" &&
+            (member ? (
+              <MemberPage
+                key={member.id}
+                member={member}
+                state={state}
+                refresh={refresh}
+              />
+            ) : (
+              <div className="page">
+                <p className="muted">
+                  This member isn't on the team any more.{" "}
+                  <a href={href({ page: "team" })}>See the team</a>
                 </p>
               </div>
             ))}

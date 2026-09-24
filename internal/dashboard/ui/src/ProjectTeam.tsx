@@ -1,16 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { FileSystemPicker } from "./FileSystemPicker";
 import { Folders } from "./ProjectFolders";
-import { isCode } from "./stages";
+import { engineLabel, engines, isCode } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
 import { setTeam, type Playbook, type Project, type Role } from "./api";
-
-const engines = [
-  { id: "claude", label: "Claude" },
-  { id: "codex", label: "Codex" },
-];
-const engineLabel = (id: string) =>
-  engines.find((e) => e.id === id)?.label ?? id;
 
 const signing: Record<string, string> = {
   "": "Signed as your git config says",

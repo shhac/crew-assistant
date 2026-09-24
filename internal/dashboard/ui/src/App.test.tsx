@@ -9,7 +9,12 @@ import {
   within,
 } from "@testing-library/react";
 import { App } from "./App";
-import { bootstrapSession, normalizeState, type State } from "./api";
+import {
+  bootstrapSession,
+  normalizeState,
+  type Member,
+  type State,
+} from "./api";
 
 const initial = (): State =>
   normalizeState({
@@ -75,7 +80,7 @@ describe("the shell", () => {
     expect(screen.getByText("No projects yet.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "New project" })).toBeTruthy();
     const nav = screen.getByRole("navigation", { name: "Main" });
-    for (const name of ["Inbox", "Projects", "Memory", "Settings"])
+    for (const name of ["Inbox", "Projects", "Team", "Memory", "Settings"])
       expect(
         within(nav).getByRole("link", { name: new RegExp(`^${name}`) }),
       ).toBeTruthy();
@@ -642,6 +647,261 @@ describe("memory", () => {
     ).toEqual({
       content: "Bring a recommendation with each decision.",
       kind: "observation",
+    });
+  });
+});
+
+describe("the team", () => {
+  const ada = (): Member => ({
+    id: "m1",
+    name: "Ada",
+    kind: "implementer",
+    engine: "claude",
+    model: "opus",
+    avatar_svg: '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    learnings: [
+      { id: "l1", text: "Run the linter first.", at: "2026-09-20T10:00:00Z" },
+      {
+        id: "l2",
+        text: "Keep commits small.",
+        project_id: "p1",
+        at: "2026-09-22T10:00:00Z",
+      },
+    ],
+  });
+  const staffed = (id: string, status = "active") => ({
+    ...project,
+    id,
+    status,
+    playbook: {
+      template: "code",
+      medium: "git",
+      max_rounds: 3,
+      deliver: "",
+      roles: [
+        { name: "Ada", kind: "implementer", engine: "claude", member: "m1" },
+      ],
+    },
+  });
+  it("says what members are for when there are none, and offers one", async () => {
+    window.history.replaceState(null, "", "/#/team");
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Team" })).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Members you set up here can join any project's team and keep what they learn.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "New member" })).toHaveLength(
+      1,
+    );
+    await waitFor(() => expect(document.title).toBe("Team · Iris"));
+  });
+  it("lists each member with what it runs on and how much it is used", async () => {
+    state.members = [
+      ada(),
+      {
+        ...ada(),
+        id: "m2",
+        name: "Rune",
+        kind: "qa",
+        model: "",
+        learnings: [],
+      },
+    ];
+    state.projects = [staffed("p1"), staffed("p2"), staffed("p3", "completed")];
+    window.history.replaceState(null, "", "/#/team");
+    render(<App />);
+    const card = await screen.findByRole("link", { name: /^Ada/ });
+    expect(card.getAttribute("href")).toBe("#/team/m1");
+    expect(card.querySelector("img")?.getAttribute("width")).toBe("40");
+    expect(within(card).getByText("Implementer · Claude opus")).toBeTruthy();
+    expect(within(card).getByText("In 2 projects · 2 learnings")).toBeTruthy();
+    const rune = screen.getByRole("link", { name: /^Rune/ });
+    expect(within(rune).getByText("QA · Claude")).toBeTruthy();
+    expect(rune.textContent).not.toMatch(/project|learning/);
+  });
+  it("creates a member and opens it", async () => {
+    window.history.replaceState(null, "", "/#/team");
+    respond = (path) => ({
+      body: path === "/api/members" ? { ...ada(), learnings: [] } : state,
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "New member" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: " Ada " },
+    });
+    fireEvent.change(screen.getByLabelText("Kind"), {
+      target: { value: "reviewer" },
+    });
+    fireEvent.change(screen.getByLabelText("Engine"), {
+      target: { value: "codex" },
+    });
+    fireEvent.change(screen.getByLabelText(/^Model/), {
+      target: { value: "gpt-6" },
+    });
+    fireEvent.change(screen.getByLabelText(/^Instructions/), {
+      target: { value: "Check the tests first." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/team/m1"));
+    const create = writes().find((c) => c.path === "/api/members")!;
+    expect(create.options?.method).toBe("POST");
+    expect(JSON.parse(String(create.options?.body))).toEqual({
+      name: "Ada",
+      kind: "reviewer",
+      engine: "codex",
+      model: "gpt-6",
+      effort: "",
+      instructions: "Check the tests first.",
+    });
+  });
+  it("shows a refused save in the form", async () => {
+    window.history.replaceState(null, "", "/#/team");
+    respond = (path) =>
+      path === "/api/members"
+        ? {
+            status: 400,
+            body: { error: "There is already a member called Ada" },
+          }
+        : { body: state };
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "New member" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "ada" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "There is already a member called Ada",
+    );
+    expect(window.location.hash).toBe("#/team");
+  });
+  it("shows a member's projects and learnings, newest first, and adds and forgets them", async () => {
+    state.members = [ada()];
+    state.projects = [staffed("p1"), staffed("p2", "completed")];
+    window.history.replaceState(null, "", "/#/team/m1");
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Ada" })).toBeTruthy();
+    const projects = screen.getByRole("region", { name: "Projects" });
+    expect(
+      within(projects)
+        .getAllByRole("link")
+        .map((a) => a.getAttribute("href")),
+    ).toEqual(["#/projects/p1/team"]);
+    const learnings = screen.getByRole("region", { name: "Learnings" });
+    expect(
+      within(learnings).getByText(
+        "They go with Ada into every task it starts, in any project.",
+      ),
+    ).toBeTruthy();
+    const rows = within(learnings).getAllByRole("listitem");
+    expect(rows.map((r) => r.querySelector("p")?.textContent)).toEqual([
+      "Keep commits small.",
+      "Run the linter first.",
+    ]);
+    expect(rows[0].textContent).toContain("Launch note · ");
+    fireEvent.change(within(learnings).getByLabelText("Add a learning"), {
+      target: { value: " Say which tests ran. " },
+    });
+    fireEvent.change(within(learnings).getByLabelText("Learned on"), {
+      target: { value: "p1" },
+    });
+    fireEvent.click(within(learnings).getByRole("button", { name: "Add" }));
+    await waitFor(() =>
+      expect(writes().some((c) => c.path === "/api/members/m1/learnings")).toBe(
+        true,
+      ),
+    );
+    const add = writes().find((c) => c.path === "/api/members/m1/learnings")!;
+    expect(add.options?.method).toBe("POST");
+    expect(JSON.parse(String(add.options?.body))).toEqual({
+      text: "Say which tests ran.",
+      project_id: "p1",
+    });
+    await waitFor(() =>
+      expect(within(learnings).getByLabelText("Add a learning")).toHaveProperty(
+        "value",
+        "",
+      ),
+    );
+    fireEvent.click(within(rows[1]).getByRole("button", { name: "Forget" }));
+    await waitFor(() =>
+      expect(
+        writes().some((c) => c.path === "/api/members/m1/learnings/l1"),
+      ).toBe(true),
+    );
+    expect(
+      writes().find((c) => c.path === "/api/members/m1/learnings/l1")!.options
+        ?.method,
+    ).toBe("DELETE");
+  });
+  it("shows why a learning was refused", async () => {
+    state.members = [ada()];
+    respond = (path) =>
+      path === "/api/members/m1/learnings"
+        ? {
+            status: 409,
+            body: { error: "Ada already keeps 30 learnings; forget one first" },
+          }
+        : { body: state };
+    window.history.replaceState(null, "", "/#/team/m1");
+    render(<App />);
+    fireEvent.change(await screen.findByLabelText("Add a learning"), {
+      target: { value: "One more." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Ada already keeps 30 learnings; forget one first",
+    );
+    expect(screen.getByLabelText("Add a learning")).toHaveProperty(
+      "value",
+      "One more.",
+    );
+  });
+  it("deletes a member only once the owner confirms, then goes back to the team", async () => {
+    state.members = [ada()];
+    window.history.replaceState(null, "", "/#/team/m1");
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete member" }),
+    );
+    expect(writes()).toHaveLength(0);
+    expect(screen.getByText("Project teams keep their copy.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+    expect(screen.queryByRole("button", { name: "Delete Ada" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Delete member" }));
+    state.members = [];
+    fireEvent.click(screen.getByRole("button", { name: "Delete Ada" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/team"));
+    expect(writes()).toEqual([
+      expect.objectContaining({
+        path: "/api/members/m1",
+        options: expect.objectContaining({ method: "DELETE" }),
+      }),
+    ]);
+  });
+  it("edits a member in place", async () => {
+    state.members = [ada()];
+    window.history.replaceState(null, "", "/#/team/m1");
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Name")).toHaveProperty("value", "Ada");
+    expect(screen.getByLabelText(/^Model/)).toHaveProperty("value", "opus");
+    fireEvent.change(screen.getByLabelText(/^Reasoning effort/), {
+      target: { value: "high" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy(),
+    );
+    const save = writes().find((c) => c.path === "/api/members/m1")!;
+    expect(save.options?.method).toBe("PUT");
+    expect(JSON.parse(String(save.options?.body))).toMatchObject({
+      name: "Ada",
+      kind: "implementer",
+      engine: "claude",
+      model: "opus",
+      effort: "high",
     });
   });
 });
