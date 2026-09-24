@@ -21,6 +21,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/sample"
 	"github.com/shhac/crew-assistant/internal/server"
 	"github.com/spf13/cobra"
 )
@@ -43,6 +44,9 @@ func registerServe(root *cobra.Command, o *options) {
 		if port != 0 {
 			cfg.Dashboard.TailscalePort = port
 		}
+		// Only a demo on a temporary state gets the fictional sample; a demo
+		// pointed at a state of its own shows that state as it is.
+		sampleDir := ""
 		if demo {
 			cfg.Dashboard.Tailscale = "off"
 			if !cmd.Flags().Changed("state") && !root.PersistentFlags().Changed("state") {
@@ -52,6 +56,7 @@ func registerServe(root *cobra.Command, o *options) {
 				}
 				defer os.RemoveAll(dir)
 				o.statePath = filepath.Join(dir, "state.db")
+				sampleDir = filepath.Join(dir, "sample")
 			}
 		}
 		if err = cfg.Validate(); err != nil {
@@ -60,7 +65,7 @@ func registerServe(root *cobra.Command, o *options) {
 		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		o.diagnostics = diagnostics.New(cmd.ErrOrStderr())
-		return serve(ctx, o, cfg, demo, open, noDispatch)
+		return serve(ctx, o, cfg, demo, sampleDir, open, noDispatch)
 	}}
 	cmd.Flags().StringVar(&addr, "http", "", "Local dashboard address (loopback only)")
 	cmd.Flags().StringVar(&mode, "tailscale", "", "Private dashboard access: off or serve")
@@ -70,7 +75,7 @@ func registerServe(root *cobra.Command, o *options) {
 	cmd.Flags().BoolVar(&noDispatch, "no-dispatch", false, "Do not start or resume workers during this boot")
 	root.AddCommand(cmd)
 }
-func serve(ctx context.Context, o *options, cfg config.Config, demo, open, noDispatch bool) error {
+func serve(ctx context.Context, o *options, cfg config.Config, demo bool, sampleDir string, open, noDispatch bool) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if err := os.MkdirAll(filepath.Dir(o.statePath), 0700); err != nil {
@@ -98,6 +103,11 @@ func serve(ctx context.Context, o *options, cfg config.Config, demo, open, noDis
 	}
 	defer store.Close()
 	service := core.NewService(store, cfg)
+	if sampleDir != "" {
+		if err = sample.Seed(ctx, service, sampleDir); err != nil {
+			return fmt.Errorf("the demo sample: %w", err)
+		}
+	}
 	appConfigPath := o.configPath
 	if demo {
 		appConfigPath = filepath.Join(o.runtimeDir(), "demo-config.json")
