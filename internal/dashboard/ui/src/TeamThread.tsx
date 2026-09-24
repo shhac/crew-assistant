@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { finished, isCode, taskPlaybook, verdictOutcome } from "./stages";
-import { roleMember } from "./members";
+import { roleMember, taskRoles } from "./members";
 import { Avatar } from "./Avatar";
 import { ErrorNotice, Pill, sinceLabel, useAction } from "./ui";
 import {
@@ -57,9 +57,7 @@ export function TeamThread({
   waitingOn?: string;
   refresh: () => Promise<void>;
 }) {
-  const team = task.roles?.length
-    ? task.roles
-    : (project.playbook?.roles ?? []);
+  const team = taskRoles(task, project);
   const [to, setTo] = useState(team[0]?.name ?? "");
   const [text, setText] = useState("");
   const { busy, error, run } = useAction();

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ConversationMarkdown } from "./ConversationMarkdown";
 import { isCode, roleName, taskPlaybook, verdictOutcome } from "./stages";
-import { roleMember } from "./members";
+import { roleMember, taskRoles } from "./members";
 import { Avatar } from "./Avatar";
 import { ErrorNotice, Pill, dateLabel } from "./ui";
 import {
@@ -32,7 +32,7 @@ export function Drafts({
   if (!revisions.length) return null;
   const playbook = taskPlaybook(task, project);
   const code = isCode(playbook);
-  const roles = task.roles?.length ? task.roles : playbook?.roles;
+  const roles = taskRoles(task, project);
   return (
     <section className="section" aria-label="Drafts">
       <h3>{code ? "Changes" : "Drafts"}</h3>

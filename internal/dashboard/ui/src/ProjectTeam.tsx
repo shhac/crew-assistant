@@ -3,7 +3,7 @@ import { FileSystemPicker } from "./FileSystemPicker";
 import { Folders } from "./ProjectFolders";
 import { memberHref } from "./router";
 import { isCode } from "./stages";
-import { engineLabel, engines } from "./members";
+import { engineLabel, engines, memberOf } from "./members";
 import { Avatar } from "./Avatar";
 import { ErrorNotice, useAction } from "./ui";
 import {
@@ -133,7 +133,7 @@ function TeamView({
  * here.
  */
 function RoleName({ role, members }: { role: Role; members: Member[] }) {
-  const member = members.find((m) => m.id === role.member);
+  const member = memberOf(role, members);
   if (!member) return <>{role.name}</>;
   return (
     <a className="role-member" href={memberHref(member.id)}>

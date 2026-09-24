@@ -1,3 +1,4 @@
+import { taskPlaybook } from "./stages";
 import type { Member, MemberKind, Project, Role, Task } from "./api";
 
 export const engines = [
@@ -30,14 +31,24 @@ export const memberProjects = (member: Member, projects: Project[]) =>
       p.playbook?.roles.some((r) => r.member === member.id),
   );
 
+/** A request's team: the one it started with, or else the project's. */
+export const taskRoles = (task: Task, project: Project): Role[] =>
+  task.roles?.length ? task.roles : (taskPlaybook(task, project)?.roles ?? []);
+
+/** The member a role was copied from, while that member is still there. */
+export const memberOf = (role: Role | undefined, members: Member[]) =>
+  role?.member ? members.find((m) => m.id === role.member) : undefined;
+
 /** The member behind the role of a request's team with this name. */
 export function roleMember(
   roles: Role[] | undefined,
   name: string | undefined,
   members: Member[],
 ) {
-  const id = roles?.find((r) => r.name === name)?.member;
-  return id ? members.find((m) => m.id === id) : undefined;
+  return memberOf(
+    roles?.find((r) => r.name === name),
+    members,
+  );
 }
 
 /**
@@ -46,12 +57,14 @@ export function roleMember(
  */
 export function atWork(task: Task, members: Member[]) {
   if (task.status === "writing")
-    return roleMember(
-      task.roles,
-      task.roles?.find((r) => r.kind === "implementer")?.name,
+    return memberOf(
+      task.roles?.find((r) => r.kind === "implementer"),
       members,
     );
   if (task.status === "reviewing" || task.status === "deciding")
-    return roleMember(task.roles, task.checking, members);
+    return memberOf(
+      task.roles?.find((r) => r.name === task.checking),
+      members,
+    );
   return undefined;
 }
