@@ -263,9 +263,11 @@ func (s *Service) SetChatLoadingPhrase(ctx context.Context, id, phrase string) e
 	})
 }
 
-func (s *Service) RecordChatTool(ctx context.Context, turnID, eventID, tool, status string) error {
-	label, ok := chatToolLabels[tool]
-	if !ok || !validChatID(eventID) {
+// RecordChatTool records a tool the assistant used, by the label the owner
+// sees. The caller vouches for the tool: an unknown name from the model is
+// refused before it gets here, so it never reaches state.
+func (s *Service) RecordChatTool(ctx context.Context, turnID, eventID, tool, label, status string) error {
+	if !validChatID(eventID) || strings.TrimSpace(label) == "" || len(label) > 80 || !validChatID(tool) {
 		return errors.New("invalid chat tool event")
 	}
 	if status != "running" && status != "completed" && status != "failed" {
@@ -301,21 +303,6 @@ func (s *Service) RecordChatTool(ctx context.Context, turnID, eventID, tool, sta
 		}
 		return ErrNotFound
 	})
-}
-
-var chatToolLabels = map[string]string{
-	"list_connections": "Check available connections", "query_connection": "Read connected information",
-	"read_state": "Check project context", "create_project": "Add a project", "update_brief": "Update the project brief",
-	"set_team": "Choose the project's team", "set_landing": "Set where changes land", "queue_task": "Ask the team for an outcome",
-	"stop_task": "Stop a task", "land_task": "Land a delivered change", "resolve_decision": "Answer a decision",
-	"ask_decision": "Prepare a decision", "remember_preference": "Remember a preference", "report_status": "Record a progress update",
-	"wake_me_when": "Ask to be woken later", "list_wakes": "Check wake-ups", "cancel_wake": "Cancel a wake-up",
-}
-
-// ChatToolLabel is what the owner sees while the assistant uses a tool.
-func ChatToolLabel(tool string) (string, bool) {
-	label, ok := chatToolLabels[tool]
-	return label, ok
 }
 
 // OriginWake marks a chat turn and message the daemon wrote to deliver

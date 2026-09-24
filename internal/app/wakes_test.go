@@ -101,7 +101,7 @@ func TestTheAssistantWaitsOnSeveralThingsAndCancelsWhatItNoLongerNeeds(t *testin
 
 func TestEveryAssistantToolHasALabelTheOwnerCanRead(t *testing.T) {
 	for _, tool := range engine.Tools() {
-		if _, ok := core.ChatToolLabel(tool.Function.Name); !ok {
+		if label, ok := engine.ToolLabel(tool.Function.Name); !ok || label == "" {
 			t.Errorf("%s has no label, so any turn that uses it fails", tool.Function.Name)
 		}
 	}

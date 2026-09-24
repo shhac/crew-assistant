@@ -212,8 +212,13 @@ func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Resul
 				id = chatID()
 				eventIDs[event.ID] = id
 			}
-			// The model's call ID is never persisted or shown, nor are args/results.
-			return a.Core.RecordChatTool(ctx, turn.ID, id, event.Tool, event.Status)
+			// The model's call ID is never persisted or shown, nor are args or
+			// results; a tool name the assistant was never offered is refused.
+			label, ok := engine.ToolLabel(event.Tool)
+			if !ok {
+				return errors.New("invalid chat tool event")
+			}
+			return a.Core.RecordChatTool(ctx, turn.ID, id, event.Tool, label, event.Status)
 		}}
 	ec.OnRetry = func(ctx context.Context, event engine.RetryEvent) error {
 		return a.chatRetryStatus(ctx, turn.ID, event)

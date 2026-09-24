@@ -235,3 +235,26 @@ func TestCancellingQueuedSynchronousChatWakesCaller(t *testing.T) {
 	close(release)
 	waitTurn(t, a, "first", "completed")
 }
+
+func TestAToolNameTheAssistantWasNeverOfferedIsNotRecorded(t *testing.T) {
+	a := testApp(t)
+	var toolErr error
+	a.chatInvoker = func(ctx context.Context, cfg engine.Config, _ engine.Request, _ engine.ToolExecutor) (engine.Result, error) {
+		toolErr = cfg.OnTool(ctx, engine.ToolEvent{ID: "call", Tool: "secret-token-arbitrary-tool-name", Status: "running"})
+		return engine.Result{Message: "done"}, nil
+	}
+	startTestQueue(t, a)
+	a.EnqueueChat(context.Background(), "one", "hello")
+	waitTurn(t, a, "one", "completed")
+	if toolErr == nil {
+		t.Fatal("an unknown tool name was accepted")
+	}
+	turns, _ := a.Core.ChatTurns(context.Background())
+	for _, turn := range turns {
+		for _, e := range turn.Events {
+			if strings.Contains(e.Tool, "secret") {
+				t.Fatal("an untrusted tool name was persisted")
+			}
+		}
+	}
+}

@@ -44,10 +44,10 @@ func TestChatQueueIdempotencyContextAndAtomicMessages(t *testing.T) {
 	if _, err = s.StartNextChat(ctx); !errors.Is(err, ErrConflict) {
 		t.Fatal(err)
 	}
-	if err = s.RecordChatTool(ctx, turn.ID, "event-1", "set_team", "running"); err != nil {
+	if err = s.RecordChatTool(ctx, turn.ID, "event-1", "set_team", "Choose the project's team", "running"); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.RecordChatTool(ctx, turn.ID, "event-1", "set_team", "completed"); err != nil {
+	if err = s.RecordChatTool(ctx, turn.ID, "event-1", "set_team", "Choose the project's team", "completed"); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.FinishChat(ctx, turn.ID, "completed", "The worker is ready.", ""); err != nil {
@@ -84,8 +84,8 @@ func TestChatQueueBoundsAndSafeToolVocabulary(t *testing.T) {
 		t.Fatal("idempotent retry must work even when full", err)
 	}
 	turn, _ := s.StartNextChat(ctx)
-	if err := s.RecordChatTool(ctx, turn.ID, "event", "secret-token-arbitrary-tool-name", "running"); err == nil {
-		t.Fatal("untrusted tool name persisted")
+	if err := s.RecordChatTool(ctx, turn.ID, "event", "set_team", "", "running"); err == nil {
+		t.Fatal("a tool event without a label was recorded")
 	}
 	if err := s.SetChatLoadingPhrase(ctx, turn.ID, strings.Repeat("x", 161)); err == nil {
 		t.Fatal("unbounded phrase")
@@ -120,7 +120,7 @@ func TestChatRestartInterruptsOnlyStartedTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.RecordChatTool(ctx, t1.ID, "event", "set_team", "running"); err != nil {
+	if err = s.RecordChatTool(ctx, t1.ID, "event", "set_team", "Choose the project's team", "running"); err != nil {
 		t.Fatal(err)
 	}
 	if err = st.Close(); err != nil {
