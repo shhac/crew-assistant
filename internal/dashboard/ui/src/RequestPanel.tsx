@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { DecisionCard } from "./DecisionCard";
-import { DraftFiles } from "./DraftPreview";
+import { Drafts } from "./Drafts";
 import { TeamThread } from "./TeamThread";
 import {
   decisionFor,
@@ -8,16 +8,12 @@ import {
   isCode,
   requestStep,
   requestTone,
-  roleName,
-  taskPlaybook,
-  verdictOutcome,
 } from "./stages";
 import {
   CriteriaList,
   ErrorNotice,
   Icon,
   Pill,
-  dateLabel,
   focusedElement,
   useAction,
 } from "./ui";
@@ -26,10 +22,8 @@ import {
   landTask,
   stopTask,
   type Project,
-  type Revision,
   type State,
   type Task,
-  type Verdict,
 } from "./api";
 
 /** One request in full, beside its project's board. */
@@ -185,151 +179,6 @@ function RequestActions({
         </button>
       )}
       <ErrorNotice error={stopping.error || landing.error} />
-    </div>
-  );
-}
-
-/** Each draft, newest first, with what every checker said about it. */
-function Drafts({
-  project,
-  task,
-  collapsed,
-}: {
-  project: Project;
-  task: Task;
-  /** The decision above already shows the latest checks. */
-  collapsed: boolean;
-}) {
-  const revisions = [...(task.revisions ?? [])].reverse();
-  if (!revisions.length) return null;
-  const code = isCode(taskPlaybook(task, project));
-  return (
-    <section className="section" aria-label="Drafts">
-      <h3>{code ? "Changes" : "Drafts"}</h3>
-      {revisions.map((r, i) => (
-        <details key={r.n} className="draft card" open={i === 0 && !collapsed}>
-          <summary>
-            <span className="draft-name">
-              {code ? "Change" : "Draft"} {r.n}
-            </span>
-            <span className="draft-checks">
-              {(task.verdicts ?? [])
-                .filter((v) => v.revision === r.n)
-                .map((v, j) => (
-                  <Pill key={j} tone={verdictOutcome[v.outcome]?.tone}>
-                    {v.role}: {verdictOutcome[v.outcome]?.label ?? v.outcome}
-                  </Pill>
-                ))}
-            </span>
-            {r.at && (
-              <time className="muted small" dateTime={r.at}>
-                {dateLabel(r.at)}
-              </time>
-            )}
-          </summary>
-          <DraftDetail
-            project={project}
-            task={task}
-            revision={r}
-            code={code}
-            latest={i === 0}
-          />
-        </details>
-      ))}
-    </section>
-  );
-}
-
-function DraftDetail({
-  project,
-  task,
-  revision,
-  code,
-  latest,
-}: {
-  project: Project;
-  task: Task;
-  revision: Revision;
-  code: boolean;
-  latest: boolean;
-}) {
-  const verdicts = (task.verdicts ?? []).filter(
-    (v) => v.revision === revision.n,
-  );
-  return (
-    <div className="draft-detail">
-      {revision.summary && (
-        <p>
-          {/* A clean catch-up merge is crew-assistant's own, not the team's. */}
-          {!revision.clean_merge_of && (
-            <>
-              <strong>
-                {roleName(task, "implementer", "Implementer")}
-              </strong>{" "}
-            </>
-          )}
-          {revision.summary}
-        </p>
-      )}
-      {revision.brief_version !== project.brief.version && (
-        <p className="muted small">
-          Written for brief version {revision.brief_version}.
-        </p>
-      )}
-      {verdicts.map((v, i) => (
-        <VerdictView key={i} verdict={v} asked={!!v.asked} />
-      ))}
-      {code
-        ? !!revision.files?.length && (
-            <details className="disclosure">
-              <summary>
-                {revision.files.length} files
-                {revision.ref && (
-                  <>
-                    {" "}
-                    at <code>{revision.ref.slice(0, 7)}</code>
-                  </>
-                )}
-              </summary>
-              <ul className="file-list">
-                {revision.files.map((f) => (
-                  <li key={f}>
-                    <code>{f}</code>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )
-        : latest && (
-            <DraftFiles
-              projectID={project.id}
-              taskID={task.id}
-              n={revision.n}
-            />
-          )}
-    </div>
-  );
-}
-
-function VerdictView({ verdict, asked }: { verdict: Verdict; asked: boolean }) {
-  return (
-    <div className="check-note">
-      <p>
-        <strong>{verdict.role}</strong>
-        {asked && <span className="muted small"> (asked directly)</span>}{" "}
-        {verdict.summary}
-      </p>
-      {verdict.question && <p className="soft">Question: {verdict.question}</p>}
-      {!!verdict.findings?.length && (
-        <ul className="findings">
-          {verdict.findings.map((f, i) => (
-            <li key={i}>
-              {f.criterion && <span className="muted">{f.criterion}: </span>}
-              {f.note}
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
