@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/avatars"
@@ -21,37 +20,42 @@ var kindWords = map[string]string{
 	core.RoleQA:          "QA, who runs the checks",
 }
 
-// painter draws with Codex. Its session has a Codex home of its own, so a
-// drawing never shares a runtime with the team's turns.
-func (a *App) painterFor() avatars.Painter {
-	if a.Painter != nil {
-		return a.Painter
-	}
-	// Tests never reach a real service; one that forgot a painter fails.
-	if testing.Testing() {
-		return refusePainter{}
-	}
-	cfg := a.Config()
-	state := a.Core.StateDirectory()
+// CodexPainter draws with Codex, as the config says at the time of drawing.
+func (a *App) CodexPainter() avatars.Painter { return codexPainter{a} }
+
+// codexPainter's session has a Codex home of its own, so a drawing never
+// shares a runtime with the team's turns.
+type codexPainter struct{ a *App }
+
+func (p codexPainter) Paint(ctx context.Context, character string) ([]byte, error) {
+	cfg := p.a.Config()
+	state := p.a.Core.StateDirectory()
 	return avatars.CodexPainter{Runner: roles.Native{}, Spec: roles.Spec{
 		Binary: cfg.Model.CodexBin, Home: cfg.Model.CodexHome,
 		RuntimeHome: filepath.Join(state, "roles", "painter"),
 		WorkDir:     filepath.Join(state, "roles", "painter-work"),
-	}}
+	}}.Paint(ctx, character)
+}
+
+// Ready holds a drawing to the owner's usage limit on Codex, as a team's
+// turn is held.
+func (p codexPainter) Ready(ctx context.Context) error {
+	if wait, detail := p.a.Work.UsageWait(ctx, "codex"); !wait.IsZero() {
+		return errors.New(detail)
+	}
+	return nil
 }
 
 // startDrawing draws a character in the background, one picture at a time,
 // and hands the stored picture to done. A drawing takes minutes, so the
 // dashboard shows it as under way and then the picture or what went wrong.
 func (a *App) startDrawing(ctx context.Context, key, character string, done func(context.Context, string) error) error {
-	if a.Demo {
-		return errors.New("demo mode doesn't draw; start without --demo to draw with Codex")
+	if a.Painter == nil {
+		return errors.New("drawing needs Codex, which demo mode doesn't use")
 	}
-	// The owner's usage limit applies to Codex, the painter unless one is set;
-	// reading it would reach Codex itself, which tests never do.
-	if a.Painter == nil && !testing.Testing() {
-		if wait, detail := a.Work.UsageWait(ctx, "codex"); !wait.IsZero() {
-			return errors.New(detail)
+	if gate, ok := a.Painter.(avatars.Gate); ok {
+		if err := gate.Ready(ctx); err != nil {
+			return err
 		}
 	}
 	if err := a.markDrawing(key); err != nil {
@@ -63,7 +67,7 @@ func (a *App) startDrawing(ctx context.Context, key, character string, done func
 		defer cancel()
 		a.paint.Lock()
 		defer a.paint.Unlock()
-		data, err := a.painterFor().Paint(ctx, character)
+		data, err := a.Painter.Paint(ctx, character)
 		image := ""
 		if err == nil {
 			image, err = a.Avatars().Put(data)
@@ -172,19 +176,13 @@ func lookOrChoose(look string) string {
 // when the drawing cannot start; its preset face stands in.
 func (a *App) CreateMember(ctx context.Context, in core.MemberInput) (core.Member, error) {
 	m, err := a.Core.SaveMember(ctx, "", in)
-	if err != nil || a.Demo {
+	if err != nil {
 		return m, err
 	}
 	if drawErr := a.DrawMember(ctx, m.ID, ""); drawErr != nil {
 		a.setDrawing(m.ID, drawing{failure: "Couldn't draw it: " + drawErr.Error()})
 	}
 	return m, nil
-}
-
-type refusePainter struct{}
-
-func (refusePainter) Paint(context.Context, string) ([]byte, error) {
-	return nil, errors.New("tests do not draw with Codex; set a painter")
 }
 
 // WaitForDrawings returns once every drawing under way has finished.

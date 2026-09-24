@@ -99,9 +99,43 @@ func TestADrawingThatFailsSaysSoAndOneAtATimeIsDrawn(t *testing.T) {
 	if snap.Members[0].Drawing || !strings.Contains(snap.Members[0].DrawError, "no image tool") || snap.Members[0].Avatar.Image != "" {
 		t.Fatalf("a failed drawing: %+v", snap.Members[0])
 	}
-	a.Demo = true
-	if err := a.DrawMember(ctx, m.ID, ""); err == nil {
-		t.Fatal("demo mode drew")
+}
+
+// A painter that says it cannot draw now, as Codex does while the owner's
+// usage limit holds.
+type gatedPainter struct {
+	fakePainter
+	notNow error
+}
+
+func (g *gatedPainter) Ready(context.Context) error { return g.notNow }
+
+func TestAPainterThatCannotDrawNowIsNotAsked(t *testing.T) {
+	a := testApp(t)
+	painter := &gatedPainter{notNow: errors.New("Waiting for Codex usage to reset")}
+	a.Painter = painter
+	ctx := context.Background()
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kind: core.RoleReviewer, Engine: "codex"})
+	if err := a.DrawMember(ctx, m.ID, ""); !errors.Is(err, painter.notNow) {
+		t.Fatalf("the gate's reason should be returned: %v", err)
+	}
+	a.WaitForDrawings()
+	snap, _ := a.Snapshot(ctx)
+	if len(painter.seen) != 0 || snap.Members[0].Drawing {
+		t.Fatalf("a held painter was asked to draw: %v %+v", painter.seen, snap.Members[0])
+	}
+}
+
+func TestWithoutAPainterAMemberIsKeptAndSaysItWasNotDrawn(t *testing.T) {
+	a := testApp(t)
+	ctx := context.Background()
+	m, err := a.CreateMember(ctx, core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	if err != nil || m.ID == "" {
+		t.Fatalf("the member should be kept: %+v %v", m, err)
+	}
+	snap, _ := a.Snapshot(ctx)
+	if got := snap.Members[0]; got.Drawing || !strings.Contains(got.DrawError, "Couldn't draw it: drawing needs Codex") {
+		t.Fatalf("a drawing that cannot start: %+v", got)
 	}
 }
 

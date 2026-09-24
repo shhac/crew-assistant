@@ -20,6 +20,12 @@ type Painter interface {
 	Paint(ctx context.Context, character string) ([]byte, error)
 }
 
+// Gate is a painter that can say, before a drawing is promised, that it
+// cannot draw now: when the owner's usage limit holds, for instance.
+type Gate interface {
+	Ready(ctx context.Context) error
+}
+
 // Style is the one look every avatar shares, so the assistant and the team
 // read as a set and each face stays recognisable at 20 pixels.
 const Style = "a cute 2D chibi manga-style face: the head only, filling most of a square frame, with no body and no text or letters. Flat colours, bold clean outlines, a strong simple silhouette and a plain solid background colour, so it still reads at 20 pixels. Give the character a hair colour and one distinctive feature of their own."

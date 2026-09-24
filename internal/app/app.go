@@ -41,7 +41,7 @@ type App struct {
 	drawing map[string]drawing
 	// Work runs the teams' tasks and wakes agents.
 	Work *work.Loop
-	// Painter draws avatars; nil draws with Codex.
+	// Painter draws avatars; with none, as in demo mode, nothing is drawn.
 	Painter  avatars.Painter
 	paint    sync.Mutex      // One drawing at a time.
 	life     context.Context // The daemon's run; drawings stop with it.

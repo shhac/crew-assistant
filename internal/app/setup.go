@@ -270,7 +270,7 @@ func proposal(cfg config.Config, arguments string) (*IdentityRecommendation, err
 // has Codex draw how it said it looks.
 func (a *App) ApplyIdentity(ctx context.Context, id string, accepted bool) (config.Assistant, error) {
 	applied, fresh, err := a.applyIdentity(ctx, id, accepted)
-	if err == nil && fresh && applied.Avatar.Look != "" && !a.Demo {
+	if err == nil && fresh && applied.Avatar.Look != "" {
 		// The stand-in shows until the drawing is done; a drawing that cannot
 		// start is shown as its status, and the identity stands either way.
 		if drawErr := a.DrawAssistant(ctx, ""); drawErr != nil {
