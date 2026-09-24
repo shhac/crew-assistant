@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +34,8 @@ func ownerGit(t *testing.T, dir string, args ...string) string {
 type codeRunner struct {
 	scriptedRunner
 	edits int
+	// onCheck runs before each check, to change the world between rounds.
+	onCheck func()
 }
 
 func (r *codeRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
@@ -48,6 +51,9 @@ func (r *codeRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, er
 			return roles.Result{}, err
 		}
 		return roles.Result{Text: "Added Feature.", Session: []byte(`{"engine":"claude","id":"impl"}`)}, nil
+	}
+	if r.onCheck != nil {
+		r.onCheck()
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -403,5 +409,77 @@ func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
 	}
 	if ownerGit(t, source, "rev-parse", "--abbrev-ref", "HEAD") != "main" || ownerGit(t, source, "status", "--porcelain") != "" {
 		t.Fatal("the owner's checkout was left on another branch or dirty")
+	}
+}
+
+// A target that moves every time the change catches up comes to the owner
+// after a bounded number of catch-ups, instead of looping; their retry starts
+// the count again.
+func TestATargetThatKeepsMovingComesToTheOwner(t *testing.T) {
+	source := t.TempDir()
+	ownerGit(t, source, "init", "-q", "-b", "main")
+	ownerGit(t, source, "config", "commit.gpgsign", "false")
+	os.WriteFile(filepath.Join(source, "main.go"), []byte("package main\n"), 0600)
+	ownerGit(t, source, "add", "-A")
+	ownerGit(t, source, "commit", "-q", "-m", "start")
+	reviews := make([]string, 40)
+	for i := range reviews {
+		reviews[i] = pass
+	}
+	moves := 0
+	move := func() {
+		moves++
+		name := fmt.Sprintf("owner%d.go", moves)
+		os.WriteFile(filepath.Join(source, name), []byte("package main\n"), 0600)
+		ownerGit(t, source, "add", name)
+		ownerGit(t, source, "commit", "-q", "-m", name)
+	}
+	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: reviews}}
+	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
+	a.runner = runner
+	ctx := context.Background()
+	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{source}, Brief: core.BriefInput{Goal: "Add a feature"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.SetTeam(ctx, engine.SetTeamArgs{ProjectID: p.ID, Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.SetLanding(ctx, engine.SetLandingArgs{ProjectID: p.ID, Via: core.LandPush, Target: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	a.StopTask(ctx, snap.Tasks[0].ProjectID, snap.Tasks[0].ID)
+	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
+	current := func() core.Task {
+		t.Helper()
+		settle(t, a)
+		snap, _ := a.Core.Snapshot(ctx)
+		for _, candidate := range snap.Tasks {
+			if candidate.ID == task.ID {
+				return candidate
+			}
+		}
+		return core.Task{}
+	}
+	task = current()
+	// From approval on, main moves before every check.
+	runner.onCheck = move
+	move()
+	if _, err = a.Core.ResolveDecision(ctx, openDecision(t, a, task).ID, choiceApprove); err != nil {
+		t.Fatal(err)
+	}
+	task = current()
+	d := openDecision(t, a, task)
+	if d.Kind != decisionFailure || !strings.Contains(d.Title, "keeps having to catch up") || task.CatchUps != maxCatchUps+1 {
+		t.Fatalf("a moving target never came to the owner: %+v %+v", d, task)
+	}
+	// The owner lets it settle and tries again: the count starts afresh.
+	runner.onCheck = nil
+	if _, err = a.Core.ResolveDecision(ctx, d.ID, choiceTryAgain); err != nil {
+		t.Fatal(err)
+	}
+	if task = current(); task.Status != core.TaskLanded {
+		t.Fatalf("a retry once the target was quiet did not land: %s %s", task.Status, task.Detail)
 	}
 }

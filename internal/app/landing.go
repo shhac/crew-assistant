@@ -14,20 +14,30 @@ import (
 // that keeps moving before the owner is asked what to do.
 const maxCatchUps = 4
 
-// startLanding moves a task on to landing. Approving records the latest
-// revision as the one the owner approved.
-func (a *App) startLanding(ctx context.Context, t core.Task, approving bool) error {
+// approve records the owner's approval of the latest revision and moves the
+// task on to landing.
+func (a *App) approve(ctx context.Context, t core.Task) error {
 	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		if t.Finished() {
 			return "", nil
 		}
-		if approving && len(t.Revisions) > 0 {
+		if len(t.Revisions) > 0 {
 			t.Approved = t.Revisions[len(t.Revisions)-1].N
 		}
-		if !approving {
-			t.CatchUps = 0
-		}
 		t.Status, t.DecisionID, t.ResumeStatus, t.Detail = core.TaskLanding, "", "", "Landing"
+		return "Landing " + t.Objective, nil
+	})
+	return err
+}
+
+// resumeLanding moves a task whose approval still stands, or that needs none,
+// back on to landing. Its catch-ups keep counting.
+func (a *App) resumeLanding(ctx context.Context, t core.Task) error {
+	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.Finished() {
+			return "", nil
+		}
+		t.Status, t.DecisionID, t.Detail = core.TaskLanding, "", "Landing"
 		return "Landing " + t.Objective, nil
 	})
 	return err
@@ -144,7 +154,7 @@ func (a *App) landingFailed(ctx context.Context, t core.Task, r core.Revision, c
 		if t.Finished() {
 			return "", nil
 		}
-		t.ResumeStatus = resumeDelivery
+		t.ResumeStatus = core.TaskLanding
 		return "", nil
 	}); err != nil {
 		return err
@@ -170,7 +180,7 @@ func (a *App) catchUpRound(ctx context.Context, t core.Task, l line) error {
 		t.CatchUps++
 		if t.CatchUps > maxCatchUps {
 			tooMany = true
-			t.ResumeStatus = resumeDelivery
+			t.ResumeStatus = core.TaskLanding
 			return "", nil
 		}
 		t.Status, t.DecisionID, t.CatchUp, t.Detail = core.TaskWriting, "", true, "Catching up: "+l.What

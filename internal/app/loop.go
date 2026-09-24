@@ -30,9 +30,6 @@ const (
 	choiceAcceptDraft  = "Accept this draft"
 	choiceStop         = "Stop"
 	choiceTryAgain     = "Try again"
-	// resumeDelivery marks a task whose approved delivery failed; a retry
-	// delivers again rather than re-running a role.
-	resumeDelivery = "deliver"
 	// A role that fails is retried this many times, with growing waits,
 	// before the owner hears about it.
 	roleRetries = 2
@@ -423,7 +420,7 @@ func (a *App) askForDelivery(ctx context.Context, p core.Project, t core.Task, r
 		return a.catchUpRound(ctx, t, *l)
 	}
 	if approvalStands(t) || !taskPlaybook(p, t).Land.AsksFirst() || proposed(t) {
-		return a.startLanding(ctx, t, false)
+		return a.resumeLanding(ctx, t)
 	}
 	where := m.deliveryNote(t)
 	_, err = a.Core.OpenTaskDecision(ctx, t.ID, decisionDelivery, core.DecisionInput{
@@ -530,9 +527,7 @@ func (a *App) applyAnswer(ctx context.Context, p core.Project, t core.Task, d co
 		return a.stopTask(ctx, t, "the owner stopped it")
 	case d.Kind == decisionDelivery && strings.EqualFold(answer, choiceApprove),
 		d.Kind == decisionEscalation && strings.EqualFold(answer, choiceAcceptDraft):
-		return a.startLanding(ctx, t, true)
-	case d.Kind == decisionFailure && strings.EqualFold(answer, choiceTryAgain) && t.ResumeStatus == resumeDelivery:
-		return a.startLanding(ctx, t, false)
+		return a.approve(ctx, t)
 	case d.Kind == decisionFailure && strings.EqualFold(answer, choiceTryAgain):
 		_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			if t.Status == core.TaskStopped {
@@ -542,7 +537,8 @@ func (a *App) applyAnswer(ctx context.Context, p core.Project, t core.Task, d co
 			if t.Status == "" {
 				t.Status = core.TaskWriting
 			}
-			t.Failures, t.RetryAt, t.DecisionID, t.Detail = 0, time.Time{}, "", "Trying again"
+			// The owner's retry starts the count of catch-ups afresh.
+			t.Failures, t.RetryAt, t.DecisionID, t.Detail, t.CatchUps = 0, time.Time{}, "", "Trying again", 0
 			return "Trying " + t.Objective + " again", nil
 		})
 		return err
