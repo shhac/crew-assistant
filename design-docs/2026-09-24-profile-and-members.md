@@ -44,7 +44,8 @@ After using it, the owner changed three things.
 - **Learnings are disclosed like skills.** Each has a `when`. A task pins a copy of its members' learnings when it starts.
   - Each role begins with an index only: when each learning applies, and a file under the state directory to read it from.
   - The index says these are notes that never override the brief or the owner.
-  - The files are never in the workspace. They are swept once the task finishes, and a stopped or landed task drops its copy.
+  - The files are never in the workspace, and they exist only while a turn that can read them runs. A stopped or landed task drops its copy.
+  - A `when` is one line: the index goes into every later task's instructions, so a line break in one could forge another entry. A learning saved without one gets its heading from its text, once, and the dashboard shows the same heading the member reads.
   - Because the index comes from the pinned copy, every turn is told the same thing and the writer's session resumes.
 - **Faces are drawn by Codex**, the assistant's and every member's, in one style: a cute 2D chibi manga face, head only, that still reads at 20 pixels.
   - The painter runs one read-only Codex turn in its own Codex home, and takes the picture from where Codex saves what it generates, keyed by that turn's session.
