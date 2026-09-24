@@ -14,7 +14,6 @@ import { applyAppearance } from "./appearance";
 import { href, parseRoute, type Route } from "./router";
 import {
   APIError,
-  avatarDataURL,
   bootstrapSession,
   errorText,
   getState,
@@ -23,7 +22,8 @@ import {
   setPaused,
   type State,
 } from "./api";
-import { ErrorNotice, svgURL, useAction } from "./ui";
+import { useFavicon } from "./Avatar";
+import { ErrorNotice, useAction } from "./ui";
 import { useChatPane } from "./chatPane";
 
 export function App() {
@@ -86,23 +86,7 @@ export function App() {
   useEffect(() => {
     if (state) applyAppearance(state.assistant.theme);
   }, [state?.assistant.theme]);
-  const sketch = state?.assistant.avatar_svg;
-  const drawn = state?.assistant.avatar?.image;
-  useEffect(() => {
-    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    if (!icon) return;
-    if (sketch) icon.href = svgURL(sketch);
-    if (!drawn) return;
-    const controller = new AbortController();
-    avatarDataURL(drawn, controller.signal)
-      .then((url) => {
-        icon.href = url;
-      })
-      .catch(() => {
-        // The sketch stays as the icon.
-      });
-    return () => controller.abort();
-  }, [sketch, drawn]);
+  useFavicon(state?.assistant);
   const needs = state
     ? pendingDecisions(state.decisions).length + state.pending_operations.length
     : 0;

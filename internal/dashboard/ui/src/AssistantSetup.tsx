@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Panel } from "./SettingsPanel";
-import { Avatar, ErrorNotice, hasFace } from "./ui";
+import { Avatar, hasFace } from "./Avatar";
+import { ErrorNotice } from "./ui";
 import { api, errorText, type AvatarSpec, type Config } from "./api";
 interface Recommendation {
   id: string;

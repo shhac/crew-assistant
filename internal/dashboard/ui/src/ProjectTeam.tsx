@@ -4,7 +4,8 @@ import { Folders } from "./ProjectFolders";
 import { memberHref } from "./router";
 import { isCode } from "./stages";
 import { engineLabel, engines } from "./members";
-import { Avatar, ErrorNotice, useAction } from "./ui";
+import { Avatar } from "./Avatar";
+import { ErrorNotice, useAction } from "./ui";
 import {
   setTeam,
   type Member,

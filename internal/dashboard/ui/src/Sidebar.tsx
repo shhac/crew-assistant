@@ -1,6 +1,7 @@
 import { href, projectHref, type Route } from "./router";
 import { projectGroup, projectTasks } from "./stages";
-import { Avatar, ErrorNotice, hasFace, Icon } from "./ui";
+import { Avatar, hasFace } from "./Avatar";
+import { ErrorNotice, Icon } from "./ui";
 import type { State } from "./api";
 
 const dotTone = {

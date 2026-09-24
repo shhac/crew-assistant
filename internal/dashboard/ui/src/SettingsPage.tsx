@@ -9,7 +9,8 @@ import { Panel } from "./SettingsPanel";
 import { appearanceOf, applyAppearance, type Appearance } from "./appearance";
 import { href } from "./router";
 import { LookForm } from "./Redraw";
-import { Avatar, ErrorNotice, Pill, humanStatus, useAction } from "./ui";
+import { Avatar } from "./Avatar";
+import { ErrorNotice, Pill, humanStatus, useAction } from "./ui";
 import {
   errorText,
   getConfig,

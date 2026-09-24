@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Avatar } from "./Avatar";
 import { MemberForm } from "./MemberForm";
 import { DrawingStatus, LookForm } from "./Redraw";
 import { href, projectHref } from "./router";
@@ -8,13 +9,7 @@ import {
   memberProjects,
   memberSummary,
 } from "./members";
-import {
-  Avatar,
-  ErrorNotice,
-  fullDateLabel,
-  sinceLabel,
-  useAction,
-} from "./ui";
+import { ErrorNotice, fullDateLabel, sinceLabel, useAction } from "./ui";
 import {
   addLearning,
   deleteMember,

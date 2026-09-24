@@ -2,7 +2,8 @@ import { useState } from "react";
 import { MemberForm } from "./MemberForm";
 import { memberHref } from "./router";
 import { memberProjects, memberSummary } from "./members";
-import { Avatar, counted } from "./ui";
+import { Avatar } from "./Avatar";
+import { counted } from "./ui";
 import type { Member, State } from "./api";
 
 export function TeamPage({

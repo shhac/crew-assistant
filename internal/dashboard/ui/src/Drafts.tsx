@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { ConversationMarkdown } from "./ConversationMarkdown";
 import { isCode, roleName, taskPlaybook, verdictOutcome } from "./stages";
 import { roleMember } from "./members";
-import { Avatar, ErrorNotice, Pill, dateLabel } from "./ui";
+import { Avatar } from "./Avatar";
+import { ErrorNotice, Pill, dateLabel } from "./ui";
 import {
   errorText,
   revisionFiles,

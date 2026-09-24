@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, APIError, errorText, type ChatTurn, type State } from "./api";
 import { ConversationMarkdown } from "./ConversationMarkdown";
-import { Avatar, dateLabel, fullDateLabel, Icon } from "./ui";
+import { Avatar } from "./Avatar";
+import { dateLabel, fullDateLabel, Icon } from "./ui";
 import { ChatQueue, type QueueHold } from "./ChatQueue";
 import { ToolActivity } from "./ToolActivity";
 import {

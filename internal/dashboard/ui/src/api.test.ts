@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { avatarURL, normalizeState, revisionFiles, setTeam } from "./api";
+import { normalizeState, revisionFiles, setTeam } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -45,23 +45,5 @@ describe("project API", () => {
       max_rounds: "4",
       deliver_to: "/out",
     });
-  });
-});
-
-describe("drawn avatars", () => {
-  const drawn = { image: "0123456789abcdef0123456789abcdef" };
-  it("picks the stored size that stays sharp at twice the pixels shown", () => {
-    const at = (px: number) => avatarURL(drawn, px);
-    expect(at(16)).toBe(`/api/avatars/${drawn.image}/small`);
-    expect(at(24)).toBe(`/api/avatars/${drawn.image}/small`);
-    expect(at(25)).toBe(`/api/avatars/${drawn.image}/medium`);
-    expect(at(64)).toBe(`/api/avatars/${drawn.image}/medium`);
-    expect(at(65)).toBe(`/api/avatars/${drawn.image}/large`);
-    expect(at(96)).toBe(`/api/avatars/${drawn.image}/large`);
-  });
-
-  it("has no address without a picture", () => {
-    expect(avatarURL(undefined, 20)).toBeUndefined();
-    expect(avatarURL({ shape: "orb" }, 20)).toBeUndefined();
   });
 });

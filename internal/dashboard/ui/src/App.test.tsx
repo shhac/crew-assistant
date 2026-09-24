@@ -103,56 +103,6 @@ describe("the shell", () => {
     await waitFor(() => expect(icon.getAttribute("href")).toBe(url));
     icon.remove();
   });
-  it("uses the drawn picture as the favicon, fetched with the session", async () => {
-    const icon = document.createElement("link");
-    icon.rel = "icon";
-    icon.href = "data:,";
-    document.head.append(icon);
-    const image = "0123456789abcdef0123456789abcdef";
-    state.assistant.avatar = { image };
-    state.assistant.avatar_svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
-    respond = (path) => ({
-      body:
-        path === "/api/state"
-          ? state
-          : path === `/api/avatars/${image}/small`
-            ? new Blob(["png"], { type: "image/png" })
-            : {},
-    });
-    render(<App />);
-    const nav = await screen.findByRole("navigation", { name: "Main" });
-    expect(
-      within(nav)
-        .getByRole("link", { name: "Iris" })
-        .querySelector("img")
-        ?.getAttribute("src"),
-    ).toBe(`/api/avatars/${image}/medium`);
-    await waitFor(() =>
-      expect(icon.getAttribute("href")).toBe(
-        `data:image/png;base64,${btoa("png")}`,
-      ),
-    );
-    const fetched = calls.find((c) => c.path === `/api/avatars/${image}/small`);
-    expect(fetched?.options?.credentials).toBe("same-origin");
-    icon.remove();
-  });
-  it("keeps the sketch as the favicon when the picture can't be fetched", async () => {
-    const icon = document.createElement("link");
-    icon.rel = "icon";
-    icon.href = "data:,";
-    document.head.append(icon);
-    state.assistant.avatar = { image: "0123456789abcdef0123456789abcdef" };
-    state.assistant.avatar_svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
-    const sketch = `data:image/svg+xml,${encodeURIComponent(state.assistant.avatar_svg)}`;
-    respond = (path) =>
-      path === "/api/state" ? { body: state } : { status: 404 };
-    render(<App />);
-    await waitFor(() =>
-      expect(calls.some((c) => c.path.startsWith("/api/avatars/"))).toBe(true),
-    );
-    await waitFor(() => expect(icon.getAttribute("href")).toBe(sketch));
-    icon.remove();
-  });
   it("sends old addresses to the inbox and says when a project is gone", async () => {
     window.history.replaceState(null, "", "/#/decisions");
     render(<App />);

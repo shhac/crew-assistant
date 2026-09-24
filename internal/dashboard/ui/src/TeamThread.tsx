@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { finished, isCode, taskPlaybook, verdictOutcome } from "./stages";
 import { roleMember } from "./members";
-import { Avatar, ErrorNotice, Pill, sinceLabel, useAction } from "./ui";
+import { Avatar } from "./Avatar";
+import { ErrorNotice, Pill, sinceLabel, useAction } from "./ui";
 import {
   messageTeam,
   type Member,

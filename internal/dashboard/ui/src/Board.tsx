@@ -14,7 +14,8 @@ import {
   projectTasks,
   requestStep,
 } from "./stages";
-import { Avatar, ErrorNotice, Icon, Pill, useAction } from "./ui";
+import { Avatar } from "./Avatar";
+import { ErrorNotice, Icon, Pill, useAction } from "./ui";
 import {
   askForTask,
   criteriaLines,
