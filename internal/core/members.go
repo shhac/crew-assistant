@@ -74,6 +74,15 @@ type MemberInput struct {
 
 const maxLearnings = 30
 
+// Member finds a member by id.
+func (v Snapshot) Member(id string) (Member, bool) {
+	i := slices.IndexFunc(v.Members, func(m Member) bool { return m.ID == id })
+	if i < 0 {
+		return Member{}, false
+	}
+	return v.Members[i], true
+}
+
 func member(v *Snapshot, id string) *Member {
 	for i := range v.Members {
 		if v.Members[i].ID == id {

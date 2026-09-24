@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/avatars"
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/roles"
 	"github.com/shhac/crew-assistant/internal/text"
@@ -143,22 +144,13 @@ func (a *App) DrawMember(ctx context.Context, id, look string) error {
 	if err != nil {
 		return err
 	}
-	i := -1
-	for j, m := range snap.Members {
-		if m.ID == id {
-			i = j
-		}
-	}
-	if i < 0 {
+	m, ok := snap.Member(id)
+	if !ok {
 		return core.ErrNotFound
 	}
-	m := snap.Members[i]
-	look = strings.TrimSpace(look)
-	if look == "" {
-		look = m.Avatar.Look
-	}
-	if len(look) > 600 {
-		return errors.New("a look is at most 600 characters")
+	look, err = resolveLook(look, m.Avatar.Look)
+	if err != nil {
+		return err
 	}
 	character := m.Name + ", " + kindWords[m.Kind] + " on a small software team."
 	if m.Instructions != "" {
@@ -173,12 +165,9 @@ func (a *App) DrawMember(ctx context.Context, id, look string) error {
 // DrawAssistant draws the assistant's own face and puts it in the config.
 func (a *App) DrawAssistant(ctx context.Context, look string) error {
 	cfg := a.Config().Assistant
-	look = strings.TrimSpace(look)
-	if look == "" {
-		look = cfg.Avatar.Look
-	}
-	if len(look) > 600 {
-		return errors.New("a look is at most 600 characters")
+	look, err := resolveLook(look, cfg.Avatar.Look)
+	if err != nil {
+		return err
 	}
 	character := cfg.Name + ", a calm personal assistant who runs projects for its owner. Personality: " + text.Clip(cfg.Personality, 200) + " " + lookOrChoose(look)
 	return a.startDrawing(ctx, drawingAssistant, character, func(_ context.Context, image string) error {
@@ -188,6 +177,18 @@ func (a *App) DrawAssistant(ctx context.Context, look string) error {
 		next.Assistant.Avatar.Image, next.Assistant.Avatar.Look = image, look
 		return a.updateConfigLocked(next)
 	})
+}
+
+// resolveLook is the look to draw from: the one given, or else the last.
+func resolveLook(given, last string) (string, error) {
+	look := strings.TrimSpace(given)
+	if look == "" {
+		look = last
+	}
+	if len(look) > config.MaxLook {
+		return "", fmt.Errorf("a look is at most %d characters", config.MaxLook)
+	}
+	return look, nil
 }
 
 func lookOrChoose(look string) string {

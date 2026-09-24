@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/shhac/crew-assistant/internal/avatars"
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 )
 
@@ -155,6 +157,26 @@ func TestApplyingAnIdentityDrawsTheAssistant(t *testing.T) {
 	snap, _ := a.Snapshot(ctx)
 	if snap.Assistant.Avatar.Image != avatar.Image || snap.Assistant.Drawing {
 		t.Fatalf("the dashboard should see the picture: %+v", snap.Assistant)
+	}
+}
+
+func TestTheLongestLookReachesThePainterWhole(t *testing.T) {
+	a := testApp(t)
+	painter := &fakePainter{}
+	a.Painter = painter
+	ctx := context.Background()
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude", Instructions: strings.Repeat("Small commits. ", 20)})
+	look := "Violet" + strings.Repeat(" violet", (config.MaxLook-10)/7) + " bob"
+	look += strings.Repeat("!", config.MaxLook-len(look))
+	if err := a.DrawMember(ctx, m.ID, look); err != nil {
+		t.Fatal(err)
+	}
+	a.WaitForDrawings()
+	if !strings.Contains(avatars.Prompt(painter.seen[0]), look+"\n\"\"\"") {
+		t.Fatal("the look was cut short")
+	}
+	if err := a.DrawMember(ctx, m.ID, look+"x"); err == nil {
+		t.Fatal("a look over the bound was drawn")
 	}
 }
 

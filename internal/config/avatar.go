@@ -33,6 +33,9 @@ type Mark struct {
 
 const maxMarks = 8
 
+// MaxLook is the longest description of how a face looks.
+const MaxLook = 600
+
 var (
 	hexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 	pathData = regexp.MustCompile(`^[Mm][MmLlHhVvCcSsQqTtAaZz0-9eE.,\- ]*$`)
@@ -63,8 +66,8 @@ func (a Avatar) Validate() error {
 	if a.Image != "" && !imageID.MatchString(a.Image) {
 		return errors.New("image must name a drawn picture")
 	}
-	if len(a.Look) > 600 {
-		return errors.New("look must be at most 600 characters")
+	if len(a.Look) > MaxLook {
+		return fmt.Errorf("look must be at most %d characters", MaxLook)
 	}
 	if len(a.Marks) == 0 {
 		if _, ok := presets[a.Shape]; !ok {

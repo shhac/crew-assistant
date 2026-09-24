@@ -34,7 +34,7 @@ type TeamChoice struct {
 
 // teamFrom builds a playbook from a template and the few choices the assistant
 // may make about it. Anything left empty keeps the template's choice.
-func teamFrom(in TeamChoice, members []core.Member) (core.Playbook, error) {
+func teamFrom(in TeamChoice, snap core.Snapshot) (core.Playbook, error) {
 	template := in.Template
 	if template == "" {
 		template = "draft"
@@ -56,7 +56,7 @@ func teamFrom(in TeamChoice, members []core.Member) (core.Playbook, error) {
 		if slot[1] == "" {
 			continue
 		}
-		if err := fillRole(&playbook, slot[0], slot[1], members); err != nil {
+		if err := fillRole(&playbook, slot[0], slot[1], snap); err != nil {
 			return core.Playbook{}, err
 		}
 	}
@@ -83,12 +83,11 @@ func teamFrom(in TeamChoice, members []core.Member) (core.Playbook, error) {
 // fillRole puts a member in the template's role of that kind. The template's
 // instructions stay, since they say how this kind of work is done here; the
 // member's own follow them.
-func fillRole(playbook *core.Playbook, kind, id string, members []core.Member) error {
-	i := slices.IndexFunc(members, func(m core.Member) bool { return m.ID == id })
-	if i < 0 {
+func fillRole(playbook *core.Playbook, kind, id string, snap core.Snapshot) error {
+	m, ok := snap.Member(id)
+	if !ok {
 		return fmt.Errorf("there is no team member %q: %w", id, core.ErrNotFound)
 	}
-	m := members[i]
 	if m.Kind != kind {
 		return fmt.Errorf("%s is a %s, not a %s", m.Name, m.Kind, kind)
 	}
@@ -108,7 +107,7 @@ func (lp *Loop) SetTeam(ctx context.Context, projectID string, in TeamChoice) (c
 	if err != nil {
 		return core.Project{}, err
 	}
-	playbook, err := teamFrom(in, snap.Members)
+	playbook, err := teamFrom(in, snap)
 	if err != nil {
 		return core.Project{}, err
 	}
