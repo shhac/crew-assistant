@@ -87,5 +87,15 @@ func assistantView(s core.Snapshot) core.Snapshot {
 	s.Wakes = wakes
 	// How the assistant looks is for the owner's screen, not its turns.
 	s.Assistant.Avatar, s.Assistant.AvatarSVG = config.Avatar{}, ""
+	members := make([]core.Member, len(s.Members))
+	for i, m := range s.Members {
+		m.Avatar, m.AvatarSVG, m.Instructions = config.Avatar{}, "", text.Clip(m.Instructions, 300)
+		// The newest few are enough to avoid recording one twice.
+		if n := len(m.Learnings); n > 5 {
+			m.Learnings = m.Learnings[n-5:]
+		}
+		members[i] = m
+	}
+	s.Members = members
 	return s
 }

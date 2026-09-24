@@ -54,8 +54,15 @@ func TestTheAssistantSeesWhatItCanActOnAndOnlyTheOutcomeOfWhatIsDone(t *testing.
 func TestTheAssistantDoesNotCarryItsOwnPictureIntoEveryTurn(t *testing.T) {
 	drawn := config.Avatar{Background: "#101820", Accent: "#ffffff", Marks: []config.Mark{{D: "M10 10L118 118", Color: "#ffffff", StrokeWidth: 8}}}
 	svg, _ := drawn.SVG()
-	view := assistantView(core.Snapshot{Assistant: core.Assistant{Name: "Iris", Avatar: drawn, AvatarSVG: svg}})
-	raw, _ := json.Marshal(view.Assistant)
+	learnings := make([]core.Learning, 12)
+	for i := range learnings {
+		learnings[i] = core.Learning{ID: fmt.Sprint(i), Text: fmt.Sprint("learning ", i)}
+	}
+	view := assistantView(core.Snapshot{Assistant: core.Assistant{Name: "Iris", Avatar: drawn, AvatarSVG: svg}, Members: []core.Member{{ID: "m", Name: "Ada", Avatar: drawn, AvatarSVG: svg, Learnings: learnings}}})
+	if m := view.Members[0]; m.Name != "Ada" || m.AvatarSVG != "" || len(m.Learnings) != 5 || m.Learnings[4].Text != "learning 11" {
+		t.Fatalf("member view %+v", m)
+	}
+	raw, _ := json.Marshal(view)
 	if view.Assistant.Name != "Iris" || strings.Contains(string(raw), "M10 10") || strings.Contains(string(raw), "<svg") {
 		t.Fatalf("assistant view: %s", raw)
 	}
