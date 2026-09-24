@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
 )
@@ -202,24 +203,22 @@ func (a *App) processNextChat(ctx context.Context, standalone bool) (bool, error
 func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Result, error) {
 	cfg := a.Config()
 	eventIDs := map[string]string{}
-	ec := engine.Config{WorkDirRoot: a.Core.StateDirectory(), Engine: cfg.Model.Engine, Effort: cfg.Model.Effort, CodexBin: cfg.Model.CodexBin, CodexHome: cfg.Model.CodexHome, ClaudeBin: cfg.Model.ClaudeBin, ClaudeHome: cfg.Model.ClaudeHome, Endpoint: strings.TrimRight(cfg.Model.BaseURL, "/") + "/chat/completions", Model: cfg.Model.Model, APIKeyEnv: cfg.Model.APIKeyEnv, AssistantName: cfg.Assistant.Name, Personality: cfg.Assistant.Personality, MaxTurns: cfg.Limits.MaxModelTurns, MaxOutputTokens: cfg.Model.MaxTokens,
-		BeforeRequest: func(ctx context.Context) error {
-			return a.Core.ReserveModelCall(ctx, a.Config().Limits.MaxModelCallsPerDay)
-		},
-		OnTool: func(ctx context.Context, event engine.ToolEvent) error {
-			id := eventIDs[event.ID]
-			if event.Status == "running" {
-				id = chatID()
-				eventIDs[event.ID] = id
-			}
-			// The model's call ID is never persisted or shown, nor are args or
-			// results; a tool name the assistant was never offered is refused.
-			label, ok := engine.ToolLabel(event.Tool)
-			if !ok {
-				return errors.New("invalid chat tool event")
-			}
-			return a.Core.RecordChatTool(ctx, turn.ID, id, event.Tool, label, event.Status)
-		}}
+	ec := a.assistantConfig(cfg)
+	ec.AssistantName, ec.Personality, ec.MaxTurns = cfg.Assistant.Name, cfg.Assistant.Personality, cfg.Limits.MaxModelTurns
+	ec.OnTool = func(ctx context.Context, event engine.ToolEvent) error {
+		id := eventIDs[event.ID]
+		if event.Status == "running" {
+			id = chatID()
+			eventIDs[event.ID] = id
+		}
+		// The model's call ID is never persisted or shown, nor are args or
+		// results; a tool name the assistant was never offered is refused.
+		label, ok := engine.ToolLabel(event.Tool)
+		if !ok {
+			return errors.New("invalid chat tool event")
+		}
+		return a.Core.RecordChatTool(ctx, turn.ID, id, event.Tool, label, event.Status)
+	}
 	ec.OnRetry = func(ctx context.Context, event engine.RetryEvent) error {
 		return a.chatRetryStatus(ctx, turn.ID, event)
 	}
@@ -247,4 +246,13 @@ func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Resul
 		return engine.Result{}, err
 	}
 	return e.Chat(ctx, req)
+}
+
+// assistantConfig is the assistant's own model, as configured, with each
+// request counted against the daily allowance.
+func (a *App) assistantConfig(cfg config.Config) engine.Config {
+	return engine.Config{WorkDirRoot: a.Core.StateDirectory(), Engine: cfg.Model.Engine, Effort: cfg.Model.Effort, CodexBin: cfg.Model.CodexBin, CodexHome: cfg.Model.CodexHome, ClaudeBin: cfg.Model.ClaudeBin, ClaudeHome: cfg.Model.ClaudeHome, Endpoint: strings.TrimRight(cfg.Model.BaseURL, "/") + "/chat/completions", Model: cfg.Model.Model, APIKeyEnv: cfg.Model.APIKeyEnv, MaxOutputTokens: cfg.Model.MaxTokens,
+		BeforeRequest: func(ctx context.Context) error {
+			return a.Core.ReserveModelCall(ctx, a.Config().Limits.MaxModelCallsPerDay)
+		}}
 }

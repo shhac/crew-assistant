@@ -126,9 +126,7 @@ func (a *App) InterviewIdentity(ctx context.Context, message string) (IdentitySe
 	messages := []engine.Message{{Role: "system", Content: identityInstructions}, {Role: "system", Content: "Current configured identity: " + string(current)}}
 	messages = append(messages, state.Messages...)
 	messages = append(messages, engine.Message{Role: "user", Content: message})
-	result, _, err := engine.Complete(ctx, engine.Config{WorkDirRoot: a.Core.StateDirectory(), Engine: cfg.Model.Engine, Effort: cfg.Model.Effort, CodexBin: cfg.Model.CodexBin, CodexHome: cfg.Model.CodexHome, ClaudeBin: cfg.Model.ClaudeBin, ClaudeHome: cfg.Model.ClaudeHome, Endpoint: strings.TrimRight(cfg.Model.BaseURL, "/") + "/chat/completions", Model: cfg.Model.Model, APIKeyEnv: cfg.Model.APIKeyEnv, MaxOutputTokens: cfg.Model.MaxTokens, BeforeRequest: func(ctx context.Context) error {
-		return a.Core.ReserveModelCall(ctx, a.Config().Limits.MaxModelCallsPerDay)
-	}}, messages, identityTools())
+	result, _, err := engine.Complete(ctx, a.assistantConfig(cfg), messages, identityTools())
 	if err != nil {
 		return state, err
 	}

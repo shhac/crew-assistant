@@ -148,3 +148,26 @@ func TestToolSchemaContainsOnlyCoordinationSurface(t *testing.T) {
 		t.Errorf("missing tools: %v", required)
 	}
 }
+
+func TestAToolCallIsAdmittedOnlyWhenItIsWellFormedAndOffered(t *testing.T) {
+	call := func(id, typ, name, args string) ToolCall {
+		var c ToolCall
+		c.ID, c.Type, c.Function.Name, c.Function.Arguments = id, typ, name, args
+		return c
+	}
+	seen := map[string]bool{}
+	if _, err := validToolCall(call("1", "function", "read_state", "{}"), seen); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]ToolCall{
+		"a repeated id":     call("1", "function", "read_state", "{}"),
+		"no id":             call("", "function", "read_state", "{}"),
+		"an unoffered tool": call("2", "function", "rm_rf", "{}"),
+		"not a function":    call("3", "code", "read_state", "{}"),
+		"broken arguments":  call("4", "function", "read_state", "{"),
+	} {
+		if _, err := validToolCall(c, seen); err == nil {
+			t.Errorf("admitted %s", name)
+		}
+	}
+}
