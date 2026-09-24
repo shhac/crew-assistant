@@ -121,7 +121,7 @@ func (m gitMedium) begin(ctx context.Context, t core.Task) (core.Task, error) {
 		return t, nil
 	}
 	t.Branch = "crew-task/" + t.ID
-	base, from, err := m.repo.Begin(ctx, t.Branch)
+	base, from, err := m.repo.Begin(ctx, t.Branch, "")
 	if err != nil {
 		return t, err
 	}

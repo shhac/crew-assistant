@@ -177,26 +177,42 @@ func (r Repo) copyPrepared() error {
 	return nil
 }
 
-// Begin starts a task: the clone catches up with the owner's current branch
-// and a task branch is created from its tip. It returns the base commit and
-// the owner's branch it came from.
-func (r Repo) Begin(ctx context.Context, branch string) (base, from string, err error) {
-	current, err := run(ctx, r.source, "symbolic-ref", "--quiet", "--short", "HEAD")
-	if err != nil {
-		return "", "", errors.New("the repository is not on a branch to start from")
+// Begin starts a task: the clone catches up with the owner's branch from, or
+// their current branch when from is empty, and a task branch is created from
+// its tip. It returns the base commit and the branch it came from.
+func (r Repo) Begin(ctx context.Context, branch, from string) (base, start string, err error) {
+	if from == "" {
+		if from, err = CurrentBranch(ctx, r.source); err != nil {
+			return "", "", err
+		}
 	}
-	from = strings.TrimSpace(current)
-	// Fetch from the repository's path, never a configured remote whose
-	// settings could name a command to run.
-	if _, err = run(ctx, r.Workspace(), "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-auto-gc", r.source, "+refs/heads/"+from+":refs/remotes/source/"+from); err != nil {
+	if base, err = r.Fetch(ctx, from); err != nil {
 		return "", "", err
 	}
-	head, err := run(ctx, r.Workspace(), "rev-parse", "refs/remotes/source/"+from)
-	if err != nil {
-		return "", "", err
-	}
-	base = strings.TrimSpace(head)
 	return base, from, r.Reset(ctx, branch, base)
+}
+
+// CurrentBranch names the branch a checkout is on.
+func CurrentBranch(ctx context.Context, dir string) (string, error) {
+	current, err := run(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return "", errors.New("the repository is not on a branch to start from")
+	}
+	return strings.TrimSpace(current), nil
+}
+
+// Fetch brings the owner's branch into the clone and returns its tip. It
+// fetches from the repository's path, never a configured remote whose
+// settings could name a command to run.
+func (r Repo) Fetch(ctx context.Context, branch string) (string, error) {
+	if _, err := run(ctx, r.source, "check-ref-format", "--branch", branch); err != nil {
+		return "", fmt.Errorf("%q is not a valid branch name", branch)
+	}
+	if _, err := run(ctx, r.Workspace(), "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-auto-gc", r.source, "+refs/heads/"+branch+":refs/remotes/source/"+branch); err != nil {
+		return "", err
+	}
+	tip, err := run(ctx, r.Workspace(), "rev-parse", "refs/remotes/source/"+branch)
+	return strings.TrimSpace(tip), err
 }
 
 // Contains reports whether commit is already part of tip's history.
@@ -397,6 +413,52 @@ func (r Repo) Deliver(ctx context.Context, taskBranch, commit, name string) (str
 		return candidate, nil
 	}
 	return "", errors.New("no free branch name")
+}
+
+// Why a push to a branch the project does not own was refused. None of them
+// is ever answered by forcing: the branch moved, or the owner's checkout of it
+// is theirs to deal with.
+var (
+	ErrTargetMoved   = errors.New("the branch has moved on since this change was checked")
+	ErrCheckedOut    = errors.New("the branch is checked out in the owner's repository, which refuses updates to it")
+	ErrDirtyCheckout = errors.New("the owner's checkout of the branch has uncommitted changes")
+)
+
+// receivePack runs the receiving side of a push into the owner's repository
+// with their hooks and file-system monitor off. Their repository's own rules,
+// such as receive.denyCurrentBranch, still apply.
+const receivePack = "git -c core.hooksPath=/dev/null -c core.fsmonitor=false receive-pack"
+
+// PushFastForward lands commit on target in the owner's repository by a plain
+// push: never forced, so it only succeeds when target has not moved past what
+// commit was built on. A checked-out target follows the owner's
+// receive.denyCurrentBranch setting.
+func (r Repo) PushFastForward(ctx context.Context, taskBranch, commit, target string) error {
+	tip, err := run(ctx, r.Workspace(), "rev-parse", "refs/heads/"+taskBranch)
+	if err != nil || strings.TrimSpace(tip) != commit {
+		return errors.New("the task branch is not at the approved revision")
+	}
+	if _, err = run(ctx, r.source, "check-ref-format", "--branch", target); err != nil {
+		return fmt.Errorf("%q is not a valid branch name", target)
+	}
+	out, err := run(ctx, r.Workspace(), "push", "--porcelain", "--no-verify", "--receive-pack="+receivePack, r.source, commit+":refs/heads/"+target)
+	if err == nil {
+		return nil
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "!") {
+			continue
+		}
+		switch reason := strings.ToLower(line); {
+		case strings.Contains(reason, "non-fast-forward"), strings.Contains(reason, "fetch first"), strings.Contains(reason, "stale info"):
+			return ErrTargetMoved
+		case strings.Contains(reason, "currently checked out"):
+			return ErrCheckedOut
+		case strings.Contains(reason, "working directory"), strings.Contains(reason, "working tree"):
+			return fmt.Errorf("%w: %s", ErrDirtyCheckout, strings.TrimSpace(line[strings.LastIndex(line, "\t")+1:]))
+		}
+	}
+	return err
 }
 
 // run is the only way this package runs git. Hooks, fsmonitor and system

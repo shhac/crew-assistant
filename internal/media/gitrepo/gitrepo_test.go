@@ -4,6 +4,7 @@ package gitrepo
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,7 +62,7 @@ func TestTheOwnersCheckoutIsNeverTouched(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(r.Workspace(), "node_modules", "dep", "index.js")); err != nil {
 		t.Fatal("prepared dependency was not copied into the clone")
 	}
-	base, _, err := r.Begin(ctx, "crew/note")
+	base, _, err := r.Begin(ctx, "crew/note", "")
 	if err != nil || base != git(t, source, "rev-parse", "HEAD") {
 		t.Fatalf("base %q err %v", base, err)
 	}
@@ -86,7 +87,7 @@ func TestRevisionsAndResetKeepIgnoredFilesOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, _, err := r.Begin(ctx, "crew/note")
+	base, _, err := r.Begin(ctx, "crew/note", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +126,7 @@ func TestTasksSharingTheCloneKeepTheirOwnBranches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, _, err := r.Begin(ctx, "crew-task/a")
+	base, _, err := r.Begin(ctx, "crew-task/a", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +136,7 @@ func TestTasksSharingTheCloneKeepTheirOwnBranches(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A second task starts while the first waits on the owner.
-	if _, _, err = r.Begin(ctx, "crew-task/b"); err != nil {
+	if _, _, err = r.Begin(ctx, "crew-task/b", ""); err != nil {
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(r.Workspace(), "b.go"), "package main\n")
@@ -175,7 +176,7 @@ func TestCatchingUpMergesLandedWorkAndRefusesUnresolvedConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, _, err := r.Begin(ctx, "crew-task/a")
+	base, _, err := r.Begin(ctx, "crew-task/a", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +185,7 @@ func TestCatchingUpMergesLandedWorkAndRefusesUnresolvedConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = r.Begin(ctx, "crew-task/b"); err != nil {
+	if _, _, err = r.Begin(ctx, "crew-task/b", ""); err != nil {
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(r.Workspace(), "main.go"), "package main\n\nfunc B() {}\n")
@@ -225,13 +226,81 @@ func TestCatchingUpMergesLandedWorkAndRefusesUnresolvedConflicts(t *testing.T) {
 	}
 }
 
+func TestPushLandsOnlyByFastForwardAndFollowsTheOwnersCheckoutRules(t *testing.T) {
+	source := ownerRepo(t)
+	marker := filepath.Join(t.TempDir(), "hook")
+	for _, hook := range []string{"pre-receive", "update", "post-receive", "post-update", "push-to-checkout"} {
+		path := filepath.Join(source, ".git", "hooks", hook)
+		write(t, path, "#!/bin/sh\ntouch "+marker+"\n")
+		os.Chmod(path, 0700)
+	}
+	r, err := Open(ctx, t.TempDir(), source, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, err := r.Begin(ctx, "crew-task/a", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Workspace(), "a.go"), "package main\n")
+	commit, _, err := r.Snapshot(ctx, base, base, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// main is checked out in the owner's repository, which by default
+	// refuses to have it updated underneath them.
+	if err = r.PushFastForward(ctx, "crew-task/a", commit, "main"); !errors.Is(err, ErrCheckedOut) {
+		t.Fatalf("pushed into a checked-out branch against the owner's settings: %v", err)
+	}
+	git(t, source, "config", "receive.denyCurrentBranch", "updateInstead")
+	write(t, filepath.Join(source, "main.go"), "package main // the owner's edit\n")
+	if err = r.PushFastForward(ctx, "crew-task/a", commit, "main"); !errors.Is(err, ErrDirtyCheckout) {
+		t.Fatalf("landed over the owner's uncommitted work: %v", err)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(source, "main.go")); string(raw) != "package main // the owner's edit\n" {
+		t.Fatal("the owner's uncommitted work was changed")
+	}
+	git(t, source, "checkout", "--", "main.go")
+	if err = r.PushFastForward(ctx, "crew-task/a", commit, "main"); err != nil {
+		t.Fatal(err)
+	}
+	if git(t, source, "rev-parse", "main") != commit {
+		t.Fatal("main did not land on the change")
+	}
+	if _, err = os.Stat(filepath.Join(source, "a.go")); err != nil {
+		t.Fatal("the owner's clean checkout was not brought up to date")
+	}
+	if _, err = os.Stat(marker); err == nil {
+		t.Fatal("the owner's hooks ran for a daemon push")
+	}
+	// The owner commits to main; a change built on the old tip is never forced over it.
+	write(t, filepath.Join(source, "owner.go"), "package main\n")
+	git(t, source, "add", "owner.go")
+	git(t, source, "commit", "-q", "-m", "owner work")
+	ownerTip := git(t, source, "rev-parse", "main")
+	if err = r.Reset(ctx, "crew-task/a", commit); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Workspace(), "b.go"), "package main\n")
+	next, _, err := r.Snapshot(ctx, base, commit, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.PushFastForward(ctx, "crew-task/a", next, "main"); !errors.Is(err, ErrTargetMoved) {
+		t.Fatalf("expected the moved branch to be refused: %v", err)
+	}
+	if git(t, source, "rev-parse", "main") != ownerTip {
+		t.Fatal("the owner's commit on main was lost")
+	}
+}
+
 func TestPlantedHooksAndFsmonitorNeverRunAsTheDaemon(t *testing.T) {
 	source := ownerRepo(t)
 	r, err := Open(ctx, t.TempDir(), source, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, _, err := r.Begin(ctx, "crew/note")
+	base, _, err := r.Begin(ctx, "crew/note", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +332,7 @@ func TestDeliverySettlesAndNeverOverwritesABranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, _, err := r.Begin(ctx, "crew/note")
+	base, _, err := r.Begin(ctx, "crew/note", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +366,7 @@ func TestPreviewFlagsWhatRunsOrInstructsOnTheOwnersSide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, _, err := r.Begin(ctx, "crew/risky")
+	base, _, err := r.Begin(ctx, "crew/risky", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +417,7 @@ func TestDaemonGitIgnoresGlobalConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, _, err := r.Begin(ctx, "crew/filter")
+	base, _, err := r.Begin(ctx, "crew/filter", "")
 	if err != nil {
 		t.Fatal(err)
 	}
