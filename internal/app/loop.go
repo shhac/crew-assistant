@@ -360,10 +360,8 @@ func (a *App) decide(ctx context.Context, p core.Project, t core.Task) error {
 		}
 	}
 	switch {
-	case r.BriefVersion != p.Brief.Version && len(changes) == 0 && len(questions) == 0:
-		// Passed against the new brief even though it was written for the old
-		// one; that is still a pass.
-		fallthrough
+	// A draft written for an older brief that passes against the current one
+	// is still a pass.
 	case len(questions) == 0 && len(changes) == 0:
 		return a.askForDelivery(ctx, p, t, r, current)
 	case len(questions) > 0:

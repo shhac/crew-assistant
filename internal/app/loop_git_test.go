@@ -483,3 +483,44 @@ func TestATargetThatKeepsMovingComesToTheOwner(t *testing.T) {
 		t.Fatalf("a retry once the target was quiet did not land: %s %s", task.Status, task.Detail)
 	}
 }
+
+func TestLandingRefusesWhenItCannotTellTheOrder(t *testing.T) {
+	source := t.TempDir()
+	ownerGit(t, source, "init", "-q", "-b", "main")
+	ownerGit(t, source, "config", "commit.gpgsign", "false")
+	os.WriteFile(filepath.Join(source, "main.go"), []byte("package main\n"), 0600)
+	ownerGit(t, source, "add", "-A")
+	ownerGit(t, source, "commit", "-q", "-m", "start")
+	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass}}}
+	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
+	a.runner = runner
+	ctx := context.Background()
+	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{source}, Brief: core.BriefInput{Goal: "x"}})
+	if _, err := a.SetTeam(ctx, engine.SetTeamArgs{ProjectID: p.ID, Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	a.StopTask(ctx, snap.Tasks[0].ProjectID, snap.Tasks[0].ID)
+	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
+	settle(t, a)
+	snap, _ = a.Core.Snapshot(ctx)
+	for _, candidate := range snap.Tasks {
+		if candidate.ID == task.ID {
+			task = candidate
+		}
+	}
+	a.Core.ResolveDecision(ctx, openDecision(t, a, task).ID, choiceApprove)
+	settle(t, a)
+	// Another change in the project names a commit git has never seen.
+	other, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Ghost"})
+	a.Core.UpdateTask(ctx, other.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		t.Status, t.Revisions = core.TaskDelivered, []core.Revision{{N: 1, Ref: strings.Repeat("f", 40)}}
+		return "", nil
+	})
+	if _, err := a.SetLanding(ctx, engine.SetLandingArgs{ProjectID: p.ID, Via: core.LandPush, Target: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.LandTask(ctx, p.ID, task.ID); err == nil || !strings.Contains(err.Error(), "could not tell") {
+		t.Fatalf("landed without knowing the order: %v", err)
+	}
+}

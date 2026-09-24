@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/shhac/crew-assistant/internal/core"
 )
@@ -190,10 +191,16 @@ func parseVerdict(text string) (core.Verdict, error) {
 	return core.Verdict{Outcome: v.Outcome, Summary: strings.TrimSpace(v.Summary), Findings: v.Findings, Question: strings.TrimSpace(v.Question)}, nil
 }
 
+// clip shortens text to about limit bytes without splitting a character, so
+// what it writes into commit messages and pull requests stays valid UTF-8.
 func clip(text string, limit int) string {
 	text = strings.TrimSpace(text)
 	if len(text) <= limit {
 		return text
 	}
-	return strings.TrimSpace(text[:limit]) + "…"
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return strings.TrimSpace(text[:cut]) + "…"
 }

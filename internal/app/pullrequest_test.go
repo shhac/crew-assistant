@@ -22,12 +22,12 @@ import (
 // fakeGitHub stands in for GitHub: a bare repository takes the pushes, and
 // gh's answers come from what the test says the checks and reviews are.
 type fakeGitHub struct {
-	mu       sync.Mutex
-	t        *testing.T
-	remote   string
-	head     string
-	opened   int
-	checks   string
+	mu     sync.Mutex
+	t      *testing.T
+	remote string
+	head   string
+	opened int
+	checks string
 	// checksOn is the commit the checks ran on; a newer head is pending, as
 	// on GitHub.
 	checksOn string

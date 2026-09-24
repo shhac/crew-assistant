@@ -130,7 +130,7 @@ func (s *Service) CancelWake(ctx context.Context, id, taskID string) (Wake, erro
 				return fmt.Errorf("%s is already %s: %w", id, w.Status, ErrConflict)
 			}
 			w.Status = WakeCancelled
-			removeFromWakeTurns(v, id)
+			removeFromWakeTurns(v, id, s.now().UTC())
 			out = *w
 			return nil
 		}
@@ -239,7 +239,7 @@ func queueWakeTurn(v *Snapshot, id string, now time.Time) {
 	v.ChatQueueRevision++
 }
 
-func removeFromWakeTurns(v *Snapshot, id string) {
+func removeFromWakeTurns(v *Snapshot, id string, now time.Time) {
 	for i := range v.ChatTurns {
 		t := &v.ChatTurns[i]
 		if t.Status != "queued" || t.Origin != OriginWake {
@@ -253,7 +253,6 @@ func removeFromWakeTurns(v *Snapshot, id string) {
 		}
 		t.WakeIDs = kept
 		if len(kept) == 0 {
-			now := time.Now().UTC()
 			t.Status, t.FinishedAt = "cancelled", &now
 			v.ChatQueueRevision++
 		}

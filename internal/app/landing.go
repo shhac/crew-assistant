@@ -53,16 +53,19 @@ func approvalStands(t core.Task) bool {
 	for _, r := range t.Revisions {
 		byN[r.N] = r
 	}
-	for r := t.Revisions[len(t.Revisions)-1]; ; {
+	seen := map[int]bool{}
+	for r := t.Revisions[len(t.Revisions)-1]; !seen[r.N]; {
 		if r.N == t.Approved {
 			return true
 		}
+		seen[r.N] = true
 		prev, ok := byN[r.CleanMergeOf]
 		if r.CleanMergeOf == 0 || !ok {
 			return false
 		}
 		r = prev
 	}
+	return false
 }
 
 // land takes the approved revision where the project's landing policy says:
@@ -326,11 +329,20 @@ func (a *App) LandTask(ctx context.Context, projectID, taskID string) (core.Task
 			continue
 		}
 		theirs := other.Revisions[len(other.Revisions)-1]
+		// Anything uncertain refuses: landing out of order would take the
+		// other change with it.
 		builtOn, err := m.(gitMedium).repo.Contains(ctx, tip.Ref, theirs.Ref)
-		if err != nil || !builtOn {
+		if err != nil {
+			return core.Task{}, fmt.Errorf("could not tell whether %q is built on %q: %w", t.Objective, other.Objective, err)
+		}
+		if !builtOn {
 			continue
 		}
-		if there, err := m.alreadyLanded(ctx, other, theirs); err == nil && !there {
+		there, err := m.alreadyLanded(ctx, other, theirs)
+		if err != nil {
+			return core.Task{}, fmt.Errorf("could not tell whether %q has landed: %w", other.Objective, err)
+		}
+		if !there {
 			return core.Task{}, fmt.Errorf("%q is built on %q, which has not landed on %s yet; land that first: %w", t.Objective, other.Objective, pinned.Land.Target, core.ErrConflict)
 		}
 	}
