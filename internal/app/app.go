@@ -142,9 +142,7 @@ func (a *App) chatContext(ctx context.Context, currentMessageID string) (json.Ra
 		}
 	}
 	s.Messages = []core.Message{}
-	if len(s.Activity) > 40 {
-		s.Activity = s.Activity[len(s.Activity)-40:]
-	}
+	s = assistantView(s)
 	cfg := a.Config()
 	raw, err := json.Marshal(struct {
 		State               core.Snapshot       `json:"state"`

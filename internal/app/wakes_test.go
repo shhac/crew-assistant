@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,5 +104,37 @@ func TestEveryAssistantToolHasALabelTheOwnerCanRead(t *testing.T) {
 		if _, ok := core.ChatToolLabel(tool.Function.Name); !ok {
 			t.Errorf("%s has no label, so any turn that uses it fails", tool.Function.Name)
 		}
+	}
+}
+
+func TestTheAssistantSeesWhatItCanActOnAndOnlyTheOutcomeOfWhatIsDone(t *testing.T) {
+	long := strings.Repeat("x", 5000)
+	var s core.Snapshot
+	for i := 0; i < 40; i++ {
+		task := core.Task{ID: fmt.Sprint("done", i), Status: core.TaskLanded, Objective: "done"}
+		for n := 1; n <= 5; n++ {
+			task.Revisions = append(task.Revisions, core.Revision{N: n, Summary: long})
+			task.Verdicts = append(task.Verdicts, core.Verdict{Revision: n, Summary: long, Findings: []core.Finding{{Note: long}}})
+		}
+		s.Tasks = append(s.Tasks, task)
+		s.Decisions = append(s.Decisions, core.Decision{ID: fmt.Sprint("old", i), Status: "resolved", Context: long})
+	}
+	s.Tasks = append(s.Tasks, core.Task{ID: "live", Status: core.TaskReviewing, Revisions: []core.Revision{{N: 1, Summary: "first"}, {N: 2, Summary: "second"}, {N: 3, Summary: "third"}}, Verdicts: []core.Verdict{{Revision: 2, Summary: "old"}, {Revision: 3, Summary: "current"}}})
+	s.Decisions = append(s.Decisions, core.Decision{ID: "now", Status: "open", Context: long})
+	view := assistantView(s)
+	raw, _ := json.Marshal(view)
+	if len(raw) > 64<<10 {
+		t.Fatalf("the assistant's view is %d bytes", len(raw))
+	}
+	live := view.Tasks[len(view.Tasks)-1]
+	if len(live.Revisions) != 2 || len(live.Verdicts) != 1 || live.Verdicts[0].Summary != "current" {
+		t.Fatalf("the live task lost what the assistant acts on: %+v", live)
+	}
+	last := view.Decisions[len(view.Decisions)-1]
+	if last.ID != "now" || last.Context != long {
+		t.Fatal("an open decision was cut")
+	}
+	if len(s.Tasks[0].Revisions) != 5 {
+		t.Fatal("the view changed the state it was made from")
 	}
 }
