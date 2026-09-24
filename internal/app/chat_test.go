@@ -118,7 +118,7 @@ func TestQueueShowsToolBeforeCompletionWithoutArguments(t *testing.T) {
 	invoked := make(chan struct{})
 	release := make(chan struct{})
 	a.chatInvoker = func(ctx context.Context, cfg engine.Config, _ engine.Request, _ engine.ToolExecutor) (engine.Result, error) {
-		if err := cfg.OnTool(ctx, engine.ToolEvent{ID: "MODEL-ID-MAY-CONTAIN-SECRET", Tool: "prepare_worker", Status: "running"}); err != nil {
+		if err := cfg.OnTool(ctx, engine.ToolEvent{ID: "MODEL-ID-MAY-CONTAIN-SECRET", Tool: "set_team", Status: "running"}); err != nil {
 			return engine.Result{}, err
 		}
 		close(invoked)
@@ -127,7 +127,7 @@ func TestQueueShowsToolBeforeCompletionWithoutArguments(t *testing.T) {
 		case <-ctx.Done():
 			return engine.Result{}, ctx.Err()
 		}
-		if err := cfg.OnTool(ctx, engine.ToolEvent{ID: "MODEL-ID-MAY-CONTAIN-SECRET", Tool: "prepare_worker", Status: "completed"}); err != nil {
+		if err := cfg.OnTool(ctx, engine.ToolEvent{ID: "MODEL-ID-MAY-CONTAIN-SECRET", Tool: "set_team", Status: "completed"}); err != nil {
 			return engine.Result{}, err
 		}
 		return engine.Result{Message: "Ready"}, nil
@@ -136,7 +136,7 @@ func TestQueueShowsToolBeforeCompletionWithoutArguments(t *testing.T) {
 	a.EnqueueChat(context.Background(), "one", "Prepare the worker")
 	<-invoked
 	turn := waitTurn(t, a, "one", "running")
-	if len(turn.Events) != 1 || turn.Events[0].Status != "running" || turn.Events[0].ID == "MODEL-ID-MAY-CONTAIN-SECRET" || turn.Events[0].Label != "Prepare a worker" {
+	if len(turn.Events) != 1 || turn.Events[0].Status != "running" || turn.Events[0].ID == "MODEL-ID-MAY-CONTAIN-SECRET" || turn.Events[0].Label != "Choose the project's team" {
 		t.Fatal(turn)
 	}
 	close(release)

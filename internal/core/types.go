@@ -20,7 +20,19 @@ type Project struct {
 	ScratchDirectory  string    `json:"scratch_directory"`
 	SourceID          string    `json:"source_id,omitempty"`
 	SourceDescription string    `json:"source_description,omitempty"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	// Landed is the project's most recently delivered code change. Other work
+	// in the project catches up with it before it is delivered.
+	Landed    *Landing  `json:"landed,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Landing is one delivered code change: the commit and the branch it went to.
+type Landing struct {
+	TaskID    string    `json:"task_id"`
+	Objective string    `json:"objective"`
+	Commit    string    `json:"commit"`
+	Branch    string    `json:"branch"`
+	At        time.Time `json:"at"`
 }
 
 type Decision struct {
@@ -42,9 +54,12 @@ type Decision struct {
 	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
 }
 type Message struct {
-	ID        string    `json:"id"`
-	Role      string    `json:"role"`
-	Content   string    `json:"content"`
+	ID      string `json:"id"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	// Origin marks a user-role message the daemon wrote, such as a wake-up,
+	// so neither the owner nor the model mistakes it for the owner's words.
+	Origin    string    `json:"origin,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -104,6 +119,7 @@ type Snapshot struct {
 	Activity          []Activity         `json:"activity"`
 	Integrations      []Integration      `json:"integrations"`
 	Paused            bool               `json:"paused"`
+	Wakes             []Wake             `json:"wakes,omitempty"`
 	ModelCalls        map[string]int     `json:"-"`
 }
 type ProjectInput struct {

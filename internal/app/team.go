@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
@@ -74,6 +75,37 @@ func (a *App) SetTeam(ctx context.Context, in engine.SetTeamArgs) (core.Project,
 		if !slices.Contains(p.Directories, playbook.Repo) {
 			return core.Project{}, errors.New("a code team works on one of the project's linked folders; link the repository first")
 		}
+		// Choosing a team never changes where its work lands; that is its own
+		// setting.
+		if p.Playbook != nil && p.Playbook.Medium == core.MediumGit {
+			playbook.Land = p.Playbook.Land
+		}
+	}
+	if err = playbook.Validate(); err != nil {
+		return core.Project{}, err
+	}
+	return a.Core.SetPlaybook(ctx, in.ProjectID, playbook)
+}
+
+// SetLanding sets what landing means for a code project. The owner and the
+// assistant can; nothing inside the project can. Tasks already under way keep
+// the policy they started with.
+func (a *App) SetLanding(ctx context.Context, in engine.SetLandingArgs) (core.Project, error) {
+	snap, err := a.Core.Snapshot(ctx)
+	if err != nil {
+		return core.Project{}, err
+	}
+	p, ok := findProject(snap, in.ProjectID)
+	if !ok {
+		return core.Project{}, core.ErrNotFound
+	}
+	if p.Playbook == nil || p.Playbook.Medium != core.MediumGit {
+		return core.Project{}, errors.New("landing policies are for code teams; choose a code team first")
+	}
+	playbook := *p.Playbook
+	playbook.Land = core.LandPolicy{Means: strings.TrimSpace(in.Means), Via: in.Via, Target: strings.TrimSpace(in.Target), Method: in.Method, GitHub: strings.TrimSpace(in.GitHub), Approve: in.Approve}
+	if playbook.Land.Via == core.LandPullRequest {
+		return core.Project{}, errors.New("landing through pull requests is not built yet; use push or branch")
 	}
 	if err = playbook.Validate(); err != nil {
 		return core.Project{}, err

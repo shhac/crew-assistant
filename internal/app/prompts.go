@@ -37,12 +37,14 @@ func briefText(p core.Project, t core.Task) string {
 
 // writerPrompt stands on its own, so a fresh session can pick the work up if
 // the previous one cannot be resumed.
-func writerPrompt(p core.Project, t core.Task) string {
+func writerPrompt(p core.Project, t core.Task, caughtUp string) string {
 	code := isCode(p, t)
 	var b strings.Builder
 	b.WriteString(briefText(p, t))
 	last := len(t.Revisions)
 	switch {
+	case caughtUp != "":
+		b.WriteString(caughtUp)
 	case last == 0 && code:
 		b.WriteString("\nYou are in a clone of the repository, on a branch for this task. " + repoInstructions + " Make the change, with tests, following those conventions. Run the relevant tests yourself before you finish.\n")
 	case last == 0:
@@ -82,6 +84,20 @@ func writerPrompt(p core.Project, t core.Task) string {
 // loaded, the repository's own included.
 const repoInstructions = "First read the repository's own instructions for contributors, such as AGENTS.md, CLAUDE.md, CONTRIBUTING.md and the README, wherever they apply."
 
+// catchUpText tells the implementer that work landed and has been merged
+// into their branch, and what is left to them.
+func catchUpText(what string, conflicts []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nSince this task started, %s. That has been merged into this branch for you", what)
+	if len(conflicts) > 0 {
+		fmt.Fprintf(&b, ", and these files have conflict markers you must resolve: %s", strings.Join(conflicts, ", "))
+	} else {
+		b.WriteString(" without conflicts")
+	}
+	b.WriteString(". " + repoInstructions + " Make both changes work together: keep what landed working as it was, adapt this task's change and its tests where they now overlap, regenerate any generated files, and run the tests.\n")
+	return b.String()
+}
+
 func isCode(p core.Project, t core.Task) bool {
 	playbook := taskPlaybook(p, t)
 	return playbook != nil && playbook.Medium == core.MediumGit
@@ -106,6 +122,9 @@ Use "question" only if the check cannot run at all for a reason the implementer 
 		var b strings.Builder
 		b.WriteString(briefText(p, t))
 		fmt.Fprintf(&b, "\nThis repository holds a proposed change for this task: the commits between %s and HEAD (run `git diff %s..HEAD` and read whatever else you need). %s Do not modify anything.\n", t.Base, t.Base, repoInstructions)
+		if playbook != nil && playbook.Check != "" {
+			fmt.Fprintf(&b, "QA runs `%s` separately, so you need not run it or report on it.\n", playbook.Check)
+		}
 		b.WriteString(`
 Review it as a careful senior engineer, against the task and every criterion above: correctness first, then tests, then design and fit with the repository's conventions. Use:
 - "pass" only when you would merge it as it is;

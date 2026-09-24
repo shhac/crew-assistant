@@ -23,6 +23,10 @@ type ChatTurn struct {
 	AssistantMessageID string     `json:"assistant_message_id,omitempty"`
 	Error              string     `json:"error,omitempty"`
 	LoadingPhrase      string     `json:"loading_phrase,omitempty"`
+	// Origin is empty for the owner's messages, or OriginWake for a turn the
+	// daemon queued to deliver the wakes named in WakeIDs.
+	Origin  string   `json:"origin,omitempty"`
+	WakeIDs []string `json:"wake_ids,omitempty"`
 	// Revision moves when the owner edits a queued message, so an edit that
 	// lost a race with the daemon starting the turn can be refused.
 	Revision int             `json:"revision"`
@@ -123,7 +127,11 @@ func (s *Service) StartNextChat(ctx context.Context) (ChatTurn, error) {
 			t.StartedAt = &now
 			t.UserMessageID = uid()
 			v.ChatQueueRevision++
-			v.Messages = append(v.Messages, Message{ID: t.UserMessageID, Role: "user", Content: t.Message, CreatedAt: now})
+			if t.Origin == OriginWake {
+				// The report is written now, so its delivered time is true.
+				t.Message = wakeTurnMessage(v, t.WakeIDs, now)
+			}
+			v.Messages = append(v.Messages, Message{ID: t.UserMessageID, Role: "user", Content: t.Message, Origin: t.Origin, CreatedAt: now})
 			out = *t
 			return nil
 		}
@@ -151,6 +159,9 @@ func (s *Service) CancelChat(ctx context.Context, id string) (ChatTurn, error) {
 			t.Status = "cancelled"
 			v.ChatQueueRevision++
 			t.FinishedAt = &now
+			if t.Origin == OriginWake {
+				settleWakeTurn(v, t, "cancelled", now)
+			}
 			out = *t
 			return nil
 		}
@@ -194,6 +205,9 @@ func (s *Service) FinishChat(ctx context.Context, id, status, reply, reason stri
 				t.AssistantMessageID = uid()
 				v.Messages = append(v.Messages, Message{ID: t.AssistantMessageID, Role: "assistant", Content: reply, CreatedAt: now})
 			}
+			if t.Origin == OriginWake {
+				settleWakeTurn(v, t, status, now)
+			}
 			return nil
 		}
 		return ErrNotFound
@@ -216,6 +230,9 @@ func (s *Service) RecoverChatTurns(ctx context.Context) error {
 			t.ModelStatus = ""
 			t.RetryAt = time.Time{}
 			t.Error = "The assistant stopped before this turn finished. Recorded actions were preserved; the message was not replayed."
+			if t.Origin == OriginWake {
+				settleWakeTurn(v, t, "interrupted", now)
+			}
 			for j := range t.Events {
 				if t.Events[j].Status == "running" {
 					t.Events[j].Status = "interrupted"
@@ -287,9 +304,67 @@ func (s *Service) RecordChatTool(ctx context.Context, turnID, eventID, tool, sta
 }
 
 var chatToolLabels = map[string]string{
-	"list_worker_models": "Check available worker models", "configure_worker": "Configure the project worker",
-	"queue_work_item": "Queue the next outcome", "unqueue_work_item": "Withdraw queued work", "create_work_item": "Define an outcome", "steer_work_item": "Record direction for the outcome", "accept_work_item": "Accept reviewed work",
-	"prepare_worker": "Prepare a worker", "list_connections": "Check available connections", "query_connection": "Read connected information",
-	"read_state": "Check project context", "create_project": "Add a project", "update_project": "Update the project brief", "delegate": "Coordinate an agent",
-	"ask_decision": "Prepare a decision", "remember_preference": "Remember a preference", "message_agent": "Message an agent", "inspect_agent": "Inspect a worker", "control_agent": "Control a worker", "complete_project": "Confirm project completion", "report_status": "Record a progress update",
+	"list_connections": "Check available connections", "query_connection": "Read connected information",
+	"read_state": "Check project context", "create_project": "Add a project", "update_brief": "Update the project brief",
+	"set_team": "Choose the project's team", "set_landing": "Set where changes land", "queue_task": "Ask the team for an outcome",
+	"stop_task": "Stop a task", "land_task": "Land a delivered change", "resolve_decision": "Answer a decision",
+	"ask_decision": "Prepare a decision", "remember_preference": "Remember a preference", "report_status": "Record a progress update",
+	"wake_me_when": "Ask to be woken later", "list_wakes": "Check wake-ups", "cancel_wake": "Cancel a wake-up",
+}
+
+// ChatToolLabel is what the owner sees while the assistant uses a tool.
+func ChatToolLabel(tool string) (string, bool) {
+	label, ok := chatToolLabels[tool]
+	return label, ok
+}
+
+// OriginWake marks a chat turn and message the daemon wrote to deliver
+// wake-ups to the assistant.
+const OriginWake = "wake"
+
+func wakeTurnMessage(v *Snapshot, ids []string, now time.Time) string {
+	var wakes []Wake
+	for _, id := range ids {
+		for i := range v.Wakes {
+			if w := &v.Wakes[i]; w.ID == id && w.Status == WakeFired {
+				w.DeliveredAt = &now
+				wakes = append(wakes, *w)
+			}
+		}
+	}
+	if len(wakes) == 0 {
+		return "[Wake-up from the daemon, not a message from the owner] The wake-ups this turn was for were cancelled. Nothing to do."
+	}
+	return "[Wake-up from the daemon, not a message from the owner. You asked to be woken; act on your continuation if it still applies, and tell the owner only what they need to know.]\n\n" + WakeReport(wakes, now)
+}
+
+// maxWakeAttempts bounds how often a wake is offered again after the turn
+// carrying it failed, so a model that keeps failing cannot loop forever.
+const maxWakeAttempts = 3
+
+// settleWakeTurn finishes the wakes a wake-up turn carried. They count as
+// delivered only when the assistant completed the turn; otherwise they are
+// offered again in a later turn, unless the owner cancelled it.
+func settleWakeTurn(v *Snapshot, t *ChatTurn, status string, now time.Time) {
+	for _, id := range t.WakeIDs {
+		for i := range v.Wakes {
+			w := &v.Wakes[i]
+			if w.ID != id || w.Status != WakeFired {
+				continue
+			}
+			switch {
+			case status == "completed":
+				w.Status = WakeDelivered
+			case status == "cancelled":
+				w.Status = WakeCancelled
+			case w.Attempts+1 >= maxWakeAttempts:
+				w.Attempts++
+				w.Status = WakeDelivered
+			default:
+				w.Attempts++
+				w.DeliveredAt = nil
+				queueWakeTurn(v, w.ID, now)
+			}
+		}
+	}
 }
