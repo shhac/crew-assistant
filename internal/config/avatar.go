@@ -101,3 +101,20 @@ func (a Avatar) SVG() (string, error) {
 	}
 	return fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="32" fill="%s"/>%s</svg>`, a.Background, body.String()), nil
 }
+
+var palettes = [][2]string{
+	{"#16211e", "#a8c5a8"}, {"#1d1b2e", "#c3b1e1"}, {"#2b1d16", "#f0b27a"}, {"#10202b", "#8ecae6"},
+	{"#2a1420", "#f4a6b8"}, {"#1f2414", "#d4e09b"}, {"#241a10", "#e9c46a"}, {"#132422", "#80cbc4"},
+}
+
+// DefaultAvatar gives a name the same preset picture every time, so a new
+// member has a face before anyone draws one.
+func DefaultAvatar(name string) Avatar {
+	h := uint32(2166136261)
+	for _, b := range []byte(strings.ToLower(strings.TrimSpace(name))) {
+		h = (h ^ uint32(b)) * 16777619
+	}
+	shapes := []string{"orb", "spark", "leaf"}
+	p := palettes[h%uint32(len(palettes))]
+	return Avatar{Shape: shapes[(h/7)%uint32(len(shapes))], Background: p[0], Accent: p[1]}
+}

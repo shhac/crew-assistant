@@ -18,6 +18,8 @@ type Role struct {
 	Model        string `json:"model,omitempty"`
 	Effort       string `json:"effort,omitempty"`
 	Instructions string `json:"instructions,omitempty"`
+	// Member is the team member this role was copied from, if any.
+	Member string `json:"member,omitempty"`
 }
 
 const (
@@ -216,10 +218,13 @@ func (p Playbook) Validate() error {
 	implementers, reviewers := 0, 0
 	names := map[string]bool{}
 	for _, r := range p.Roles {
-		if !required(r.Name) || names[r.Name] {
+		// Messages find a role by name ignoring case, so names must differ
+		// by more than case.
+		key := strings.ToLower(strings.TrimSpace(r.Name))
+		if !required(r.Name) || names[key] {
 			return errors.New("each role needs a distinct name")
 		}
-		names[r.Name] = true
+		names[key] = true
 		if r.Engine != "codex" && r.Engine != "claude" {
 			return fmt.Errorf("role %s: engine must be codex or claude", r.Name)
 		}

@@ -119,7 +119,7 @@ func (s *Store) Close() error {
 	return err
 }
 func emptyState() Snapshot {
-	return Snapshot{Projects: []Project{}, Tasks: []Task{}, Decisions: []Decision{}, Messages: []Message{}, Memories: []Memory{}, Activity: []Activity{}, Integrations: []Integration{}, Events: map[string]bool{}, ModelCalls: map[string]int{}}
+	return Snapshot{Projects: []Project{}, Tasks: []Task{}, Decisions: []Decision{}, Messages: []Message{}, Memories: []Memory{}, Activity: []Activity{}, Integrations: []Integration{}, Members: []Member{}, Events: map[string]bool{}, ModelCalls: map[string]int{}}
 }
 func readState(ctx context.Context, conn *sql.Conn) (Snapshot, error) {
 	var data string

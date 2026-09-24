@@ -43,6 +43,9 @@ func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	// A loaded configuration is valid, so its avatar always draws.
 	svg, _ := cfg.Assistant.Avatar.SVG()
 	v.Assistant = Assistant{Name: cfg.Assistant.Name, Personality: cfg.Assistant.Personality, Theme: cfg.Assistant.Theme, Avatar: cfg.Assistant.Avatar, AvatarSVG: svg}
+	for i := range v.Members {
+		v.Members[i].AvatarSVG, _ = v.Members[i].Avatar.SVG()
+	}
 	v.PendingOperations = []PendingOperation{}
 	for id, done := range v.Events {
 		if !done {

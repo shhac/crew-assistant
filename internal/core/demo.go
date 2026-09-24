@@ -10,7 +10,7 @@ import (
 func (s *Service) SeedDemo(ctx context.Context, sample Snapshot) (Snapshot, error) {
 	var out Snapshot
 	err := s.store.update(ctx, func(v *Snapshot) error {
-		if len(v.Projects)+len(v.Tasks)+len(v.Decisions)+len(v.Messages)+len(v.Memories) > 0 {
+		if len(v.Projects)+len(v.Tasks)+len(v.Decisions)+len(v.Messages)+len(v.Memories)+len(v.Members) > 0 {
 			return errors.New("the demo sample only fills an empty state")
 		}
 		for i := range sample.Projects {
@@ -20,6 +20,9 @@ func (s *Service) SeedDemo(ctx context.Context, sample Snapshot) (Snapshot, erro
 		}
 		v.Projects, v.Tasks, v.Decisions = sample.Projects, sample.Tasks, sample.Decisions
 		v.Messages, v.Memories, v.Activity = sample.Messages, sample.Memories, sample.Activity
+		if sample.Members != nil {
+			v.Members = sample.Members
+		}
 		deriveStages(v)
 		out = *v
 		return nil

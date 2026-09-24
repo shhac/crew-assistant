@@ -158,6 +158,7 @@ type Snapshot struct {
 	Memories          []Memory           `json:"memories"`
 	Activity          []Activity         `json:"activity"`
 	Integrations      []Integration      `json:"integrations"`
+	Members           []Member           `json:"members"`
 	Paused            bool               `json:"paused"`
 	Wakes             []Wake             `json:"wakes,omitempty"`
 	ModelCalls        map[string]int     `json:"-"`
