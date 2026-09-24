@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -207,10 +208,8 @@ func (s *Service) RecordLearning(ctx context.Context, memberID, taskID string, i
 	if in.When == "" {
 		return Learning{}, errors.New("a learning needs to say when it applies")
 	}
-	for _, word := range specific {
-		if word != "" && (strings.Contains(in.Text, word) || strings.Contains(in.When, word)) {
-			return Learning{}, fmt.Errorf("a learning must not be about one project; it names %s", word)
-		}
+	if word := naming(in.When+"\n"+in.Text, specific); word != "" {
+		return Learning{}, fmt.Errorf("a learning must not be about one project; it names %s", word)
 	}
 	var out Learning
 	err = s.store.update(ctx, func(v *Snapshot) error {
@@ -256,6 +255,21 @@ func (s *Service) ForgetLearning(ctx context.Context, memberID, learningID strin
 		return ErrNotFound
 	})
 	return out, err
+}
+
+// identifying are things no learning meant for every project would hold:
+// addresses, links and anything shaped like a key or token.
+var identifying = regexp.MustCompile(`[\w.+-]+@[\w-]+\.[\w.]+|https?://\S+|\b[0-9a-fA-F]{20,}\b|\b[A-Za-z0-9+/_=-]{40,}\b`)
+
+// naming returns what text names that ties it to one project, ignoring case.
+func naming(text string, specific []string) string {
+	lower := strings.ToLower(text)
+	for _, word := range specific {
+		if word != "" && strings.Contains(lower, strings.ToLower(word)) {
+			return word
+		}
+	}
+	return identifying.FindString(text)
 }
 
 // withLearnings is the roles a task starts with: each role copied from a

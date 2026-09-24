@@ -165,3 +165,32 @@ func TestAMemberFullOfTheOwnersLearningsKeepsThemAll(t *testing.T) {
 		t.Fatalf("a member full of the owner's learnings should keep them all: %v", err)
 	}
 }
+
+func TestALearningThatNamesAProjectIsRecognised(t *testing.T) {
+	for text, want := range map[string]bool{
+		"In ACME-Portal, run the seed first":       true,
+		"Ask ops@example.com before deploying":     true,
+		"See https://example.com/runbook":          true,
+		"Rotate 0123456789abcdef0123456789abcdef":  true,
+		"Run the whole suite before finishing":     false,
+		"Prefer small commits; e.g. for Zoë's app": false,
+	} {
+		if got := naming(text, []string{"acme-portal"}) != ""; got != want {
+			t.Errorf("%q: names a project = %v, want %v", text, got, want)
+		}
+	}
+}
+
+func TestAStoppedTaskLetsGoOfWhatItsRolesWereTold(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	task, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "A draft"})
+	got, err := s.UpdateTask(testContext, task.ID, func(t *Task, _ *Project) (string, error) {
+		t.Roles = []Role{{Name: "Ada", Kind: RoleImplementer, Member: "m", Learnings: []Learning{{Text: "x"}}}}
+		t.Status = TaskStopped
+		return "", nil
+	})
+	if err != nil || got.Roles[0].Learnings != nil {
+		t.Fatalf("a stopped task should not keep its roles' learnings: %+v %v", got.Roles, err)
+	}
+}

@@ -102,6 +102,7 @@ func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 	if snap.Paused {
 		return false, nil
 	}
+	lp.sweepLearnings(snap)
 	if progressed, err := lp.settleAnswers(ctx, snap); progressed || err != nil {
 		return progressed, err
 	}
@@ -113,7 +114,6 @@ func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 		return false, err
 	}
 	if !ok {
-		lp.sweepLearnings(snap)
 		return false, nil
 	}
 	if t.RetryAt.After(time.Now()) {

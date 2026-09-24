@@ -262,7 +262,7 @@ type wakeBlock struct {
 // role's reply, returning the reply without it and the block's contents.
 func splitBlock(text, kind string) (string, string) {
 	fence := "```" + kind
-	start := strings.LastIndex(text, fence)
+	start := strings.LastIndex(text, fence+"\n")
 	if start < 0 {
 		return text, ""
 	}

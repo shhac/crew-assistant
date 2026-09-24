@@ -305,6 +305,13 @@ func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Pro
 			cancelTaskWakes(v, t.ID)
 			closeMessages(t, t.UpdatedAt)
 		}
+		// A delivered task may still land later and resume its writer, so it
+		// keeps what its roles were told; one stopped or landed never runs again.
+		if t.Status == TaskStopped || t.Status == TaskLanded {
+			for i := range t.Roles {
+				t.Roles[i].Learnings = nil
+			}
+		}
 		if activity != "" {
 			record(v, t.UpdatedAt, t.ProjectID, "task."+t.Status, activity)
 		}
