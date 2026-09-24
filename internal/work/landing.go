@@ -67,12 +67,6 @@ func approvalStands(t core.Task) bool {
 // a new branch, a fast-forward push onto the target, or the delivery folder.
 // It never forces anything: a moved target sends the task back to catch up.
 func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium) error {
-	if len(t.Revisions) == 0 {
-		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
-	}
-	if t.DirectionPending > 0 {
-		return lp.takeDirection(ctx, t)
-	}
 	if taskPlaybook(p, t).Land.AsksFirst() && !approvalStands(t) && !proposed(t) {
 		return lp.setStatus(ctx, t.ID, core.TaskDeciding, "Checks are in")
 	}

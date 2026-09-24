@@ -127,6 +127,9 @@ func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 	if err != nil {
 		return true, lp.roleFailed(ctx, t, "The workspace", err)
 	}
+	if sent, err := lp.backToWriter(ctx, t); sent {
+		return true, err
+	}
 	switch t.Status {
 	case core.TaskWriting:
 		return true, lp.write(ctx, p, t, m)
@@ -136,6 +139,21 @@ func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 		return true, lp.decide(ctx, p, t)
 	case core.TaskLanding:
 		return true, lp.land(ctx, p, t, m)
+	}
+	return false, nil
+}
+
+// backToWriter sends a task past writing back to the implementer when it has
+// no revision to work from, or has direction it has not yet had in view. It
+// reports whether it did.
+func (lp *Loop) backToWriter(ctx context.Context, t core.Task) (bool, error) {
+	switch {
+	case t.Status != core.TaskReviewing && t.Status != core.TaskDeciding && t.Status != core.TaskLanding:
+		return false, nil
+	case len(t.Revisions) == 0:
+		return true, lp.setStatus(ctx, t.ID, core.TaskWriting, "")
+	case t.DirectionPending > 0:
+		return true, lp.takeDirection(ctx, t)
 	}
 	return false, nil
 }
@@ -319,12 +337,6 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 // review runs each checking role that has not yet judged the latest revision
 // against the current brief, one per step: reviewers first, then QA.
 func (lp *Loop) review(ctx context.Context, p core.Project, t core.Task, m medium) error {
-	if len(t.Revisions) == 0 {
-		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
-	}
-	if t.DirectionPending > 0 {
-		return lp.takeDirection(ctx, t)
-	}
 	r := t.Revisions[len(t.Revisions)-1]
 	for _, checker := range t.Checkers() {
 		if t.Judged(checker.Name, r.N, p.Brief.Version) {
@@ -394,12 +406,6 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 // until the round limit, bring the owner questions, a limit reached, or a
 // draft every reviewer passed.
 func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
-	if len(t.Revisions) == 0 {
-		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
-	}
-	if t.DirectionPending > 0 {
-		return lp.takeDirection(ctx, t)
-	}
 	r := t.Revisions[len(t.Revisions)-1]
 	var current []core.Verdict
 	for _, v := range t.Verdicts {
