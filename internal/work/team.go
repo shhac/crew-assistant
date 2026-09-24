@@ -26,11 +26,15 @@ type TeamChoice struct {
 	Check        string   `json:"check"`
 	Prepare      []string `json:"prepare"`
 	Sign         string   `json:"sign"`
+	// Members to fill a role with, by id; empty keeps the template's role.
+	Implementer string `json:"implementer_member"`
+	Reviewer    string `json:"reviewer_member"`
+	QA          string `json:"qa_member"`
 }
 
 // teamFrom builds a playbook from a template and the few choices the assistant
 // may make about it. Anything left empty keeps the template's choice.
-func teamFrom(in TeamChoice) (core.Playbook, error) {
+func teamFrom(in TeamChoice, members []core.Member) (core.Playbook, error) {
 	template := in.Template
 	if template == "" {
 		template = "draft"
@@ -46,6 +50,14 @@ func teamFrom(in TeamChoice) (core.Playbook, error) {
 			playbook.Roles[i].Engine = in.WriterEngine
 		case playbook.Roles[i].Kind == core.RoleReviewer && in.ReviewerEngine != "":
 			playbook.Roles[i].Engine = in.ReviewerEngine
+		}
+	}
+	for _, slot := range [][2]string{{core.RoleImplementer, in.Implementer}, {core.RoleReviewer, in.Reviewer}, {core.RoleQA, in.QA}} {
+		if slot[1] == "" {
+			continue
+		}
+		if err := fillRole(&playbook, slot[0], slot[1], members); err != nil {
+			return core.Playbook{}, err
 		}
 	}
 	if in.MaxRounds != "" {
@@ -68,17 +80,39 @@ func teamFrom(in TeamChoice) (core.Playbook, error) {
 	return playbook, nil
 }
 
+// fillRole puts a member in the template's role of that kind. The template's
+// instructions stay, since they say how this kind of work is done here; the
+// member's own follow them.
+func fillRole(playbook *core.Playbook, kind, id string, members []core.Member) error {
+	i := slices.IndexFunc(members, func(m core.Member) bool { return m.ID == id })
+	if i < 0 {
+		return fmt.Errorf("there is no team member %q: %w", id, core.ErrNotFound)
+	}
+	m := members[i]
+	if m.Kind != kind {
+		return fmt.Errorf("%s is a %s, not a %s", m.Name, m.Kind, kind)
+	}
+	slot := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Kind == kind })
+	if slot < 0 {
+		return fmt.Errorf("a %s team has no %s for %s to fill", playbook.Template, kind, m.Name)
+	}
+	r := &playbook.Roles[slot]
+	r.Name, r.Engine, r.Model, r.Effort, r.Member = m.Name, m.Engine, m.Model, m.Effort, m.ID
+	r.Instructions = strings.TrimSpace(r.Instructions + "\n\n" + m.Instructions)
+	return nil
+}
+
 // SetTeam applies a team choice made in the dashboard or by the assistant.
 func (lp *Loop) SetTeam(ctx context.Context, projectID string, in TeamChoice) (core.Project, error) {
-	playbook, err := teamFrom(in)
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return core.Project{}, err
+	}
+	playbook, err := teamFrom(in, snap.Members)
 	if err != nil {
 		return core.Project{}, err
 	}
 	if playbook.Medium == core.MediumGit {
-		snap, err := lp.Core.Snapshot(ctx)
-		if err != nil {
-			return core.Project{}, err
-		}
 		p, ok := findProject(snap, projectID)
 		if !ok {
 			return core.Project{}, core.ErrNotFound

@@ -229,7 +229,7 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 			pinned.Roles = append([]Role(nil), p.Playbook.Roles...)
 			pinned.Prepare = append([]string(nil), p.Playbook.Prepare...)
 			t.Playbook = &pinned
-			t.Roles = append([]Role(nil), p.Playbook.Roles...)
+			t.Roles = withLearnings(v, p.Playbook.Roles)
 			t.MaxRounds = p.Playbook.MaxRounds
 			t.Round = 1
 			t.Status = TaskWriting

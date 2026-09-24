@@ -198,3 +198,21 @@ func learningsText(m Member) string {
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
+
+// withLearnings is the roles a task starts with: each role copied from a
+// member carries what that member has learned so far. They are pinned here,
+// once, because a role's instructions are part of its session; changing them
+// mid-task would start the writer afresh.
+func withLearnings(v *Snapshot, roles []Role) []Role {
+	out := append([]Role(nil), roles...)
+	for i, r := range out {
+		m := member(v, r.Member)
+		if m == nil {
+			continue
+		}
+		if learned := learningsText(*m); learned != "" {
+			out[i].Instructions = strings.TrimSpace(r.Instructions + "\n\n" + learned)
+		}
+	}
+	return out
+}
