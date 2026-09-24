@@ -1,6 +1,6 @@
 //go:build !windows
 
-package app
+package work
 
 import (
 	"context"
@@ -177,7 +177,7 @@ func TestCodeTaskRunsInACloneAndDeliversALocalBranch(t *testing.T) {
 }
 
 func TestACodeTeamOnlyWorksOnTheProjectsOwnFolders(t *testing.T) {
-	a := testApp(t)
+	a := testLoop(t)
 	ctx := context.Background()
 	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Brief: core.BriefInput{Goal: "Add a feature"}})
 	if err != nil {

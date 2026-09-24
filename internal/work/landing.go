@@ -1,4 +1,4 @@
-package app
+package work
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // maxCatchUps bounds how often landing goes back to catch up with a target
@@ -16,8 +17,8 @@ const maxCatchUps = 4
 
 // approve records the owner's approval of the latest revision and moves the
 // task on to landing.
-func (a *App) approve(ctx context.Context, t core.Task) error {
-	_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+func (lp *Loop) approve(ctx context.Context, t core.Task) error {
+	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		if len(t.Revisions) > 0 {
 			t.Approved = t.Revisions[len(t.Revisions)-1].N
 		}
@@ -29,8 +30,8 @@ func (a *App) approve(ctx context.Context, t core.Task) error {
 
 // resumeLanding moves a task whose approval still stands, or that needs none,
 // back on to landing. Its catch-ups keep counting.
-func (a *App) resumeLanding(ctx context.Context, t core.Task) error {
-	_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+func (lp *Loop) resumeLanding(ctx context.Context, t core.Task) error {
+	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Status, t.DecisionID, t.Detail = core.TaskLanding, "", "Landing"
 		return "Landing " + t.Objective, nil
 	})
@@ -65,56 +66,56 @@ func approvalStands(t core.Task) bool {
 // land takes the approved revision where the project's landing policy says:
 // a new branch, a fast-forward push onto the target, or the delivery folder.
 // It never forces anything: a moved target sends the task back to catch up.
-func (a *App) land(ctx context.Context, p core.Project, t core.Task, m medium) error {
+func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium) error {
 	if len(t.Revisions) == 0 {
-		return a.setStatus(ctx, t.ID, core.TaskWriting, "")
+		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
 	}
 	if taskPlaybook(p, t).Land.AsksFirst() && !approvalStands(t) && !proposed(t) {
-		return a.setStatus(ctx, t.ID, core.TaskDeciding, "Checks are in")
+		return lp.setStatus(ctx, t.ID, core.TaskDeciding, "Checks are in")
 	}
 	playbook := taskPlaybook(p, t)
 	if playbook.Land.Way() == core.LandPullRequest {
-		gm, err := a.gitMediumFor(ctx, p, playbook)
+		gm, err := lp.gitMediumFor(ctx, p, playbook)
 		if err != nil {
-			return a.roleFailed(ctx, t, "The workspace", err)
+			return lp.roleFailed(ctx, t, "The workspace", err)
 		}
-		return a.landPR(ctx, p, t, gm)
+		return lp.landPR(ctx, p, t, gm)
 	}
 	r := t.Revisions[len(t.Revisions)-1]
 	if c, ok := m.(catcher); ok {
 		done, err := c.alreadyLanded(ctx, t, r)
 		if err != nil {
-			return a.landingFailed(ctx, t, r, err)
+			return lp.landingFailed(ctx, t, r, err)
 		}
 		if done {
-			return a.recordLanded(ctx, t, r, playbook.Land.Target, "it was already there")
+			return lp.recordLanded(ctx, t, r, playbook.Land.Target, "it was already there")
 		}
 	}
 	c, l, err := lag(ctx, m, t)
 	if err != nil {
-		return a.landingFailed(ctx, t, r, err)
+		return lp.landingFailed(ctx, t, r, err)
 	}
 	if l != nil {
-		return a.catchUpRound(ctx, t, c, *l)
+		return lp.catchUpRound(ctx, t, c, *l)
 	}
 	target, err := m.deliver(ctx, t, r)
 	if errors.Is(err, gitrepo.ErrTargetMoved) {
 		if c, l, lagErr := lag(ctx, m, t); lagErr == nil && l != nil {
-			return a.catchUpRound(ctx, t, c, *l)
+			return lp.catchUpRound(ctx, t, c, *l)
 		}
 	}
 	if err != nil {
-		return a.landingFailed(ctx, t, r, err)
+		return lp.landingFailed(ctx, t, r, err)
 	}
-	return a.recordLanded(ctx, t, r, target, "")
+	return lp.recordLanded(ctx, t, r, target, "")
 }
 
 // proposed reports a task whose pull request is open: updates to it go out
 // without asking again, unless they touch what runs or instructs.
 func proposed(t core.Task) bool { return t.Proposal != nil && t.Proposal.Number > 0 }
 
-func (a *App) recordLanded(ctx context.Context, t core.Task, r core.Revision, target, note string) error {
-	_, err := a.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
+func (lp *Loop) recordLanded(ctx context.Context, t core.Task, r core.Revision, target, note string) error {
+	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 		t.Status, t.DecisionID, t.DeliveredTo, t.CatchUps = core.TaskDelivered, "", target, 0
 		t.Detail = fmt.Sprintf("Draft %d approved", r.N)
 		if target != "" {
@@ -134,12 +135,12 @@ func (a *App) recordLanded(ctx context.Context, t core.Task, r core.Revision, ta
 	if err != nil || r.Ref == "" {
 		return err
 	}
-	return a.supersedeStaleApprovals(ctx, t.ProjectID)
+	return lp.supersedeStaleApprovals(ctx, t.ProjectID)
 }
 
 // landingFailed brings the owner a decision rather than retrying on a timer: a
 // refused push needs something only they can change.
-func (a *App) landingFailed(ctx context.Context, t core.Task, r core.Revision, cause error) error {
+func (lp *Loop) landingFailed(ctx context.Context, t core.Task, r core.Revision, cause error) error {
 	reason := cause.Error()
 	target := "the target branch"
 	if t.Playbook != nil && t.Playbook.Land.Target != "" {
@@ -151,15 +152,15 @@ func (a *App) landingFailed(ctx context.Context, t core.Task, r core.Revision, c
 	case errors.Is(cause, gitrepo.ErrDirtyCheckout):
 		reason = fmt.Sprintf("Your checkout of %s has uncommitted changes, so git would not update it. Commit or stash them, then choose Try again. Nothing of yours was changed.", target)
 	}
-	if _, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+	if _, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.ResumeStatus = core.TaskLanding
 		return "", nil
 	}); err != nil {
 		return err
 	}
-	_, err := a.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
+	_, err := lp.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
 		Title:          fmt.Sprintf("Draft %d of %s couldn't land", r.N, t.Objective),
-		Context:        clip(reason, 900),
+		Context:        text.Clip(reason, 900),
 		Recommendation: choiceTryAgain + " once the cause is fixed",
 		Choices:        []string{choiceTryAgain, choiceStop},
 	})
@@ -169,9 +170,9 @@ func (a *App) landingFailed(ctx context.Context, t core.Task, r core.Revision, c
 // catchUpRound sends a task back to take in work that landed after it
 // started. A clean merge is recorded by the daemon; only conflicts need the
 // implementer. A target that keeps moving is brought to the owner.
-func (a *App) catchUpRound(ctx context.Context, t core.Task, c catcher, l line) error {
+func (lp *Loop) catchUpRound(ctx context.Context, t core.Task, c catcher, l line) error {
 	tooMany := false
-	t, err := a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+	t, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.CatchUps++
 		if t.CatchUps > maxCatchUps {
 			tooMany = true
@@ -183,7 +184,7 @@ func (a *App) catchUpRound(ctx context.Context, t core.Task, c catcher, l line) 
 		return err
 	}
 	if tooMany {
-		_, err = a.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
+		_, err = lp.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
 			Title:          fmt.Sprintf("%s keeps having to catch up", t.Objective),
 			Context:        fmt.Sprintf("It caught up %d times and the target moved again each time: %s. Nothing was forced.", maxCatchUps, l.What),
 			Recommendation: choiceTryAgain + " once the target is quiet",
@@ -193,13 +194,13 @@ func (a *App) catchUpRound(ctx context.Context, t core.Task, c catcher, l line) 
 	}
 	moved, commit, err := c.cleanMerge(ctx, t, l)
 	if err != nil {
-		return a.roleFailed(ctx, t, "The workspace", fmt.Errorf("catching up: %s: %w", l.What, err))
+		return lp.roleFailed(ctx, t, "The workspace", fmt.Errorf("catching up: %s: %w", l.What, err))
 	}
 	if commit != "" {
-		return a.recordCatchUp(ctx, moved, c, commit, l)
+		return lp.recordCatchUp(ctx, moved, c, commit, l)
 	}
 	// A conflict is the implementer's to resolve, in a round of its own.
-	_, err = a.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+	_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", "Catching up: "+l.What
 		return t.Objective + " is catching up: " + l.What, nil
 	})
@@ -210,16 +211,16 @@ func (a *App) catchUpRound(ctx context.Context, t core.Task, c catcher, l line) 
 // implementer. The task's own change is unchanged, so the reviewers' passes
 // against the current brief carry over and an approval still stands; QA runs
 // again on the merged result.
-func (a *App) recordCatchUp(ctx context.Context, moved core.Task, c catcher, commit string, l line) error {
+func (lp *Loop) recordCatchUp(ctx context.Context, moved core.Task, c catcher, commit string, l line) error {
 	files, err := c.files(ctx, moved, commit)
 	if err != nil {
-		return a.roleFailed(ctx, moved, "The workspace", err)
+		return lp.roleFailed(ctx, moved, "The workspace", err)
 	}
 	reviewers := map[string]bool{}
 	for _, r := range roleOf(moved, core.RoleReviewer) {
 		reviewers[r.Name] = true
 	}
-	_, err = a.updateOpen(ctx, moved.ID, func(t *core.Task, p *core.Project) (string, error) {
+	_, err = lp.updateOpen(ctx, moved.ID, func(t *core.Task, p *core.Project) (string, error) {
 		if len(t.Revisions) == 0 {
 			return "", nil
 		}
@@ -259,8 +260,8 @@ func carriedOver(verdicts []core.Verdict, from, to int, reviewers map[string]boo
 // supersedeStaleApprovals replaces any approval another task in the project
 // is waiting on with a catch-up, so the owner is never asked to approve work
 // that is out of date.
-func (a *App) supersedeStaleApprovals(ctx context.Context, projectID string) error {
-	snap, err := a.Core.Snapshot(ctx)
+func (lp *Loop) supersedeStaleApprovals(ctx context.Context, projectID string) error {
+	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
 		return err
 	}
@@ -276,7 +277,7 @@ func (a *App) supersedeStaleApprovals(ctx context.Context, projectID string) err
 		if !ok || d.Status != "open" || (d.Kind != decisionDelivery && d.Kind != decisionEscalation) {
 			continue
 		}
-		m, err := a.mediumFor(ctx, p, taskPlaybook(p, t))
+		m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
 		if err != nil {
 			return err
 		}
@@ -287,10 +288,10 @@ func (a *App) supersedeStaleApprovals(ctx context.Context, projectID string) err
 		if l == nil {
 			continue
 		}
-		if err = a.catchUpRound(ctx, t, c, *l); err != nil {
+		if err = lp.catchUpRound(ctx, t, c, *l); err != nil {
 			return err
 		}
-		if _, err = a.Core.DismissDecision(ctx, d.ID, "Out of date: "+l.What+". It is catching up and will ask again."); err != nil && !errors.Is(err, core.ErrConflict) {
+		if _, err = lp.Core.DismissDecision(ctx, d.ID, "Out of date: "+l.What+". It is catching up and will ask again."); err != nil && !errors.Is(err, core.ErrConflict) {
 			return err
 		}
 	}
@@ -301,8 +302,8 @@ func (a *App) supersedeStaleApprovals(ctx context.Context, projectID string) err
 // such as a branch approved before the project landed on main. Its approval
 // stands. A change built on another that has not landed yet is refused, so
 // the two land in the order they were built.
-func (a *App) LandTask(ctx context.Context, projectID, taskID string) (core.Task, error) {
-	snap, err := a.Core.Snapshot(ctx)
+func (lp *Loop) LandTask(ctx context.Context, projectID, taskID string) (core.Task, error) {
+	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
 		return core.Task{}, err
 	}
@@ -322,7 +323,7 @@ func (a *App) LandTask(ctx context.Context, projectID, taskID string) (core.Task
 	}
 	pinned := *t.Playbook
 	pinned.Land = p.Playbook.Land
-	m, err := a.gitMediumFor(ctx, p, &pinned)
+	m, err := lp.gitMediumFor(ctx, p, &pinned)
 	if err != nil {
 		return core.Task{}, err
 	}
@@ -349,7 +350,7 @@ func (a *App) LandTask(ctx context.Context, projectID, taskID string) (core.Task
 			return core.Task{}, fmt.Errorf("%q is built on %q, which has not landed on %s yet; land that first: %w", t.Objective, other.Objective, pinned.Land.Target, core.ErrConflict)
 		}
 	}
-	landing, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+	landing, err := lp.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		if t.Status != core.TaskDelivered {
 			return "", core.ErrConflict
 		}
@@ -360,6 +361,6 @@ func (a *App) LandTask(ctx context.Context, projectID, taskID string) (core.Task
 		t.Status, t.Detail = core.TaskLanding, "Landing on "+pinned.Land.Target
 		return fmt.Sprintf("Landing %s on %s", t.Objective, pinned.Land.Target), nil
 	})
-	a.nudgeLoop()
+	lp.Nudge()
 	return landing, err
 }

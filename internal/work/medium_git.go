@@ -1,4 +1,4 @@
-package app
+package work
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/media"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // gitMedium is code work in a private clone of one of the project's
@@ -63,7 +64,7 @@ func onto(t core.Task, l line) core.Task {
 }
 
 func (m gitMedium) cleanMerge(ctx context.Context, t core.Task, l line) (core.Task, string, error) {
-	commit, err := m.repo.MergeClean(ctx, tipOf(t), l.Commit, fmt.Sprintf("catch up with %s: %s", l.Name, clip(t.Objective, 60)))
+	commit, err := m.repo.MergeClean(ctx, tipOf(t), l.Commit, fmt.Sprintf("catch up with %s: %s", l.Name, text.Clip(t.Objective, 60)))
 	if err != nil || commit == "" {
 		return t, "", err
 	}
@@ -98,7 +99,7 @@ func (m gitMedium) reset(ctx context.Context, t core.Task) error {
 }
 
 func (m gitMedium) snapshot(ctx context.Context, t core.Task, n int) (core.Revision, error) {
-	commit, files, err := m.repo.Snapshot(ctx, t.Base, tipOf(t), fmt.Sprintf("draft %d: %s", n, clip(t.Objective, 60)))
+	commit, files, err := m.repo.Snapshot(ctx, t.Base, tipOf(t), fmt.Sprintf("draft %d: %s", n, text.Clip(t.Objective, 60)))
 	return core.Revision{N: n, Files: files, Ref: commit}, err
 }
 

@@ -153,7 +153,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 			problem(w, err)
 			return
 		}
-		a.Nudge()
+		a.Work.Nudge()
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("POST /api/decisions/{id}/dismiss", func(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +168,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 			problem(w, err)
 			return
 		}
-		a.Nudge()
+		a.Work.Nudge()
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("POST /api/memories", func(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,9 @@
 package app
 
-import "github.com/shhac/crew-assistant/internal/core"
+import (
+	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/text"
+)
 
 // assistantView is the state the assistant reads each turn: everything it can
 // act on, and only the outcome of what is finished. Full revision and review
@@ -19,7 +22,7 @@ func assistantView(s core.Snapshot) core.Snapshot {
 		}
 		revisions := make([]core.Revision, len(t.Revisions))
 		for i, r := range t.Revisions {
-			r.Summary = clip(r.Summary, 500)
+			r.Summary = text.Clip(r.Summary, 500)
 			if len(r.Files) > 20 {
 				r.Files = r.Files[:20]
 			}
@@ -33,10 +36,10 @@ func assistantView(s core.Snapshot) core.Snapshot {
 				if v.Revision != latest {
 					continue
 				}
-				v.Summary = clip(v.Summary, 400)
+				v.Summary = text.Clip(v.Summary, 400)
 				findings := make([]core.Finding, len(v.Findings))
 				for i, f := range v.Findings {
-					f.Note = clip(f.Note, 300)
+					f.Note = text.Clip(f.Note, 300)
 					findings[i] = f
 				}
 				v.Findings = findings
@@ -54,7 +57,7 @@ func assistantView(s core.Snapshot) core.Snapshot {
 			open = append(open, d)
 			continue
 		}
-		d.Context = clip(d.Context, 300)
+		d.Context = text.Clip(d.Context, 300)
 		closed = append(closed, d)
 	}
 	if len(closed) > 8 {

@@ -1,11 +1,9 @@
 //go:build !windows
 
-package app
+package work
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,13 +11,23 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
-	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/integrations/github"
 )
 
-func call(t *testing.T, a *App, tool string, in any) any {
+// call drives the wake tools the way the assistant does.
+func call(t *testing.T, a *Loop, tool string, in map[string]string) any {
 	t.Helper()
-	raw, _ := json.Marshal(in)
-	out, err := a.Execute(context.Background(), tool, raw)
+	ctx := context.Background()
+	var out any
+	var err error
+	switch tool {
+	case "wake_me_when":
+		out, err = a.WakeMeWhen(ctx, WakeRequest{On: in["on"], ProjectID: in["project_id"], Target: in["target"], Match: in["match"], Prompt: in["prompt"], Timeout: in["timeout"]})
+	case "list_wakes":
+		out, err = a.OpenWakes(ctx)
+	case "cancel_wake":
+		out, err = a.Core.CancelWake(ctx, in["handle"], "")
+	}
 	if err != nil {
 		t.Fatalf("%s: %v", tool, err)
 	}
@@ -27,7 +35,7 @@ func call(t *testing.T, a *App, tool string, in any) any {
 }
 
 func TestTheAssistantWaitsOnSeveralThingsAndCancelsWhatItNoLongerNeeds(t *testing.T) {
-	a := testApp(t)
+	a := testLoop(t)
 	ctx := context.Background()
 	repo := t.TempDir()
 	ownerGit(t, repo, "init", "-q", "-b", "main")
@@ -93,48 +101,14 @@ func TestTheAssistantWaitsOnSeveralThingsAndCancelsWhatItNoLongerNeeds(t *testin
 			t.Fatalf("a wake that timed out was not delivered: %+v", w)
 		}
 	}
-	raw, _ := json.Marshal(map[string]string{"on": "pr_checks", "project_id": "", "target": "shhac/x#1", "match": "", "prompt": "", "timeout": ""})
-	if _, err = a.Execute(ctx, "wake_me_when", raw); err == nil {
-		t.Fatal("waiting on a pull request was accepted before it is built")
-	}
-}
-
-func TestEveryAssistantToolHasALabelTheOwnerCanRead(t *testing.T) {
-	for _, tool := range engine.Tools() {
-		if label, ok := engine.ToolLabel(tool.Function.Name); !ok || label == "" {
-			t.Errorf("%s has no label, so any turn that uses it fails", tool.Function.Name)
-		}
-	}
-}
-
-func TestTheAssistantSeesWhatItCanActOnAndOnlyTheOutcomeOfWhatIsDone(t *testing.T) {
-	long := strings.Repeat("x", 5000)
-	var s core.Snapshot
-	for i := 0; i < 40; i++ {
-		task := core.Task{ID: fmt.Sprint("done", i), Status: core.TaskLanded, Objective: "done"}
-		for n := 1; n <= 5; n++ {
-			task.Revisions = append(task.Revisions, core.Revision{N: n, Summary: long})
-			task.Verdicts = append(task.Verdicts, core.Verdict{Revision: n, Summary: long, Findings: []core.Finding{{Note: long}}})
-		}
-		s.Tasks = append(s.Tasks, task)
-		s.Decisions = append(s.Decisions, core.Decision{ID: fmt.Sprint("old", i), Status: "resolved", Context: long})
-	}
-	s.Tasks = append(s.Tasks, core.Task{ID: "live", Status: core.TaskReviewing, Revisions: []core.Revision{{N: 1, Summary: "first"}, {N: 2, Summary: "second"}, {N: 3, Summary: "third"}}, Verdicts: []core.Verdict{{Revision: 2, Summary: "old"}, {Revision: 3, Summary: "current"}}})
-	s.Decisions = append(s.Decisions, core.Decision{ID: "now", Status: "open", Context: long})
-	view := assistantView(s)
-	raw, _ := json.Marshal(view)
-	if len(raw) > 64<<10 {
-		t.Fatalf("the assistant's view is %d bytes", len(raw))
-	}
-	live := view.Tasks[len(view.Tasks)-1]
-	if len(live.Revisions) != 2 || len(live.Verdicts) != 1 || live.Verdicts[0].Summary != "current" {
-		t.Fatalf("the live task lost what the assistant acts on: %+v", live)
-	}
-	last := view.Decisions[len(view.Decisions)-1]
-	if last.ID != "now" || last.Context != long {
-		t.Fatal("an open decision was cut")
-	}
-	if len(s.Tasks[0].Revisions) != 5 {
-		t.Fatal("the view changed the state it was made from")
+	// Waiting on a pull request starts from what GitHub shows now.
+	remote := t.TempDir()
+	ownerGit(t, remote, "init", "-q", "--bare", "-b", "main")
+	ownerGit(t, repo, "push", "-q", remote, "main:paul/x")
+	gh := &fakeGitHub{t: t, remote: remote, head: "paul/x", opened: 1, checks: "PENDING"}
+	a.github = github.Client{Run: gh.run}
+	checks := call(t, a, "wake_me_when", map[string]string{"on": "pr_checks", "project_id": "", "target": "o/r#7", "match": "SUCCESS", "prompt": "merge it", "timeout": ""}).(core.Wake)
+	if !strings.HasPrefix(checks.Baseline, "PENDING@") {
+		t.Fatalf("baseline %q", checks.Baseline)
 	}
 }

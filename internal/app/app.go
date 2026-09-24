@@ -16,9 +16,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/integrations/connections"
-	"github.com/shhac/crew-assistant/internal/integrations/github"
-	"github.com/shhac/crew-assistant/internal/quota"
-	"github.com/shhac/crew-assistant/internal/roles"
+	"github.com/shhac/crew-assistant/internal/work"
 )
 
 type App struct {
@@ -38,18 +36,14 @@ type App struct {
 	chatWaiters      sync.Map
 	chatInvoker      func(context.Context, engine.Config, engine.Request, engine.ToolExecutor) (engine.Result, error)
 	statuses         map[string]core.Integration
-	runner           roles.Runner
-	meter            *quota.Meter
-	loopWake         chan struct{}
-	// github reads and merges pull requests; githubURL is where git pushes.
-	// Both are replaced in tests.
-	github    github.Client
-	githubURL func(repo string) string
-	prSeen    sync.Map
+	// Work runs the teams' tasks and wakes agents.
+	Work *work.Loop
 }
 
 func New(s *core.Service, cfg config.Config, path string, demo bool) *App {
-	return &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), statuses: map[string]core.Integration{}, runner: roles.Native{}, meter: &quota.Meter{}, loopWake: make(chan struct{}, 1), small: newSmallModels(func() string { return s.StateDirectory() }), github: github.New(), githubURL: github.URL}
+	a := &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), statuses: map[string]core.Integration{}, small: newSmallModels(func() string { return s.StateDirectory() })}
+	a.Work = work.New(s, a.Config, demo)
+	return a
 }
 func (a *App) Config() config.Config { a.mu.RLock(); defer a.mu.RUnlock(); return a.cfg }
 func (a *App) UpdateConfig(cfg config.Config) error {
@@ -193,37 +187,37 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 			return nil, err
 		}
 		project, err := a.Core.UpdateBrief(ctx, in.ProjectID, core.BriefInput{Goal: in.Goal, Audience: in.Audience, Constraints: in.Constraints, Criteria: in.Criteria})
-		a.nudgeLoop()
+		a.Work.Nudge()
 		return project, err
 	case "set_team":
 		var in engine.SetTeamArgs
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		return a.SetTeam(ctx, in.ProjectID, TeamChoice{Template: in.Template, WriterEngine: in.WriterEngine, ReviewerEngine: in.ReviewerEngine, MaxRounds: in.MaxRounds, DeliverTo: in.DeliverTo, Repo: in.Repo, BranchPrefix: in.BranchPrefix, Check: in.Check, Prepare: in.Prepare})
+		return a.Work.SetTeam(ctx, in.ProjectID, work.TeamChoice{Template: in.Template, WriterEngine: in.WriterEngine, ReviewerEngine: in.ReviewerEngine, MaxRounds: in.MaxRounds, DeliverTo: in.DeliverTo, Repo: in.Repo, BranchPrefix: in.BranchPrefix, Check: in.Check, Prepare: in.Prepare})
 	case "set_landing":
 		var in engine.SetLandingArgs
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		return a.SetLanding(ctx, in.ProjectID, core.LandPolicy{Means: in.Means, Via: in.Via, Target: in.Target, Method: in.Method, GitHub: in.GitHub, Approve: in.Approve})
+		return a.Work.SetLanding(ctx, in.ProjectID, core.LandPolicy{Means: in.Means, Via: in.Via, Target: in.Target, Method: in.Method, GitHub: in.GitHub, Approve: in.Approve})
 	case "land_task":
 		var in engine.LandTaskArgs
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		return a.LandTask(ctx, in.ProjectID, in.TaskID)
+		return a.Work.LandTask(ctx, in.ProjectID, in.TaskID)
 	case "wake_me_when":
 		var in engine.WakeArgs
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		return a.WakeMeWhen(ctx, WakeRequest(in))
+		return a.Work.WakeMeWhen(ctx, work.WakeRequest(in))
 	case "list_wakes":
 		if err := args(raw, &struct{}{}); err != nil {
 			return nil, err
 		}
-		return a.OpenWakes(ctx)
+		return a.Work.OpenWakes(ctx)
 	case "cancel_wake":
 		var in engine.WakeHandleArgs
 		if err := args(raw, &in); err != nil {
@@ -236,21 +230,21 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 			return nil, err
 		}
 		queued, err := a.Core.QueueTask(ctx, in.ProjectID, core.TaskInput{Objective: in.Objective, Criteria: in.Criteria})
-		a.nudgeLoop()
+		a.Work.Nudge()
 		return queued, err
 	case "stop_task":
 		var in engine.StopTaskArgs
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		return a.StopTask(ctx, in.ProjectID, in.TaskID)
+		return a.Work.StopTask(ctx, in.ProjectID, in.TaskID)
 	case "resolve_decision":
 		var in engine.ResolveDecisionArgs
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
 		decision, err := a.Core.ResolveDecision(ctx, in.DecisionID, in.Answer)
-		a.nudgeLoop()
+		a.Work.Nudge()
 		return decision, err
 	case "ask_decision":
 		var in engine.DecisionArgs

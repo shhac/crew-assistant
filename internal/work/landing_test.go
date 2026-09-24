@@ -1,9 +1,7 @@
-package app
+package work
 
 import (
-	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/shhac/crew-assistant/internal/core"
 )
@@ -31,17 +29,5 @@ func TestAnApprovalStandsOnlyThroughCleanMergesOfTheApprovedDraft(t *testing.T) 
 		if got := approvalStands(tc.task); got != tc.want {
 			t.Errorf("%s: got %v", name, got)
 		}
-	}
-}
-
-func TestClipNeverSplitsACharacter(t *testing.T) {
-	text := strings.Repeat("é", 10) // two bytes each
-	for limit := 1; limit < len(text); limit++ {
-		if got := clip(text, limit); !utf8.ValidString(got) {
-			t.Fatalf("clip(%d) = %q is not valid UTF-8", limit, got)
-		}
-	}
-	if clip("short", 10) != "short" {
-		t.Fatal("clipped text that fit")
 	}
 }

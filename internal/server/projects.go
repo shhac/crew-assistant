@@ -6,6 +6,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/app"
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/work"
 )
 
 // registerProjectWork serves the owner's direct controls over a project: its
@@ -21,20 +22,20 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 			problem(w, err)
 			return
 		}
-		a.Nudge()
+		a.Work.Nudge()
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("PUT /api/projects/{id}/team", func(w http.ResponseWriter, r *http.Request) {
-		var in app.TeamChoice
+		var in work.TeamChoice
 		if decode(w, r, &in) != nil {
 			return
 		}
-		v, err := a.SetTeam(r.Context(), r.PathValue("id"), in)
+		v, err := a.Work.SetTeam(r.Context(), r.PathValue("id"), in)
 		if err != nil {
 			problem(w, err)
 			return
 		}
-		a.Nudge()
+		a.Work.Nudge()
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("PUT /api/projects/{id}/landing", func(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +43,7 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		if decode(w, r, &in) != nil {
 			return
 		}
-		v, err := a.SetLanding(r.Context(), r.PathValue("id"), in)
+		v, err := a.Work.SetLanding(r.Context(), r.PathValue("id"), in)
 		if err != nil {
 			problem(w, err)
 			return
@@ -50,7 +51,7 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/land", func(w http.ResponseWriter, r *http.Request) {
-		v, err := a.LandTask(r.Context(), r.PathValue("id"), r.PathValue("task"))
+		v, err := a.Work.LandTask(r.Context(), r.PathValue("id"), r.PathValue("task"))
 		if err != nil {
 			problem(w, err)
 			return
@@ -75,11 +76,11 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 			problem(w, err)
 			return
 		}
-		a.Nudge()
+		a.Work.Nudge()
 		respond(w, 201, v)
 	})
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/stop", func(w http.ResponseWriter, r *http.Request) {
-		v, err := a.StopTask(r.Context(), r.PathValue("id"), r.PathValue("task"))
+		v, err := a.Work.StopTask(r.Context(), r.PathValue("id"), r.PathValue("task"))
 		if err != nil {
 			problem(w, err)
 			return
@@ -92,7 +93,7 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 			fail(w, 400, "invalid revision")
 			return
 		}
-		files, err := a.RevisionPreview(r.Context(), r.PathValue("id"), r.PathValue("task"), n)
+		files, err := a.Work.RevisionPreview(r.Context(), r.PathValue("id"), r.PathValue("task"), n)
 		if err != nil {
 			problem(w, err)
 			return

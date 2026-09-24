@@ -1,11 +1,10 @@
-package app
+package work
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/shhac/crew-assistant/internal/core"
 )
@@ -189,26 +188,4 @@ func parseVerdict(text string) (core.Verdict, error) {
 		return core.Verdict{}, errors.New("the review asked for changes without naming any")
 	}
 	return core.Verdict{Outcome: v.Outcome, Summary: strings.TrimSpace(v.Summary), Findings: v.Findings, Question: strings.TrimSpace(v.Question)}, nil
-}
-
-// short is the abbreviated form of a commit id.
-func short(sha string) string {
-	if len(sha) > 7 {
-		return sha[:7]
-	}
-	return sha
-}
-
-// clip shortens text to about limit bytes without splitting a character, so
-// what it writes into commit messages and pull requests stays valid UTF-8.
-func clip(text string, limit int) string {
-	text = strings.TrimSpace(text)
-	if len(text) <= limit {
-		return text
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(text[cut]) {
-		cut--
-	}
-	return strings.TrimSpace(text[:cut]) + "…"
 }

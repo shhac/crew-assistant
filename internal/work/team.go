@@ -1,4 +1,4 @@
-package app
+package work
 
 import (
 	"context"
@@ -67,13 +67,13 @@ func teamFrom(in TeamChoice) (core.Playbook, error) {
 }
 
 // SetTeam applies a team choice made in the dashboard or by the assistant.
-func (a *App) SetTeam(ctx context.Context, projectID string, in TeamChoice) (core.Project, error) {
+func (lp *Loop) SetTeam(ctx context.Context, projectID string, in TeamChoice) (core.Project, error) {
 	playbook, err := teamFrom(in)
 	if err != nil {
 		return core.Project{}, err
 	}
 	if playbook.Medium == core.MediumGit {
-		snap, err := a.Core.Snapshot(ctx)
+		snap, err := lp.Core.Snapshot(ctx)
 		if err != nil {
 			return core.Project{}, err
 		}
@@ -98,14 +98,14 @@ func (a *App) SetTeam(ctx context.Context, projectID string, in TeamChoice) (cor
 	if err = playbook.Validate(); err != nil {
 		return core.Project{}, err
 	}
-	return a.Core.SetPlaybook(ctx, projectID, playbook)
+	return lp.Core.SetPlaybook(ctx, projectID, playbook)
 }
 
 // SetLanding sets what landing means for a code project. The owner and the
 // assistant can; nothing inside the project can. Tasks already under way keep
 // the policy they started with.
-func (a *App) SetLanding(ctx context.Context, projectID string, land core.LandPolicy) (core.Project, error) {
-	snap, err := a.Core.Snapshot(ctx)
+func (lp *Loop) SetLanding(ctx context.Context, projectID string, land core.LandPolicy) (core.Project, error) {
+	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
 		return core.Project{}, err
 	}
@@ -122,12 +122,12 @@ func (a *App) SetLanding(ctx context.Context, projectID string, land core.LandPo
 	if err = playbook.Validate(); err != nil {
 		return core.Project{}, err
 	}
-	return a.Core.SetPlaybook(ctx, projectID, playbook)
+	return lp.Core.SetPlaybook(ctx, projectID, playbook)
 }
 
 // RevisionPreview returns what one revision holds, for the owner to read.
-func (a *App) RevisionPreview(ctx context.Context, projectID, taskID string, n int) ([]media.File, error) {
-	snap, err := a.Core.Snapshot(ctx)
+func (lp *Loop) RevisionPreview(ctx context.Context, projectID, taskID string, n int) ([]media.File, error) {
+	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ func (a *App) RevisionPreview(ctx context.Context, projectID, taskID string, n i
 	}
 	for _, r := range t.Revisions {
 		if r.N == n {
-			m, err := a.mediumFor(ctx, p, taskPlaybook(p, t))
+			m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
 			if err != nil {
 				return nil, err
 			}

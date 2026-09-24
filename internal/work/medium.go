@@ -1,4 +1,4 @@
-package app
+package work
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/media"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 	"github.com/shhac/crew-assistant/internal/media/localdocs"
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // medium is what differs between kinds of work: where roles work, how a
@@ -76,7 +77,7 @@ type line struct {
 	Foreign bool
 }
 
-func (a *App) mediumFor(ctx context.Context, p core.Project, playbook *core.Playbook) (medium, error) {
+func (lp *Loop) mediumFor(ctx context.Context, p core.Project, playbook *core.Playbook) (medium, error) {
 	if playbook == nil || playbook.Medium == core.MediumDocuments {
 		docs, err := localdocs.Open(p.ScratchDirectory)
 		dest := ""
@@ -85,11 +86,11 @@ func (a *App) mediumFor(ctx context.Context, p core.Project, playbook *core.Play
 		}
 		return docsMedium{docs: docs, deliverTo: dest}, err
 	}
-	return a.gitMediumFor(ctx, p, playbook)
+	return lp.gitMediumFor(ctx, p, playbook)
 }
 
 // gitMediumFor is the git medium, for code that needs git itself.
-func (a *App) gitMediumFor(ctx context.Context, p core.Project, playbook *core.Playbook) (gitMedium, error) {
+func (lp *Loop) gitMediumFor(ctx context.Context, p core.Project, playbook *core.Playbook) (gitMedium, error) {
 	if playbook.Medium != core.MediumGit {
 		return gitMedium{}, fmt.Errorf("unsupported medium %q", playbook.Medium)
 	}
@@ -97,7 +98,7 @@ func (a *App) gitMediumFor(ctx context.Context, p core.Project, playbook *core.P
 	if err != nil {
 		return gitMedium{}, err
 	}
-	return gitMedium{repo: repo, playbook: *playbook, landed: p.Landed, remote: a.githubURL, way: wayFor(playbook.Land)}, nil
+	return gitMedium{repo: repo, playbook: *playbook, landed: p.Landed, remote: lp.githubURL, way: wayFor(playbook.Land)}, nil
 }
 
 func tipOf(t core.Task) string {
@@ -111,7 +112,7 @@ func startedFrom(t core.Task) string {
 	if t.From == "" || len(t.Base) < 7 {
 		return "where the task started"
 	}
-	return t.From + " at " + short(t.Base)
+	return t.From + " at " + text.Short(t.Base)
 }
 
 // slugify keeps whole words, up to 40 characters, so a branch name never ends

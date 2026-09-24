@@ -1,4 +1,4 @@
-package app
+package work
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/integrations/github"
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // landWay is how an approved code change lands: a new local branch, a
@@ -89,7 +90,7 @@ func (pushWay) line(ctx context.Context, m gitMedium, t core.Task) (*line, error
 	if err != nil {
 		return nil, err
 	}
-	what := fmt.Sprintf("%s moved on since this task started (it is now at %s)", target, short(tip))
+	what := fmt.Sprintf("%s moved on since this task started (it is now at %s)", target, text.Short(tip))
 	if m.landed != nil && m.landed.TaskID != t.ID && m.landed.Commit == tip {
 		what = fmt.Sprintf("%q landed on %s", m.landed.Objective, target)
 	}
@@ -142,7 +143,7 @@ func (prWay) line(ctx context.Context, m gitMedium, t core.Task) (*line, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &line{Commit: tip, Name: target, What: fmt.Sprintf("%s on GitHub moved on since this task started (it is now at %s)", target, short(tip))}, nil
+	return &line{Commit: tip, Name: target, What: fmt.Sprintf("%s on GitHub moved on since this task started (it is now at %s)", target, text.Short(tip))}, nil
 }
 
 func (prWay) deliver(context.Context, gitMedium, core.Task, core.Revision) (string, error) {

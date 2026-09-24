@@ -37,12 +37,12 @@ func (a *App) Run(ctx context.Context, noDispatch bool) error {
 	listeners.Add(1)
 	go func() {
 		defer listeners.Done()
-		a.runLoop(ctx, noDispatch)
+		a.Work.Run(ctx, noDispatch)
 	}()
 	listeners.Add(1)
 	go func() {
 		defer listeners.Done()
-		a.runWakes(ctx)
+		a.Work.RunWakes(ctx)
 	}()
 	pending, err := a.Core.PendingEvents(ctx)
 	if err != nil {

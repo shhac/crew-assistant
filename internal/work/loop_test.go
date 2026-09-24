@@ -1,4 +1,4 @@
-package app
+package work
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/quota"
 	"github.com/shhac/crew-assistant/internal/roles"
@@ -63,9 +64,21 @@ const (
 	ask    = `{"outcome":"question","summary":"Unclear audience.","findings":[],"question":"Is this for the whole team or one person?"}`
 )
 
-func loopApp(t *testing.T, runner *scriptedRunner, deliverTo string) (*App, core.Project, core.Task) {
+// testLoop is a loop over a fresh, private store.
+func testLoop(t *testing.T) *Loop {
 	t.Helper()
-	a := testApp(t)
+	cfg := config.Default()
+	s, err := core.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return New(core.NewService(s, cfg), func() config.Config { return cfg }, false)
+}
+
+func loopApp(t *testing.T, runner *scriptedRunner, deliverTo string) (*Loop, core.Project, core.Task) {
+	t.Helper()
+	a := testLoop(t)
 	a.runner = runner
 	// No real account is ever read from a test; an empty reading is unknown.
 	a.meter = &quota.Meter{Inspect: func(context.Context, session.Options) (session.Inspection, error) { return session.Inspection{}, nil }}
@@ -89,7 +102,7 @@ func loopApp(t *testing.T, runner *scriptedRunner, deliverTo string) (*App, core
 }
 
 // settle runs loop steps until the loop has nothing left to do.
-func settle(t *testing.T, a *App) core.Task {
+func settle(t *testing.T, a *Loop) core.Task {
 	t.Helper()
 	for i := 0; i < 50; i++ {
 		progressed, err := a.loopStep(context.Background(), false)
@@ -105,7 +118,7 @@ func settle(t *testing.T, a *App) core.Task {
 	return core.Task{}
 }
 
-func openDecision(t *testing.T, a *App, task core.Task) core.Decision {
+func openDecision(t *testing.T, a *Loop, task core.Task) core.Decision {
 	t.Helper()
 	snap, _ := a.Core.Snapshot(context.Background())
 	d, ok := findDecision(snap, task.DecisionID)
@@ -311,7 +324,7 @@ func TestNearlyUsedSubscriptionHoldsTheRoleWithoutFailing(t *testing.T) {
 
 func TestStoppingATaskSticksEvenMidTurn(t *testing.T) {
 	runner := &scriptedRunner{reviews: []string{pass}}
-	var a *App
+	var a *Loop
 	var taskID, projectID string
 	// The owner stops the task while the writer's turn is still running.
 	runner.onWriter = func(string) {

@@ -1,4 +1,4 @@
-package app
+package work
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/integrations/github"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // wakeCheckEvery is how often the watcher looks at branches, times and
@@ -20,8 +21,8 @@ const wakeCheckEvery = 15 * time.Second
 
 // WakeMeWhen registers one of the assistant's wakes. The baseline is read now,
 // so a change is measured from what the assistant could see when it asked.
-func (a *App) WakeMeWhen(ctx context.Context, in WakeRequest) (core.Wake, error) {
-	return a.registerWake(ctx, core.WakeAssistant, "", in)
+func (lp *Loop) WakeMeWhen(ctx context.Context, in WakeRequest) (core.Wake, error) {
+	return lp.registerWake(ctx, core.WakeAssistant, "", in)
 }
 
 // WakeRequest is one wake as an agent asks for it; timeout is a duration.
@@ -34,7 +35,7 @@ type WakeRequest struct {
 	Timeout   string `json:"timeout"`
 }
 
-func (a *App) registerWake(ctx context.Context, owner, taskID string, in WakeRequest) (core.Wake, error) {
+func (lp *Loop) registerWake(ctx context.Context, owner, taskID string, in WakeRequest) (core.Wake, error) {
 	timeout := time.Duration(0)
 	if in.Timeout != "" {
 		d, err := time.ParseDuration(in.Timeout)
@@ -44,7 +45,7 @@ func (a *App) registerWake(ctx context.Context, owner, taskID string, in WakeReq
 		timeout = d
 	}
 	wake := core.WakeInput{Owner: owner, TaskID: taskID, On: in.On, Target: in.Target, Match: in.Match, Prompt: in.Prompt, ProjectID: in.ProjectID, Timeout: timeout}
-	snap, err := a.Core.Snapshot(ctx)
+	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
 		return core.Wake{}, err
 	}
@@ -73,18 +74,18 @@ func (a *App) registerWake(ctx context.Context, owner, taskID string, in WakeReq
 			wake.Timeout = time.Until(at) + time.Minute
 		}
 	case core.WakeOnChecks, core.WakeOnReview:
-		pr, err := a.viewPR(ctx, in.Target)
+		pr, err := lp.viewPR(ctx, in.Target)
 		if err != nil {
 			return core.Wake{}, err
 		}
 		wake.Baseline = prValue(in.On, pr)
 	}
-	return a.Core.RegisterWake(ctx, wake)
+	return lp.Core.RegisterWake(ctx, wake)
 }
 
 // OpenWakes lists every wake still waiting or not yet delivered.
-func (a *App) OpenWakes(ctx context.Context) ([]core.Wake, error) {
-	snap, err := a.Core.Snapshot(ctx)
+func (lp *Loop) OpenWakes(ctx context.Context) ([]core.Wake, error) {
+	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -98,12 +99,12 @@ func (a *App) OpenWakes(ctx context.Context) ([]core.Wake, error) {
 }
 
 // viewPR reads a pull request named as owner/name#number.
-func (a *App) viewPR(ctx context.Context, target string) (github.PR, error) {
+func (lp *Loop) viewPR(ctx context.Context, target string) (github.PR, error) {
 	ref, err := github.ParsePRRef(target)
 	if err != nil {
 		return github.PR{}, err
 	}
-	return a.github.View(ctx, ref.Repo, ref.Number)
+	return lp.github.View(ctx, ref.Repo, ref.Number)
 }
 
 func prValue(on string, pr github.PR) string {
@@ -140,12 +141,12 @@ func projectRepo(snap core.Snapshot, projectID string) (string, error) {
 
 // runWakes watches what cannot tell the daemon it changed: branches, the
 // clock, and every wake's expiry.
-func (a *App) runWakes(ctx context.Context) {
+func (lp *Loop) RunWakes(ctx context.Context) {
 	tick := time.NewTicker(wakeCheckEvery)
 	defer tick.Stop()
 	for {
-		if err := a.checkWakes(ctx, time.Now()); err != nil && ctx.Err() == nil {
-			a.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "wakes"}, err)
+		if err := lp.checkWakes(ctx, time.Now()); err != nil && ctx.Err() == nil {
+			lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "wakes"}, err)
 		}
 		select {
 		case <-ctx.Done():
@@ -155,25 +156,25 @@ func (a *App) runWakes(ctx context.Context) {
 	}
 }
 
-func (a *App) checkWakes(ctx context.Context, now time.Time) error {
-	waiting, err := a.Core.Waiting(ctx)
+func (lp *Loop) checkWakes(ctx context.Context, now time.Time) error {
+	waiting, err := lp.Core.Waiting(ctx)
 	if err != nil {
 		return err
 	}
-	snap, err := a.Core.Snapshot(ctx)
+	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
 		return err
 	}
 	for _, w := range waiting {
-		f, ok := a.observe(ctx, snap, w, now)
+		f, ok := lp.observe(ctx, snap, w, now)
 		if !ok {
 			continue
 		}
-		if _, err := a.Core.FireWake(ctx, w.ID, f.observed, f.event, f.timedOut); err != nil && !errors.Is(err, core.ErrConflict) {
+		if _, err := lp.Core.FireWake(ctx, w.ID, f.observed, f.event, f.timedOut); err != nil && !errors.Is(err, core.ErrConflict) {
 			return err
 		}
 		if w.Owner != core.WakeAssistant {
-			if err := a.wakeTask(ctx, w.TaskID, f.event); err != nil {
+			if err := lp.wakeTask(ctx, w.TaskID, f.event); err != nil {
 				return err
 			}
 		}
@@ -188,7 +189,7 @@ type firing struct {
 }
 
 // observe looks at what w waits on and reports a change that fires it.
-func (a *App) observe(ctx context.Context, snap core.Snapshot, w core.Wake, now time.Time) (firing, bool) {
+func (lp *Loop) observe(ctx context.Context, snap core.Snapshot, w core.Wake, now time.Time) (firing, bool) {
 	if now.After(w.ExpiresAt) {
 		return firing{observed: w.Baseline, event: "timed out with no change", timedOut: true}, true
 	}
@@ -198,11 +199,11 @@ func (a *App) observe(ctx context.Context, snap core.Snapshot, w core.Wake, now 
 		return firing{observed: "reached", event: "the time came"}, err == nil && !now.Before(at)
 	case core.WakeOnChecks, core.WakeOnReview:
 		// GitHub is asked about each pull request at most once a minute.
-		if last, ok := a.prSeen.Load(w.On + w.Target); ok && now.Sub(last.(time.Time)) < time.Minute {
+		if last, ok := lp.prSeen.Load(w.On + w.Target); ok && now.Sub(last.(time.Time)) < time.Minute {
 			return firing{}, false
 		}
-		a.prSeen.Store(w.On+w.Target, now)
-		pr, err := a.viewPR(ctx, w.Target)
+		lp.prSeen.Store(w.On+w.Target, now)
+		pr, err := lp.viewPR(ctx, w.Target)
 		if err != nil {
 			return firing{}, false
 		}
@@ -217,15 +218,15 @@ func (a *App) observe(ctx context.Context, snap core.Snapshot, w core.Wake, now 
 		if err != nil {
 			return firing{}, false
 		}
-		return firing{observed: tip, event: fmt.Sprintf("%s moved from %s to %s", w.Target, short(w.Baseline), short(tip))}, w.FiresOn(tip)
+		return firing{observed: tip, event: fmt.Sprintf("%s moved from %s to %s", w.Target, text.Short(w.Baseline), text.Short(tip))}, w.FiresOn(tip)
 	}
 	return firing{}, false
 }
 
 // wakeTask sends a task asleep on something outside the team back to
 // landing, to look again.
-func (a *App) wakeTask(ctx context.Context, taskID, event string) error {
-	_, err := a.Core.UpdateTask(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
+func (lp *Loop) wakeTask(ctx context.Context, taskID, event string) error {
+	_, err := lp.Core.UpdateTask(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
 		if t.Status == core.TaskAwaiting {
 			t.Status, t.Detail = core.TaskLanding, "Looking again: "+event
 		}
@@ -234,7 +235,7 @@ func (a *App) wakeTask(ctx context.Context, taskID, event string) error {
 	if err != nil && !errors.Is(err, core.ErrNotFound) {
 		return err
 	}
-	a.nudgeLoop()
+	lp.Nudge()
 	return nil
 }
 
@@ -260,7 +261,7 @@ func splitWakeBlock(text string) (string, string) {
 
 // applyWakeBlock registers and cancels the implementer's wakes. Problems are
 // kept for its next round rather than dropped.
-func (a *App) applyWakeBlock(ctx context.Context, p core.Project, t core.Task, block string) []string {
+func (lp *Loop) applyWakeBlock(ctx context.Context, p core.Project, t core.Task, block string) []string {
 	if block == "" {
 		return nil
 	}
@@ -270,7 +271,7 @@ func (a *App) applyWakeBlock(ctx context.Context, p core.Project, t core.Task, b
 	}
 	var problems []string
 	for _, handle := range in.Cancel {
-		if _, err := a.Core.CancelWake(ctx, handle, t.ID); err != nil {
+		if _, err := lp.Core.CancelWake(ctx, handle, t.ID); err != nil {
 			problems = append(problems, fmt.Sprintf("cancelling %s: %v", handle, err))
 		}
 	}
@@ -283,7 +284,7 @@ func (a *App) applyWakeBlock(ctx context.Context, p core.Project, t core.Task, b
 			}
 			req.Target = github.PRRef{Repo: t.Playbook.Land.GitHub, Number: t.Proposal.Number}.String()
 		}
-		if _, err := a.registerWake(ctx, core.WakeTask, t.ID, req); err != nil {
+		if _, err := lp.registerWake(ctx, core.WakeTask, t.ID, req); err != nil {
 			problems = append(problems, fmt.Sprintf("waiting on %s %s: %v", req.On, req.Target, err))
 		}
 	}
@@ -292,8 +293,8 @@ func (a *App) applyWakeBlock(ctx context.Context, p core.Project, t core.Task, b
 
 // wakePrompt tells the implementer what woke it, what it is still waiting
 // on, and how to ask for more.
-func (a *App) wakePrompt(ctx context.Context, t core.Task, woken []core.Wake) (string, error) {
-	snap, err := a.Core.Snapshot(ctx)
+func (lp *Loop) wakePrompt(ctx context.Context, t core.Task, woken []core.Wake) (string, error) {
+	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
 		return "", err
 	}

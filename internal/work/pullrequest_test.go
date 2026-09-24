@@ -1,6 +1,6 @@
 //go:build !windows
 
-package app
+package work
 
 import (
 	"context"
@@ -98,7 +98,7 @@ func (f *fakeGitHub) set(fn func()) { f.mu.Lock(); defer f.mu.Unlock(); fn() }
 // prScenario is a code project landing by pull request on a stand-in for
 // GitHub, with one task approved and waiting on its open pull request.
 type prScenario struct {
-	a      *App
+	a      *Loop
 	ctx    context.Context
 	gh     *fakeGitHub
 	runner *codeRunner
@@ -269,7 +269,7 @@ func TestAPullRequestIsBabysatThroughReviewAndCIUntilItMerges(t *testing.T) {
 }
 
 func TestTheImplementerAsksForItsOwnWakesInItsReply(t *testing.T) {
-	a := testApp(t)
+	a := testLoop(t)
 	ctx := context.Background()
 	gh := &fakeGitHub{t: t, checks: "PENDING", decision: "REVIEW_REQUIRED"}
 	remote := t.TempDir()
