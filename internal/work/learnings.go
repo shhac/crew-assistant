@@ -2,6 +2,8 @@ package work
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -72,4 +74,58 @@ func (lp *Loop) sweepLearnings(snap core.Snapshot) {
 			os.RemoveAll(filepath.Join(root, e.Name()))
 		}
 	}
+}
+
+// learnedGuide asks a member to keep what a turn taught it, on the rule the
+// owner set: a shared learning is never about one project, and any data in
+// it is made up. Roles not copied from a member have nowhere to keep it.
+func learnedGuide(r core.Role, afterJSON bool) string {
+	if r.Member == "" {
+		return ""
+	}
+	where := "you may end your reply with"
+	if afterJSON {
+		where = "you may add, after the JSON object,"
+	}
+	return "\n\nIf this turn taught you something you would do again in every project, " + where + ":\n```learned\n" +
+		`[{"when": "the situation it applies to, in a few words", "learning": "what to do, and why"}]` +
+		"\n```\nAt most two. Never put anything from this project in one: no names, paths, repositories, people, code or data; if an example helps, make one up. Leave out anything your learnings already cover. Most turns teach nothing new; then add nothing.\n"
+}
+
+// recordLearned keeps what a member said it learned. A learning that breaks
+// the rule is dropped rather than failing the turn; the work itself stands.
+func (lp *Loop) recordLearned(ctx context.Context, p core.Project, t core.Task, r core.Role, m medium, block string) {
+	if block == "" || r.Member == "" {
+		return
+	}
+	var learned []struct {
+		When     string `json:"when"`
+		Learning string `json:"learning"`
+	}
+	if json.Unmarshal([]byte(block), &learned) != nil {
+		return
+	}
+	var specific []string
+	for _, dir := range append([]string{lp.Core.StateDirectory(), m.workspace()}, p.Directories...) {
+		specific = append(specific, pathForms(dir)...)
+	}
+	if playbook := taskPlaybook(p, t); playbook != nil {
+		specific = append(append(specific, pathForms(playbook.Repo)...), playbook.Land.GitHub)
+	}
+	for _, l := range learned[:min(len(learned), 2)] {
+		lp.Core.RecordLearning(ctx, r.Member, t.ID, core.LearningInput{When: l.When, Text: l.Learning, ProjectID: p.ID}, specific)
+	}
+}
+
+// pathForms is a folder as a role may have seen it: as given, with links
+// resolved, and without macOS's /private prefix.
+func pathForms(dir string) []string {
+	if dir == "" {
+		return nil
+	}
+	forms := []string{dir, strings.TrimPrefix(dir, "/private")}
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		forms = append(forms, real, strings.TrimPrefix(real, "/private"))
+	}
+	return forms
 }

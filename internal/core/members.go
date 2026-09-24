@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -187,6 +188,52 @@ func (s *Service) AddLearning(ctx context.Context, memberID, source string, in L
 		}
 		m.Learnings = append(m.Learnings, Learning{ID: uid(), When: in.When, Text: in.Text, Source: source, ProjectID: in.ProjectID, At: s.now().UTC()})
 		out = *m
+		return nil
+	})
+	return out, err
+}
+
+// RecordLearning keeps something a member learned by itself on a task. The
+// rule it works to is that a shared learning is never about one project and
+// any data in it is made up; one naming the project's own paths is refused
+// outright. The same situation is not learned twice, and when the member is
+// full the oldest thing it taught itself makes room; what the owner added is
+// never pushed out.
+func (s *Service) RecordLearning(ctx context.Context, memberID, taskID string, in LearningInput, specific []string) (Learning, error) {
+	in, err := in.clean()
+	if err != nil {
+		return Learning{}, err
+	}
+	if in.When == "" {
+		return Learning{}, errors.New("a learning needs to say when it applies")
+	}
+	for _, word := range specific {
+		if word != "" && (strings.Contains(in.Text, word) || strings.Contains(in.When, word)) {
+			return Learning{}, fmt.Errorf("a learning must not be about one project; it names %s", word)
+		}
+	}
+	var out Learning
+	err = s.store.update(ctx, func(v *Snapshot) error {
+		m := member(v, memberID)
+		if m == nil {
+			return ErrNotFound
+		}
+		for _, l := range m.Learnings {
+			if strings.EqualFold(l.When, in.When) {
+				return fmt.Errorf("%s already has a learning for %q: %w", m.Name, in.When, ErrConflict)
+			}
+		}
+		if len(m.Learnings) >= maxLearnings {
+			i := slices.IndexFunc(m.Learnings, func(l Learning) bool { return l.Source == LearnedByMember })
+			if i < 0 {
+				return fmt.Errorf("%s is full of learnings the owner added: %w", m.Name, ErrConflict)
+			}
+			m.Learnings = append(m.Learnings[:i], m.Learnings[i+1:]...)
+		}
+		now := s.now().UTC()
+		out = Learning{ID: uid(), When: in.When, Text: in.Text, Source: LearnedByMember, ProjectID: in.ProjectID, TaskID: taskID, At: now}
+		m.Learnings = append(m.Learnings, out)
+		record(v, now, in.ProjectID, "member.learned", m.Name+" learned: "+in.When)
 		return nil
 	})
 	return out, err

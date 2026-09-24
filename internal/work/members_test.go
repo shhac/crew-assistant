@@ -116,3 +116,51 @@ func TestALearningWithoutAWhenIsIndexedByItsOpeningWords(t *testing.T) {
 		t.Fatalf("when %q", got)
 	}
 }
+
+// A member keeps what a turn taught it, on the owner's rule: never about one
+// project. A learning naming the project's own folder is dropped, and the
+// work itself stands either way.
+func TestMembersRecordWhatTheyLearnedButNothingAboutTheProject(t *testing.T) {
+	runner := &scriptedRunner{reviews: []string{pass + "\n```learned\n" + `[{"when": "Reviewing a greeting", "learning": "Check the name is spelled the way the person spells it, e.g. Zoë not Zoe."}]` + "\n```"}}
+	a, p, _ := loopApp(t, runner, "")
+	ctx := context.Background()
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	rn, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kind: core.RoleReviewer, Engine: "codex"})
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", Implementer: ada.ID, Reviewer: rn.ID}); err != nil {
+		t.Fatal(err)
+	}
+	folder := t.TempDir()
+	if _, err := a.Core.SetProjectDirectories(ctx, p.ID, []string{folder}); err != nil {
+		t.Fatal(err)
+	}
+	runner.writerText = "Wrote the note.\n```learned\n" + `[{"when": "Writing a thank-you", "learning": "Name one specific thing the person did."}, {"when": "Saving drafts", "learning": "Keep drafts in ` + folder + `"}]` + "\n```"
+	task := settle(t, a)
+	if task.Status != core.TaskWaiting || strings.Contains(task.Revisions[0].Summary, "learned") {
+		t.Fatalf("the learned block should not reach the draft's summary: %+v", task.Revisions)
+	}
+	if !strings.Contains(runner.seen[0].Prompt, "```learned") || !strings.Contains(runner.seen[0].Prompt, "make one up") {
+		t.Fatal("the writer was not told how to keep what it learned")
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	learned := map[string]core.Learning{}
+	for _, m := range snap.Members {
+		for _, l := range m.Learnings {
+			learned[m.Name+": "+l.When] = l
+		}
+	}
+	if l, ok := learned["Ada: Writing a thank-you"]; !ok || l.Source != core.LearnedByMember || l.TaskID != task.ID || l.ProjectID != p.ID {
+		t.Fatalf("Ada's learning %+v in %v", l, learned)
+	}
+	if _, ok := learned["Ada: Saving drafts"]; ok {
+		t.Fatal("a learning naming the project's own folder was kept")
+	}
+	if _, ok := learned["Rune: Reviewing a greeting"]; !ok {
+		t.Fatalf("the reviewer's learning after its verdict was not kept: %v", learned)
+	}
+}
+
+func TestOnlyMembersAreAskedWhatTheyLearned(t *testing.T) {
+	if learnedGuide(core.Role{Name: "Writer", Kind: core.RoleImplementer}, false) != "" {
+		t.Fatal("a template role has nowhere to keep a learning")
+	}
+}

@@ -26,6 +26,8 @@ type scriptedRunner struct {
 	fail     []error
 	seen     []roles.Spec
 	onWriter func(dir string)
+	// writerText replaces the writer's reply when set.
+	writerText string
 }
 
 func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, error) {
@@ -48,7 +50,11 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 		if err := os.WriteFile(filepath.Join(spec.WorkDir, "note.md"), []byte(body), 0600); err != nil {
 			return roles.Result{}, err
 		}
-		return roles.Result{Text: "Wrote the note.", Session: []byte(`{"engine":"claude","id":"writer"}`)}, nil
+		text := "Wrote the note."
+		if r.writerText != "" {
+			text = r.writerText
+		}
+		return roles.Result{Text: text, Session: []byte(`{"engine":"claude","id":"writer"}`)}, nil
 	}
 	if len(r.reviews) == 0 {
 		return roles.Result{}, errors.New("no scripted review left")

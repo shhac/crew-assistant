@@ -258,13 +258,15 @@ type wakeBlock struct {
 	Cancel     []string      `json:"cancel"`
 }
 
-// splitWakeBlock takes a trailing ```wake block off the implementer's reply.
-func splitWakeBlock(text string) (string, string) {
-	start := strings.LastIndex(text, "```wake")
+// splitBlock takes the last fenced block of a kind, such as ```wake, off a
+// role's reply, returning the reply without it and the block's contents.
+func splitBlock(text, kind string) (string, string) {
+	fence := "```" + kind
+	start := strings.LastIndex(text, fence)
 	if start < 0 {
 		return text, ""
 	}
-	rest := text[start+len("```wake"):]
+	rest := text[start+len(fence):]
 	end := strings.Index(rest, "```")
 	if end < 0 {
 		return text, ""

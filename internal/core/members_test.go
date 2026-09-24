@@ -3,7 +3,9 @@ package core
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -99,5 +101,67 @@ func TestRoleNamesMustDifferByMoreThanCase(t *testing.T) {
 	p.Roles[1].Name = strings.ToUpper(p.Roles[0].Name)
 	if err := p.Validate(); err == nil {
 		t.Fatal("two roles named alike were accepted")
+	}
+}
+
+func TestAMembersOwnLearningsMakeRoomButNeverPushOutTheOwners(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kind: RoleImplementer, Engine: "claude"})
+	learn := func(when string) error {
+		_, err := s.RecordLearning(testContext, m.ID, "task", LearningInput{When: when, Text: "Do the thing.", ProjectID: p.ID}, []string{"/secret/repo"})
+		return err
+	}
+	if _, err := s.RecordLearning(testContext, m.ID, "task", LearningInput{Text: "No situation"}, nil); err == nil {
+		t.Fatal("a member's learning needs to say when it applies")
+	}
+	if _, err := s.RecordLearning(testContext, m.ID, "task", LearningInput{When: "Paths", Text: "Look in /secret/repo/docs"}, []string{"/secret/repo"}); err == nil {
+		t.Fatal("a learning about the project was kept")
+	}
+	if err := learn("Oldest"); err != nil {
+		t.Fatal(err)
+	}
+	if err := learn("oldest"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("the same situation twice: %v", err)
+	}
+	for i := 1; i < maxLearnings; i++ {
+		if _, err := s.AddLearning(testContext, m.ID, LearnedByOwner, LearningInput{Text: fmt.Sprint("Owner ", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := learn("Newest"); err != nil {
+		t.Fatalf("a full member should make room: %v", err)
+	}
+	snap, _ := s.Snapshot(testContext)
+	got := snap.Members[0].Learnings
+	if len(got) != maxLearnings || got[len(got)-1].When != "Newest" || slices.ContainsFunc(got, func(l Learning) bool { return l.When == "Oldest" }) {
+		t.Fatalf("the oldest learning it taught itself should have made room: %+v", got[len(got)-1])
+	}
+	if err := learn("One more"); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ = s.Snapshot(testContext)
+	owners := 0
+	for _, l := range snap.Members[0].Learnings {
+		if l.Source == LearnedByOwner {
+			owners++
+		}
+	}
+	if owners != maxLearnings-1 {
+		t.Fatalf("the owner's learnings should all stay, have %d", owners)
+	}
+	if !slices.ContainsFunc(snap.Activity, func(a Activity) bool { return a.Summary == "Ada learned: Newest" }) {
+		t.Fatal("a learning should be noted in the project's activity")
+	}
+}
+
+func TestAMemberFullOfTheOwnersLearningsKeepsThemAll(t *testing.T) {
+	s, _ := fixture(t)
+	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kind: RoleImplementer, Engine: "claude"})
+	for i := 0; i < maxLearnings; i++ {
+		s.AddLearning(testContext, m.ID, LearnedByOwner, LearningInput{Text: fmt.Sprint("Owner ", i)})
+	}
+	if _, err := s.RecordLearning(testContext, m.ID, "task", LearningInput{When: "Anything", Text: "Something"}, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("a member full of the owner's learnings should keep them all: %v", err)
 	}
 }

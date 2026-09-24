@@ -258,7 +258,7 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 		return err
 	}
 	seen := len(t.Direction)
-	spec, err := lp.roleSpec(t, writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp)+prompt)
+	spec, err := lp.roleSpec(t, writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp)+prompt+learnedGuide(writers[0], false))
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
@@ -317,8 +317,12 @@ func (lp *Loop) takeInLanded(ctx context.Context, t core.Task, m medium) (core.T
 // review, or, answering a pull request, the team's word that nothing needed
 // to change. seen is how much of the owner's direction its prompt carried.
 func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m medium, writer string, result roles.Result, seen int) error {
-	reply, block := splitWakeBlock(result.Text)
+	reply, learned := splitBlock(result.Text, "learned")
+	reply, block := splitBlock(reply, "wake")
 	wakeErrors := lp.applyWakeBlock(ctx, p, t, block)
+	if r, ok := t.Role(writer); ok {
+		lp.recordLearned(ctx, p, t, r, m, learned)
+	}
 	n := len(t.Revisions) + 1
 	revision, err := m.snapshot(ctx, t, n)
 	if errors.Is(err, gitrepo.ErrNoChange) && proposed(t) {
@@ -399,7 +403,7 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 	}
 	defer cleanup()
 	playbook := taskPlaybook(p, t)
-	base := checkerPrompt(p, t, r, checker, playbook) + note
+	base := checkerPrompt(p, t, r, checker, playbook) + note + learnedGuide(checker, true)
 	spec, err := lp.roleSpec(t, checker, dir, checker.Kind == core.RoleQA, m, base)
 	if err != nil {
 		return core.Verdict{}, err
@@ -410,8 +414,10 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 		if err != nil {
 			return core.Verdict{}, err
 		}
-		verdict, err := parseVerdict(result.Text)
+		reply, learned := splitBlock(result.Text, "learned")
+		verdict, err := parseVerdict(reply)
 		if err == nil {
+			lp.recordLearned(ctx, p, t, checker, m, learned)
 			return verdict, nil
 		}
 		parseErr = err

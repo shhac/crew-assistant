@@ -289,7 +289,7 @@ func TestTheImplementerAsksForItsOwnWakesInItsReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	reply := "Fixed the nil case.\n```wake\n" + `{"wake_me_when": [{"on": "pr_checks", "target": "this", "match": "", "prompt": "if e2e fails again it is the flaky upload test", "timeout": "2h"}, {"on": "time", "target": "30m", "match": "", "prompt": "re-run the benchmark", "timeout": ""}, {"on": "weather", "target": "x", "match": "", "prompt": "", "timeout": ""}], "cancel": []}` + "\n```"
-	text, block := splitWakeBlock(reply)
+	text, block := splitBlock(reply, "wake")
 	if text != "Fixed the nil case." {
 		t.Fatalf("the block was left in the summary: %q", text)
 	}
