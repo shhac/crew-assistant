@@ -183,7 +183,7 @@ func TestCodeTaskRunsInACloneAndDeliversALocalBranch(t *testing.T) {
 	if ownerGit(t, source, "status", "--porcelain") != "?? wip.txt" || ownerGit(t, source, "branch", "--list", "paul/*") != "" {
 		t.Fatal("the owner's checkout changed before approval")
 	}
-	if _, err = a.Core.ResolveDecision(ctx, d.ID, choiceApprove); err != nil {
+	if _, err = a.Core.ChooseDecision(ctx, d.ID, choiceApprove); err != nil {
 		t.Fatal(err)
 	}
 	task = settle(t, a)
@@ -264,7 +264,7 @@ func TestTheSecondChangeCatchesUpWhenTheFirstLands(t *testing.T) {
 		t.Fatalf("both should wait for approval from the same start: %+v\n%+v", first, second)
 	}
 	stale := openDecision(t, a, second)
-	if _, err = a.Core.ResolveDecision(ctx, openDecision(t, a, first).ID, choiceApprove); err != nil {
+	if _, err = a.Core.ChooseDecision(ctx, openDecision(t, a, first).ID, choiceApprove); err != nil {
 		t.Fatal(err)
 	}
 	first, second = current(first.ID), current(second.ID)
@@ -291,7 +291,7 @@ func TestTheSecondChangeCatchesUpWhenTheFirstLands(t *testing.T) {
 	if !strings.Contains(d.Context, "It builds on Add A, which landed first") {
 		t.Fatalf("the owner is not told the change builds on what landed: %s", d.Context)
 	}
-	if _, err = a.Core.ResolveDecision(ctx, d.ID, choiceApprove); err != nil {
+	if _, err = a.Core.ChooseDecision(ctx, d.ID, choiceApprove); err != nil {
 		t.Fatal(err)
 	}
 	if second = current(second.ID); second.Status != core.TaskDelivered || second.DeliveredTo != "paul/add-b" {
@@ -340,7 +340,7 @@ func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
 	}
 	approve := func(task core.Task) {
 		t.Helper()
-		if _, err := a.Core.ResolveDecision(ctx, openDecision(t, a, task).ID, choiceApprove); err != nil {
+		if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -401,7 +401,7 @@ func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
 	}
 	ownerGit(t, source, "commit", "-q", "-am", "owner wip")
 	ownerWip := ownerGit(t, source, "rev-parse", "HEAD")
-	if _, err = a.Core.ResolveDecision(ctx, d.ID, choiceTryAgain); err != nil {
+	if _, err = a.Core.ChooseDecision(ctx, d.ID, choiceTryAgain); err != nil {
 		t.Fatal(err)
 	}
 	second = current(second.ID)
@@ -471,7 +471,7 @@ func TestATargetThatKeepsMovingComesToTheOwner(t *testing.T) {
 	// From approval on, main moves before every check.
 	runner.onCheck = move
 	move()
-	if _, err = a.Core.ResolveDecision(ctx, openDecision(t, a, task).ID, choiceApprove); err != nil {
+	if _, err = a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove); err != nil {
 		t.Fatal(err)
 	}
 	task = current()
@@ -481,7 +481,7 @@ func TestATargetThatKeepsMovingComesToTheOwner(t *testing.T) {
 	}
 	// The owner lets it settle and tries again: the count starts afresh.
 	runner.onCheck = nil
-	if _, err = a.Core.ResolveDecision(ctx, d.ID, choiceTryAgain); err != nil {
+	if _, err = a.Core.ChooseDecision(ctx, d.ID, choiceTryAgain); err != nil {
 		t.Fatal(err)
 	}
 	if task = current(); task.Status != core.TaskLanded {
@@ -504,7 +504,7 @@ func TestLandingRefusesWhenItCannotTellTheOrder(t *testing.T) {
 			task = candidate
 		}
 	}
-	a.Core.ResolveDecision(ctx, openDecision(t, a, task).ID, choiceApprove)
+	a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove)
 	settle(t, a)
 	// Another change in the project names a commit git has never seen.
 	other, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Ghost"})
@@ -560,7 +560,7 @@ func TestNoApprovalStepAndAlreadyLanded(t *testing.T) {
 	second, _ = findTask(snap, p.ID, second.ID)
 	ownerGit(t, source, "fetch", "-q", filepath.Join(p.ScratchDirectory, "clone"), second.Branch)
 	ownerGit(t, source, "merge", "-q", "--ff-only", second.Revisions[len(second.Revisions)-1].Ref)
-	a.Core.ResolveDecision(ctx, openDecision(t, a, second).ID, choiceApprove)
+	a.Core.ChooseDecision(ctx, openDecision(t, a, second).ID, choiceApprove)
 	settle(t, a)
 	snap, _ = a.Core.Snapshot(ctx)
 	second, _ = findTask(snap, p.ID, second.ID)

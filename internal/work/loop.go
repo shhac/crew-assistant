@@ -611,13 +611,18 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 		return lp.stopTask(ctx, t, "You closed it")
 	}
 	answer := strings.TrimSpace(d.Answer)
+	// Only a choice the owner picked acts on the task. Their own words are
+	// direction, even when they spell "approve" or "stop".
+	chose := func(choice string) bool {
+		return d.Disposition == core.DispositionChoice && answer == choice
+	}
 	switch {
-	case strings.EqualFold(answer, choiceStop):
+	case chose(choiceStop):
 		return lp.stopTask(ctx, t, "You stopped it")
-	case (d.Kind == decisionDelivery || d.Kind == decisionUpdate) && strings.EqualFold(answer, choiceApprove),
-		d.Kind == decisionEscalation && strings.EqualFold(answer, choiceAcceptDraft):
+	case (d.Kind == decisionDelivery || d.Kind == decisionUpdate) && chose(choiceApprove),
+		d.Kind == decisionEscalation && chose(choiceAcceptDraft):
 		return lp.approve(ctx, t)
-	case d.Kind == decisionFailure && strings.EqualFold(answer, choiceTryAgain):
+	case d.Kind == decisionFailure && chose(choiceTryAgain):
 		_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.Status, t.ResumeStatus = t.ResumeStatus, ""
 			if t.Status == "" {
@@ -635,7 +640,7 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 		switch {
 		case d.Kind == decisionQuestion:
 			t.Direction = append(t.Direction, "Answer to a reviewer's question ("+text.Clip(d.Context, 300)+"): "+answer)
-		case !strings.EqualFold(answer, choiceAnotherRound) && !strings.EqualFold(answer, choiceChanges):
+		case !chose(choiceAnotherRound) && !chose(choiceChanges):
 			t.Direction = append(t.Direction, answer)
 		}
 		t.NextRound()

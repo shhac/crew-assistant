@@ -46,7 +46,7 @@ func TestDecisionResolvesExactlyOnceUnderConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func(a string) {
 			defer wg.Done()
-			_, err := s.ResolveDecision(testContext, d.ID, a)
+			_, err := s.ChooseDecision(testContext, d.ID, a)
 			success <- err == nil
 		}(answer)
 	}

@@ -144,11 +144,12 @@ func New(a *app.App, auth *Auth) http.Handler {
 			problem(w, errors.New("provide one selected choice or custom answer"))
 			return
 		}
+		choose := a.Core.ChooseDecision
 		answer := in.Choice
 		if strings.TrimSpace(in.Answer) != "" {
-			answer = in.Answer
+			choose, answer = a.Core.AnswerDecision, in.Answer
 		}
-		v, err := a.Core.ResolveDecision(r.Context(), r.PathValue("id"), answer)
+		v, err := choose(r.Context(), r.PathValue("id"), answer)
 		if err != nil {
 			problem(w, err)
 			return

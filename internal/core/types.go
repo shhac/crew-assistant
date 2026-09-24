@@ -41,6 +41,14 @@ type Landing struct {
 	At        time.Time `json:"at"`
 }
 
+// How a decision was closed. Only DispositionChoice can approve, stop or
+// retry a task; DispositionCustom is the owner's own words.
+const (
+	DispositionChoice    = "choice"
+	DispositionCustom    = "custom"
+	DispositionDismissed = "dismissed"
+)
+
 type Decision struct {
 	Disposition      string `json:"disposition,omitempty"`
 	ResolutionReason string `json:"resolution_reason,omitempty"`

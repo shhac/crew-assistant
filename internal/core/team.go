@@ -181,7 +181,7 @@ func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
 			t.NextRound()
 		}
 	case open != nil:
-		open.Status, open.Disposition, open.Answer, open.ResolvedAt = "resolved", "custom", m.Text, &now
+		open.Status, open.Disposition, open.Answer, open.ResolvedAt = "resolved", DispositionCustom, m.Text, &now
 		record(v, now, open.ProjectID, "decision.resolved", open.Title+": "+m.Text)
 		t.ReviseWithDirection()
 	case t.Status == TaskAwaiting:

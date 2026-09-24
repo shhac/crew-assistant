@@ -62,6 +62,13 @@ func TestDashboardProjectDecisionMemoryFlow(t *testing.T) {
 	if w := call("POST", "/api/decisions/"+custom.ID+"/resolve", `{"choice":"One","answer":"Other"}`); w.Code != 400 {
 		t.Fatal("ambiguous answer accepted", w.Code)
 	}
+	if w := call("POST", "/api/decisions/"+custom.ID+"/resolve", `{"choice":"Three"}`); w.Code != 409 {
+		t.Fatal("a choice the decision does not offer was accepted", w.Code)
+	}
+	if w := call("POST", "/api/decisions/"+custom.ID+"/resolve", `{"answer":"One"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"disposition":"custom"`) {
+		t.Fatal("typed words that spell a choice must stay the owner's words", w.Code, w.Body.String())
+	}
+	custom, _ = s.CreateDecision(context.Background(), core.DecisionInput{Title: "Custom?", Context: "Options incomplete", Recommendation: "One", Choices: []string{"One", "Two"}})
 	if w := call("POST", "/api/decisions/"+custom.ID+"/resolve", `{"answer":"Use the existing option"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"disposition":"custom"`) {
 		t.Fatal(w.Code, w.Body.String())
 	}

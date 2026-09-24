@@ -78,6 +78,7 @@ type MessageTeamArgs struct {
 }
 type ResolveDecisionArgs struct {
 	DecisionID string `json:"decision_id"`
+	Choice     string `json:"choice"`
 	Answer     string `json:"answer"`
 }
 
@@ -145,7 +146,7 @@ var tools = []labelled{
 	{Tool: tool("stop_task", "Stop a queued or running task when the owner asks. A turn already under way finishes but changes nothing; any decision it was waiting on is closed.", []string{"project_id", "task_id"}, nil), label: "Stop a task"},
 	{Tool: tool("order_tasks", "Set the order a project's queued tasks start in: task_ids lists every queued task of the project, first to start first. You decide the order as the project's manager, putting what unblocks or matters most first; the owner may also ask for an order. Tasks already started are not included. If the list has changed since you read it, read the state again and retry.", []string{"project_id"}, []string{"task_ids"}), label: "Reorder the to-do list"},
 	{Tool: tool("message_team", "Say something directly to one member of a task's team, for the owner or as the project's manager. to is a role name from the task's team, or implementer, reviewer or qa when the team has only one. To the implementer it is direction: a task waiting on the owner's approval, question or round limit goes straight back for another round with it, one waiting on its pull request does too, and otherwise the implementer's next round has it; nothing reaches approval or landing until it has been taken in. To a reviewer or QA it asks for a check of the latest draft now, ahead of the task's own next step, with the message in their prompt; their verdict counts while the task is being checked, and their reply is recorded on the task. A task that is landing or finished cannot be messaged.", []string{"project_id", "task_id", "to", "message"}, nil), label: "Message a team member"},
-	{Tool: tool("resolve_decision", "Answer an open decision with the owner's choice, in their words. Use it only when the owner has just given that answer in this conversation.", []string{"decision_id", "answer"}, nil), label: "Answer a decision"},
+	{Tool: tool("resolve_decision", "Answer an open decision for the owner. Use it only when the owner has just given that answer in this conversation. choice is one of the decision's choices, exactly as listed, when the owner picked it (only a choice can approve, stop or retry). answer is anything else they said, in their words, which the team takes as direction. Give one and leave the other empty.", []string{"decision_id", "choice", "answer"}, nil), label: "Answer a decision"},
 	{Tool: tool("ask_decision", "Prepare an unresolved owner decision. Include recommendation, viable alternatives, consequences and evidence.", []string{"project_id", "question", "recommendation", "why"}, []string{"options", "evidence"}), label: "Prepare a decision"},
 	{Tool: tool("remember_preference", "Remember an owner preference. This cannot grant permissions or change budgets.", []string{"key", "value"}, nil), label: "Remember a preference"},
 	{Tool: tool("report_status", "Record an evidence-backed update on a project for the owner.", []string{"project_id", "summary"}, []string{"evidence"}), label: "Record a progress update"},

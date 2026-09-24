@@ -4,17 +4,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
-// ResolveDecision records the owner's selected option or custom answer. Existing
-// worker decision propagation remains responsible for delivering actual answers.
-func (s *Service) ResolveDecision(ctx context.Context, id, answer string) (Decision, error) {
+// ChooseDecision records the owner picking one of a decision's own choices.
+// Only a choice made this way can approve, stop or retry; the loop reads any
+// other answer as the owner's words.
+func (s *Service) ChooseDecision(ctx context.Context, id, choice string) (Decision, error) {
+	choice = strings.TrimSpace(choice)
+	if choice == "" {
+		return Decision{}, errors.New("choose one of the decision's choices")
+	}
+	return s.finishDecision(ctx, id, choice, DispositionChoice, "")
+}
+
+// AnswerDecision records the owner's own words, even when they happen to
+// spell one of the choices.
+func (s *Service) AnswerDecision(ctx context.Context, id, answer string) (Decision, error) {
 	answer = strings.TrimSpace(answer)
 	if answer == "" || len(answer) > 16*1024 {
 		return Decision{}, errors.New("answer is required and must be at most 16 KiB")
 	}
-	return s.finishDecision(ctx, id, answer, "")
+	return s.finishDecision(ctx, id, answer, DispositionCustom, "")
 }
 
 // DismissDecision closes an obsolete question with an audit reason. It is not an
@@ -25,9 +37,9 @@ func (s *Service) DismissDecision(ctx context.Context, id, reason string) (Decis
 	if reason == "" || len(reason) > 4096 {
 		return Decision{}, errors.New("dismissal reason is required and must be at most 4 KiB")
 	}
-	return s.finishDecision(ctx, id, "", reason)
+	return s.finishDecision(ctx, id, "", DispositionDismissed, reason)
 }
-func (s *Service) finishDecision(ctx context.Context, id, answer, reason string) (Decision, error) {
+func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, reason string) (Decision, error) {
 	var out Decision
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		for i := range v.Decisions {
@@ -38,24 +50,20 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, reason string)
 			if d.Status != "open" {
 				return fmt.Errorf("decision already closed: %w", ErrConflict)
 			}
+			if disposition == DispositionChoice && !slices.Contains(d.Choices, answer) {
+				return fmt.Errorf("%q is not one of this decision's choices: %w", answer, ErrConflict)
+			}
 			now := s.now().UTC()
 			d.ResolvedAt = &now
-			if reason != "" {
+			d.Disposition = disposition
+			if disposition == DispositionDismissed {
 				d.Status = "dismissed"
-				d.Disposition = "dismissed"
 				d.ResolutionReason = reason
 				d.Answer = ""
 				record(v, now, d.ProjectID, "decision.dismissed", d.Title+": "+reason)
 			} else {
 				d.Status = "resolved"
-				d.Disposition = "custom"
 				d.Answer = answer
-				for _, choice := range d.Choices {
-					if choice == answer {
-						d.Disposition = "choice"
-						break
-					}
-				}
 				record(v, now, d.ProjectID, "decision.resolved", d.Title+": "+answer)
 			}
 			out = *d

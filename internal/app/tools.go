@@ -122,8 +122,17 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		decision, err := a.Core.ResolveDecision(ctx, in.DecisionID, in.Answer)
-		a.Work.Nudge()
+		if (strings.TrimSpace(in.Choice) == "") == (strings.TrimSpace(in.Answer) == "") {
+			return nil, errors.New("give either a choice or an answer")
+		}
+		choose, answer := a.Core.ChooseDecision, in.Choice
+		if strings.TrimSpace(in.Answer) != "" {
+			choose, answer = a.Core.AnswerDecision, in.Answer
+		}
+		decision, err := choose(ctx, in.DecisionID, answer)
+		if err == nil {
+			a.Work.Nudge()
+		}
 		return decision, err
 	case "ask_decision":
 		var in engine.DecisionArgs

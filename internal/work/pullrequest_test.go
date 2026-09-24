@@ -158,7 +158,7 @@ func (s *prScenario) current(t *testing.T) core.Task {
 func (s *prScenario) open(t *testing.T) core.Task {
 	t.Helper()
 	task := s.current(t)
-	s.a.Core.ResolveDecision(s.ctx, openDecision(t, s.a, task).ID, choiceApprove)
+	s.a.Core.ChooseDecision(s.ctx, openDecision(t, s.a, task).ID, choiceApprove)
 	task = s.current(t)
 	if task.Status != core.TaskAwaiting || task.Proposal == nil || task.Proposal.Number != 7 {
 		t.Fatalf("the pull request did not open: %+v", task)
@@ -191,7 +191,7 @@ func TestAPullRequestIsBabysatThroughReviewAndCIUntilItMerges(t *testing.T) {
 	if !strings.Contains(d.Context, "opens a pull request on o/r from paul/add-a into main") {
 		t.Fatalf("the owner is not told approving opens a pull request: %s", d.Context)
 	}
-	a.Core.ResolveDecision(ctx, d.ID, choiceApprove)
+	a.Core.ChooseDecision(ctx, d.ID, choiceApprove)
 	task = current()
 	first := task.Revisions[0].Ref
 	if task.Status != core.TaskAwaiting || task.Proposal == nil || task.Proposal.Number != 7 || task.Proposal.Pushed != first || ownerGit(t, remote, "rev-parse", "refs/heads/paul/add-a") != first {
@@ -338,7 +338,7 @@ func TestAnUpdateThatTouchesWhatRunsWaitsForTheOwnerBeforeItIsPushed(t *testing.
 	if d.Kind != decisionUpdate || !strings.Contains(d.Context, "Makefile changed") || s.remoteHead(t) != first {
 		t.Fatalf("a Makefile change went to the pull request unasked: %+v head %s", d, s.remoteHead(t))
 	}
-	s.a.Core.ResolveDecision(s.ctx, d.ID, choiceApprove)
+	s.a.Core.ChooseDecision(s.ctx, d.ID, choiceApprove)
 	task = s.current(t)
 	if s.remoteHead(t) != task.Revisions[len(task.Revisions)-1].Ref {
 		t.Fatal("the approved update was not pushed")
@@ -357,7 +357,7 @@ func TestAClosedPullRequestComesToTheOwnerAndATryAgainOpensANewOne(t *testing.T)
 	if d.Kind != decisionFailure || !strings.Contains(d.Context, "closed without merging") || task.Proposal.Number != 0 || task.Proposal.Pushed == "" {
 		t.Fatalf("the closed pull request was not brought to the owner: %+v %+v", d, task.Proposal)
 	}
-	s.a.Core.ResolveDecision(s.ctx, d.ID, choiceTryAgain)
+	s.a.Core.ChooseDecision(s.ctx, d.ID, choiceTryAgain)
 	if task = s.current(t); task.Proposal.Number != 7 || s.gh.opened != 2 || task.Status != core.TaskAwaiting {
 		t.Fatalf("trying again did not open a new pull request: %+v opened %d", task, s.gh.opened)
 	}
