@@ -3,6 +3,7 @@ import {
   approveLabel,
   boardColumns,
   decisionFor,
+  decisionKind,
   isOpenMessage,
   landsBy,
   leadRequest,
@@ -209,6 +210,30 @@ describe("the board", () => {
       decisionFor(task({ decision_id: "d2" }), [open, closed]),
     ).toBeUndefined();
     expect(decisionFor(task({}), [open])).toBeUndefined();
+  });
+  it("shows and answers each kind of decision in its own way", () => {
+    expect(decisionKind(decision("question")).answering).toBe("open");
+    expect(decisionKind(decision("delivery")).prompt).toBe(
+      "What should change?",
+    );
+    expect(decisionKind(decision("update")).approve?.()).toBe(
+      "Push the update",
+    );
+    expect(
+      [
+        "delivery",
+        "update",
+        "question",
+        "escalation",
+        "failure",
+        "choice",
+      ].filter((k) => decisionKind(decision(k)).recommend),
+    ).toEqual(["update", "escalation", "choice"]);
+    // A kind this dashboard doesn't know is shown as a plain choice.
+    const other = decisionKind(decision("constructor"));
+    expect(other.badge).toBe("Decision");
+    expect(other.answering).toBe("offered");
+    expect(decisionKind(undefined).step(task({}))).toBe("Waiting for you");
   });
   it("treats a message as open until it is answered", () => {
     const message = (status: "waiting" | "working" | "answered") => ({

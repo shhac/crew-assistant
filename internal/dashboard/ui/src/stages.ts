@@ -83,6 +83,85 @@ export function roleName(task: Task, kind: string, fallback: string) {
   return task.roles?.find((r) => r.kind === kind)?.name ?? fallback;
 }
 
+export interface DecisionKindWords {
+  /** The badge on the inbox. */
+  badge: string;
+  /** What the waiting request is doing, for its board card and panel. */
+  step: (task: Task) => string;
+  recommend: boolean;
+  /**
+   * How the owner can answer in their own words: the form is open from the
+   * start, a button offers it, or only a choice that asks for words opens it.
+   */
+  answering: "open" | "offered" | "through-choice";
+  prompt: string;
+  send: string;
+  /** The words for "Approve", when approving sends the work on. */
+  approve?: (playbook?: Playbook) => string;
+  /** Whether the card says how hard landing is to undo. */
+  reversible?: boolean;
+}
+
+const askForChanges = { prompt: "What should change?", send: "Send changes" };
+const askForAnswer = { prompt: "Your answer", send: "Send answer" };
+
+const otherDecision: DecisionKindWords = {
+  badge: "Decision",
+  step: () => "Waiting for you",
+  recommend: true,
+  answering: "offered",
+  ...askForAnswer,
+};
+
+const decisionKinds: Record<string, DecisionKindWords> = {
+  delivery: {
+    badge: "Ready to approve",
+    step: () => "Waiting for your approval",
+    recommend: false,
+    answering: "through-choice",
+    ...askForChanges,
+    approve: approveLabel,
+    reversible: true,
+  },
+  update: {
+    badge: "Update to check",
+    step: () => "Update waiting for you",
+    recommend: true,
+    answering: "through-choice",
+    ...askForChanges,
+    approve: () => "Push the update",
+  },
+  question: {
+    badge: "Question",
+    step: () => "Question for you",
+    recommend: false,
+    answering: "open",
+    ...askForAnswer,
+  },
+  escalation: {
+    badge: "Review points left",
+    step: (task) => `Still has review points after ${task.round} rounds`,
+    recommend: true,
+    answering: "through-choice",
+    ...askForAnswer,
+  },
+  failure: {
+    badge: "Stuck",
+    step: () => "Stuck until you decide",
+    recommend: false,
+    answering: "through-choice",
+    ...askForAnswer,
+  },
+};
+
+/** How a kind of decision is shown and answered; any other kind is a plain choice. */
+export function decisionKind(decision?: Decision): DecisionKindWords {
+  const kind = decision?.kind ?? "";
+  return Object.hasOwn(decisionKinds, kind)
+    ? decisionKinds[kind]
+    : otherDecision;
+}
+
 const held = (task: Task) => {
   const until = recordedTime(task.retry_at);
   return !!until && until.valueOf() > Date.now();
@@ -106,19 +185,7 @@ export function requestStep(task: Task, decision?: Decision): string {
       return check ? `${round}QA running ${check}` : `${round}QA checking`;
     }
     case "waiting":
-      switch (decision?.kind) {
-        case "delivery":
-          return "Waiting for your approval";
-        case "update":
-          return "Update waiting for you";
-        case "question":
-          return "Question for you";
-        case "escalation":
-          return `Still has review points after ${task.round} rounds`;
-        case "failure":
-          return "Stuck until you decide";
-      }
-      return "Waiting for you";
+      return decisionKind(decision).step(task);
     case "landing": {
       const target = task.playbook?.land?.target;
       return target ? `Landing on ${target}` : "Landing";
