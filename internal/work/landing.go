@@ -160,7 +160,7 @@ func (lp *Loop) landingFailed(ctx context.Context, t core.Task, r core.Revision,
 	}); err != nil {
 		return err
 	}
-	_, err := lp.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
+	_, err := lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionFailure, core.DecisionInput{
 		Title:          fmt.Sprintf("“%s” couldn't land", t.Objective),
 		Context:        text.Clip(reason, 900),
 		Recommendation: choiceTryAgain + " once the cause is fixed",
@@ -186,7 +186,7 @@ func (lp *Loop) catchUpRound(ctx context.Context, t core.Task, c catcher, l line
 		return err
 	}
 	if tooMany {
-		_, err = lp.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
+		_, err = lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionFailure, core.DecisionInput{
 			Title:          fmt.Sprintf("“%s” keeps having to catch up", t.Objective),
 			Context:        fmt.Sprintf("It caught up %d times and the target moved again each time: %s. Nothing was forced.", maxCatchUps, l.What),
 			Recommendation: choiceTryAgain + " once the target is quiet",
@@ -283,7 +283,7 @@ func (lp *Loop) supersedeStaleApprovals(ctx context.Context, projectID string) e
 			continue
 		}
 		d, ok := findDecision(snap, t.DecisionID)
-		if !ok || d.Status != "open" || (d.Kind != decisionDelivery && d.Kind != decisionUpdate && d.Kind != decisionEscalation) {
+		if !ok || d.Status != core.DecisionOpen || !(d.Approves() || d.Kind == core.DecisionEscalation) {
 			continue
 		}
 		m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))

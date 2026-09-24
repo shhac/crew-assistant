@@ -162,18 +162,18 @@ func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
 	entry := m.Text
 	var open *Decision
 	for i := range v.Decisions {
-		if d := &v.Decisions[i]; t.Status == TaskWaiting && d.ID == t.DecisionID && d.Status == "open" {
+		if d := &v.Decisions[i]; t.Status == TaskWaiting && d.ID == t.DecisionID && d.Status == DecisionOpen {
 			open = d
 		}
 	}
-	if open != nil && open.Kind == "question" {
+	if open != nil && open.Kind == DecisionQuestion {
 		entry = "Answer to a reviewer's question (" + text.Clip(open.Context, 300) + "): " + m.Text
 	}
 	m.Direction = len(t.Direction)
 	t.Direction = append(t.Direction, entry)
 	t.DirectionPending++
 	switch {
-	case open != nil && open.Kind == "failure":
+	case open != nil && open.Kind == DecisionFailure:
 		// A retry that would go straight back to landing must not land
 		// without the owner's direction.
 		if t.ResumeStatus == TaskLanding {
@@ -181,7 +181,7 @@ func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
 			t.NextRound()
 		}
 	case open != nil:
-		open.Status, open.Disposition, open.Answer, open.ResolvedAt = "resolved", DispositionCustom, m.Text, &now
+		open.Status, open.Disposition, open.Answer, open.ResolvedAt = DecisionResolved, DispositionCustom, m.Text, &now
 		record(v, now, open.ProjectID, "decision.resolved", open.Title+": "+m.Text)
 		t.ReviseWithDirection()
 	case t.Status == TaskAwaiting:
@@ -238,7 +238,7 @@ func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID strin
 			t.Verdicts = append(t.Verdicts, counted)
 		case verdict.Outcome != VerdictPass && t.Status == TaskWaiting:
 			for i := range v.Decisions {
-				if d := &v.Decisions[i]; d.ID == t.DecisionID && d.Status == "open" && (d.Kind == "delivery" || d.Kind == "update") {
+				if d := &v.Decisions[i]; d.ID == t.DecisionID && d.Status == DecisionOpen && d.Approves() {
 					d.Context += fmt.Sprintf("\n\nAsked directly, %s did not pass it: %s", m.To, verdict.Summary)
 				}
 			}

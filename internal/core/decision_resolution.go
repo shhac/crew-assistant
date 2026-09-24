@@ -47,7 +47,7 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 			if d.ID != id {
 				continue
 			}
-			if d.Status != "open" {
+			if d.Status != DecisionOpen {
 				return fmt.Errorf("decision already closed: %w", ErrConflict)
 			}
 			if disposition == DispositionChoice && !slices.Contains(d.Choices, answer) {
@@ -57,12 +57,12 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 			d.ResolvedAt = &now
 			d.Disposition = disposition
 			if disposition == DispositionDismissed {
-				d.Status = "dismissed"
+				d.Status = DecisionDismissed
 				d.ResolutionReason = reason
 				d.Answer = ""
 				record(v, now, d.ProjectID, "decision.dismissed", d.Title+": "+reason)
 			} else {
-				d.Status = "resolved"
+				d.Status = DecisionResolved
 				d.Answer = answer
 				record(v, now, d.ProjectID, "decision.resolved", d.Title+": "+answer)
 			}

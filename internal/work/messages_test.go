@@ -18,7 +18,7 @@ func TestTheWriterRevisesWithAMessageInsteadOfAwaitingApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	task = settle(t, a)
-	if openDecision(t, a, task).Kind != decisionDelivery || len(task.Revisions) != 2 {
+	if openDecision(t, a, task).Kind != core.DecisionDelivery || len(task.Revisions) != 2 {
 		t.Fatalf("expected a second draft to approve: %+v", task)
 	}
 	if writer := runner.seen[2]; !writer.Write || !strings.Contains(writer.Prompt, "Mention the launch party") {
@@ -46,7 +46,7 @@ func TestAMessageSentMidTurnIsNotDroppedWhenTheReviewPasses(t *testing.T) {
 	}
 	a, p, task = loopApp(t, runner, "")
 	task = settle(t, a)
-	if openDecision(t, a, task).Kind != decisionDelivery || len(task.Revisions) != 2 {
+	if openDecision(t, a, task).Kind != core.DecisionDelivery || len(task.Revisions) != 2 {
 		t.Fatalf("the passing draft went to approval without the message: %+v", task)
 	}
 	if got := task.Messages[0]; got.Status != core.MessageAnswered || got.Revision != 2 {
@@ -70,7 +70,7 @@ func TestAskingTheReviewerChecksTheLatestDraftNow(t *testing.T) {
 		t.Fatal(err)
 	}
 	task = settle(t, a)
-	if openDecision(t, a, task).Kind != decisionDelivery {
+	if openDecision(t, a, task).Kind != core.DecisionDelivery {
 		t.Fatalf("task %+v", task)
 	}
 	if len(runner.seen) != 2 || !strings.Contains(runner.seen[1].Prompt, "Is it warm enough?") {

@@ -49,13 +49,31 @@ const (
 	DispositionDismissed = "dismissed"
 )
 
+// Decision kinds. A choice is an ordinary decision; the rest hold a task.
+const (
+	DecisionChoice   = "choice"
+	DecisionDelivery = "delivery"
+	// DecisionUpdate holds an update to an open pull request that changes
+	// what runs or instructs on the owner's side.
+	DecisionUpdate     = "update"
+	DecisionQuestion   = "question"
+	DecisionEscalation = "escalation"
+	DecisionFailure    = "failure"
+)
+
+// Decision statuses.
+const (
+	DecisionOpen      = "open"
+	DecisionResolved  = "resolved"
+	DecisionDismissed = "dismissed"
+)
+
 type Decision struct {
 	Disposition      string `json:"disposition,omitempty"`
 	ResolutionReason string `json:"resolution_reason,omitempty"`
 	ID               string `json:"id"`
 	ProjectID        string `json:"project_id,omitempty"`
-	// TaskID and Kind tie a decision to the task it holds. Kind is "choice"
-	// for an ordinary decision, or delivery, question or escalation.
+	// TaskID and Kind tie a decision to the task it holds.
 	TaskID         string     `json:"task_id,omitempty"`
 	Kind           string     `json:"kind,omitempty"`
 	Title          string     `json:"title"`
@@ -67,6 +85,12 @@ type Decision struct {
 	CreatedAt      time.Time  `json:"created_at"`
 	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
 }
+
+// Approves reports a decision whose approval lets the task's change go out.
+func (d Decision) Approves() bool {
+	return d.Kind == DecisionDelivery || d.Kind == DecisionUpdate
+}
+
 type Message struct {
 	ID      string `json:"id"`
 	Role    string `json:"role"`

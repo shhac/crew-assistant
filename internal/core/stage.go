@@ -131,16 +131,16 @@ func waitingStage(v *Snapshot, t Task) string {
 		}
 	}
 	switch kind {
-	case "delivery", "update":
+	case DecisionDelivery, DecisionUpdate:
 		return StageReady
-	case "failure":
+	case DecisionFailure:
 		if t.ResumeStatus == "" || t.ResumeStatus == TaskWaiting {
 			return StageImplementing
 		}
 		resumed := t
 		resumed.Status = t.ResumeStatus
 		return stageOf(v, resumed)
-	case "question":
+	case DecisionQuestion:
 		if n := len(t.Revisions); n > 0 {
 			for _, verdict := range t.Verdicts {
 				if verdict.Revision == t.Revisions[n-1].N && verdict.Outcome == VerdictQuestion && roleKind(t, verdict.Role) == RoleQA {

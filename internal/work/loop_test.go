@@ -122,7 +122,7 @@ func openDecision(t *testing.T, a *Loop, task core.Task) core.Decision {
 	t.Helper()
 	snap, _ := a.Core.Snapshot(context.Background())
 	d, ok := findDecision(snap, task.DecisionID)
-	if !ok || d.Status != "open" {
+	if !ok || d.Status != core.DecisionOpen {
 		t.Fatalf("no open decision for %+v", task)
 	}
 	return d
@@ -137,7 +137,7 @@ func TestLoopRevisesUntilReviewersPassThenDeliversOnApproval(t *testing.T) {
 		t.Fatalf("task %+v", task)
 	}
 	d := openDecision(t, a, task)
-	if d.Kind != decisionDelivery || d.Choices[0] != choiceApprove || !strings.Contains(d.Context, dest) {
+	if d.Kind != core.DecisionDelivery || d.Choices[0] != choiceApprove || !strings.Contains(d.Context, dest) {
 		t.Fatalf("delivery decision %+v", d)
 	}
 	// The second writer turn resumed the first and was told what to change.
@@ -172,7 +172,7 @@ func TestOwnerChangesQuestionsAndRoundLimits(t *testing.T) {
 	ctx := context.Background()
 	task := settle(t, a)
 	d := openDecision(t, a, task)
-	if d.Kind != decisionQuestion || !strings.Contains(d.Context, "whole team") {
+	if d.Kind != core.DecisionQuestion || !strings.Contains(d.Context, "whole team") {
 		t.Fatalf("question %+v", d)
 	}
 	a.Core.AnswerDecision(ctx, d.ID, "The whole team")
@@ -180,7 +180,7 @@ func TestOwnerChangesQuestionsAndRoundLimits(t *testing.T) {
 	// Round 2 answered the question; rounds 2 and 3 were revised; the limit
 	// of three rounds then comes to the owner rather than a fourth attempt.
 	d = openDecision(t, a, task)
-	if d.Kind != decisionEscalation || task.Round != 3 {
+	if d.Kind != core.DecisionEscalation || task.Round != 3 {
 		t.Fatalf("expected an escalation at the round limit, got %+v / %+v", d, task)
 	}
 	if !strings.Contains(runner.seen[2].Prompt, "The whole team") {
@@ -189,13 +189,13 @@ func TestOwnerChangesQuestionsAndRoundLimits(t *testing.T) {
 	a.Core.ChooseDecision(ctx, d.ID, choiceAnotherRound)
 	task = settle(t, a)
 	d = openDecision(t, a, task)
-	if d.Kind != decisionEscalation || task.Round != 4 {
+	if d.Kind != core.DecisionEscalation || task.Round != 4 {
 		t.Fatalf("another round should end at another escalation, got %+v", task)
 	}
 	a.Core.AnswerDecision(ctx, d.ID, "Make it shorter")
 	task = settle(t, a)
 	d = openDecision(t, a, task)
-	if d.Kind != decisionDelivery || !strings.Contains(runner.seen[len(runner.seen)-2].Prompt, "Make it shorter") {
+	if d.Kind != core.DecisionDelivery || !strings.Contains(runner.seen[len(runner.seen)-2].Prompt, "Make it shorter") {
 		t.Fatalf("free-text direction did not produce a new round: %+v", task)
 	}
 	a.Core.ChooseDecision(ctx, d.ID, choiceApprove)
@@ -213,7 +213,7 @@ func TestTypedAnswersAreDirectionNotChoices(t *testing.T) {
 	ctx := context.Background()
 	task := settle(t, a)
 	d := openDecision(t, a, task)
-	if d.Kind != decisionDelivery {
+	if d.Kind != core.DecisionDelivery {
 		t.Fatalf("delivery %+v", d)
 	}
 	if d, _ = a.Core.AnswerDecision(ctx, d.ID, "approve"); d.Disposition != core.DispositionCustom {
@@ -221,7 +221,7 @@ func TestTypedAnswersAreDirectionNotChoices(t *testing.T) {
 	}
 	task = settle(t, a)
 	d = openDecision(t, a, task)
-	if task.Status != core.TaskWaiting || task.Round != 2 || d.Kind != decisionQuestion {
+	if task.Status != core.TaskWaiting || task.Round != 2 || d.Kind != core.DecisionQuestion {
 		t.Fatalf("a typed approve should go back for a round, got %+v", task)
 	}
 	if !strings.Contains(runner.seen[2].Prompt, "approve") {
@@ -248,7 +248,7 @@ func TestFailuresRetryQuietlyThenAskOnce(t *testing.T) {
 		t.RetryAt = time.Time{}
 		return "", nil
 	})
-	if task = settle(t, a); task.Status != core.TaskWaiting || openDecision(t, a, task).Kind != decisionDelivery {
+	if task = settle(t, a); task.Status != core.TaskWaiting || openDecision(t, a, task).Kind != core.DecisionDelivery {
 		t.Fatalf("the retry should have carried on: %+v", task)
 	}
 
@@ -257,11 +257,11 @@ func TestFailuresRetryQuietlyThenAskOnce(t *testing.T) {
 	a, _, _ = loopApp(t, runner, "")
 	task = settle(t, a)
 	d := openDecision(t, a, task)
-	if d.Kind != decisionFailure || task.ResumeStatus != core.TaskWriting {
+	if d.Kind != core.DecisionFailure || task.ResumeStatus != core.TaskWriting {
 		t.Fatalf("a sandbox problem should reach the owner at once: %+v %+v", d, task)
 	}
 	a.Core.ChooseDecision(context.Background(), d.ID, choiceTryAgain)
-	if task = settle(t, a); openDecision(t, a, task).Kind != decisionDelivery {
+	if task = settle(t, a); openDecision(t, a, task).Kind != core.DecisionDelivery {
 		t.Fatalf("try again should resume the failed step: %+v", task)
 	}
 }
@@ -303,7 +303,7 @@ func TestBriefChangeRechecksBeforeDelivery(t *testing.T) {
 	}
 	a.Core.ChooseDecision(ctx, d.ID, choiceChanges)
 	task = settle(t, a)
-	if openDecision(t, a, task).Kind != decisionDelivery || len(task.Revisions) != 2 || task.Revisions[1].BriefVersion != 2 {
+	if openDecision(t, a, task).Kind != core.DecisionDelivery || len(task.Revisions) != 2 || task.Revisions[1].BriefVersion != 2 {
 		t.Fatalf("the new draft should answer brief 2: %+v", task)
 	}
 	for _, v := range task.Verdicts {

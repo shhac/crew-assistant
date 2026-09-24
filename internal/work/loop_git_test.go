@@ -146,7 +146,7 @@ func TestCodeTaskRunsInACloneAndDeliversALocalBranch(t *testing.T) {
 		t.Fatalf("task %+v", task)
 	}
 	d := openDecision(t, a, task)
-	if d.Kind != decisionDelivery || !strings.Contains(d.Context, "paul/add-feature") || !strings.Contains(d.Context, "from main at "+start[:7]) || !strings.Contains(d.Context, "Nothing is pushed") {
+	if d.Kind != core.DecisionDelivery || !strings.Contains(d.Context, "paul/add-feature") || !strings.Contains(d.Context, "from main at "+start[:7]) || !strings.Contains(d.Context, "Nothing is pushed") {
 		t.Fatalf("delivery decision %+v", d)
 	}
 	// QA ran with write access in the clone; the reviewer read-only; both saw
@@ -393,7 +393,7 @@ func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
 	}
 	second = current(second.ID)
 	d := openDecision(t, a, second)
-	if d.Kind != decisionFailure || !strings.Contains(d.Context, "uncommitted changes") {
+	if d.Kind != core.DecisionFailure || !strings.Contains(d.Context, "uncommitted changes") {
 		t.Fatalf("expected the owner to be asked about their uncommitted work: %+v", d)
 	}
 	if raw, _ := os.ReadFile(filepath.Join(source, "main.go")); string(raw) != "package main // wip\n" {
@@ -476,7 +476,7 @@ func TestATargetThatKeepsMovingComesToTheOwner(t *testing.T) {
 	}
 	task = current()
 	d := openDecision(t, a, task)
-	if d.Kind != decisionFailure || !strings.Contains(d.Title, "keeps having to catch up") || task.CatchUps != maxCatchUps+1 {
+	if d.Kind != core.DecisionFailure || !strings.Contains(d.Title, "keeps having to catch up") || task.CatchUps != maxCatchUps+1 {
 		t.Fatalf("a moving target never came to the owner: %+v %+v", d, task)
 	}
 	// The owner lets it settle and tries again: the count starts afresh.

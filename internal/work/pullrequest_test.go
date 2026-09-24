@@ -335,7 +335,7 @@ func TestAnUpdateThatTouchesWhatRunsWaitsForTheOwnerBeforeItIsPushed(t *testing.
 	s.review(t, "Add a make target for this.", time.Now())
 	task := s.current(t)
 	d := openDecision(t, s.a, task)
-	if d.Kind != decisionUpdate || !strings.Contains(d.Context, "Makefile changed") || s.remoteHead(t) != first {
+	if d.Kind != core.DecisionUpdate || !strings.Contains(d.Context, "Makefile changed") || s.remoteHead(t) != first {
 		t.Fatalf("a Makefile change went to the pull request unasked: %+v head %s", d, s.remoteHead(t))
 	}
 	s.a.Core.ChooseDecision(s.ctx, d.ID, choiceApprove)
@@ -354,7 +354,7 @@ func TestAClosedPullRequestComesToTheOwnerAndATryAgainOpensANewOne(t *testing.T)
 	}
 	task := s.current(t)
 	d := openDecision(t, s.a, task)
-	if d.Kind != decisionFailure || !strings.Contains(d.Context, "closed without merging") || task.Proposal.Number != 0 || task.Proposal.Pushed == "" {
+	if d.Kind != core.DecisionFailure || !strings.Contains(d.Context, "closed without merging") || task.Proposal.Number != 0 || task.Proposal.Pushed == "" {
 		t.Fatalf("the closed pull request was not brought to the owner: %+v %+v", d, task.Proposal)
 	}
 	s.a.Core.ChooseDecision(s.ctx, d.ID, choiceTryAgain)

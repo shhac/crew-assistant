@@ -23,17 +23,6 @@ import (
 	"github.com/shhac/crew-assistant/internal/text"
 )
 
-// Decision kinds a task can wait on.
-const (
-	decisionDelivery = "delivery"
-	// decisionUpdate holds an update to an open pull request that changes
-	// what runs or instructs on the owner's side.
-	decisionUpdate     = "update"
-	decisionQuestion   = "question"
-	decisionEscalation = "escalation"
-	decisionFailure    = "failure"
-)
-
 const (
 	choiceApprove      = "Approve"
 	choiceChanges      = "Request changes"
@@ -440,7 +429,7 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 		return lp.askForDelivery(ctx, p, t, r, current)
 	case len(questions) > 0:
 		q := questions[0]
-		_, err := lp.Core.OpenTaskDecision(ctx, t.ID, decisionQuestion, core.DecisionInput{
+		_, err := lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionQuestion, core.DecisionInput{
 			Title:          fmt.Sprintf("%s has a question about “%s”", q.Role, t.Objective),
 			Context:        q.Question,
 			Recommendation: "Answer it, or let the team decide",
@@ -448,7 +437,7 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 		})
 		return err
 	case t.Round >= t.MaxRounds:
-		_, err := lp.Core.OpenTaskDecision(ctx, t.ID, decisionEscalation, core.DecisionInput{
+		_, err := lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionEscalation, core.DecisionInput{
 			Title:          fmt.Sprintf("“%s” still has review points after %d rounds", t.Objective, t.Round),
 			Context:        reviewDigest(changes),
 			Recommendation: "Another round if these points matter; otherwise accept it as it is",
@@ -505,7 +494,7 @@ func (lp *Loop) askForDelivery(ctx context.Context, p core.Project, t core.Task,
 	if approvalStands(t) || !taskPlaybook(p, t).Land.AsksFirst() || proposed(t) {
 		return lp.resumeLanding(ctx, t)
 	}
-	_, err = lp.Core.OpenTaskDecision(ctx, t.ID, decisionDelivery, core.DecisionInput{
+	_, err = lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionDelivery, core.DecisionInput{
 		Title:          approvalTitle(t, taskPlaybook(p, t)),
 		Context:        text.Clip(r.Summary, 600) + "\n\n" + m.deliveryNote(t),
 		Recommendation: choiceApprove,
@@ -543,7 +532,7 @@ func (lp *Loop) roleFailed(ctx context.Context, t core.Task, role string, cause 
 	}); err != nil {
 		return err
 	}
-	_, err = lp.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
+	_, err = lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionFailure, core.DecisionInput{
 		Title:          fmt.Sprintf("%s couldn't work on “%s”", role, t.Objective),
 		Context:        text.Clip(cause.Error(), 600),
 		Recommendation: choiceTryAgain + " once the cause is fixed",
@@ -575,7 +564,7 @@ func (lp *Loop) settleAnswers(ctx context.Context, snap core.Snapshot) (bool, er
 			continue
 		}
 		d, ok := findDecision(snap, t.DecisionID)
-		if !ok || d.Status == "open" {
+		if !ok || d.Status == core.DecisionOpen {
 			continue
 		}
 		return true, lp.applyAnswer(ctx, t, d)
@@ -584,7 +573,7 @@ func (lp *Loop) settleAnswers(ctx context.Context, snap core.Snapshot) (bool, er
 }
 
 func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) error {
-	if d.Status == "dismissed" {
+	if d.Status == core.DecisionDismissed {
 		return lp.stopTask(ctx, t, "You closed it")
 	}
 	answer := strings.TrimSpace(d.Answer)
@@ -596,10 +585,10 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 	switch {
 	case chose(choiceStop):
 		return lp.stopTask(ctx, t, "You stopped it")
-	case (d.Kind == decisionDelivery || d.Kind == decisionUpdate) && chose(choiceApprove),
-		d.Kind == decisionEscalation && chose(choiceAcceptDraft):
+	case d.Approves() && chose(choiceApprove),
+		d.Kind == core.DecisionEscalation && chose(choiceAcceptDraft):
 		return lp.approve(ctx, t)
-	case d.Kind == decisionFailure && chose(choiceTryAgain):
+	case d.Kind == core.DecisionFailure && chose(choiceTryAgain):
 		_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.Status, t.ResumeStatus = t.ResumeStatus, ""
 			if t.Status == "" {
@@ -615,7 +604,7 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 	// changes, answered a reviewer's question or wants one more attempt.
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		switch {
-		case d.Kind == decisionQuestion:
+		case d.Kind == core.DecisionQuestion:
 			t.Direction = append(t.Direction, "Answer to a reviewer's question ("+text.Clip(d.Context, 300)+"): "+answer)
 		case !chose(choiceAnotherRound) && !chose(choiceChanges):
 			t.Direction = append(t.Direction, answer)

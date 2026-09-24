@@ -97,7 +97,7 @@ func (lp *Loop) publish(ctx context.Context, t core.Task, m gitMedium, r core.Re
 			return true, lp.landingFailed(ctx, t, r, err)
 		}
 		if len(notes) > 0 {
-			_, err = lp.Core.OpenTaskDecision(ctx, t.ID, decisionUpdate, core.DecisionInput{
+			_, err = lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionUpdate, core.DecisionInput{
 				Title:          fmt.Sprintf("Check the update to “%s” before it's pushed", t.Objective),
 				Context:        "It changes things that run or instruct on your side:\n- " + strings.Join(notes, "\n- ") + "\n\nApproving pushes it to " + prop.Branch + " on " + m.playbook.Land.GitHub + ".",
 				Recommendation: choiceApprove + " if these changes are expected",

@@ -313,7 +313,7 @@ func (s *Service) OpenTaskDecision(ctx context.Context, taskID, kind string, in 
 		return Decision{}, errors.New("decision requires title, context, recommendation and at least two choices")
 	}
 	now := s.now().UTC()
-	out := Decision{ID: uid(), Kind: kind, TaskID: taskID, Title: in.Title, Context: in.Context, Recommendation: in.Recommendation, Choices: in.Choices, Status: "open", CreatedAt: now}
+	out := Decision{ID: uid(), Kind: kind, TaskID: taskID, Title: in.Title, Context: in.Context, Recommendation: in.Recommendation, Choices: in.Choices, Status: DecisionOpen, CreatedAt: now}
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		t := task(v, taskID)
 		if t == nil {
