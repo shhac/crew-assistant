@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/media/localdocs"
 )
@@ -39,14 +40,20 @@ var (
 		{Name: "Reviewer", Kind: core.RoleReviewer, Engine: "codex"},
 		{Name: "QA", Kind: core.RoleQA, Engine: "claude"},
 	}
+	// The crew-assistant project is staffed by two of the owner's members.
+	crewTeam = []core.Role{
+		{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude", Model: "opus", Member: "demo-ada"},
+		{Name: "Rune", Kind: core.RoleReviewer, Engine: "codex", Member: "demo-rune"},
+		{Name: "QA", Kind: core.RoleQA, Engine: "claude"},
+	}
 	writingTeam = []core.Role{
 		{Name: "Writer", Kind: core.RoleImplementer, Engine: "claude"},
 		{Name: "Reviewer", Kind: core.RoleReviewer, Engine: "codex"},
 	}
 )
 
-func codePlaybook(repo string, land core.LandPolicy) *core.Playbook {
-	return &core.Playbook{Template: "code", Medium: core.MediumGit, Roles: codeTeam, MaxRounds: 3, Deliver: "owner", Repo: repo, BranchPrefix: "crew/", Check: "make check", Land: land}
+func codePlaybook(repo string, land core.LandPolicy, team []core.Role) *core.Playbook {
+	return &core.Playbook{Template: "code", Medium: core.MediumGit, Roles: team, MaxRounds: 3, Deliver: "owner", Repo: repo, BranchPrefix: "crew/", Check: "make check", Land: land}
 }
 
 func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
@@ -54,9 +61,9 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 	docsRepo := filepath.Join(dir, "projects", "docs-site")
 	fastForward := core.LandPolicy{Via: core.LandPush, Target: "main", Method: "fast-forward", Approve: core.ApproveBefore, Means: "the next release includes it"}
 	pullRequest := core.LandPolicy{Via: core.LandPullRequest, Target: "main", Method: "squash", GitHub: "example/docs-site", Approve: core.ApproveBefore}
-	crew := core.Project{ID: "demo-crew", Title: "crew-assistant", Status: "active", Directories: []string{crewRepo}, Playbook: codePlaybook(crewRepo, fastForward), UpdatedAt: ago(4 * time.Minute),
+	crew := core.Project{ID: "demo-crew", Title: "crew-assistant", Status: "active", Directories: []string{crewRepo}, Playbook: codePlaybook(crewRepo, fastForward, crewTeam), UpdatedAt: ago(4 * time.Minute),
 		Brief: core.Brief{Version: 3, Goal: "Make crew-assistant a software factory that can build and improve itself.", Criteria: []string{"Features land on main without losing work", "Tests never touch real services"}, UpdatedAt: ago(72 * time.Hour)}}
-	docs := core.Project{ID: "demo-docs", Title: "docs-site", Status: "active", Directories: []string{docsRepo}, Playbook: codePlaybook(docsRepo, pullRequest), UpdatedAt: ago(22 * time.Minute),
+	docs := core.Project{ID: "demo-docs", Title: "docs-site", Status: "active", Directories: []string{docsRepo}, Playbook: codePlaybook(docsRepo, pullRequest, codeTeam), UpdatedAt: ago(22 * time.Minute),
 		Brief: core.Brief{Version: 1, Goal: "A documentation site people can find answers in quickly.", Audience: "Developers new to the product", Criteria: []string{"Every page loads fast", "Search finds pages by their headings"}, UpdatedAt: ago(240 * time.Hour)}}
 	memo := core.Project{ID: "demo-memo", Title: "Q4 planning memo", Status: "active", UpdatedAt: ago(time.Minute),
 		Playbook: &core.Playbook{Template: "draft", Medium: core.MediumDocuments, Roles: writingTeam, MaxRounds: 3, Deliver: "owner"},
@@ -81,9 +88,9 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 		{N: 2, BriefVersion: 3, Ref: "b30f381", Files: []string{"internal/media/gitrepo/sign.go", "internal/media/gitrepo/gitrepo.go", "internal/media/gitrepo/gitrepo_test.go", "internal/core/playbook.go"}, Summary: "Signing failures now say signing was the cause, and the tests use a stand-in signer.", At: ago(40 * time.Minute)},
 	}
 	signing.Verdicts = []core.Verdict{
-		{Revision: 1, Role: "Reviewer", BriefVersion: 3, Outcome: core.VerdictRevise, Summary: "Close, but a failed signature gives no hint why.", Findings: []core.Finding{{Note: "Say in the error that signing failed and how to turn it off."}, {Note: "Test with a stand-in gpg program, not the real one."}}, At: ago(130 * time.Minute)},
+		{Revision: 1, Role: "Rune", BriefVersion: 3, Outcome: core.VerdictRevise, Summary: "Close, but a failed signature gives no hint why.", Findings: []core.Finding{{Note: "Say in the error that signing failed and how to turn it off."}, {Note: "Test with a stand-in gpg program, not the real one."}}, At: ago(130 * time.Minute)},
 		pass(1, "QA", "make check passed.", ago(120*time.Minute)),
-		pass(2, "Reviewer", "Both findings resolved, none new.", ago(20*time.Minute)),
+		pass(2, "Rune", "Both findings resolved, none new.", ago(20*time.Minute)),
 		pass(2, "QA", "make check passed in 3 min 12 s.", ago(6*time.Minute)),
 	}
 	signing.DecisionID = "demo-land-signing"
@@ -94,8 +101,8 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 		{N: 2, BriefVersion: 3, Ref: "c07d3b8", Files: []string{"internal/dashboard/ui/src/ProjectsPage.tsx", "internal/dashboard/ui/src/ProjectsPage.test.tsx"}, Summary: "Added tests for each group and an empty state.", At: ago(12 * time.Minute)},
 	}
 	grouping.Verdicts = []core.Verdict{
-		{Revision: 1, Role: "Reviewer", BriefVersion: 3, Outcome: core.VerdictRevise, Summary: "Needs tests for the grouping.", Findings: []core.Finding{{Note: "No test covers a project with no requests."}}, At: ago(60 * time.Minute)},
-		pass(2, "Reviewer", "Tests cover every group now.", ago(4*time.Minute)),
+		{Revision: 1, Role: "Rune", BriefVersion: 3, Outcome: core.VerdictRevise, Summary: "Needs tests for the grouping.", Findings: []core.Finding{{Note: "No test covers a project with no requests."}}, At: ago(60 * time.Minute)},
+		pass(2, "Rune", "Tests cover every group now.", ago(4*time.Minute)),
 	}
 	grouping.Messages = []core.TeamMessage{{ID: "demo-message-qa", To: "QA", Kind: core.RoleQA, From: core.FromOwner, Text: "Run it with the race detector too, please.", Status: core.MessageWorking, At: ago(3 * time.Minute)}}
 
@@ -105,7 +112,7 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 	landed := func(id, objective, commit string, at time.Time) core.Task {
 		t := started(crew, id, objective, core.TaskLanded, 1, at.Add(-2*time.Hour))
 		t.Revisions = []core.Revision{{N: 1, BriefVersion: 3, Ref: commit, Summary: "Done.", At: at.Add(-time.Hour)}}
-		t.Verdicts = []core.Verdict{pass(1, "Reviewer", "Good to go.", at.Add(-50*time.Minute)), pass(1, "QA", "make check passed.", at.Add(-40*time.Minute))}
+		t.Verdicts = []core.Verdict{pass(1, "Rune", "Good to go.", at.Add(-50*time.Minute)), pass(1, "QA", "make check passed.", at.Add(-40*time.Minute))}
 		t.Approved, t.DeliveredTo, t.Detail, t.UpdatedAt = 1, "main", "Landed on main", at
 		return t
 	}
@@ -164,6 +171,19 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 			{ID: "demo-m2", Role: "assistant", Content: "QA is running `make check` on round 2. I've set a wake-up for when it finishes and will put the landing in your inbox.", CreatedAt: ago(39 * time.Minute)},
 			{ID: "demo-m3", Role: "user", Origin: "wake", Content: wakeMessage(ago), CreatedAt: ago(5 * time.Minute)},
 			{ID: "demo-m4", Role: "assistant", Content: "`make check` passed. It's in your inbox, ready to land on main.", CreatedAt: ago(4 * time.Minute)},
+		},
+		Members: []core.Member{
+			{ID: "demo-ada", Name: "Ada", Kind: core.RoleImplementer, Engine: "claude", Model: "opus", Instructions: "Prefer small, reviewable commits.", CreatedAt: ago(20 * 24 * time.Hour),
+				Avatar: config.Avatar{Background: "#1d1b2e", Accent: "#c3b1e1", Marks: []config.Mark{{D: "M64 22 L100 104 H80 L72 84 H56 L48 104 H28 Z", Color: "#c3b1e1"}, {D: "M60 70 H68 L64 58 Z", Color: "#1d1b2e"}}},
+				Learnings: []core.Learning{
+					{ID: "demo-l1", Text: "Run the whole test suite before finishing, not only the package you changed.", ProjectID: crew.ID, At: ago(9 * 24 * time.Hour)},
+					{ID: "demo-l2", Text: "Keep user-facing copy plain; the owner rewrites filler.", ProjectID: crew.ID, At: ago(2 * 24 * time.Hour)},
+				}},
+			{ID: "demo-rune", Name: "Rune", Kind: core.RoleReviewer, Engine: "codex", Instructions: "Read the tests before the code.", CreatedAt: ago(20 * 24 * time.Hour),
+				Avatar: config.Avatar{Background: "#10202b", Accent: "#8ecae6", Marks: []config.Mark{{D: "M40 30 H80 A22 22 0 0 1 80 74 H52 L88 104", Color: "#8ecae6", StrokeWidth: 12}, {D: "M40 30 V104", Color: "#8ecae6", StrokeWidth: 12}}},
+				Learnings: []core.Learning{
+					{ID: "demo-l3", Text: "Ask for a test of the failure path, not just the happy one.", ProjectID: crew.ID, At: ago(5 * 24 * time.Hour)},
+				}},
 		},
 		Memories: []core.Memory{
 			{ID: "demo-mem1", Key: "decisions", Content: "Bring a recommendation with every decision, and keep updates brief.", Kind: "preference", Source: "owner", UpdatedAt: ago(12 * 24 * time.Hour)},

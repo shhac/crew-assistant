@@ -33,6 +33,21 @@ func TestTheSampleShowsWorkAtEveryStageAndNeverTouchesRealState(t *testing.T) {
 			t.Errorf("no sample task is at %s", want)
 		}
 	}
+	if len(snap.Members) == 0 {
+		t.Error("the sample has no team members")
+	}
+	for _, m := range snap.Members {
+		if !strings.HasPrefix(m.AvatarSVG, "<svg") {
+			t.Errorf("member %s cannot be drawn: %+v", m.Name, m.Avatar)
+		}
+	}
+	for _, task := range snap.Tasks {
+		for _, v := range task.Verdicts {
+			if _, ok := task.Role(v.Role); !ok {
+				t.Errorf("%q has a verdict from %s, who is not on its team", task.Objective, v.Role)
+			}
+		}
+	}
 	for _, d := range snap.Decisions {
 		if d.Status == "open" {
 			if task := findTask(snap, d.TaskID); task.DecisionID != d.ID || task.Status != core.TaskWaiting {
