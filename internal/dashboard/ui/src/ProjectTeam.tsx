@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { FileSystemPicker } from "./FileSystemPicker";
 import { DirectoryList } from "./ProjectForms";
+import { isCode } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
 import {
   setDirectories,
@@ -67,7 +68,7 @@ export function TeamTab({
 }
 
 function TeamView({ playbook }: { playbook: Playbook }) {
-  const code = playbook.medium === "git";
+  const code = isCode(playbook);
   return (
     <dl className="facts">
       {playbook.roles.map((role) => (

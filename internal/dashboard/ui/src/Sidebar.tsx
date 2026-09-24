@@ -1,5 +1,5 @@
 import { href, projectHref, type Route } from "./router";
-import { projectGroup } from "./stages";
+import { projectGroup, projectTasks } from "./stages";
 import { ErrorNotice, Icon } from "./ui";
 import type { State } from "./api";
 
@@ -111,7 +111,9 @@ export function Sidebar({
             >
               <span
                 className="dot"
-                style={{ color: dotTone[projectGroup(p, state.tasks)] }}
+                style={{
+                  color: dotTone[projectGroup(projectTasks(p, state.tasks))],
+                }}
               />
               <span className="nav-text">{p.title}</span>
             </a>

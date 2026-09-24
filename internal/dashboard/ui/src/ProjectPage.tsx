@@ -5,7 +5,7 @@ import { LandingTab } from "./ProjectLanding";
 import { ActivityTab } from "./ProjectActivity";
 import { RequestPanel } from "./RequestPanel";
 import { href, projectHref, type ProjectTab, type Route } from "./router";
-import { isCode, landsBy, needsYou } from "./stages";
+import { isCode, landsBy, needsYou, projectKind, projectTasks } from "./stages";
 import { Icon, Pill } from "./ui";
 import type { Project, State } from "./api";
 
@@ -28,7 +28,7 @@ export function ProjectPage({
   state: State;
   refresh: () => Promise<void>;
 }) {
-  const tasks = state.tasks.filter((t) => t.project_id === project.id);
+  const tasks = projectTasks(project, state.tasks);
   const waiting = tasks.filter(needsYou).length;
   const code = isCode(project.playbook);
   const tabs: ProjectTab[] = code
@@ -57,9 +57,7 @@ export function ProjectPage({
         </div>
         <p className="project-meta soft">
           {code && <Icon name="Branch" size={14} />}
-          <span>
-            {!project.playbook ? "Tracking only" : code ? "Code" : "Writing"}
-          </span>
+          <span>{projectKind(project.playbook)}</span>
           {folder && (
             <>
               <span aria-hidden="true">·</span>

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { finished, isCode } from "./stages";
+import { finished, isCode, taskPlaybook, verdictOutcome } from "./stages";
 import { ErrorNotice, Pill, sinceLabel, useAction } from "./ui";
 import {
   messageTeam,
@@ -8,12 +8,6 @@ import {
   type Task,
   type TeamMessage,
 } from "./api";
-
-const outcomeLabel: Record<string, string> = {
-  pass: "Passed",
-  revise: "Asked for changes",
-  question: "Asked a question",
-};
 
 /** What a message to each kind of team member does. */
 function effect(role: Role | undefined, task: Task, waitingOn?: string) {
@@ -74,9 +68,7 @@ export function TeamThread({
             <MessageView
               key={m.id}
               message={m}
-              made={
-                isCode(task.playbook ?? project.playbook) ? "change" : "draft"
-              }
+              made={isCode(taskPlaybook(task, project)) ? "change" : "draft"}
             />
           ))}
         </ol>
@@ -185,8 +177,8 @@ function Reply({ message: m, made }: { message: TeamMessage; made: string }) {
         {m.outcome && (
           <>
             {" "}
-            <Pill tone={m.outcome === "pass" ? "done" : "needs"}>
-              {outcomeLabel[m.outcome] ?? m.outcome}
+            <Pill tone={verdictOutcome[m.outcome]?.tone ?? "needs"}>
+              {verdictOutcome[m.outcome]?.label ?? m.outcome}
             </Pill>
           </>
         )}

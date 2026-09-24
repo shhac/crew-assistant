@@ -1,10 +1,13 @@
-import type {
-  Decision,
-  LandPolicy,
-  Playbook,
-  Project,
-  Stage,
-  Task,
+import { recordedTime } from "./ui";
+import {
+  pendingDecisions,
+  type Decision,
+  type LandPolicy,
+  type Playbook,
+  type Project,
+  type Stage,
+  type Task,
+  type TeamMessage,
 } from "./api";
 
 /** Colour roles: amber needs the owner, blue is under way, grey waits. */
@@ -19,11 +22,38 @@ export const finished = (task: Task) =>
 
 export const needsYou = (task: Task) => task.status === "waiting";
 
-const active = (task: Task) =>
+export const active = (task: Task) =>
   task.status === "writing" ||
   task.status === "reviewing" ||
   task.status === "deciding" ||
   task.status === "landing";
+
+/** Started and not yet back with the owner or finished. */
+export const underWay = (task: Task) =>
+  !finished(task) && task.status !== "waiting" && task.status !== "queued";
+
+export const projectTasks = (project: Project, tasks: Task[]) =>
+  tasks.filter((t) => t.project_id === project.id);
+
+/** The open decision a request is waiting on, if any. */
+export const decisionFor = (task: Task, decisions: Decision[]) =>
+  pendingDecisions(decisions).find((d) => d.id === task.decision_id);
+
+export const projectKind = (playbook?: Playbook) =>
+  !playbook ? "Tracking only" : isCode(playbook) ? "Code" : "Writing";
+
+/** A request keeps the team it started with after the project's changes. */
+export const taskPlaybook = (task?: Task, project?: Project) =>
+  task?.playbook ?? project?.playbook;
+
+export const isOpenMessage = (m: TeamMessage) =>
+  m.status === "waiting" || m.status === "working";
+
+export const verdictOutcome: Record<string, { label: string; tone: Tone }> = {
+  pass: { label: "Passed", tone: "done" },
+  revise: { label: "Asked for changes", tone: "needs" },
+  question: { label: "Asked a question", tone: "needs" },
+};
 
 export interface Column {
   stage: Stage;
@@ -53,10 +83,10 @@ export function roleName(task: Task, kind: string, fallback: string) {
   return task.roles?.find((r) => r.kind === kind)?.name ?? fallback;
 }
 
-const held = (task: Task) =>
-  !!task.retry_at &&
-  !task.retry_at.startsWith("0001-") &&
-  new Date(task.retry_at).valueOf() > Date.now();
+const held = (task: Task) => {
+  const until = recordedTime(task.retry_at);
+  return !!until && until.valueOf() > Date.now();
+};
 
 /** What a request is doing now, in a few words. */
 export function requestStep(task: Task, decision?: Decision): string {
@@ -128,8 +158,8 @@ export const projectGroups: { group: ProjectGroup; label: string }[] = [
   { group: "quiet", label: "Quiet" },
 ];
 
-export function projectGroup(project: Project, tasks: Task[]): ProjectGroup {
-  const own = tasks.filter((t) => t.project_id === project.id);
+/** Where a project sits, judged by its own requests. */
+export function projectGroup(own: Task[]): ProjectGroup {
   if (own.some(needsYou)) return "needs";
   if (own.some(active)) return "working";
   if (own.some((t) => !finished(t))) return "waiting";
@@ -149,10 +179,10 @@ const groupOrder: Record<Task["status"], number> = {
   stopped: 5,
 };
 
-/** The request that says most about what a project is doing now. */
-export function leadRequest(project: Project, tasks: Task[]) {
-  return tasks
-    .filter((t) => t.project_id === project.id && !finished(t))
+/** Of a project's own requests, the one that says most about it now. */
+export function leadRequest(own: Task[]) {
+  return own
+    .filter((t) => !finished(t))
     .sort((a, b) => groupOrder[a.status] - groupOrder[b.status])[0];
 }
 

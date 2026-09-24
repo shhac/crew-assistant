@@ -1,15 +1,19 @@
 import { useState } from "react";
 import { projectHref } from "./router";
 import {
-  isCode,
+  decisionFor,
+  finished,
   landsBy,
   leadRequest,
+  needsYou,
   projectGroup,
   projectGroups,
+  projectKind,
+  projectTasks,
   requestStep,
 } from "./stages";
 import { Pill, sinceLabel } from "./ui";
-import { pendingDecisions, type Project, type State } from "./api";
+import type { Project, State } from "./api";
 
 export function ProjectsPage({
   state,
@@ -63,7 +67,7 @@ export function ProjectsPage({
           </div>
           {projectGroups.map(({ group, label }) => {
             const members = open.filter(
-              (p) => projectGroup(p, state.tasks) === group,
+              (p) => projectGroup(projectTasks(p, state.tasks)) === group,
             );
             if (!members.length) return null;
             return (
@@ -98,19 +102,11 @@ export function ProjectsPage({
 }
 
 function ProjectRow({ project, state }: { project: Project; state: State }) {
-  const own = state.tasks.filter((t) => t.project_id === project.id);
-  const lead = leadRequest(project, state.tasks);
-  const decision = lead?.decision_id
-    ? pendingDecisions(state.decisions).find((d) => d.id === lead.decision_id)
-    : undefined;
-  const open = own.filter(
-    (t) => !["delivered", "landed", "stopped"].includes(t.status),
-  ).length;
-  const kind = !project.playbook
-    ? "Tracking only"
-    : isCode(project.playbook)
-      ? "Code"
-      : "Writing";
+  const own = projectTasks(project, state.tasks);
+  const lead = leadRequest(own);
+  const decision = lead ? decisionFor(lead, state.decisions) : undefined;
+  const open = own.filter((t) => !finished(t)).length;
+  const kind = projectKind(project.playbook);
   return (
     <li>
       <a className="project-row" href={projectHref(project.id)}>
@@ -124,11 +120,11 @@ function ProjectRow({ project, state }: { project: Project; state: State }) {
         <span className="project-now">
           {lead ? (
             <>
-              {lead.status === "waiting" && (
+              {needsYou(lead) && (
                 <Pill tone="needs">{requestStep(lead, decision)}</Pill>
               )}
               <span>
-                {lead.status === "waiting"
+                {needsYou(lead)
                   ? lead.objective
                   : `${lead.objective}: ${requestStep(lead, decision)}`}
               </span>

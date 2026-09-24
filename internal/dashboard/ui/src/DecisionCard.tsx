@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { requestHref, projectHref } from "./router";
-import { approveLabel, isCode, reversibility } from "./stages";
+import { approveLabel, isCode, reversibility, taskPlaybook } from "./stages";
 import { ErrorNotice, Pill, sinceLabel, useAction } from "./ui";
 import {
   dismissDecision,
@@ -32,7 +32,7 @@ function choiceLabel(
   project?: Project,
 ) {
   if (decision.kind === "delivery" && choice === "Approve")
-    return approveLabel(task?.playbook ?? project?.playbook);
+    return approveLabel(taskPlaybook(task, project));
   if (decision.kind === "update" && choice === "Approve")
     return "Push the update";
   if (choice === "Stop") return "Stop request";
@@ -65,7 +65,7 @@ export function DecisionCard({
     decision.kind === "question" ? "answer" : "",
   );
   const [draft, setDraft] = useState("");
-  const playbook = task?.playbook ?? project?.playbook;
+  const playbook = taskPlaybook(task, project);
   const delivery = approvals.has(decision.kind ?? "");
   const closable = !task;
   async function send(value: string, action: "choice" | "answer" | "dismiss") {

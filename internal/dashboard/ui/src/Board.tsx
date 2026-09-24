@@ -5,13 +5,19 @@ import {
   type ReactNode,
 } from "react";
 import { projectHref, requestHref } from "./router";
-import { boardColumns, needsYou, requestStep } from "./stages";
+import {
+  boardColumns,
+  decisionFor,
+  isOpenMessage,
+  needsYou,
+  projectTasks,
+  requestStep,
+} from "./stages";
 import { ErrorNotice, Icon, Pill, useAction } from "./ui";
 import {
   askForTask,
   criteriaLines,
   orderTasks,
-  pendingDecisions,
   type Decision,
   type Project,
   type State,
@@ -30,11 +36,8 @@ export function Board({
   refresh: () => Promise<void>;
 }) {
   // The server's order is the order work starts in; keep it.
-  const tasks = state.tasks.filter((t) => t.project_id === project.id);
+  const tasks = projectTasks(project, state.tasks);
   const columns = boardColumns(project, tasks);
-  const decisions = pendingDecisions(state.decisions);
-  const decisionFor = (t: Task) =>
-    decisions.find((d) => d.id === t.decision_id);
   const stopped = tasks.filter((t) => t.stage === "stopped");
   return (
     <div className="board-page">
@@ -68,7 +71,7 @@ export function Board({
                       column.stage === "done" ? [...cards].reverse() : cards
                     }
                     limit={column.stage === "done" ? shownDone : undefined}
-                    decisionFor={decisionFor}
+                    decisionFor={(t) => decisionFor(t, state.decisions)}
                   />
                 )}
               </section>
@@ -136,9 +139,7 @@ function BoardCard({
   decision?: Decision;
   children?: ReactNode;
 }) {
-  const open = (task.messages ?? []).filter(
-    (m) => m.status === "waiting" || m.status === "working",
-  ).length;
+  const open = (task.messages ?? []).filter(isOpenMessage).length;
   const ref = task.revisions?.at(-1)?.ref;
   return (
     <article className={`board-card${needsYou(task) ? " needs" : ""}`}>

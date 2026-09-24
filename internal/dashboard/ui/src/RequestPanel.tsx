@@ -2,7 +2,16 @@ import { useEffect, useRef } from "react";
 import { DecisionCard } from "./DecisionCard";
 import { DraftFiles } from "./DraftPreview";
 import { TeamThread } from "./TeamThread";
-import { finished, isCode, requestStep, requestTone } from "./stages";
+import {
+  decisionFor,
+  finished,
+  isCode,
+  requestStep,
+  requestTone,
+  roleName,
+  taskPlaybook,
+  verdictOutcome,
+} from "./stages";
 import {
   CriteriaList,
   ErrorNotice,
@@ -14,7 +23,6 @@ import {
 import {
   criteriaLines,
   landTask,
-  pendingDecisions,
   stopTask,
   type Project,
   type Revision,
@@ -22,12 +30,6 @@ import {
   type Task,
   type Verdict,
 } from "./api";
-
-const outcome: Record<string, { label: string; tone: string }> = {
-  pass: { label: "Passed", tone: "done" },
-  revise: { label: "Asked for changes", tone: "needs" },
-  question: { label: "Asked a question", tone: "needs" },
-};
 
 /** One request in full, beside its project's board. */
 export function RequestPanel({
@@ -63,9 +65,7 @@ export function RequestPanel({
       .map((m) => m.direction ?? 0),
   );
   const said = (task?.direction ?? []).filter((_, i) => !fromThread.has(i));
-  const decision = task?.decision_id
-    ? pendingDecisions(state.decisions).find((d) => d.id === task.decision_id)
-    : undefined;
+  const decision = task ? decisionFor(task, state.decisions) : undefined;
   return (
     <aside className="request-panel" aria-labelledby="request-title">
       <div className="request-panel-bar">
@@ -201,7 +201,7 @@ function Drafts({
 }) {
   const revisions = [...(task.revisions ?? [])].reverse();
   if (!revisions.length) return null;
-  const code = isCode(task.playbook ?? project.playbook);
+  const code = isCode(taskPlaybook(task, project));
   return (
     <section className="section" aria-label="Drafts">
       <h3>{code ? "Changes" : "Drafts"}</h3>
@@ -215,8 +215,8 @@ function Drafts({
               {(task.verdicts ?? [])
                 .filter((v) => v.revision === r.n)
                 .map((v, j) => (
-                  <Pill key={j} tone={outcome[v.outcome]?.tone}>
-                    {v.role}: {outcome[v.outcome]?.label ?? v.outcome}
+                  <Pill key={j} tone={verdictOutcome[v.outcome]?.tone}>
+                    {v.role}: {verdictOutcome[v.outcome]?.label ?? v.outcome}
                   </Pill>
                 ))}
             </span>
@@ -263,8 +263,7 @@ function DraftDetail({
           {!revision.clean_merge_of && (
             <>
               <strong>
-                {task.roles?.find((r) => r.kind === "implementer")?.name ??
-                  "Implementer"}
+                {roleName(task, "implementer", "Implementer")}
               </strong>{" "}
             </>
           )}

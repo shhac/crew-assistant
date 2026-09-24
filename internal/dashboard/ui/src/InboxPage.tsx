@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { DecisionCard } from "./DecisionCard";
 import { projectHref, requestHref } from "./router";
-import { finished, requestStep, requestTone } from "./stages";
+import { requestStep, requestTone, underWay } from "./stages";
 import {
   ErrorNotice,
   Pill,
@@ -21,9 +21,6 @@ import {
 } from "./api";
 
 const shownInProgress = 6;
-
-const underWay = (t: Task) =>
-  !finished(t) && t.status !== "waiting" && t.status !== "queued";
 
 function landedToday(t: Task) {
   const at = recordedTime(t.updated_at);

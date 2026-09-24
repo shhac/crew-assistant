@@ -2,12 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   approveLabel,
   boardColumns,
+  decisionFor,
+  isOpenMessage,
   landsBy,
   leadRequest,
   projectGroup,
+  projectKind,
+  projectTasks,
   requestStep,
   requestTone,
   reversibility,
+  taskPlaybook,
+  underWay,
   whatHappens,
 } from "./stages";
 import type { Decision, Playbook, Project, Task } from "./api";
@@ -188,31 +194,83 @@ describe("the board", () => {
     expect(requestTone(task({ status: "landed" }))).toBe("done");
     expect(requestTone(task({ status: "stopped" }))).toBe("");
   });
+  it("counts as under way only what has started and isn't back with the owner", () => {
+    expect(underWay(task({ status: "writing" }))).toBe(true);
+    expect(underWay(task({ status: "awaiting" }))).toBe(true);
+    expect(underWay(task({ status: "queued" }))).toBe(false);
+    expect(underWay(task({ status: "waiting" }))).toBe(false);
+    expect(underWay(task({ status: "landed" }))).toBe(false);
+  });
+  it("finds the open decision a request waits on", () => {
+    const open = { ...decision("delivery"), id: "d1" };
+    const closed = { ...decision("question"), id: "d2", status: "resolved" };
+    expect(decisionFor(task({ decision_id: "d1" }), [open, closed])).toBe(open);
+    expect(
+      decisionFor(task({ decision_id: "d2" }), [open, closed]),
+    ).toBeUndefined();
+    expect(decisionFor(task({}), [open])).toBeUndefined();
+  });
+  it("treats a message as open until it is answered", () => {
+    const message = (status: "waiting" | "working" | "answered") => ({
+      id: "m",
+      to: "Reviewer",
+      kind: "reviewer",
+      from: "owner",
+      text: "",
+      status,
+    });
+    expect(isOpenMessage(message("waiting"))).toBe(true);
+    expect(isOpenMessage(message("working"))).toBe(true);
+    expect(isOpenMessage(message("answered"))).toBe(false);
+  });
+  it("ignores a hold whose time was never recorded", () => {
+    expect(
+      requestStep(
+        task({
+          status: "queued",
+          retry_at: "0001-01-01T00:00:00Z",
+          detail: "Held",
+        }),
+      ),
+    ).toBe("Waiting to start");
+  });
 });
 
 describe("projects", () => {
   it("groups a project by its most pressing request", () => {
-    const p = project(writing);
     expect(
-      projectGroup(p, [
-        task({ status: "writing" }),
-        task({ status: "waiting" }),
-      ]),
+      projectGroup([task({ status: "writing" }), task({ status: "waiting" })]),
     ).toBe("needs");
     expect(
-      projectGroup(p, [
-        task({ status: "queued" }),
-        task({ status: "reviewing" }),
-      ]),
+      projectGroup([task({ status: "queued" }), task({ status: "reviewing" })]),
     ).toBe("working");
-    expect(projectGroup(p, [task({ status: "awaiting" })])).toBe("waiting");
-    expect(projectGroup(p, [task({ status: "landed" })])).toBe("quiet");
+    expect(projectGroup([task({ status: "awaiting" })])).toBe("waiting");
+    expect(projectGroup([task({ status: "landed" })])).toBe("quiet");
     expect(
-      leadRequest(p, [
+      leadRequest([
         task({ id: "a", status: "queued" }),
         task({ id: "b", status: "waiting" }),
+        task({ id: "c", status: "landed" }),
       ])?.id,
     ).toBe("b");
+    expect(leadRequest([task({ status: "stopped" })])).toBeUndefined();
+  });
+  it("keeps only a project's own requests", () => {
+    const own = task({ id: "a" });
+    expect(
+      projectTasks(project(writing), [own, task({ id: "b", project_id: "q" })]),
+    ).toEqual([own]);
+  });
+  it("names a project's kind of work from its team", () => {
+    expect(projectKind(undefined)).toBe("Tracking only");
+    expect(projectKind(code())).toBe("Code");
+    expect(projectKind(writing)).toBe("Writing");
+  });
+  it("prefers the team a request started with over the project's", () => {
+    const pb = code();
+    expect(taskPlaybook(task({ playbook: pb }), project(writing))).toBe(pb);
+    expect(taskPlaybook(task({}), project(writing))).toBe(writing);
+    expect(taskPlaybook(undefined, undefined)).toBeUndefined();
   });
   it("says how approved work leaves a project, and what approving does", () => {
     expect(landsBy(undefined)).toBe("No team yet");
