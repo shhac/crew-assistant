@@ -181,6 +181,30 @@ func TestALearningsWhenIsOneLine(t *testing.T) {
 	}
 }
 
+func TestALearningWithoutAWhenIsHeadedByItsOpeningWords(t *testing.T) {
+	s, _ := fixture(t)
+	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kind: RoleImplementer, Engine: "claude"})
+	text := "Run the whole suite. Not just the package you changed.\nMore detail."
+	m, err := s.AddLearning(testContext, m.ID, LearnedByOwner, LearningInput{Text: text})
+	if err != nil || m.Learnings[0].When != "Run the whole suite" {
+		t.Fatalf("an owner's learning without a when: %+v %v", m.Learnings, err)
+	}
+	// One kept before a when was always filled in reads with its heading.
+	if err := s.store.update(testContext, func(v *Snapshot) error {
+		member(v, m.ID).Learnings = append(member(v, m.ID).Learnings, Learning{ID: "legacy", Text: "Name things plainly. Always."})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := s.Snapshot(testContext)
+	if got := snap.Members[0].Learnings[1].When; got != "Name things plainly" {
+		t.Fatalf("a legacy learning read with when %q", got)
+	}
+	if got := Heading(strings.Repeat("word ", 40)); len(got) > 125 {
+		t.Fatalf("a heading should be clipped: %d bytes", len(got))
+	}
+}
+
 func TestALearningThatNamesAProjectIsRecognised(t *testing.T) {
 	for text, want := range map[string]bool{
 		"In ACME-Portal, run the seed first":       true,

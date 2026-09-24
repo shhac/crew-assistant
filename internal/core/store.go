@@ -150,6 +150,7 @@ func readState(ctx context.Context, conn *sql.Conn) (Snapshot, error) {
 		d.Snapshot.ModelCalls = map[string]int{}
 	}
 	deriveStages(&d.Snapshot)
+	headLegacyLearnings(&d.Snapshot)
 	return d.Snapshot, nil
 }
 func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {

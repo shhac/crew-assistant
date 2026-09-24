@@ -129,13 +129,6 @@ func TestAPinnedWhenCannotForgeAnIndexEntry(t *testing.T) {
 	}
 }
 
-func TestALearningWithoutAWhenIsIndexedByItsOpeningWords(t *testing.T) {
-	got := when(core.Learning{Text: "Run the whole suite. Not just the package you changed.\nMore detail."})
-	if got != "Run the whole suite" {
-		t.Fatalf("when %q", got)
-	}
-}
-
 // A member keeps what a turn taught it, on the owner's rule: never about one
 // project. A learning naming the project's own folder is dropped, and the
 // work itself stands either way.

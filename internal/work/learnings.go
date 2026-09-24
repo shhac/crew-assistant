@@ -11,7 +11,6 @@ import (
 	"unicode"
 
 	"github.com/shhac/crew-assistant/internal/core"
-	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // learningsDir is where a task's copy of one member's learnings is kept for
@@ -39,7 +38,7 @@ func (lp *Loop) learningsIndex(t core.Task, r core.Role) (string, string, error)
 	for i := len(r.Learnings) - 1; i >= 0; i-- {
 		l := r.Learnings[i]
 		path := filepath.Join(dir, fmt.Sprintf("%02d.md", i+1))
-		situation := oneLine(when(l))
+		situation := oneLine(l.When)
 		body := []byte(fmt.Sprintf("When: %s\n\n%s\n", situation, l.Text))
 		if old, err := os.ReadFile(path); err != nil || !bytes.Equal(old, body) {
 			if err := os.WriteFile(path, body, 0o600); err != nil {
@@ -49,19 +48,6 @@ func (lp *Loop) learningsIndex(t core.Task, r core.Role) (string, string, error)
 		fmt.Fprintf(&b, "- %s: %s\n", situation, path)
 	}
 	return dir, strings.TrimRight(b.String(), "\n"), nil
-}
-
-// when is a learning's situation, or its opening words when it was recorded
-// without one.
-func when(l core.Learning) string {
-	if l.When != "" {
-		return l.When
-	}
-	first, _, _ := strings.Cut(l.Text, "\n")
-	if i := strings.Index(first, ". "); i > 0 {
-		first = first[:i]
-	}
-	return text.Clip(first, 120)
 }
 
 // oneLine keeps a learning to its own line of the index, whatever an older

@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // Member is someone the owner keeps on their team across projects: a named
@@ -173,10 +174,18 @@ func (s *Service) DeleteMember(ctx context.Context, id string) error {
 	})
 }
 
-func (in LearningInput) clean() (LearningInput, error) {
+// clean checks a learning from source. The owner and the assistant may leave
+// out when it applies, and its heading stands in; a member must say.
+func (in LearningInput) clean(source string) (LearningInput, error) {
 	in.When, in.Text = strings.TrimSpace(in.When), strings.TrimSpace(in.Text)
 	if in.Text == "" || len(in.Text) > 1500 {
 		return in, errors.New("a learning is 1 to 1500 characters")
+	}
+	if in.When == "" && source == LearnedByMember {
+		return in, errors.New("a learning needs to say when it applies")
+	}
+	if in.When == "" {
+		in.When = Heading(in.Text)
 	}
 	if len(in.When) > 160 {
 		return in, errors.New("when it applies is at most 160 characters")
@@ -189,10 +198,45 @@ func (in LearningInput) clean() (LearningInput, error) {
 	return in, nil
 }
 
+// Heading is what a learning is indexed by when it says nothing of when it
+// applies: its opening words, up to the end of the first sentence or line.
+func Heading(learning string) string {
+	first, _, _ := strings.Cut(strings.TrimSpace(learning), "\n")
+	if i := strings.Index(first, ". "); i > 0 {
+		first = first[:i]
+	}
+	return text.Clip(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, first), 120)
+}
+
+// headLegacyLearnings gives a when to learnings kept before one was always
+// filled in, so every reader sees one.
+func headLegacyLearnings(v *Snapshot) {
+	head := func(ls []Learning) {
+		for i := range ls {
+			if ls[i].When == "" {
+				ls[i].When = Heading(ls[i].Text)
+			}
+		}
+	}
+	for i := range v.Members {
+		head(v.Members[i].Learnings)
+	}
+	for i := range v.Tasks {
+		for j := range v.Tasks[i].Roles {
+			head(v.Tasks[i].Roles[j].Learnings)
+		}
+	}
+}
+
 // AddLearning keeps something the owner, or the assistant on the owner's
 // word, wants a member to do everywhere.
 func (s *Service) AddLearning(ctx context.Context, memberID, source string, in LearningInput) (Member, error) {
-	in, err := in.clean()
+	in, err := in.clean(source)
 	if err != nil {
 		return Member{}, err
 	}
@@ -222,12 +266,9 @@ func (s *Service) AddLearning(ctx context.Context, memberID, source string, in L
 // full the oldest thing it taught itself makes room; what the owner added is
 // never pushed out.
 func (s *Service) RecordLearning(ctx context.Context, memberID, taskID string, in LearningInput, specific []string) (Learning, error) {
-	in, err := in.clean()
+	in, err := in.clean(LearnedByMember)
 	if err != nil {
 		return Learning{}, err
-	}
-	if in.When == "" {
-		return Learning{}, errors.New("a learning needs to say when it applies")
 	}
 	if word := naming(in.When+"\n"+in.Text, specific); word != "" {
 		return Learning{}, fmt.Errorf("a learning must not be about one project; it names %s", word)
@@ -282,15 +323,15 @@ func (s *Service) ForgetLearning(ctx context.Context, memberID, learningID strin
 // addresses, links and anything shaped like a key or token.
 var identifying = regexp.MustCompile(`[\w.+-]+@[\w-]+\.[\w.]+|https?://\S+|\b[0-9a-fA-F]{20,}\b|\b[A-Za-z0-9+/_=-]{40,}\b`)
 
-// naming returns what text names that ties it to one project, ignoring case.
-func naming(text string, specific []string) string {
-	lower := strings.ToLower(text)
+// naming returns what s names that ties it to one project, ignoring case.
+func naming(s string, specific []string) string {
+	lower := strings.ToLower(s)
 	for _, word := range specific {
 		if word != "" && strings.Contains(lower, strings.ToLower(word)) {
 			return word
 		}
 	}
-	return identifying.FindString(text)
+	return identifying.FindString(s)
 }
 
 // withLearnings is the roles a task starts with: each role copied from a
