@@ -2,14 +2,13 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Panel } from "./SettingsPanel";
 import { Avatar, hasFace } from "./Avatar";
 import { ErrorNotice } from "./ui";
-import { api, errorText, type AvatarSpec, type Config } from "./api";
-interface Recommendation {
+import { api, errorText, type AvatarSpec, type Config, type Face } from "./api";
+interface Recommendation extends Face {
   id: string;
   name: string;
   personality: string;
   avatar: AvatarSpec;
   rationale: string;
-  avatar_svg?: string;
   applied?: boolean;
 }
 interface SetupState {

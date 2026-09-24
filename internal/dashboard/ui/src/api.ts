@@ -19,6 +19,13 @@ export interface Face {
   avatar?: AvatarSpec;
   avatar_svg?: string;
 }
+/** Anyone Codex draws: the assistant or a member. */
+export interface Drawable extends Face {
+  /** Codex is drawing its picture. */
+  drawing?: boolean;
+  /** Why the last drawing failed. */
+  draw_error?: string;
+}
 export interface Brief {
   version: number;
   goal: string;
@@ -59,7 +66,7 @@ export interface LearningInput {
   text: string;
   project_id: string;
 }
-export interface Member {
+export interface Member extends Drawable {
   id: string;
   name: string;
   kind: MemberKind;
@@ -67,12 +74,6 @@ export interface Member {
   model?: string;
   effort?: string;
   instructions?: string;
-  avatar?: AvatarSpec;
-  avatar_svg?: string;
-  /** Codex is drawing its picture. */
-  drawing?: boolean;
-  /** Why the last drawing failed. */
-  draw_error?: string;
   learnings: Learning[];
   created_at?: string;
 }
@@ -330,14 +331,10 @@ export interface PendingOperation {
 }
 export interface State {
   pending_operations: PendingOperation[];
-  assistant: {
+  assistant: Drawable & {
     name: string;
     personality: string;
     theme?: string;
-    avatar?: AvatarSpec;
-    avatar_svg?: string;
-    drawing?: boolean;
-    draw_error?: string;
   };
   projects: Project[];
   members: Member[];

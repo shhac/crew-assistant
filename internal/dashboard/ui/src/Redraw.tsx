@@ -1,13 +1,6 @@
 import { useState } from "react";
 import { ErrorNotice, useAction } from "./ui";
-import type { AvatarSpec } from "./api";
-
-/** Anyone Codex draws: the assistant or a member. */
-export interface Drawable {
-  avatar?: AvatarSpec;
-  drawing?: boolean;
-  draw_error?: string;
-}
+import type { Drawable } from "./api";
 
 export function DrawingStatus({ face }: { face: Drawable }) {
   if (face.drawing)
