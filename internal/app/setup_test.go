@@ -34,8 +34,14 @@ func writeSetupCall(w http.ResponseWriter, name string, arguments any) {
 	encoded, _ := json.Marshal(arguments)
 	json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": "fixture-call", "type": "function", "function": map[string]any{"name": name, "arguments": string(encoded)}}}}}}})
 }
+func fixtureDrawing() map[string]any {
+	return map[string]any{"background": "#10182a", "marks": []any{
+		map[string]any{"d": "M28 92C18 39 65 21 106 23 108 77 76 108 28 92Z", "color": "#91b5e8", "stroke_width": 0},
+		map[string]any{"d": "M31 91\n83 43", "color": "#10182a", "stroke_width": 6},
+	}}
+}
 func fixtureProposal() map[string]any {
-	return map[string]any{"name": "Juniper", "personality": "Be concise and calm; bring a recommendation with the evidence.", "avatar": map[string]any{"shape": "leaf", "background": "#10182a", "accent": "#91b5e8"}, "rationale": "A calm botanical identity suits the preference for measured communication."}
+	return map[string]any{"name": "Juniper", "personality": "Be concise and calm; bring a recommendation with the evidence.", "avatar": fixtureDrawing(), "rationale": "A calm botanical identity suits the preference for measured communication."}
 }
 
 func TestIdentityInterviewPreviewsThenAppliesOnlyAcceptedRecommendation(t *testing.T) {
@@ -113,7 +119,7 @@ func TestIdentityInterviewPreviewsThenAppliesOnlyAcceptedRecommendation(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identity.Name != "Juniper" || identity.Avatar.Shape != "leaf" || a.Config().Limits.MaxModelTurns != 7 {
+	if identity.Name != "Juniper" || len(identity.Avatar.Marks) != 2 || identity.Avatar.Marks[1].D != "M31 91 83 43" || identity.Avatar.Accent != "#91b5e8" || a.Config().Limits.MaxModelTurns != 7 {
 		t.Fatal(identity)
 	}
 	persisted, err := config.Load(a.configPath)
@@ -140,7 +146,8 @@ func TestSetupRejectsProjectToolsAndUnsafeAvatar(t *testing.T) {
 		arguments any
 	}{
 		{"project action", "create_project", map[string]any{"title": "Unwanted", "objective": "Never"}},
-		{"markup avatar", "propose_identity", map[string]any{"name": "Juniper", "personality": "Calm", "rationale": "A useful recommendation", "avatar": map[string]any{"shape": "orb", "background": "#10182a", "accent": "\"/><script>alert(1)</script>"}}},
+		{"markup avatar", "propose_identity", map[string]any{"name": "Juniper", "personality": "Calm", "rationale": "A useful recommendation", "avatar": map[string]any{"background": "#10182a", "marks": []any{map[string]any{"d": "M0 0\"/><script>alert(1)</script>", "color": "#ffffff", "stroke_width": 0}}}}},
+		{"preset avatar", "propose_identity", map[string]any{"name": "Juniper", "personality": "Calm", "rationale": "A useful recommendation", "avatar": map[string]any{"shape": "orb", "background": "#10182a", "accent": "#ffffff"}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			a := testApp(t)
@@ -160,6 +167,37 @@ func TestSetupRejectsProjectToolsAndUnsafeAvatar(t *testing.T) {
 		})
 	}
 }
+
+// A drawing that is not usable is sent back once with the reason, so the
+// owner is not asked to try again for a slip in the path data.
+func TestSetupRetriesAnUnusableDrawingOnce(t *testing.T) {
+	a := testApp(t)
+	var calls atomic.Int32
+	setupModel(t, a, func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []struct{ Role, Content string } `json:"messages"`
+		}
+		json.NewDecoder(r.Body).Decode(&request)
+		if calls.Add(1) == 1 {
+			bad := fixtureProposal()
+			bad["avatar"] = map[string]any{"background": "#10182a", "marks": []any{map[string]any{"d": "circle", "color": "#ffffff", "stroke_width": 0}}}
+			writeSetupCall(w, "propose_identity", bad)
+			return
+		}
+		if last := request.Messages[len(request.Messages)-1].Content; !strings.Contains(last, "mark 1 must be SVG path data") {
+			t.Errorf("the retry did not say what was wrong: %q", last)
+		}
+		writeSetupCall(w, "propose_identity", fixtureProposal())
+	})
+	state, err := a.InterviewIdentity(context.Background(), "Draw yourself")
+	if err != nil || state.Recommendation == nil || calls.Load() != 2 {
+		t.Fatalf("retry: %+v %v after %d calls", state, err, calls.Load())
+	}
+	if len(state.Messages) != 2 || strings.Contains(state.Messages[1].Content, "could not be used") {
+		t.Fatalf("the retry should not be kept in the interview: %+v", state.Messages)
+	}
+}
+
 func TestSetupDemoDoesNotInvokeModel(t *testing.T) {
 	a := testApp(t)
 	var calls atomic.Int32
