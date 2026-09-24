@@ -114,6 +114,8 @@ func (a *App) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 		return true, a.review(ctx, p, t, m)
 	case core.TaskDeciding:
 		return true, a.decide(ctx, p, t)
+	case core.TaskLanding:
+		return true, a.land(ctx, p, t, m)
 	}
 	return false, nil
 }
@@ -155,9 +157,9 @@ func taskPlaybook(p core.Project, t core.Task) *core.Playbook {
 	return p.Playbook
 }
 
-func (a *App) roleSpec(r core.Role, workDir string, write bool, env []string, prompt string) roles.Spec {
+func (a *App) roleSpec(r core.Role, workDir string, write bool, m medium, prompt string) roles.Spec {
 	cfg := a.Config()
-	spec := roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Write: write, Env: env, Instructions: r.Instructions, Prompt: prompt}
+	spec := roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Write: write, Env: m.env(), Read: m.readable(), Instructions: r.Instructions, Prompt: prompt}
 	if r.Engine == "codex" {
 		spec.Binary, spec.Home = cfg.Model.CodexBin, cfg.Model.CodexHome
 		spec.RuntimeHome = filepath.Join(a.Core.StateDirectory(), "roles", "codex")
@@ -195,7 +197,28 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 	if held, err := a.holdForUsage(ctx, t, writers[0]); held || err != nil {
 		return err
 	}
-	spec := a.roleSpec(writers[0], m.workspace(), true, m.env(), writerPrompt(p, t))
+	caughtUp := ""
+	l, err := m.behind(ctx, t)
+	if err != nil {
+		return a.roleFailed(ctx, t, "The workspace", err)
+	}
+	if l != nil {
+		moved, clean, conflicts, err := m.catchUp(ctx, t, *l)
+		if err != nil {
+			return a.roleFailed(ctx, t, "The workspace", fmt.Errorf("catching up: %s: %w", l.What, err))
+		}
+		if clean != "" && t.CatchUp {
+			return a.recordCatchUp(ctx, moved, m, clean, *l)
+		}
+		if t, err = a.Core.UpdateTask(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
+			task.Base, task.From = moved.Base, moved.From
+			return "", nil
+		}); err != nil {
+			return err
+		}
+		caughtUp = catchUpText(l.What, conflicts)
+	}
+	spec := a.roleSpec(writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp))
 	spec.Resume = t.WriterSession
 	result, err := a.runner.Run(ctx, spec)
 	if err != nil {
@@ -213,7 +236,7 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 		revision.BriefVersion, revision.Summary, revision.At = p.Brief.Version, clip(result.Text, 2000), time.Now().UTC()
 		t.Revisions = append(t.Revisions, revision)
 		t.WriterSession = result.Session
-		t.Failures, t.RetryAt = 0, time.Time{}
+		t.Failures, t.RetryAt, t.CatchUp = 0, time.Time{}, false
 		t.Status, t.Detail = core.TaskReviewing, fmt.Sprintf("Draft %d written; reviewing", n)
 		return fmt.Sprintf("%s wrote draft %d of %s", writers[0].Name, n, t.Objective), nil
 	})
@@ -275,7 +298,7 @@ func (a *App) runChecker(ctx context.Context, p core.Project, t core.Task, r cor
 	prompt := base
 	var parseErr error
 	for attempt := 0; attempt < 2; attempt++ {
-		result, err := a.runner.Run(ctx, a.roleSpec(checker, dir, checker.Kind == core.RoleQA, m.env(), prompt))
+		result, err := a.runner.Run(ctx, a.roleSpec(checker, dir, checker.Kind == core.RoleQA, m, prompt))
 		if err != nil {
 			return core.Verdict{}, err
 		}
@@ -368,6 +391,16 @@ func (a *App) askForDelivery(ctx context.Context, p core.Project, t core.Task, r
 	m, err := a.mediumFor(ctx, p, taskPlaybook(p, t))
 	if err != nil {
 		return a.roleFailed(ctx, t, "The workspace", err)
+	}
+	l, err := m.behind(ctx, t)
+	if err != nil {
+		return a.roleFailed(ctx, t, "The workspace", err)
+	}
+	if l != nil {
+		return a.catchUpRound(ctx, t, *l)
+	}
+	if approvalStands(t) || !taskPlaybook(p, t).Land.AsksFirst() {
+		return a.startLanding(ctx, t, false)
 	}
 	where := m.deliveryNote(t)
 	_, err = a.Core.OpenTaskDecision(ctx, t.ID, decisionDelivery, core.DecisionInput{
@@ -474,9 +507,9 @@ func (a *App) applyAnswer(ctx context.Context, p core.Project, t core.Task, d co
 		return a.stopTask(ctx, t, "the owner stopped it")
 	case d.Kind == decisionDelivery && strings.EqualFold(answer, choiceApprove),
 		d.Kind == decisionEscalation && strings.EqualFold(answer, choiceAcceptDraft):
-		return a.deliver(ctx, p, t)
+		return a.startLanding(ctx, t, true)
 	case d.Kind == decisionFailure && strings.EqualFold(answer, choiceTryAgain) && t.ResumeStatus == resumeDelivery:
-		return a.deliver(ctx, p, t)
+		return a.startLanding(ctx, t, false)
 	case d.Kind == decisionFailure && strings.EqualFold(answer, choiceTryAgain):
 		_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			if t.Status == core.TaskStopped {
@@ -509,52 +542,6 @@ func (a *App) applyAnswer(ctx context.Context, p core.Project, t core.Task, d co
 		}
 		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", fmt.Sprintf("Revising with your direction (round %d)", t.Round)
 		return fmt.Sprintf("Revising %s with the owner's direction", t.Objective), nil
-	})
-	return err
-}
-
-// deliver performs the one outward step: copying the approved draft to the
-// project's delivery folder, if it has one.
-func (a *App) deliver(ctx context.Context, p core.Project, t core.Task) error {
-	if len(t.Revisions) == 0 {
-		return errors.New("nothing to deliver")
-	}
-	r := t.Revisions[len(t.Revisions)-1]
-	m, err := a.mediumFor(ctx, p, taskPlaybook(p, t))
-	if err != nil {
-		return err
-	}
-	target, err := m.deliver(ctx, t, r)
-	{
-		if err != nil {
-			if _, updateErr := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-				if t.Status == core.TaskStopped {
-					return "", nil
-				}
-				t.ResumeStatus = resumeDelivery
-				return "", nil
-			}); updateErr != nil {
-				return updateErr
-			}
-			_, openErr := a.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
-				Title:          fmt.Sprintf("Draft %d of %s couldn't be delivered", r.N, t.Objective),
-				Context:        clip(err.Error(), 600),
-				Recommendation: choiceTryAgain + " once the cause is fixed",
-				Choices:        []string{choiceTryAgain, choiceStop},
-			})
-			return openErr
-		}
-	}
-	_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Status == core.TaskStopped {
-			return "", nil
-		}
-		t.Status, t.DecisionID, t.DeliveredTo = core.TaskDelivered, "", target
-		t.Detail = fmt.Sprintf("Draft %d approved", r.N)
-		if target != "" {
-			t.Detail += " and delivered to " + target
-		}
-		return t.Objective + ": " + t.Detail, nil
 	})
 	return err
 }
@@ -604,7 +591,7 @@ func (a *App) StopTask(ctx context.Context, projectID, taskID string) (core.Task
 		if t.ProjectID != projectID {
 			return "", core.ErrNotFound
 		}
-		if t.Status == core.TaskDelivered || t.Status == core.TaskStopped {
+		if t.Finished() {
 			return "", fmt.Errorf("this task has already finished: %w", core.ErrConflict)
 		}
 		decisionID = t.DecisionID

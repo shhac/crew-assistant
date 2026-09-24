@@ -32,6 +32,30 @@ type SetTeamArgs struct {
 	Check        string   `json:"check"`
 	Prepare      []string `json:"prepare"`
 }
+type SetLandingArgs struct {
+	ProjectID string `json:"project_id"`
+	Means     string `json:"means"`
+	Via       string `json:"via"`
+	Target    string `json:"target"`
+	Method    string `json:"method"`
+	GitHub    string `json:"github"`
+	Approve   string `json:"approve"`
+}
+type LandTaskArgs struct {
+	ProjectID string `json:"project_id"`
+	TaskID    string `json:"task_id"`
+}
+type WakeArgs struct {
+	On        string `json:"on"`
+	ProjectID string `json:"project_id"`
+	Target    string `json:"target"`
+	Match     string `json:"match"`
+	Prompt    string `json:"prompt"`
+	Timeout   string `json:"timeout"`
+}
+type WakeHandleArgs struct {
+	Handle string `json:"handle"`
+}
 type QueueTaskArgs struct {
 	ProjectID string   `json:"project_id"`
 	Objective string   `json:"objective"`
@@ -76,6 +100,11 @@ func Tools() []Tool {
 		tool("create_project", "Start tracking a project of any kind — writing, email, research, code — in local state. A brief (goal, audience, constraints, criteria) says what it is for; leave fields empty when unknown. template \"draft\" gives it a writer and a reviewer for written work; empty sets no team yet. Directories are optional existing absolute paths; linking them grants nothing. No Linear issue, external tracker, or connection is required.", []string{"title", "goal", "audience", "constraints", "template"}, []string{"criteria"}),
 		tool("update_brief", "Replace a project's brief with a new version: its goal, audience, constraints and criteria. Work already done is re-checked against the new version before delivery.", []string{"project_id", "goal", "audience", "constraints"}, []string{"criteria"}),
 		tool("set_team", "Choose how a project's work gets done. template \"draft\" is a writer and a reviewer for written work. template \"code\" is for a project with a linked git repository: an implementer works in a private clone, a reviewer reads the change, QA runs the check command, and approval creates a local branch in the repository; nothing is pushed. writer_engine and reviewer_engine are codex or claude, or empty for the template's choice. max_rounds is how many revise-and-check rounds to try before bringing the owner a decision, or empty for the default. deliver_to is an optional absolute folder approved drafts are copied to (written work). For code: repo is the linked repository (empty for the project's first folder), branch_prefix names delivered branches (empty for crew/), check is the command QA runs (such as make check), and prepare lists ignored dependency folders to copy into the clone (such as node_modules paths). Use empty values for settings that do not apply. Tasks already under way keep their team.", []string{"project_id", "template", "writer_engine", "reviewer_engine", "max_rounds", "deliver_to", "repo", "branch_prefix", "check"}, []string{"prepare"}),
+		tool("set_landing", "Set what landing an approved change means for a code project; tasks already under way keep what they started with. means is the owner's own words for it. via is branch (approval creates a new local branch; nothing moves), push (approval fast-forwards target, such as main, in the owner's repository: never forced, so work already there is never replaced; a checked-out target is updated only if the owner's repository allows it and the checkout is clean), or pull-request (not built yet). target is the branch to land on for push, empty for branch. method is fast-forward or empty. github is empty. approve is before (the owner approves each change before it lands) or none (a change that passes its checks lands without asking); use none only when the owner has said so.", []string{"project_id", "means", "via", "target", "method", "github", "approve"}, nil),
+		tool("land_task", "Land a change that was delivered earlier, such as a branch, under the project's current landing policy. Its earlier approval stands; it catches up with the target first, and QA checks the merged result. A change built on another that has not landed is refused: land that one first. Use it only when the owner has asked for this change to land in this conversation or a wake-up continuation they set up.", []string{"project_id", "task_id"}, nil),
+		tool("wake_me_when", "Be woken later, in a new turn, when something changes, instead of checking back. on is task (target is a task id; match is a status to wait for, such as landed, or empty for any change), branch (project_id and a branch name in its repository; fires when the tip moves), or time (target is RFC 3339 or a duration such as 30m). prompt is your own continuation: what to do when woken. timeout is a duration or empty for a day, at most 7 days; a wake that times out is still delivered, saying so. Returns a handle you can cancel. Several can wait at once. When woken you get the handle, when it was registered, seen and delivered, and what changed; check the current state before acting if much time has passed.", []string{"on", "project_id", "target", "match", "prompt", "timeout"}, nil),
+		tool("list_wakes", "List wake-ups still waiting or about to be delivered, with their handles.", nil, nil),
+		tool("cancel_wake", "Cancel a wake-up by its handle when it is no longer needed.", []string{"handle"}, nil),
 		tool("queue_task", "Ask the project's team for one outcome. The writer drafts it, reviewers check it against the brief, and the owner approves delivery. Criteria are specific to this task and add to the brief's.", []string{"project_id", "objective"}, []string{"criteria"}),
 		tool("stop_task", "Stop a queued or running task when the owner asks. A turn already under way finishes but changes nothing; any decision it was waiting on is closed.", []string{"project_id", "task_id"}, nil),
 		tool("resolve_decision", "Answer an open decision with the owner's choice, in their words. Use it only when the owner has just given that answer in this conversation.", []string{"decision_id", "answer"}, nil),

@@ -142,9 +142,7 @@ func (a *App) chatContext(ctx context.Context, currentMessageID string) (json.Ra
 		}
 	}
 	s.Messages = []core.Message{}
-	if len(s.Activity) > 40 {
-		s.Activity = s.Activity[len(s.Activity)-40:]
-	}
+	s = assistantView(s)
 	cfg := a.Config()
 	raw, err := json.Marshal(struct {
 		State               core.Snapshot       `json:"state"`
@@ -197,6 +195,35 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 			return nil, err
 		}
 		return a.SetTeam(ctx, in)
+	case "set_landing":
+		var in engine.SetLandingArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		return a.SetLanding(ctx, in)
+	case "land_task":
+		var in engine.LandTaskArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		return a.LandTask(ctx, in.ProjectID, in.TaskID)
+	case "wake_me_when":
+		var in engine.WakeArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		return a.WakeMeWhen(ctx, in)
+	case "list_wakes":
+		if err := args(raw, &struct{}{}); err != nil {
+			return nil, err
+		}
+		return a.OpenWakes(ctx)
+	case "cancel_wake":
+		var in engine.WakeHandleArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		return a.Core.CancelWake(ctx, in.Handle, "")
 	case "queue_task":
 		var in engine.QueueTaskArgs
 		if err := args(raw, &in); err != nil {

@@ -17,7 +17,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 
 	"github.com/shhac/crew-assistant/internal/media"
 )
@@ -71,6 +73,32 @@ func Open(ctx context.Context, projectDir, source string, prepare []string) (Rep
 // Workspace is where team roles work.
 func (r Repo) Workspace() string { return filepath.Join(r.root, "clone") }
 
+// Readable is what roles may read outside the clone: the owner's Go module
+// cache, so an offline build finds the modules the owner already has.
+func (r Repo) Readable() []string {
+	if dir := moduleCache(); dir != "" {
+		return []string{dir}
+	}
+	return nil
+}
+
+// moduleCache is the owner's Go module cache, asked once of the Go toolchain
+// from outside any repository so no project setting can move it.
+var moduleCache = sync.OnceValue(func() string {
+	cmd := exec.Command("go", "env", "GOMODCACHE")
+	cmd.Dir = os.TempDir()
+	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOFLAGS=")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	dir := strings.TrimSpace(string(out))
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() || !filepath.IsAbs(dir) {
+		return ""
+	}
+	return dir
+})
+
 // Env is the environment roles need to build and test inside their sandbox:
 // caches and temporary files in the clone, and no attempts at the network.
 func (r Repo) Env() []string {
@@ -78,7 +106,7 @@ func (r Repo) Env() []string {
 	for _, dir := range []string{"go-build", "tmp", "npm", "xdg"} {
 		_ = os.MkdirAll(filepath.Join(cache, dir), 0700)
 	}
-	return []string{
+	env := []string{
 		"GOCACHE=" + filepath.Join(cache, "go-build"),
 		"TMPDIR=" + filepath.Join(cache, "tmp"),
 		"npm_config_cache=" + filepath.Join(cache, "npm"),
@@ -88,6 +116,10 @@ func (r Repo) Env() []string {
 		"GOTOOLCHAIN=local",
 		"CI=1",
 	}
+	if dir := moduleCache(); dir != "" {
+		env = append(env, "GOMODCACHE="+dir)
+	}
+	return env
 }
 
 func (r Repo) configure(ctx context.Context) error {
@@ -145,32 +177,109 @@ func (r Repo) copyPrepared() error {
 	return nil
 }
 
-// Begin starts a task: the clone catches up with the owner's current branch
-// and a task branch is created from its tip. It returns the base commit and
-// the owner's branch it came from.
-func (r Repo) Begin(ctx context.Context, branch string) (base, from string, err error) {
-	current, err := run(ctx, r.source, "symbolic-ref", "--quiet", "--short", "HEAD")
+// Begin starts a task: the clone catches up with the owner's branch from, or
+// their current branch when from is empty, and a task branch is created from
+// its tip. It returns the base commit and the branch it came from.
+func (r Repo) Begin(ctx context.Context, branch, from string) (base, start string, err error) {
+	if from == "" {
+		if from, err = CurrentBranch(ctx, r.source); err != nil {
+			return "", "", err
+		}
+	}
+	if base, err = r.Fetch(ctx, from); err != nil {
+		return "", "", err
+	}
+	return base, from, r.Reset(ctx, branch, base)
+}
+
+// CurrentBranch names the branch a checkout is on.
+func CurrentBranch(ctx context.Context, dir string) (string, error) {
+	current, err := run(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {
-		return "", "", errors.New("the repository is not on a branch to start from")
+		return "", errors.New("the repository is not on a branch to start from")
 	}
-	from = strings.TrimSpace(current)
-	// Fetch from the repository's path, never a configured remote whose
-	// settings could name a command to run.
-	if _, err = run(ctx, r.Workspace(), "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-auto-gc", r.source, "+refs/heads/"+from+":refs/remotes/source/"+from); err != nil {
-		return "", "", err
+	return strings.TrimSpace(current), nil
+}
+
+// BranchTip reads a branch's tip in a repository without changing anything.
+func BranchTip(ctx context.Context, dir, branch string) (string, error) {
+	if _, err := run(ctx, dir, "check-ref-format", "--branch", branch); err != nil {
+		return "", fmt.Errorf("%q is not a valid branch name", branch)
 	}
-	head, err := run(ctx, r.Workspace(), "rev-parse", "refs/remotes/source/"+from)
+	tip, err := run(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	if err != nil {
-		return "", "", err
+		return "", fmt.Errorf("there is no branch %s", branch)
 	}
-	base = strings.TrimSpace(head)
-	if err = r.Reset(ctx, "HEAD"); err != nil {
-		return "", "", err
+	return strings.TrimSpace(tip), nil
+}
+
+// Fetch brings the owner's branch into the clone and returns its tip. It
+// fetches from the repository's path, never a configured remote whose
+// settings could name a command to run.
+func (r Repo) Fetch(ctx context.Context, branch string) (string, error) {
+	if _, err := run(ctx, r.source, "check-ref-format", "--branch", branch); err != nil {
+		return "", fmt.Errorf("%q is not a valid branch name", branch)
 	}
-	if _, err = run(ctx, r.Workspace(), "checkout", "--quiet", "-B", branch, base); err != nil {
-		return "", "", err
+	if _, err := run(ctx, r.Workspace(), "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", "--no-auto-gc", r.source, "+refs/heads/"+branch+":refs/remotes/source/"+branch); err != nil {
+		return "", err
 	}
-	return base, from, r.Reset(ctx, base)
+	tip, err := run(ctx, r.Workspace(), "rev-parse", "refs/remotes/source/"+branch)
+	return strings.TrimSpace(tip), err
+}
+
+// Contains reports whether commit is already part of tip's history.
+func (r Repo) Contains(ctx context.Context, tip, commit string) (bool, error) {
+	_, err := run(ctx, r.Workspace(), "merge-base", "--is-ancestor", commit, tip)
+	var status *gitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &status) && status.code == 1:
+		return false, nil
+	}
+	return false, err
+}
+
+// MergeClean merges commit into tip without touching any working tree. It
+// returns the new merge commit, or "" when the two conflict and someone has to
+// resolve them.
+func (r Repo) MergeClean(ctx context.Context, tip, commit, message string) (string, error) {
+	tree, err := run(ctx, r.Workspace(), "merge-tree", "--write-tree", "--no-messages", tip, commit)
+	var status *gitError
+	if errors.As(err, &status) && status.code == 1 {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Fields(tree)
+	if len(lines) == 0 {
+		return "", errors.New("git merge-tree wrote no tree")
+	}
+	out, err := run(ctx, r.Workspace(), "commit-tree", lines[0], "-p", tip, "-p", commit, "-m", message)
+	return strings.TrimSpace(out), err
+}
+
+// ChangedFiles lists what differs between two commits.
+func (r Repo) ChangedFiles(ctx context.Context, from, to string) ([]string, error) {
+	out, err := run(ctx, r.Workspace(), "diff", "--no-ext-diff", "--no-textconv", "--name-only", from+".."+to)
+	return strings.Fields(out), err
+}
+
+// Merge brings commit into the checked-out task branch without committing, so
+// the implementer's next revision records the merged result. It returns the
+// files left with conflicts for the implementer to resolve.
+func (r Repo) Merge(ctx context.Context, commit string) ([]string, error) {
+	_, mergeErr := run(ctx, r.Workspace(), "merge", "--quiet", "--no-commit", "--no-ff", "--no-edit", commit)
+	out, err := run(ctx, r.Workspace(), "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	conflicts := strings.Fields(out)
+	if mergeErr != nil && len(conflicts) == 0 {
+		return nil, mergeErr
+	}
+	return conflicts, nil
 }
 
 // Snapshot records the working tree as a commit on the task branch and
@@ -180,7 +289,24 @@ func (r Repo) Snapshot(ctx context.Context, base, previous, message string) (str
 	if _, err := run(ctx, r.Workspace(), "add", "-A"); err != nil {
 		return "", nil, err
 	}
-	if _, err := run(ctx, r.Workspace(), "diff", "--cached", "--quiet"); err != nil {
+	_, mergeErr := run(ctx, r.Workspace(), "rev-parse", "--quiet", "--verify", "MERGE_HEAD")
+	merging := mergeErr == nil
+	if merging {
+		// Completing a merge: refuse to record conflicts nobody resolved.
+		check, _ := run(ctx, r.Workspace(), "diff", "--cached", "--check")
+		var left []string
+		for _, line := range strings.Split(check, "\n") {
+			if strings.Contains(line, "leftover conflict marker") {
+				left = append(left, strings.SplitN(line, ":", 2)[0])
+			}
+		}
+		if len(left) > 0 {
+			return "", nil, fmt.Errorf("conflict markers are still in %s", strings.Join(slices.Compact(left), ", "))
+		}
+	}
+	// A merge is recorded even when it changes no files: the task must then
+	// contain what it merged, or it would try to catch up forever.
+	if _, err := run(ctx, r.Workspace(), "diff", "--cached", "--quiet"); err != nil || merging {
 		if _, err = run(ctx, r.Workspace(), "commit", "--quiet", "--no-verify", "-m", message); err != nil {
 			return "", nil, err
 		}
@@ -200,12 +326,18 @@ func (r Repo) Snapshot(ctx context.Context, base, previous, message string) (str
 	return head, strings.Fields(names), nil
 }
 
-// Reset puts the clone back to commit, dropping anything a role left behind,
+// Reset puts the clone on branch at commit, dropping anything a role left behind,
 // ignored files included: an ignored source file would still be compiled, so a
 // check could pass on code that never ships. Only the build caches and the
 // copied dependencies are kept.
-func (r Repo) Reset(ctx context.Context, commit string) error {
-	if _, err := run(ctx, r.Workspace(), "reset", "--quiet", "--hard", commit); err != nil {
+func (r Repo) Reset(ctx context.Context, branch, commit string) error {
+	// Several tasks share the clone, so each step checks out its own task's
+	// branch; a bare reset would move whichever branch was left checked out.
+	if _, err := run(ctx, r.Workspace(), "checkout", "--quiet", "--force", "--no-recurse-submodules", "-B", branch, commit); err != nil {
+		return err
+	}
+	// A merge a failed round left in progress must not carry into the next.
+	if _, err := run(ctx, r.Workspace(), "reset", "--quiet", "--hard"); err != nil {
 		return err
 	}
 	args := []string{"clean", "-ffdxq", "-e", "/" + cacheDir + "/"}
@@ -325,6 +457,52 @@ func (r Repo) Deliver(ctx context.Context, taskBranch, commit, name string) (str
 	return "", errors.New("no free branch name")
 }
 
+// Why a push to a branch the project does not own was refused. None of them
+// is ever answered by forcing: the branch moved, or the owner's checkout of it
+// is theirs to deal with.
+var (
+	ErrTargetMoved   = errors.New("the branch has moved on since this change was checked")
+	ErrCheckedOut    = errors.New("the branch is checked out in the owner's repository, which refuses updates to it")
+	ErrDirtyCheckout = errors.New("the owner's checkout of the branch has uncommitted changes")
+)
+
+// receivePack runs the receiving side of a push into the owner's repository
+// with their hooks and file-system monitor off. Their repository's own rules,
+// such as receive.denyCurrentBranch, still apply.
+var receivePack = "git " + strings.Join(append(append([]string(nil), safety...), "-c", "receive.autogc=false"), " ") + " receive-pack"
+
+// PushFastForward lands commit on target in the owner's repository by a plain
+// push: never forced, so it only succeeds when target has not moved past what
+// commit was built on. A checked-out target follows the owner's
+// receive.denyCurrentBranch setting.
+func (r Repo) PushFastForward(ctx context.Context, taskBranch, commit, target string) error {
+	tip, err := run(ctx, r.Workspace(), "rev-parse", "refs/heads/"+taskBranch)
+	if err != nil || strings.TrimSpace(tip) != commit {
+		return errors.New("the task branch is not at the approved revision")
+	}
+	if _, err = run(ctx, r.source, "check-ref-format", "--branch", target); err != nil {
+		return fmt.Errorf("%q is not a valid branch name", target)
+	}
+	out, err := run(ctx, r.Workspace(), "push", "--porcelain", "--no-verify", "--receive-pack="+receivePack, r.source, commit+":refs/heads/"+target)
+	if err == nil {
+		return nil
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "!") {
+			continue
+		}
+		switch reason := strings.ToLower(line); {
+		case strings.Contains(reason, "non-fast-forward"), strings.Contains(reason, "fetch first"), strings.Contains(reason, "stale info"):
+			return ErrTargetMoved
+		case strings.Contains(reason, "currently checked out"):
+			return ErrCheckedOut
+		case strings.Contains(reason, "working directory"), strings.Contains(reason, "working tree"):
+			return fmt.Errorf("%w: %s", ErrDirtyCheckout, strings.TrimSpace(line[strings.LastIndex(line, "\t")+1:]))
+		}
+	}
+	return err
+}
+
 // run is the only way this package runs git. Hooks, fsmonitor and system
 // configuration are off for every command, wherever it runs.
 func run(ctx context.Context, dir string, args ...string) (string, error) {
@@ -339,10 +517,22 @@ func run(ctx context.Context, dir string, args ...string) (string, error) {
 		if len(detail) > 300 {
 			detail = detail[:300]
 		}
-		return stdout.String(), fmt.Errorf("git %s: %s", args[0], detail)
+		code := -1
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			code = exit.ExitCode()
+		}
+		return stdout.String(), &gitError{command: args[0], detail: detail, code: code}
 	}
 	return stdout.String(), nil
 }
+
+type gitError struct {
+	command, detail string
+	code            int
+}
+
+func (e *gitError) Error() string { return "git " + e.command + ": " + e.detail }
 
 // safety is prepended to every git command: nothing configured in a
 // repository, the operator's global config or the system can make git run a
@@ -377,5 +567,7 @@ func gitEnvironment() []string {
 		"GIT_PAGER=cat",
 		"GIT_NO_REPLACE_OBJECTS=1",
 		"GIT_OPTIONAL_LOCKS=0",
+		// Refusals are read from git's own words.
+		"LC_ALL=C",
 	)
 }

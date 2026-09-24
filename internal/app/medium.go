@@ -19,6 +19,8 @@ import (
 type medium interface {
 	workspace() string
 	env() []string
+	// readable is what roles may read outside the workspace.
+	readable() []string
 	// begin readies the workspace for a task's first round and returns the
 	// task with anything the medium needs to remember.
 	begin(ctx context.Context, t core.Task) (core.Task, error)
@@ -32,6 +34,25 @@ type medium interface {
 	deliver(ctx context.Context, t core.Task, r core.Revision) (string, error)
 	// deliveryNote tells the owner what approving will do.
 	deliveryNote(t core.Task) string
+	// behind reports what the task must take in before it can land, or nil.
+	behind(ctx context.Context, t core.Task) (*line, error)
+	// catchUp brings l into the task. A clean merge comes back as a commit the
+	// daemon can record; otherwise the workspace holds the merge with the
+	// files left in conflict for the implementer. Either way the task returns
+	// on its new base.
+	catchUp(ctx context.Context, t core.Task, l line) (moved core.Task, clean string, conflicts []string, err error)
+	// alreadyLanded reports whether the revision is already where it lands.
+	alreadyLanded(ctx context.Context, t core.Task, r core.Revision) (bool, error)
+	// files lists what a revision changes from the task's base.
+	files(ctx context.Context, t core.Task, ref string) ([]string, error)
+}
+
+// line is work a task must include before it lands: the target branch's tip
+// for a push, or the project's last landing for new branches.
+type line struct {
+	Commit, Name string
+	// What says in words what moved, for the implementer and the activity log.
+	What string
 }
 
 func (a *App) mediumFor(ctx context.Context, p core.Project, playbook *core.Playbook) (medium, error) {
@@ -46,7 +67,7 @@ func (a *App) mediumFor(ctx context.Context, p core.Project, playbook *core.Play
 	if err != nil {
 		return nil, err
 	}
-	return gitMedium{repo: repo, playbook: *playbook}, nil
+	return gitMedium{repo: repo, playbook: *playbook, landed: p.Landed}, nil
 }
 
 func deliverTo(p *core.Playbook) string {
@@ -61,8 +82,9 @@ type docsMedium struct {
 	deliverTo string
 }
 
-func (m docsMedium) workspace() string { return m.docs.Workspace() }
-func (m docsMedium) env() []string     { return nil }
+func (m docsMedium) workspace() string  { return m.docs.Workspace() }
+func (m docsMedium) env() []string      { return nil }
+func (m docsMedium) readable() []string { return nil }
 func (m docsMedium) begin(_ context.Context, t core.Task) (core.Task, error) {
 	return t, nil
 }
@@ -85,6 +107,14 @@ func (m docsMedium) deliver(_ context.Context, t core.Task, r core.Revision) (st
 	}
 	return m.docs.Deliver(t.ID, r.N, m.deliverTo, t.Objective)
 }
+func (m docsMedium) behind(context.Context, core.Task) (*line, error) { return nil, nil }
+func (m docsMedium) catchUp(_ context.Context, t core.Task, _ line) (core.Task, string, []string, error) {
+	return t, "", nil, nil
+}
+func (m docsMedium) alreadyLanded(context.Context, core.Task, core.Revision) (bool, error) {
+	return false, nil
+}
+func (m docsMedium) files(context.Context, core.Task, string) ([]string, error) { return nil, nil }
 func (m docsMedium) deliveryNote(core.Task) string {
 	if m.deliverTo != "" {
 		return "Approving copies it into " + m.deliverTo + "."
@@ -95,19 +125,119 @@ func (m docsMedium) deliveryNote(core.Task) string {
 type gitMedium struct {
 	repo     gitrepo.Repo
 	playbook core.Playbook
+	landed   *core.Landing
 }
 
-func (m gitMedium) workspace() string { return m.repo.Workspace() }
-func (m gitMedium) env() []string     { return m.repo.Env() }
+func (m gitMedium) workspace() string  { return m.repo.Workspace() }
+func (m gitMedium) env() []string      { return m.repo.Env() }
+func (m gitMedium) readable() []string { return m.repo.Readable() }
 
 func (m gitMedium) begin(ctx context.Context, t core.Task) (core.Task, error) {
 	if t.Base != "" {
 		return t, nil
 	}
 	t.Branch = "crew-task/" + t.ID
-	base, from, err := m.repo.Begin(ctx, t.Branch)
-	t.Base, t.From = base, from
-	return t, err
+	// A task that lands on a target starts from it, whatever the owner has
+	// checked out.
+	from := ""
+	if m.playbook.Land.Way() != core.LandBranch {
+		from = m.playbook.Land.Target
+	}
+	base, start, err := m.repo.Begin(ctx, t.Branch, from)
+	if err != nil {
+		return t, err
+	}
+	t.Base, t.From = base, start
+	// Build on what already landed as a new branch when the owner's branch has
+	// not moved past it, rather than starting behind and catching up later.
+	if m.playbook.Land.Way() != core.LandBranch || m.landed == nil {
+		return t, nil
+	}
+	ahead, err := m.repo.Contains(ctx, m.landed.Commit, base)
+	if err != nil || !ahead || m.landed.Commit == base {
+		return t, err
+	}
+	t.Base, t.From = m.landed.Commit, m.landed.Branch
+	return t, m.repo.Reset(ctx, t.Branch, t.Base)
+}
+
+// lineFor is what the task must include: a freshly fetched target tip when it
+// lands on a target (never the project's record of what landed, which may
+// name another task's branch), or the last new-branch landing otherwise.
+func (m gitMedium) lineFor(ctx context.Context, t core.Task) (*line, error) {
+	land := m.playbook.Land
+	if land.Way() == core.LandBranch {
+		if m.landed == nil || m.landed.TaskID == t.ID {
+			return nil, nil
+		}
+		return &line{Commit: m.landed.Commit, Name: m.landed.Branch, What: fmt.Sprintf("%q landed on branch %s", m.landed.Objective, m.landed.Branch)}, nil
+	}
+	tip, err := m.repo.Fetch(ctx, land.Target)
+	if err != nil {
+		return nil, err
+	}
+	what := fmt.Sprintf("%s moved on since this task started (it is now at %s)", land.Target, tip[:7])
+	if m.landed != nil && m.landed.TaskID != t.ID && m.landed.Commit == tip {
+		what = fmt.Sprintf("%q landed on %s", m.landed.Objective, land.Target)
+	}
+	return &line{Commit: tip, Name: land.Target, What: what}, nil
+}
+
+func tipOf(t core.Task) string {
+	if n := len(t.Revisions); n > 0 {
+		return t.Revisions[n-1].Ref
+	}
+	return t.Base
+}
+
+func (m gitMedium) behind(ctx context.Context, t core.Task) (*line, error) {
+	tip := tipOf(t)
+	if tip == "" {
+		return nil, nil
+	}
+	l, err := m.lineFor(ctx, t)
+	if err != nil || l == nil {
+		return nil, err
+	}
+	contains, err := m.repo.Contains(ctx, tip, l.Commit)
+	if err != nil || contains {
+		return nil, err
+	}
+	return l, nil
+}
+
+func (m gitMedium) catchUp(ctx context.Context, t core.Task, l line) (core.Task, string, []string, error) {
+	tip := tipOf(t)
+	moved := t
+	// The task's own change is now measured from what it took in.
+	moved.Base, moved.From = l.Commit, l.Name
+	clean, err := m.repo.MergeClean(ctx, tip, l.Commit, fmt.Sprintf("catch up with %s: %s", l.Name, clip(t.Objective, 60)))
+	if err != nil {
+		return t, "", nil, err
+	}
+	if clean != "" {
+		return moved, clean, nil, m.repo.Reset(ctx, t.Branch, clean)
+	}
+	if err = m.repo.Reset(ctx, t.Branch, tip); err != nil {
+		return t, "", nil, err
+	}
+	conflicts, err := m.repo.Merge(ctx, l.Commit)
+	return moved, "", conflicts, err
+}
+
+func (m gitMedium) alreadyLanded(ctx context.Context, t core.Task, r core.Revision) (bool, error) {
+	if m.playbook.Land.Way() != core.LandPush || r.Ref == "" {
+		return false, nil
+	}
+	tip, err := m.repo.Fetch(ctx, m.playbook.Land.Target)
+	if err != nil {
+		return false, err
+	}
+	return m.repo.Contains(ctx, tip, r.Ref)
+}
+
+func (m gitMedium) files(ctx context.Context, t core.Task, ref string) ([]string, error) {
+	return m.repo.ChangedFiles(ctx, t.Base, ref)
 }
 
 func (m gitMedium) reset(ctx context.Context, t core.Task) error {
@@ -118,7 +248,7 @@ func (m gitMedium) reset(ctx context.Context, t core.Task) error {
 	if ref == "" {
 		return errors.New("the task has no starting point")
 	}
-	return m.repo.Reset(ctx, ref)
+	return m.repo.Reset(ctx, t.Branch, ref)
 }
 
 func (m gitMedium) snapshot(ctx context.Context, t core.Task, n int) (core.Revision, error) {
@@ -132,11 +262,11 @@ func (m gitMedium) snapshot(ctx context.Context, t core.Task, n int) (core.Revis
 
 // checkDir is the clone itself, at the revision. Checks run one at a time, so
 // nothing else is working there; whatever a check wrote is reset afterwards.
-func (m gitMedium) checkDir(ctx context.Context, _ core.Task, r core.Revision) (string, func(), error) {
-	if err := m.repo.Reset(ctx, r.Ref); err != nil {
+func (m gitMedium) checkDir(ctx context.Context, t core.Task, r core.Revision) (string, func(), error) {
+	if err := m.repo.Reset(ctx, t.Branch, r.Ref); err != nil {
 		return "", nil, err
 	}
-	return m.repo.Workspace(), func() { _ = m.repo.Reset(context.WithoutCancel(ctx), r.Ref) }, nil
+	return m.repo.Workspace(), func() { _ = m.repo.Reset(context.WithoutCancel(ctx), t.Branch, r.Ref) }, nil
 }
 
 func (m gitMedium) preview(ctx context.Context, t core.Task, r core.Revision) ([]media.File, error) {
@@ -144,8 +274,8 @@ func (m gitMedium) preview(ctx context.Context, t core.Task, r core.Revision) ([
 }
 
 func (m gitMedium) deliver(ctx context.Context, t core.Task, r core.Revision) (string, error) {
-	if err := m.repo.Reset(ctx, r.Ref); err != nil {
-		return "", err
+	if land := m.playbook.Land; land.Way() == core.LandPush {
+		return land.Target, m.repo.PushFastForward(ctx, t.Branch, r.Ref, land.Target)
 	}
 	return m.repo.Deliver(ctx, t.Branch, r.Ref, m.branchName(t))
 }
@@ -155,7 +285,18 @@ func (m gitMedium) branchName(t core.Task) string {
 }
 
 func (m gitMedium) deliveryNote(t core.Task) string {
-	return "Approving creates the branch " + m.branchName(t) + " in " + filepath.Base(m.playbook.Repo) + ", from " + startedFrom(t) + ". Nothing is pushed, and your checkout is not touched."
+	if land := m.playbook.Land; land.Way() == core.LandPush {
+		note := "Approving lands it on " + land.Target + " in " + filepath.Base(m.playbook.Repo) + " by fast-forward: " + land.Target + " only moves forward, nothing already on it is replaced, and nothing is pushed anywhere else."
+		if land.Means != "" {
+			note += " For this project, landing means: " + land.Means
+		}
+		return note
+	}
+	note := "Approving creates the branch " + m.branchName(t) + " in " + filepath.Base(m.playbook.Repo) + ", from " + startedFrom(t) + "."
+	if m.landed != nil && m.landed.TaskID != t.ID && t.Base == m.landed.Commit {
+		note += " It builds on " + m.landed.Objective + ", which landed first, so it includes that change too."
+	}
+	return note + " Nothing is pushed, and your checkout is not touched."
 }
 
 func startedFrom(t core.Task) string {
@@ -165,21 +306,28 @@ func startedFrom(t core.Task) string {
 	return t.From + " at " + t.Base[:7]
 }
 
+// slugify keeps whole words, up to 40 characters, so a branch name never ends
+// mid-word.
 func slugify(text string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(text) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case b.Len() > 0 && !strings.HasSuffix(b.String(), "-"):
-			b.WriteByte('-')
+	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	})
+	out := ""
+	for _, word := range words {
+		next := word
+		if out != "" {
+			next = out + "-" + word
 		}
-		if b.Len() >= 40 {
+		if len(next) > 40 {
 			break
 		}
+		out = next
 	}
-	if out := strings.Trim(b.String(), "-"); out != "" {
-		return out
+	if out == "" && len(words) > 0 {
+		out = words[0][:min(len(words[0]), 40)]
 	}
-	return "change"
+	if out == "" {
+		return "change"
+	}
+	return out
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // Store serializes mutations in-process and uses BEGIN IMMEDIATE to serialize
@@ -177,6 +178,9 @@ func (s *Store) update(ctx context.Context, fn func(*Snapshot) error) error {
 	if err = fn(&state); err != nil {
 		return err
 	}
+	// A task's status can pass through a value within one change; checking
+	// here, not by polling, means a wake waiting on it never misses it.
+	settleTaskWakes(&state, time.Now().UTC())
 	data, err := json.Marshal(diskState{Schema: stateSchema, ChatCheckpoint: state.ChatCheckpoint, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: state, ModelCalls: state.ModelCalls, Events: state.Events})
 	if err != nil {
 		return err
