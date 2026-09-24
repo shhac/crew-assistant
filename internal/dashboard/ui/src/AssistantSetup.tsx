@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { ErrorNotice } from "./ui";
 import { api, errorText, type Config } from "./api";
-import { Avatar, Waiting, themes, type AvatarSpec } from "./Identity";
+import { Avatar, type AvatarSpec } from "./Identity";
 interface Recommendation {
   id: string;
   name: string;
   personality: string;
-  theme: string;
   avatar: AvatarSpec;
   rationale: string;
   avatar_svg?: string;
@@ -105,127 +105,100 @@ export function AssistantSetup({
   const proposal = state.recommendation;
   const isApplied = applied || proposal?.applied === true;
   return (
-    <section className="setup-studio" aria-labelledby="setup-title">
-      <div className="setup-intro">
-        <span className="eyebrow">A GOOD WORKING RELATIONSHIP</span>
-        <h2 id="setup-title">Meet your assistant.</h2>
-        <p>
-          A few preferences are enough. Your assistant can suggest a name, a
-          voice and a look that fit how you like to work.
-        </p>
-      </div>
-      {error && (
-        <div className="error-notice" role="alert">
-          {error}
-        </div>
-      )}
-      {demo && (
-        <p className="field-hint">
-          This is a preview workspace. The guided conversation uses your
-          configured model outside demo mode; manual preferences are available
-          below.
-        </p>
-      )}
+    <section
+      className="tab-panel card settings-panel"
+      aria-labelledby="setup-title"
+    >
+      <h2 id="setup-title">Get a suggestion</h2>
+      <p className="soft">
+        Answer a question or two, and the assistant suggests a name, a way of
+        working and an avatar. Nothing changes until you use it.
+      </p>
+      <ErrorNotice error={error} />
+      {demo && <p className="muted small">Not available in the demo.</p>}
       {state.messages.length > 0 && (
         <div
-          className="setup-dialogue"
+          className="setup-log"
           role="log"
-          aria-label="Assistant setup conversation"
+          aria-label="Suggestion conversation"
           ref={log}
         >
           {state.messages.map((m, i) => (
-            <article
+            <p
               key={i}
-              className={m.role === "user" ? "setup-answer" : "setup-question"}
+              className={m.role === "user" ? "setup-you" : "setup-them"}
             >
-              <span>
-                {m.role === "user" ? "You" : currentName || "Your assistant"}
+              <span className="label">
+                {m.role === "user" ? "You" : currentName || "Assistant"}
               </span>
-              <p>{m.content}</p>
-            </article>
+              {m.content}
+            </p>
           ))}
         </div>
       )}
       {!state.messages.length && !busy && (
-        <div className="setup-start">
-          <Avatar />
-          <div>
-            <h3>How do you want us to work together?</h3>
-            <p>
-              We can talk through your preferences before you choose anything.
-            </p>
-          </div>
+        <div className="actions">
           <button
             type="button"
-            className="button primary"
+            className="btn"
             disabled={demo}
             onClick={() => void interview()}
           >
-            Let’s get acquainted
+            Start
           </button>
         </div>
       )}
       {busy && (
-        <Waiting
-          label="Considering what suits you"
-          detail="A thoughtful suggestion, based on your preferences."
-        />
+        <p className="muted small" role="status">
+          Working on a suggestion…
+        </p>
       )}
       {state.messages.length > 0 && (
-        <form className="setup-reply" onSubmit={interview}>
+        <div className="form">
           <label htmlFor="setup-answer">
-            Your preferences
+            Your answer
             <textarea
               id="setup-answer"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               rows={2}
               maxLength={12000}
-              placeholder="I like concise updates, a calm tone, and a little personality…"
+              placeholder="Short updates, a calm tone…"
               disabled={busy || demo}
             />
           </label>
-          <button
-            className="button secondary"
-            disabled={busy || demo || !message.trim()}
-          >
-            Continue conversation
-          </button>
-        </form>
-      )}
-      {proposal && (
-        <div className="identity-proposal">
-          <div className="proposal-heading">
-            <Avatar avatar={proposal.avatar} />
-            <div>
-              <span className="eyebrow">A SUGGESTION FOR YOU</span>
-              <h3>{proposal.name}</h3>
-              <span>
-                {themes.find((t) => t.id === proposal.theme)?.name ||
-                  proposal.theme}
-              </span>
-            </div>
-          </div>
-          <p className="proposal-personality">{proposal.personality}</p>
-          <p className="field-hint">{proposal.rationale}</p>
-          <div className="proposal-actions">
-            <span role="status">
-              {isApplied
-                ? "Your assistant’s identity is saved."
-                : "Nothing changes until you apply this suggestion."}
-            </span>
+          <div className="actions">
             <button
               type="button"
-              className="button primary"
+              className="btn"
+              disabled={busy || demo || !message.trim()}
+              onClick={() => void interview()}
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      )}
+      {proposal && (
+        <div className="setup-proposal">
+          <div className="setup-proposal-head">
+            <Avatar avatar={proposal.avatar} />
+            <h3>{proposal.name}</h3>
+          </div>
+          <p>{proposal.personality}</p>
+          <p className="muted small">{proposal.rationale}</p>
+          <div className="actions">
+            <button
+              type="button"
+              className="btn btn-primary"
               disabled={applying || busy || isApplied || demo}
               onClick={() => void apply()}
             >
-              {applying
-                ? "Applying…"
-                : isApplied
-                  ? "Applied"
-                  : "Use this identity"}
+              {isApplied ? "In use" : "Use this"}
             </button>
+            <span className="muted small" role="status">
+              {isApplied ? "Saved." : "Nothing changes until you use it."}
+            </span>
           </div>
         </div>
       )}

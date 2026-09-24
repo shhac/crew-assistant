@@ -16,7 +16,6 @@ const recommendation = {
   id: "proposal-1",
   name: "Rowan",
   personality: "Calm, direct, and thoughtful.",
-  theme: "graphite-sage",
   avatar: { shape: "leaf", background: "#202424", accent: "#aacbbb" },
   rationale: "A quiet style to match your preferences.",
 };
@@ -46,13 +45,27 @@ it("keeps a proposed identity unchanged until the owner applies it", async () =>
   render(
     <AssistantSetup currentName="Iris" demo={false} onApplied={applied} />,
   );
-  const button = await screen.findByRole("button", {
-    name: "Use this identity",
-  });
+  const button = await screen.findByRole("button", { name: "Use this" });
+  expect(
+    screen.getByRole("heading", { level: 2, name: "Get a suggestion" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("heading", { level: 3, name: "Rowan" })).toBeTruthy();
+  expect(screen.getByText("Calm, direct, and thoughtful.")).toBeTruthy();
+  expect(
+    screen.getByText("A quiet style to match your preferences."),
+  ).toBeTruthy();
+  expect(screen.queryByText(/graphite|theme/i)).toBeNull();
+  expect(screen.getByRole("status").textContent).toBe(
+    "Nothing changes until you use it.",
+  );
   expect(applied).not.toHaveBeenCalled();
   expect(requests.some((r) => r.path.endsWith("/apply"))).toBe(false);
   fireEvent.click(button);
-  await screen.findByRole("button", { name: "Applied" });
+  expect(await screen.findByRole("button", { name: "In use" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  expect(screen.getByRole("status").textContent).toBe("Saved.");
   expect(applied).toHaveBeenCalledTimes(1);
   expect(
     JSON.parse(
@@ -69,13 +82,12 @@ it("restores a previously applied recommendation without offering to apply it ag
   render(
     <AssistantSetup currentName="Rowan" demo={false} onApplied={vi.fn()} />,
   );
-  expect(await screen.findByRole("button", { name: "Applied" })).toHaveProperty(
+  expect(await screen.findByRole("button", { name: "In use" })).toHaveProperty(
     "disabled",
     true,
   );
-  expect(
-    screen.queryByText("Nothing changes until you apply this suggestion."),
-  ).toBeNull();
+  expect(screen.queryByText("Nothing changes until you use it.")).toBeNull();
+  expect(screen.getByText("Saved.")).toBeTruthy();
 });
 it("keeps named account bindings distinct and enables Notion with its CLI default", async () => {
   response = (path) =>
@@ -141,9 +153,63 @@ it("keeps named account bindings distinct and enables Notion with its CLI defaul
   expect(latest[1].tool).toBe("agent-notion");
   expect(latest[1].profiles).toEqual([]);
   expect(await screen.findByText("Uses the CLI default account")).toBeTruthy();
-  expect(screen.getByText("CLI default account")).toBeTruthy();
-  expect(screen.getAllByLabelText("Connection name")[0]).toHaveProperty(
-    "maxLength",
-    80,
+  expect(screen.getByText("Uses the account its CLI has")).toBeTruthy();
+  expect(screen.getAllByLabelText("Name")[0]).toHaveProperty("maxLength", 80);
+});
+it("starts a suggestion, then sends a trimmed answer without submitting a form", async () => {
+  let release: () => void = () => {};
+  response = (path) =>
+    path.endsWith("/interview")
+      ? {
+          messages: [{ role: "assistant", content: "How should I sound?" }],
+          questions: [],
+        }
+      : { messages: [], questions: [] };
+  render(
+    <AssistantSetup currentName="Iris" demo={false} onApplied={vi.fn()} />,
   );
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const stub = vi.mocked(fetch);
+  stub.mockImplementationOnce(async (path, options) => {
+    requests.push({ path: String(path), options });
+    await gate;
+    return new Response(JSON.stringify(response(String(path))));
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+  expect((await screen.findByRole("status")).textContent).toBe(
+    "Working on a suggestion…",
+  );
+  release();
+  const answer = await screen.findByLabelText("Your answer");
+  expect(screen.getByText("How should I sound?")).toBeTruthy();
+  const send = screen.getByRole("button", { name: "Send" });
+  expect(send.getAttribute("type")).toBe("button");
+  expect(send).toHaveProperty("disabled", true);
+  fireEvent.change(answer, { target: { value: "  Calm and short.  " } });
+  fireEvent.click(send);
+  await waitFor(() =>
+    expect(requests.filter((r) => r.path.endsWith("/interview"))).toHaveLength(
+      2,
+    ),
+  );
+  const bodies = requests
+    .filter((r) => r.path.endsWith("/interview"))
+    .map((r) => JSON.parse(String(r.options?.body)));
+  expect(bodies).toEqual([{ message: "" }, { message: "Calm and short." }]);
+  await waitFor(() => expect(answer).toHaveProperty("value", ""));
+});
+it("offers no suggestion in the demo", async () => {
+  response = () => ({ messages: [], questions: [], recommendation });
+  render(<AssistantSetup currentName="Iris" demo onApplied={vi.fn()} />);
+  expect(screen.getByText("Not available in the demo.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Start" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  expect(
+    await screen.findByRole("button", { name: "Use this" }),
+  ).toHaveProperty("disabled", true);
+  expect(requests.every((r) => r.path === "/api/setup")).toBe(true);
 });

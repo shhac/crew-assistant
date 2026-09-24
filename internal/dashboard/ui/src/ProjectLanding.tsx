@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { reversibility, whatHappens } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
 import { setLanding, type Project } from "./api";
 
@@ -12,28 +13,118 @@ function landingMethod(via: string, chosen: string) {
   return methods[via] ?? "";
 }
 
-function landingSummary(project: Project) {
-  const land = project.playbook?.land;
-  const ask =
-    land?.approve === "none"
-      ? "A change that passes its checks lands without asking you."
-      : "You approve each change before it lands.";
-  if (land?.via === "push")
-    return `Approved changes land on ${land.target} by fast-forward: it only moves forward, and nothing already there is replaced. ${ask}`;
-  if (land?.via === "pull-request")
-    return `Approved changes open a pull request on ${land.github} into ${land.target}; the team answers its reviews and CI, and it merges by ${land.method || "squash"} once GitHub says it is approved and green. ${ask}`;
-  return `Approved changes become a local branch starting ${project.playbook?.branch_prefix ?? ""}; nothing is pushed. ${ask}`;
-}
+const ways: Record<string, string> = {
+  branch: "A new local branch",
+  push: "Fast-forward a branch",
+  "pull-request": "A pull request on GitHub",
+};
 
-export function LandingCard({
+/**
+ * What landing an approved change means for this project. Only the owner and
+ * the assistant can change it; nothing the team does can.
+ */
+export function LandingTab({
   project,
   refresh,
 }: {
   project: Project;
   refresh: () => Promise<void>;
 }) {
-  const land = project.playbook?.land;
   const [editing, setEditing] = useState(false);
+  const land = project.playbook?.land;
+  if (!project.playbook)
+    return (
+      <section className="tab-panel card">
+        <p className="muted">Choose a team first.</p>
+      </section>
+    );
+  if (editing)
+    return (
+      <section className="tab-panel card">
+        <LandingEditor
+          project={project}
+          onDone={() => setEditing(false)}
+          refresh={refresh}
+        />
+      </section>
+    );
+  const via = land?.via || "branch";
+  return (
+    <section className="tab-panel card">
+      <div className="panel-head">
+        <h2>Landing</h2>
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={() => setEditing(true)}
+        >
+          Edit
+        </button>
+      </div>
+      <dl className="facts">
+        {land?.means && (
+          <div className="fact-row">
+            <dt>Means</dt>
+            <dd>{land.means}</dd>
+          </div>
+        )}
+        <div className="fact-row">
+          <dt>Lands as</dt>
+          <dd>
+            {ways[via]}
+            {via === "push" && (
+              <>
+                : <code>{land?.target}</code>
+              </>
+            )}
+            {via === "pull-request" && (
+              <>
+                {" "}
+                on <code>{land?.github}</code> into <code>{land?.target}</code>,
+                merged by {land?.method || "squash"}
+              </>
+            )}
+          </dd>
+        </div>
+        <div className="fact-row">
+          <dt>Before it lands</dt>
+          <dd>
+            {land?.approve === "none"
+              ? "It lands once the checks pass"
+              : "You approve each change"}
+          </dd>
+        </div>
+        <div className="fact-row">
+          <dt>To undo</dt>
+          <dd>{reversibility(land)}</dd>
+        </div>
+      </dl>
+      <div className="section">
+        <p className="label">When a change lands</p>
+        <ol className="happens">
+          {whatHappens(project.playbook).map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ol>
+      </div>
+      <p className="muted small">
+        Nothing the team does can change this, and a branch the team doesn't own
+        is never overwritten.
+      </p>
+    </section>
+  );
+}
+
+function LandingEditor({
+  project,
+  onDone,
+  refresh,
+}: {
+  project: Project;
+  onDone: () => void;
+  refresh: () => Promise<void>;
+}) {
+  const land = project.playbook?.land;
   const [via, setVia] = useState(land?.via || "branch");
   const [github, setGithub] = useState(land?.github ?? "");
   const [method, setMethod] = useState(
@@ -55,42 +146,24 @@ export function LandingCard({
         approve,
       });
       await refresh();
-      setEditing(false);
+      onDone();
     });
   }
-  if (!editing)
-    return (
-      <div className="team-landing" aria-label="Landing">
-        <p className="field-hint">
-          {land?.means && (
-            <>
-              <strong>Landing means:</strong> {land.means}.{" "}
-            </>
-          )}
-          {landingSummary(project)}
-        </p>
-        <button
-          type="button"
-          className="text-button"
-          onClick={() => setEditing(true)}
-        >
-          Change where changes land
-        </button>
-      </div>
-    );
   return (
-    <form className="project-card-form" aria-label="Landing" onSubmit={save}>
-      <div className="team-fields">
+    <form className="form" aria-label="Landing" onSubmit={save}>
+      <h2>Landing</h2>
+      <div className="form-row">
         <label htmlFor="land-via">
-          When approved
+          Lands as
           <select
             id="land-via"
+            className="field"
             value={via}
             onChange={(e) => setVia(e.target.value)}
           >
-            <option value="branch">Create a new local branch</option>
+            <option value="branch">A new local branch</option>
             <option value="push">Fast-forward a branch</option>
-            <option value="pull-request">Open a pull request on GitHub</option>
+            <option value="pull-request">A pull request on GitHub</option>
           </select>
         </label>
         {via === "pull-request" && (
@@ -98,6 +171,7 @@ export function LandingCard({
             GitHub repository
             <input
               id="land-github"
+              className="field"
               value={github}
               placeholder="owner/name"
               onChange={(e) => setGithub(e.target.value)}
@@ -110,6 +184,7 @@ export function LandingCard({
             Merge by
             <select
               id="land-method"
+              className="field"
               value={method}
               onChange={(e) => setMethod(e.target.value)}
             >
@@ -121,9 +196,10 @@ export function LandingCard({
         )}
         {via !== "branch" && (
           <label htmlFor="land-target">
-            {via === "pull-request" ? "Into branch" : "Branch to land on"}
+            {via === "pull-request" ? "Into branch" : "Branch"}
             <input
               id="land-target"
+              className="field"
               value={target}
               onChange={(e) => setTarget(e.target.value)}
               required
@@ -134,33 +210,36 @@ export function LandingCard({
           Before it lands
           <select
             id="land-approve"
+            className="field"
             value={approve}
             onChange={(e) => setApprove(e.target.value)}
           >
             <option value="before">Ask me first</option>
-            <option value="none">Land when the checks pass</option>
+            <option value="none">Land once the checks pass</option>
           </select>
         </label>
       </div>
       <label htmlFor="land-means">
-        What landing means here (optional)
+        What landing means here
         <input
           id="land-means"
+          className="field"
           value={means}
-          placeholder="fully fast-forward merged to main"
+          placeholder="fast-forwarded onto main"
           onChange={(e) => setMeans(e.target.value)}
         />
+        <span className="hint">Optional. The team reads it.</span>
       </label>
       <ErrorNotice error={error} />
-      <div className="form-actions">
-        <button className="button primary" type="submit" disabled={busy}>
-          {busy ? "Saving…" : "Save"}
+      <div className="actions">
+        <button className="btn btn-primary" type="submit" disabled={busy}>
+          Save
         </button>
         <button
-          className="text-button"
+          className="btn btn-quiet"
           type="button"
           disabled={busy}
-          onClick={() => setEditing(false)}
+          onClick={onDone}
         >
           Cancel
         </button>

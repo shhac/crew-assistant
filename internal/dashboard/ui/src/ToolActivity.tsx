@@ -1,20 +1,29 @@
 import type { ChatToolEvent } from "./api";
 
+function seconds(from?: string, to?: string) {
+  const start = Date.parse(from || "");
+  const end = Date.parse(to || "");
+  return Number.isNaN(start) || Number.isNaN(end)
+    ? 0
+    : Math.max(0, (end - start) / 1000);
+}
+
+export function durationLabel(total: number) {
+  const whole = Math.round(total);
+  if (whole < 1) return "";
+  if (whole < 60) return `${whole} s`;
+  const minutes = Math.floor(whole / 60);
+  const rest = whole % 60;
+  return rest ? `${minutes} min ${rest} s` : `${minutes} min`;
+}
+
+const troubled = (e: ChatToolEvent) =>
+  e.status === "failed" || e.status === "interrupted";
+
 /**
- * Tool activity, weighted by what still needs watching. Running and failed
- * operations stay visible; finished ones collapse into a count so a long
- * successful turn does not bury the reply it produced.
- */
-/**
- * Tool activity, weighted by what still needs watching.
- *
- * Anything unfinished stays visible wherever it sits. So does the newest step
- * while it is the most recent thing in the thread: collapsing it would hide
- * what just happened at the moment the owner is watching for it. Once a reply
- * arrives, that step joins the others.
- *
- * A single remaining step is shown rather than hidden behind a summary that
- * would cost a row and a click to save one row.
+ * A turn's steps as one line: what it is doing while it works, and how long
+ * it took once it is done. Steps that failed, or whose outcome is unknown,
+ * are always shown; the rest fold away.
  */
 export function ToolActivity({
   events,
@@ -24,33 +33,43 @@ export function ToolActivity({
   /** This turn is the most recent thing in the thread and has not replied. */
   live?: boolean;
 }) {
-  const last = events[events.length - 1];
-  const tail = live && last?.status === "completed" ? last : undefined;
-  const settled = events.filter((e) => e.status === "completed" && e !== tail);
-  const collapse = settled.length > 1;
-  // One order-preserving pass: anything not folded away renders where it sits,
-  // which is what "unfinished steps stay visible wherever they are" means.
-  const folded = new Set(collapse ? settled : []);
-  const visible = events.filter((e) => !folded.has(e));
+  if (!events.length) return null;
+  const running = events.find((e) => e.status === "running");
+  const problems = events.filter(troubled);
+  const failed = events.filter((e) => e.status === "failed").length;
+  const unconfirmed = events.filter((e) => e.status === "interrupted").length;
+  const took = durationLabel(
+    seconds(
+      events[0]?.started_at,
+      events.at(-1)?.finished_at ?? events.at(-1)?.started_at,
+    ),
+  );
+  const count = `${events.length} ${events.length === 1 ? "step" : "steps"}`;
+  const summary = running
+    ? `${running.label || "Working"}…`
+    : live
+      ? events.at(-1)?.label || "Working"
+      : [
+          took ? `Worked for ${took}` : "Worked",
+          count,
+          failed ? `${failed} failed` : "",
+          unconfirmed ? `${unconfirmed} not confirmed` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
   return (
-    <div
-      className="chat-tools"
-      role="group"
-      aria-label="Assistant tool activity"
-    >
-      {collapse && (
-        <details className="chat-tools-settled">
-          <summary>{settled.length} steps completed</summary>
-          <ul>
-            {settled.map((event) => (
-              <ToolRow key={event.id} event={event} />
-            ))}
-          </ul>
-        </details>
-      )}
-      {!!visible.length && (
+    <div className="tools" role="group" aria-label="What the assistant did">
+      <details className="tools-summary">
+        <summary>{summary}</summary>
         <ul>
-          {visible.map((event) => (
+          {events.map((event) => (
+            <ToolRow key={event.id} event={event} />
+          ))}
+        </ul>
+      </details>
+      {problems.length > 0 && (
+        <ul className="tools-problems">
+          {problems.map((event) => (
             <ToolRow key={event.id} event={event} />
           ))}
         </ul>
@@ -58,34 +77,30 @@ export function ToolActivity({
     </div>
   );
 }
-const MARKER: Record<ChatToolEvent["status"], string> = {
-  completed: "✓",
-  failed: "!",
-  interrupted: "!",
-  running: "",
-};
 
-const PHRASE: Record<ChatToolEvent["status"], string> = {
-  running: "In progress",
-  completed: "Completed",
-  interrupted: "Outcome unconfirmed",
+const outcome: Record<ChatToolEvent["status"], string> = {
+  running: "Working",
+  completed: "Done",
+  interrupted: "Stopped; outcome not confirmed",
   failed: "Failed",
 };
 
 function ToolRow({ event }: { event: ChatToolEvent }) {
   return (
-    <li className={`chat-tool chat-tool-${event.status}`}>
-      <span className="chat-tool-marker" aria-hidden="true">
-        {MARKER[event.status]}
+    <li className={`tool tool-${event.status}`}>
+      <span className="tool-mark" aria-hidden="true">
+        {event.status === "completed"
+          ? "✓"
+          : event.status === "running"
+            ? "•"
+            : "!"}
       </span>
-      <span className="chat-tool-description">
-        {event.label || "Using a tool"}
-        <small>{PHRASE[event.status]}</small>
+      <span>
+        {event.label || "A step"}
+        {event.status !== "completed" && (
+          <span className="muted small"> · {outcome[event.status]}</span>
+        )}
       </span>
-      <details>
-        <summary>Tool details</summary>
-        <code>{event.tool}</code>
-      </details>
     </li>
   );
 }

@@ -104,10 +104,13 @@ export type TaskStatus =
   | "awaiting"
   | "landed"
   | "stopped";
+export type Stage =
+  "todo" | "implementing" | "reviewing" | "qa" | "ready" | "done" | "stopped";
 export interface Revision {
   n: number;
   brief_version: number;
   files: string[] | null;
+  ref?: string;
   summary?: string;
   at?: string;
 }
@@ -123,7 +126,26 @@ export interface Verdict {
   summary: string;
   findings?: Finding[];
   question?: string;
+  asked?: string;
   at?: string;
+}
+export interface TeamMessage {
+  id: string;
+  to: string;
+  kind: string;
+  from: "owner" | "assistant" | (string & {});
+  text: string;
+  status: "waiting" | "working" | "answered" | "failed" | "closed";
+  reply?: string;
+  outcome?: string;
+  revision?: number;
+  at?: string;
+  answered_at?: string;
+}
+export interface Proposal {
+  branch: string;
+  number?: number;
+  url?: string;
 }
 export interface Task {
   id: string;
@@ -131,11 +153,18 @@ export interface Task {
   objective: string;
   criteria: string[] | null;
   status: TaskStatus;
+  stage: Stage;
   detail?: string;
   roles?: Role[];
+  playbook?: Playbook;
   max_rounds?: number;
   round: number;
   direction?: string[];
+  direction_pending?: number;
+  messages?: TeamMessage[];
+  proposal?: Proposal;
+  branch?: string;
+  retry_at?: string;
   revisions: Revision[] | null;
   verdicts: Verdict[] | null;
   decision_id?: string;
@@ -361,6 +390,23 @@ export function landTask(projectID: string, taskID: string) {
   return api<Task>(
     `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/land`,
     { method: "POST", body: "{}" },
+  );
+}
+export function orderTasks(projectID: string, taskIDs: string[]) {
+  return api<Task[]>(`${projectPath(projectID)}/tasks/order`, {
+    method: "PUT",
+    body: JSON.stringify({ task_ids: taskIDs }),
+  });
+}
+export function messageTeam(
+  projectID: string,
+  taskID: string,
+  to: string,
+  text: string,
+) {
+  return api<TeamMessage>(
+    `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/messages`,
+    { method: "POST", body: JSON.stringify({ to, text }) },
   );
 }
 export function stopTask(projectID: string, taskID: string) {

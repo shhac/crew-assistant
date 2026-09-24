@@ -173,32 +173,28 @@ export function ChatQueue({
 
   if (!turns.length)
     return running ? (
-      <p className="chat-queue-summary">
-        You can keep writing · Each message gets its own reply.
+      <p className="queue-hint">
+        Keep writing if you like. Each message gets its own reply.
       </p>
     ) : null;
   return (
-    <section className="chat-queue" aria-label="Queued messages">
-      <p className="chat-queue-summary">
-        {turns.length} {turns.length === 1 ? "message" : "messages"} queued ·
-        Each message gets its own reply.
-      </p>
+    <section className="queue" aria-label="Queued messages">
+      <p className="label">Up next ({turns.length})</p>
       {hold && (
-        <p className="chat-queue-held" role="status">
-          The queue is paused while you change it. It resumes on its own if you
-          leave this open.
+        <p className="queue-hint" role="status">
+          Paused while you change it. It picks up again on its own.
         </p>
       )}
       {error && (
-        <p className="error-notice" role="alert">
+        <p className="error" role="alert">
           {error}
         </p>
       )}
-      <ol className="chat-queue-list">
+      <ol className="queue-list">
         {shown.map((turn, index) => (
           <li
             key={turn.id}
-            className="chat-queue-item"
+            className="queue-item"
             aria-label={`Queued message ${index + 1}`}
             draggable={editing === null && !busy}
             onDragStart={() => {
@@ -238,24 +234,26 @@ export function ChatQueue({
               dropped.current = false;
             }}
           >
-            <span className="chat-queue-position" aria-hidden="true">
+            <span className="queue-position" aria-hidden="true">
               {index + 1}
             </span>
             {editing === turn.id ? (
-              <div className="chat-queue-editor">
-                <label htmlFor={`queue-edit-${turn.id}`}>
-                  Edit queued message
+              <div className="queue-editor">
+                <label className="control" htmlFor={`queue-edit-${turn.id}`}>
+                  Edit message
                   <textarea
                     id={`queue-edit-${turn.id}`}
+                    className="field"
                     rows={3}
                     maxLength={24000}
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
                   />
                 </label>
-                <div className="chat-queue-actions">
+                <div className="actions">
                   <button
                     type="button"
+                    className="btn btn-primary btn-sm"
                     disabled={busy || !draft.trim()}
                     onClick={() => void save(turn)}
                   >
@@ -263,6 +261,7 @@ export function ChatQueue({
                   </button>
                   <button
                     type="button"
+                    className="btn btn-quiet btn-sm"
                     onClick={() => {
                       setEditing(null);
                       setDraft("");
@@ -275,28 +274,29 @@ export function ChatQueue({
               </div>
             ) : (
               <>
-                <p className="chat-queue-text">{turn.message}</p>
-                <div className="chat-queue-actions">
+                <p className="queue-text">{turn.message}</p>
+                <div className="queue-actions">
                   <button
                     type="button"
+                    className="btn btn-quiet btn-icon btn-sm"
                     aria-label={`Move message ${index + 1} earlier`}
                     disabled={busy || index === 0}
                     onClick={() => move(turn.id, -1)}
                   >
-                    <Icon name="Arrow" size={13} />
-                    Earlier
+                    <Icon name="Up" size={13} />
                   </button>
                   <button
                     type="button"
+                    className="btn btn-quiet btn-icon btn-sm"
                     aria-label={`Move message ${index + 1} later`}
                     disabled={busy || index === shown.length - 1}
                     onClick={() => move(turn.id, 1)}
                   >
-                    <Icon name="Arrow" size={13} />
-                    Later
+                    <Icon name="Down" size={13} />
                   </button>
                   <button
                     type="button"
+                    className="btn btn-quiet btn-sm"
                     aria-label={`Edit message ${index + 1}`}
                     disabled={busy}
                     onClick={() => {
@@ -310,11 +310,12 @@ export function ChatQueue({
                   {onCancel && (
                     <button
                       type="button"
-                      aria-label={`Cancel queued message: ${turn.message}`}
+                      className="btn btn-quiet btn-sm"
+                      aria-label={`Remove queued message: ${turn.message}`}
                       disabled={busy || cancelling?.has(turn.id)}
                       onClick={() => onCancel(turn.id)}
                     >
-                      Cancel
+                      Remove
                     </button>
                   )}
                 </div>

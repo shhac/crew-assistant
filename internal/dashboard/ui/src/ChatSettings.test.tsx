@@ -20,9 +20,12 @@ it("toggles loading phrases without fetching a model catalog", () => {
   vi.stubGlobal("fetch", fetch);
   const changed = vi.fn();
   render(<ChatSettings config={config} onChange={changed} />);
-  expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+  const toggle = screen.getByRole<HTMLInputElement>("checkbox", {
+    name: "Loading messages",
+  });
+  expect(toggle.checked).toBe(true);
   expect(fetch).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(toggle);
   expect(changed).toHaveBeenCalledWith({
     ...config,
     chat: { other: "preserved", loading_phrases: { enabled: false } },
@@ -32,7 +35,7 @@ it("names the own CLI's approved model first and the other as fallback, with no 
   const view = render(<ChatSettings config={config} onChange={() => {}} />);
   expect(
     screen.getByText(
-      /your Codex CLI login \(gpt-6-luna, low effort\).*your Claude login \(haiku\) instead/,
+      "Loading messages and next-message suggestions use your Codex login (gpt-6-luna, low effort), or your Claude login (haiku) if that isn't working. No other model is used.",
     ),
   ).toBeTruthy();
   expect(screen.queryByRole("combobox")).toBeNull();
@@ -45,7 +48,7 @@ it("names the own CLI's approved model first and the other as fallback, with no 
   );
   expect(
     screen.getByText(
-      /your Claude CLI login \(haiku\).*your Codex login \(gpt-6-luna, low effort\) instead/,
+      "Loading messages and next-message suggestions use your Claude login (haiku), or your Codex login (gpt-6-luna, low effort) if that isn't working. No other model is used.",
     ),
   ).toBeTruthy();
 });
@@ -56,6 +59,10 @@ it("makes no small-model requests for API assistants", () => {
       onChange={() => {}}
     />,
   );
-  expect(screen.getByText(/make no additional model requests/)).toBeTruthy();
+  expect(
+    screen.getByText(
+      "The assistant uses an API, so loading messages are a fixed line and cost nothing extra.",
+    ),
+  ).toBeTruthy();
   expect(screen.queryByText(/gpt-6-luna|haiku/)).toBeNull();
 });

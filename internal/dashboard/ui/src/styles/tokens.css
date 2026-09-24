@@ -1,0 +1,100 @@
+/*
+ * Colour means status and nothing else: warm neutral greys for everything,
+ * amber for what needs the owner, blue for work under way, grey for waiting,
+ * red for stuck, green for done. Dark is the same set of roles; it applies
+ * when the owner chooses it, or when they follow the system and it is dark.
+ */
+:root {
+  color-scheme: light;
+  --font-sans:
+    "IBM Plex Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --bg: #f6f5f1;
+  --panel: #fbfaf7;
+  --surface: #ffffff;
+  --sunken: #f0eee9;
+  --line: #e4e1da;
+  --line-strong: #cdc9bf;
+  --text: #1c1c1a;
+  --soft: #43423e;
+  --muted: #67655f;
+  --accent: #2a55b8;
+  --needs: #9e4a0a;
+  --needs-bg: #fbebda;
+  --work: #2a55b8;
+  --work-bg: #e6edfa;
+  --wait: #555d69;
+  --wait-bg: #eceef1;
+  --block: #a8231b;
+  --block-bg: #fae5e3;
+  --done: #2a6f44;
+  --done-bg: #e2f1e7;
+  --invert: #1c1c1a;
+  --on-invert: #ffffff;
+  --scrim: rgb(28 28 26 / 0.28);
+  --shadow: 0 1px 2px rgb(28 28 26 / 0.05);
+  --shadow-raised: 0 12px 40px rgb(28 28 26 / 0.16);
+  --radius: 8px;
+  --radius-lg: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #131416;
+    --panel: #18191c;
+    --surface: #1e1f23;
+    --sunken: #16171a;
+    --line: #2d2f34;
+    --line-strong: #3d4046;
+    --text: #ecece8;
+    --soft: #c8c8c2;
+    --muted: #9c9c95;
+    --accent: #93b2f5;
+    --needs: #f2ae70;
+    --needs-bg: #3a2918;
+    --work: #93b2f5;
+    --work-bg: #1d2940;
+    --wait: #aeb5bf;
+    --wait-bg: #262a30;
+    --block: #f2918a;
+    --block-bg: #3c1e1b;
+    --done: #83cb9b;
+    --done-bg: #1b3125;
+    --invert: #ecece8;
+    --on-invert: #131416;
+    --scrim: rgb(0 0 0 / 0.5);
+    --shadow: none;
+    --shadow-raised: 0 12px 40px rgb(0 0 0 / 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #131416;
+  --panel: #18191c;
+  --surface: #1e1f23;
+  --sunken: #16171a;
+  --line: #2d2f34;
+  --line-strong: #3d4046;
+  --text: #ecece8;
+  --soft: #c8c8c2;
+  --muted: #9c9c95;
+  --accent: #93b2f5;
+  --needs: #f2ae70;
+  --needs-bg: #3a2918;
+  --work: #93b2f5;
+  --work-bg: #1d2940;
+  --wait: #aeb5bf;
+  --wait-bg: #262a30;
+  --block: #f2918a;
+  --block-bg: #3c1e1b;
+  --done: #83cb9b;
+  --done-bg: #1b3125;
+  --invert: #ecece8;
+  --on-invert: #131416;
+  --scrim: rgb(0 0 0 / 0.5);
+  --shadow: none;
+  --shadow-raised: 0 12px 40px rgb(0 0 0 / 0.5);
+}

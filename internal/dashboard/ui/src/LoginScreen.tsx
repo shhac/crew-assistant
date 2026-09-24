@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { ErrorNotice, Icon, Mark } from "./ui";
+import { ErrorNotice } from "./ui";
 import { api, errorText } from "./api";
 
 export function Login({
@@ -30,57 +30,42 @@ export function Login({
     }
   }
   return (
-    <div className="login-screen">
-      <div className="login-art" aria-hidden="true">
-        <div className="orbit one" />
-        <div className="orbit two" />
-        <div className="orbit three" />
-        <Mark />
-      </div>
-      <main className="login-card">
-        <p className="eyebrow">YOUR PRIVATE WORKSPACE</p>
-        <h1>A little less to carry.</h1>
-        <p>
-          Connect to your assistant to see the work clearly and keep it moving.
-        </p>
-        <form onSubmit={login}>
+    <div className="pairing">
+      <main className="pairing-card card">
+        <span className="brand-mark" aria-hidden="true">
+          C
+        </span>
+        <h1>Pair this browser</h1>
+        <p className="soft">On the computer running crew-assistant, run:</p>
+        <pre className="pairing-command">
+          <code>crew-assistant dashboard open --print</code>
+        </pre>
+        <form className="form" onSubmit={login}>
           <label htmlFor="login-token">
-            Dashboard access code
+            Pairing code
             <input
               id="login-token"
+              className="field"
               type="password"
-              autoComplete="off"
+              autoComplete="one-time-code"
               value={token}
               onChange={(e) => setToken(e.target.value)}
               autoFocus
               required
             />
+            <span className="hint">
+              A code works once and expires after five minutes.
+            </span>
           </label>
-          <div className="field-hint login-help">
-            <p>
-              Run this on the computer hosting your assistant to get a code:
-            </p>
-            <pre>
-              <code>crew-assistant dashboard open --print</code>
-            </pre>
-            <p>
-              The code expires after five minutes and works once. It is issued
-              on demand, not stored for you to look up.
-            </p>
-          </div>
           <ErrorNotice error={error} />
           <button
             type="submit"
-            className="button primary"
+            className="btn btn-primary"
             disabled={busy || !token.trim()}
           >
-            {busy ? "Connecting…" : "Open workspace"}
-            <Icon name="Arrow" size={16} />
+            Pair browser
           </button>
         </form>
-        <span className="login-private">
-          <Icon name="Lock" size={13} /> Crew Assistant · Owner access
-        </span>
       </main>
     </div>
   );

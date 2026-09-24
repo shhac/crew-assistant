@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { FileSystemPicker } from "./FileSystemPicker";
+import { DirectoryList } from "./ProjectForms";
 import { ErrorNotice, useAction } from "./ui";
-import { LandingCard } from "./ProjectLanding";
-import { setTeam, type Playbook, type Project, type Role } from "./api";
+import { api, setTeam, type Playbook, type Project, type Role } from "./api";
 
 const engines = [
   { id: "claude", label: "Claude" },
@@ -11,18 +11,13 @@ const engines = [
 const engineLabel = (id: string) =>
   engines.find((e) => e.id === id)?.label ?? id;
 
-const signings = [
-  { id: "", label: "As your git config says" },
-  { id: "always", label: "Always" },
-  { id: "never", label: "Never" },
-];
-const signingNote: Record<string, string> = {
-  "": "Commits are signed as your git config for the repository says.",
-  always: "Commits are always signed.",
-  never: "Commits are never signed.",
+const signing: Record<string, string> = {
+  "": "Signed as your git config says",
+  always: "Always signed",
+  never: "Never signed",
 };
 
-export function TeamCard({
+export function TeamTab({
   project,
   refresh,
 }: {
@@ -32,78 +27,88 @@ export function TeamCard({
   const [editing, setEditing] = useState(false);
   const playbook = project.playbook;
   return (
-    <section className="project-card" aria-label="Team">
-      <div className="section-heading">
-        <h2>Team</h2>
-        {!editing && playbook && (
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => setEditing(true)}
-          >
-            Edit team
-          </button>
+    <div className="tab-stack">
+      <section className="tab-panel card" aria-label="Team">
+        {editing ? (
+          <TeamEditor
+            project={project}
+            onDone={() => setEditing(false)}
+            refresh={refresh}
+          />
+        ) : (
+          <>
+            <div className="panel-head">
+              <h2>Team</h2>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setEditing(true)}
+              >
+                {playbook ? "Edit" : "Choose a team"}
+              </button>
+            </div>
+            {playbook ? (
+              <TeamView playbook={playbook} />
+            ) : (
+              <p className="muted">No team yet, so nothing can be asked for.</p>
+            )}
+          </>
         )}
-      </div>
-      {editing ? (
-        <TeamEditor
-          project={project}
-          onDone={() => setEditing(false)}
-          refresh={refresh}
-        />
-      ) : playbook ? (
-        <>
-          <TeamView playbook={playbook} />
-          {playbook.medium === "git" && (
-            <LandingCard project={project} refresh={refresh} />
-          )}
-        </>
-      ) : (
-        <div className="team-prompt">
-          <p className="muted">
-            No one is doing this project’s work yet. For written work, a writer
-            drafts and a reviewer checks each draft against the brief.
-          </p>
-          <button
-            type="button"
-            className="button primary"
-            onClick={() => setEditing(true)}
-          >
-            Choose a team
-          </button>
-        </div>
-      )}
-    </section>
+      </section>
+      <Folders project={project} refresh={refresh} />
+    </div>
   );
 }
 
 function TeamView({ playbook }: { playbook: Playbook }) {
-  const rounds = `Up to ${playbook.max_rounds} ${playbook.max_rounds === 1 ? "round" : "rounds"} before checking with you.`;
+  const code = playbook.medium === "git";
   return (
-    <>
-      <ul className="team-roles">
-        {playbook.roles.map((role) => (
-          <li key={role.name}>
-            <strong>{role.name}</strong>
-            <span>{engineLabel(role.engine)}</span>
-          </li>
-        ))}
-      </ul>
-      {playbook.medium === "git" ? (
-        <p className="field-hint">
-          Works in a private copy of <code>{playbook.repo}</code>; QA runs{" "}
-          <code>{playbook.check}</code>. {signingNote[playbook.sign ?? ""]}{" "}
-          {rounds}
-        </p>
-      ) : (
-        <p className="field-hint">
-          {rounds}{" "}
-          {playbook.deliver_to
-            ? `Approved deliverables are copied to ${playbook.deliver_to}.`
-            : "Approved deliverables stay on this page."}
-        </p>
+    <dl className="facts">
+      {playbook.roles.map((role) => (
+        <div key={role.name} className="fact-row">
+          <dt>{role.name}</dt>
+          <dd>{engineLabel(role.engine)}</dd>
+        </div>
+      ))}
+      {code && (
+        <>
+          <div className="fact-row">
+            <dt>QA runs</dt>
+            <dd>
+              <code>{playbook.check}</code>
+            </dd>
+          </div>
+          <div className="fact-row">
+            <dt>Works in</dt>
+            <dd>
+              A private copy of <code>{playbook.repo}</code>
+            </dd>
+          </div>
+          <div className="fact-row">
+            <dt>Commits</dt>
+            <dd>{signing[playbook.sign ?? ""]}</dd>
+          </div>
+        </>
       )}
-    </>
+      {!code && (
+        <div className="fact-row">
+          <dt>Approved drafts</dt>
+          <dd>
+            {playbook.deliver_to ? (
+              <>
+                Copied to <code>{playbook.deliver_to}</code>
+              </>
+            ) : (
+              "Stay on the project"
+            )}
+          </dd>
+        </div>
+      )}
+      <div className="fact-row">
+        <dt>Rounds</dt>
+        <dd>Up to {playbook.max_rounds}, then it asks you</dd>
+      </div>
+    </dl>
   );
 }
 
@@ -171,26 +176,23 @@ function TeamEditor({
   }
   return (
     <>
-      <form className="project-card-form" onSubmit={save}>
+      <form className="form" onSubmit={save} aria-label="Team">
+        <h2>Team</h2>
         {folders.length > 0 && (
           <label htmlFor="team-kind">
             Kind of work
             <select
               id="team-kind"
+              className="field"
               value={template}
               onChange={(e) => setTemplate(e.target.value)}
             >
               <option value="draft">Writing</option>
-              <option value="code">Code in a linked folder</option>
+              <option value="code">Code</option>
             </select>
           </label>
         )}
-        <p className="field-hint">
-          {code
-            ? "An implementer changes a private copy of the repository, a reviewer reads the change, and QA runs your check. Work already under way keeps the team it started with."
-            : "A writer drafts and a reviewer checks each draft against the brief. Work already under way keeps the team it started with."}
-        </p>
-        <div className="team-fields">
+        <div className="form-row">
           <EngineSelect
             id="team-writer"
             label={code ? "Implementer" : "Writer"}
@@ -204,9 +206,10 @@ function TeamEditor({
             onChange={setReviewer}
           />
           <label htmlFor="team-rounds">
-            Rounds before checking with you
+            Rounds before asking you
             <input
               id="team-rounds"
+              className="field"
               type="number"
               min={1}
               max={10}
@@ -217,11 +220,12 @@ function TeamEditor({
           </label>
         </div>
         {code ? (
-          <div className="team-fields">
+          <div className="form-row">
             <label htmlFor="team-repo">
               Repository
               <select
                 id="team-repo"
+                className="field"
                 value={repo}
                 onChange={(e) => setRepo(e.target.value)}
               >
@@ -233,9 +237,10 @@ function TeamEditor({
               </select>
             </label>
             <label htmlFor="team-check">
-              Check QA runs
+              QA runs
               <input
                 id="team-check"
+                className="field"
                 value={check}
                 placeholder="make check"
                 onChange={(e) => setCheck(e.target.value)}
@@ -246,43 +251,47 @@ function TeamEditor({
               Branch prefix
               <input
                 id="team-prefix"
+                className="field"
                 value={branchPrefix}
                 onChange={(e) => setBranchPrefix(e.target.value)}
                 required
               />
             </label>
             <label htmlFor="team-prepare">
-              Ignored folders to copy in (optional)
+              Ignored folders to copy in
               <input
                 id="team-prepare"
+                className="field"
                 value={prepare}
                 placeholder="node_modules"
                 onChange={(e) => setPrepare(e.target.value)}
               />
+              <span className="hint">Optional. Separate with commas.</span>
             </label>
             <label htmlFor="team-sign">
               Sign commits
               <select
                 id="team-sign"
+                className="field"
                 value={sign}
                 onChange={(e) => setSign(e.target.value)}
               >
-                {signings.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                  </option>
-                ))}
+                <option value="">As your git config says</option>
+                <option value="always">Always</option>
+                <option value="never">Never</option>
               </select>
             </label>
           </div>
         ) : (
-          <div className="team-delivery">
-            <span>Deliver approved work to</span>
-            <code>{deliverTo || "Nowhere; keep it on this page"}</code>
-            <div className="form-actions">
+          <div className="control">
+            Copy approved drafts to
+            <div className="actions">
+              <code className="folder-choice">
+                {deliverTo || "Nowhere; keep them on the project"}
+              </code>
               <button
                 type="button"
-                className="button secondary"
+                className="btn btn-sm"
                 disabled={busy}
                 onClick={() => setPicking(true)}
               >
@@ -291,7 +300,7 @@ function TeamEditor({
               {deliverTo && (
                 <button
                   type="button"
-                  className="text-button"
+                  className="btn btn-quiet btn-sm"
                   disabled={busy}
                   onClick={() => setDeliverTo("")}
                 >
@@ -301,13 +310,16 @@ function TeamEditor({
             </div>
           </div>
         )}
+        <p className="hint">
+          Requests already under way keep the team they started with.
+        </p>
         <ErrorNotice error={error} />
-        <div className="form-actions">
-          <button className="button primary" type="submit" disabled={busy}>
-            {busy ? "Saving…" : "Save team"}
+        <div className="actions">
+          <button className="btn btn-primary" type="submit" disabled={busy}>
+            Save team
           </button>
           <button
-            className="text-button"
+            className="btn btn-quiet"
             type="button"
             disabled={busy}
             onClick={onDone}
@@ -345,7 +357,12 @@ function EngineSelect({
   return (
     <label htmlFor={id}>
       {label}
-      <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+      <select
+        id={id}
+        className="field"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
         {engines.map((engine) => (
           <option key={engine.id} value={engine.id}>
             {engine.label}
@@ -353,5 +370,110 @@ function EngineSelect({
         ))}
       </select>
     </label>
+  );
+}
+
+function Folders({
+  project,
+  refresh,
+}: {
+  project: Project;
+  refresh: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [paths, setPaths] = useState(project.directories || []);
+  const { busy, error, setError, run } = useAction();
+  async function save() {
+    await run(async () => {
+      await api(`/api/projects/${encodeURIComponent(project.id)}/directories`, {
+        method: "PUT",
+        body: JSON.stringify({ directories: paths }),
+      });
+      await refresh();
+      setEditing(false);
+    });
+  }
+  const shown = editing ? paths : project.directories || [];
+  return (
+    <section className="tab-panel card" aria-label="Folders">
+      <div className="panel-head">
+        <h2>Folders</h2>
+        {!editing && (
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              setPaths(project.directories || []);
+              setError("");
+              setEditing(true);
+            }}
+          >
+            {project.directories?.length ? "Edit" : "Add folders"}
+          </button>
+        )}
+      </div>
+      {shown.length ? (
+        <DirectoryList
+          paths={shown}
+          onRemove={
+            editing && !busy
+              ? (path) =>
+                  setPaths((previous) =>
+                    previous.filter((value) => value !== path),
+                  )
+              : undefined
+          }
+        />
+      ) : (
+        <p className="muted">No folders.</p>
+      )}
+      {editing && (
+        <div className="actions">
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={() => setPicking(true)}
+          >
+            Add folders
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy}
+            onClick={() => void save()}
+          >
+            Save folders
+          </button>
+          <button
+            type="button"
+            className="btn btn-quiet"
+            disabled={busy}
+            onClick={() => setEditing(false)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      <ErrorNotice error={error} />
+      {project.scratch_directory && (
+        <p className="muted small">
+          The team's own files are in <code>{project.scratch_directory}</code>
+        </p>
+      )}
+      {picking && (
+        <FileSystemPicker
+          kind="directory"
+          multiple
+          initialPath={paths[0]}
+          onCancel={() => setPicking(false)}
+          onSelect={(selection) => {
+            setPaths((previous) => [...new Set([...previous, ...selection])]);
+            setPicking(false);
+          }}
+        />
+      )}
+    </section>
   );
 }

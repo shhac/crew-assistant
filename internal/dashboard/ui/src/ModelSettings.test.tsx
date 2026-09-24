@@ -45,11 +45,18 @@ it("uses discovered friendly models and only their supported efforts", async () 
   mockCatalog(catalog);
   const changed = vi.fn();
   render(<ModelSettings config={config} onChange={changed} />);
-  await screen.findByRole("option", { name: "Test Thinker — recommended" });
-  expect(screen.getByLabelText("Assistant model").tagName).toBe("SELECT");
+  await screen.findByRole("option", { name: "Test Thinker (recommended)" });
+  expect(screen.getByLabelText("Model").tagName).toBe("SELECT");
+  expect(screen.getByRole("option", { name: "Test Builder" })).toBeTruthy();
+  expect(
+    screen.getByRole("option", { name: "The model's default (high)" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("option", { name: "high (default)" })).toBeTruthy();
+  expect(screen.getByRole("option", { name: "low" })).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toBe("Reported by Codex");
   expect(screen.queryByRole("option", { name: "ultra" })).toBeNull();
   expect(changed).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText("Assistant model"), {
+  fireEvent.change(screen.getByLabelText("Model"), {
     target: { value: "builder" },
   });
   expect(changed).toHaveBeenCalledWith({
@@ -68,13 +75,23 @@ it("preserves a saved custom model and effort when discovery is unavailable", as
   const changed = vi.fn();
   render(<ModelSettings config={config} onChange={changed} />);
   await screen.findByText("Login unavailable; saved settings unchanged");
+  expect(screen.getByLabelText<HTMLSelectElement>("Model").value).toBe(
+    "thinker",
+  );
+  expect(screen.getByRole("option", { name: "thinker (saved)" })).toBeTruthy();
   expect(
-    (screen.getByLabelText("Assistant model") as HTMLSelectElement).value,
-  ).toBe("thinker");
-  expect(
-    (screen.getByLabelText("Assistant reasoning effort") as HTMLSelectElement)
-      .value,
+    screen.getByLabelText<HTMLSelectElement>("Reasoning effort", {
+      selector: "select",
+    }).value,
   ).toBe("high");
+  expect(
+    screen.getByLabelText<HTMLInputElement>("Reasoning effort", {
+      selector: "input",
+    }).value,
+  ).toBe("high");
+  expect(screen.getByLabelText<HTMLInputElement>("Model ID").value).toBe(
+    "thinker",
+  );
   expect(changed).not.toHaveBeenCalled();
 });
 it("keeps unknown saved model after successful discovery until an explicit selection", async () => {
@@ -85,10 +102,21 @@ it("keeps unknown saved model after successful discovery until an explicit selec
     model: { ...model, model: "custom-model", effort: "ultra" },
   };
   render(<ModelSettings config={custom} onChange={changed} />);
-  await screen.findByText(/Your saved model is not in this catalog/);
+  await screen.findByText(
+    "Your saved model isn't in this list. It stays until you pick another.",
+  );
+  expect(screen.getByLabelText<HTMLSelectElement>("Model").value).toBe(
+    "custom-model",
+  );
   expect(
-    (screen.getByLabelText("Assistant model") as HTMLSelectElement).value,
-  ).toBe("custom-model");
+    screen.getByRole("option", { name: "custom-model (saved)" }),
+  ).toBeTruthy();
+  expect(
+    screen.getByLabelText<HTMLSelectElement>("Reasoning effort", {
+      selector: "select",
+    }).value,
+  ).toBe("ultra");
+  expect(screen.getByRole("option", { name: "ultra (saved)" })).toBeTruthy();
   expect(changed).not.toHaveBeenCalled();
 });
 it("lists Claude models and effort choices from CLI initialization", async () => {
@@ -126,12 +154,79 @@ it("switches CLI engines without retaining an incompatible model identifier", as
   mockCatalog(catalog);
   const changed = vi.fn();
   render(<ModelSettings config={config} onChange={changed} />);
-  await screen.findByRole("option", { name: "Test Thinker — recommended" });
-  fireEvent.change(screen.getByLabelText("Assistant engine"), {
+  await screen.findByRole("option", { name: "Test Thinker (recommended)" });
+  expect(screen.getByRole("option", { name: "Codex" })).toBeTruthy();
+  expect(screen.getByRole("option", { name: "Claude Code" })).toBeTruthy();
+  expect(screen.getByRole("option", { name: "Another API" })).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Runs on"), {
     target: { value: "claude" },
   });
   expect(changed).toHaveBeenCalledWith({
     ...config,
     model: { ...model, engine: "claude", model: "", effort: "" },
   });
+});
+
+it("keeps the saved choice and offers a refresh when the model list cannot load", async () => {
+  const fetch = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValue({ ok: true, json: async () => catalog });
+  vi.stubGlobal("fetch", fetch);
+  const changed = vi.fn();
+  render(<ModelSettings config={config} onChange={changed} />);
+  expect(screen.getByRole("status").textContent).toBe("Finding models…");
+  await screen.findByText(
+    "Couldn't load the list of models. Your choice hasn't changed.",
+  );
+  expect(screen.getByLabelText<HTMLSelectElement>("Model").value).toBe(
+    "thinker",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Refresh the list" }));
+  await screen.findByRole("option", { name: "Test Thinker (recommended)" });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(changed).not.toHaveBeenCalled();
+});
+it("labels the advanced settings for each engine and fetches no list for an API", () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  const changed = vi.fn();
+  const view = render(<ModelSettings config={config} onChange={changed} />);
+  expect(screen.getByText("More model settings").tagName).toBe("SUMMARY");
+  expect(screen.getByLabelText<HTMLInputElement>(/^Codex folder/).value).toBe(
+    "/test/login",
+  );
+  expect(screen.getByLabelText("Codex program")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Codex program"), {
+    target: { value: "/bin/codex" },
+  });
+  expect(changed).toHaveBeenLastCalledWith({
+    ...config,
+    model: { ...model, codex_bin: "/bin/codex" },
+  });
+  view.rerender(
+    <ModelSettings
+      config={{ model: { engine: "claude" } }}
+      onChange={changed}
+    />,
+  );
+  expect(screen.getByLabelText("Claude program")).toBeTruthy();
+  expect(screen.getByLabelText(/^Claude settings folder/)).toBeTruthy();
+  fetch.mockClear();
+  view.rerender(
+    <ModelSettings
+      config={{ model: { engine: "openai-compatible", max_tokens: 4096 } }}
+      onChange={changed}
+    />,
+  );
+  expect(screen.queryByLabelText("Model")).toBeNull();
+  expect(screen.getByLabelText("API address")).toBeTruthy();
+  expect(screen.getByLabelText(/^API key variable/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Most output tokens per call"), {
+    target: { value: "8192" },
+  });
+  expect(changed).toHaveBeenLastCalledWith({
+    model: { engine: "openai-compatible", max_tokens: 8192 },
+  });
+  expect(fetch).not.toHaveBeenCalled();
 });

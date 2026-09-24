@@ -3,37 +3,51 @@ import { AssistantSetup } from "./AssistantSetup";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { ChatSettings } from "./ChatSettings";
 import { ModelSettings } from "./ModelSettings";
-import { ThemePicker } from "./Identity";
-import {
-  ErrorNotice,
-  humanStatus,
-  Icon,
-  Mark,
-  PageHeading,
-  Status,
-} from "./ui";
+import { appearanceOf, applyAppearance, type Appearance } from "./appearance";
+import { href } from "./router";
+import { ErrorNotice, Pill, humanStatus } from "./ui";
 import { api, errorText, section, type Config, type State } from "./api";
+
+const sections = [
+  { id: "assistant", label: "Assistant" },
+  { id: "appearance", label: "Appearance" },
+  { id: "model", label: "Model" },
+  { id: "chat", label: "Chat" },
+  { id: "connections", label: "Connections" },
+  { id: "limits", label: "Limits" },
+  { id: "advanced", label: "Advanced" },
+] as const;
+
+type SectionID = (typeof sections)[number]["id"];
+
+const appearances: { id: Appearance; label: string }[] = [
+  { id: "system", label: "Match the system" },
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
+];
 
 export function Settings({
   state,
   refresh,
-  control,
+  section: requested,
 }: {
   state: State;
   refresh: () => Promise<void>;
-  control: ReactNode;
+  section?: string;
 }) {
-  const [config, setConfig] = useState<Config | null>(null);
-  const [name, setName] = useState(state.assistant.name);
-  const [personality, setPersonality] = useState(state.assistant.personality);
+  const current: SectionID =
+    sections.find((s) => s.id === requested)?.id ?? "assistant";
+  const [saved, setSaved] = useState<Config | null>(null);
+  const [draft, setDraft] = useState<Config | null>(null);
   const [error, setError] = useState("");
-  const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let alive = true;
     api<Config>("/api/config")
       .then((value) => {
-        if (alive) setConfig(value);
+        if (!alive) return;
+        setSaved(value);
+        setDraft(value);
       })
       .catch((e) => {
         if (alive) setError(errorText(e));
@@ -42,62 +56,217 @@ export function Settings({
       alive = false;
     };
   }, []);
+  const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(saved);
+  async function put(next: Config) {
+    await api("/api/config", { method: "PUT", body: JSON.stringify(next) });
+    await refresh();
+  }
   async function save(e: FormEvent) {
     e.preventDefault();
-    if (!config) return;
+    if (!draft) return;
     setBusy(true);
     setError("");
-    setSaved(false);
     try {
-      const next = {
-        ...config,
-        assistant: { ...config.assistant, name: name.trim(), personality },
-      };
-      await api("/api/config", { method: "PUT", body: JSON.stringify(next) });
-      setConfig(next);
-      setSaved(true);
-      await refresh();
+      await put(draft);
+      setSaved(draft);
     } catch (err) {
       setError(errorText(err));
     } finally {
       setBusy(false);
     }
   }
+  // Appearance is applied and kept at once; it never waits on other edits.
+  async function chooseAppearance(theme: Appearance) {
+    if (!saved || !draft) return;
+    applyAppearance(theme);
+    setError("");
+    const next = { ...saved, assistant: { ...saved.assistant, theme } };
+    try {
+      await put(next);
+      setSaved(next);
+      setDraft({ ...draft, assistant: { ...draft.assistant, theme } });
+    } catch (err) {
+      applyAppearance(saved.assistant?.theme);
+      setError(errorText(err));
+    }
+  }
   return (
-    <section>
-      <PageHeading
-        eyebrow="MAKE IT YOURS"
-        title="Settings"
-        description="A familiar voice, a clear remit, and connections you control."
-      />
-      <ErrorNotice error={error} />
-      <AssistantSetup
-        currentName={state.assistant.name}
-        demo={state.demo}
-        onApplied={async (assistant) => {
-          setName(assistant.name || state.assistant.name);
-          setPersonality(assistant.personality || "");
-          setConfig(await api<Config>("/api/config"));
-          await refresh();
-        }}
-      />
-      <form className="settings-form" onSubmit={save}>
-        <div className="settings-section-title">
-          <Mark small />
-          <div>
-            <h2>Your assistant</h2>
-            <p>Choose the name and character you want to work with.</p>
-          </div>
-        </div>
+    <div className="page settings">
+      <header className="page-header">
+        <h1>Settings</h1>
+      </header>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="Settings sections">
+          {sections.map((s) => (
+            <a
+              key={s.id}
+              className="nav-link"
+              href={href({ page: "settings", section: s.id })}
+              aria-current={current === s.id ? "page" : undefined}
+            >
+              {s.label}
+            </a>
+          ))}
+        </nav>
+        <form className="settings-body" onSubmit={save} aria-label="Settings">
+          <ErrorNotice error={error} />
+          {!draft ? (
+            !error && <p className="muted">Loading…</p>
+          ) : (
+            <>
+              {current === "assistant" && (
+                <AssistantSection
+                  state={state}
+                  config={draft}
+                  onChange={setDraft}
+                  onApplied={async () => {
+                    const fresh = await api<Config>("/api/config");
+                    setSaved(fresh);
+                    setDraft(fresh);
+                    await refresh();
+                  }}
+                />
+              )}
+              {current === "appearance" && (
+                <Panel title="Appearance">
+                  <div
+                    className="segmented"
+                    role="group"
+                    aria-label="Appearance"
+                  >
+                    {appearances.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        aria-pressed={
+                          appearanceOf(saved?.assistant?.theme) === a.id
+                        }
+                        onClick={() => void chooseAppearance(a.id)}
+                      >
+                        {a.label}
+                      </button>
+                    ))}
+                  </div>
+                </Panel>
+              )}
+              {current === "model" && (
+                <Panel title="The assistant's model">
+                  <ModelSettings config={draft} onChange={setDraft} />
+                </Panel>
+              )}
+              {current === "chat" && (
+                <Panel title="Chat">
+                  <ChatSettings config={draft} onChange={setDraft} />
+                </Panel>
+              )}
+              {current === "connections" && (
+                <>
+                  <ConnectionsSettings
+                    connections={draft.connections || []}
+                    onChange={(connections) =>
+                      setDraft({ ...draft, connections })
+                    }
+                  />
+                  {state.integrations.length > 0 && (
+                    <Panel title="Status">
+                      <ul className="rows">
+                        {state.integrations.map((i) => (
+                          <li key={i.id} className="integration">
+                            <span>
+                              <strong>{i.name}</strong>
+                              {i.detail && (
+                                <span className="muted small"> {i.detail}</span>
+                              )}
+                            </span>
+                            <Pill
+                              tone={
+                                ["connected", "ready", "configured"].includes(
+                                  i.status,
+                                )
+                                  ? "done"
+                                  : "needs"
+                              }
+                            >
+                              {humanStatus(i.status)}
+                            </Pill>
+                          </li>
+                        ))}
+                      </ul>
+                    </Panel>
+                  )}
+                </>
+              )}
+              {current === "limits" && (
+                <LimitsSection config={draft} onChange={setDraft} />
+              )}
+              {current === "advanced" && (
+                <AdvancedSection config={draft} onChange={setDraft} />
+              )}
+            </>
+          )}
+          {dirty && (
+            <div
+              className="save-bar"
+              role="region"
+              aria-label="Unsaved changes"
+            >
+              <span>Unsaved changes</span>
+              <div className="actions">
+                <button
+                  type="button"
+                  className="btn btn-quiet"
+                  disabled={busy}
+                  onClick={() => setDraft(saved)}
+                >
+                  Discard
+                </button>
+                <button
+                  className="btn btn-primary"
+                  disabled={busy || !draft?.assistant?.name?.trim()}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          )}
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function Panel({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="tab-panel card settings-panel" aria-label={title}>
+      <h2>{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function AssistantSection({
+  state,
+  config,
+  onChange,
+  onApplied,
+}: {
+  state: State;
+  config: Config;
+  onChange: (next: Config) => void;
+  onApplied: () => Promise<void>;
+}) {
+  const assistant = config.assistant ?? {};
+  const set = (patch: Record<string, unknown>) =>
+    onChange({ ...config, assistant: { ...assistant, ...patch } });
+  return (
+    <>
+      <Panel title="Assistant">
         <label htmlFor="assistant-name">
           Name
           <input
             id="assistant-name"
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              setSaved(false);
-            }}
+            value={assistant.name ?? ""}
+            onChange={(e) => set({ name: e.target.value })}
             maxLength={80}
             required
           />
@@ -106,134 +275,141 @@ export function Settings({
           Personality
           <textarea
             id="personality"
-            value={personality}
-            onChange={(e) => {
-              setPersonality(e.target.value);
-              setSaved(false);
-            }}
+            value={assistant.personality ?? ""}
+            onChange={(e) => set({ personality: e.target.value })}
             rows={4}
             maxLength={10000}
-            placeholder="Calm, direct, curious. Bring a recommendation, not just a question."
+            placeholder="Calm and direct. Bring a recommendation, not just a question."
           />
+          <span className="hint">
+            How it writes to you. It can't change what it's allowed to do.
+          </span>
         </label>
-        <p className="field-hint">
-          Personality changes how your assistant communicates. Authority is
-          configured separately.
-        </p>
-        {config && (
-          <ThemePicker
-            value={config.assistant?.theme}
-            onChange={(theme) => {
-              setConfig({
-                ...config,
-                assistant: { ...config.assistant, theme },
-              });
-              setSaved(false);
-            }}
-          />
-        )}
-        {config && (
-          <ConnectionsSettings
-            connections={config.connections || []}
-            onChange={(connections) => {
-              setConfig({ ...config, connections });
-              setSaved(false);
-            }}
-          />
-        )}
-        {config && (
-          <ChatSettings
-            config={config}
-            onChange={(next) => {
-              setConfig(next);
-              setSaved(false);
-            }}
-          />
-        )}
-        {config && (
-          <ConfigurationFields
-            config={config}
-            onChange={(next) => {
-              setConfig(next);
-              setSaved(false);
-            }}
-          />
-        )}
-        <div className="settings-save">
-          <span role="status">{saved ? "Preferences saved." : ""}</span>
-          <button
-            className="button primary"
-            disabled={busy || !config || !name.trim()}
-          >
-            {busy ? "Saving…" : "Save preferences"}
-          </button>
-        </div>
-      </form>
-      <section className="section-block">
-        <div className="section-heading">
-          <h2>Connection status</h2>
-        </div>
-        <p className="section-description">
-          Connection credentials stay outside the dashboard. Configure
-          credential references through the CLI.
-        </p>
-        <div className="integrations">
-          {state.integrations.length ? (
-            state.integrations.map((i) => (
-              <div className="integration-row" key={i.id}>
-                <span className="integration-symbol">{i.name.slice(0, 1)}</span>
-                <div>
-                  <strong>{i.name}</strong>
-                  <p>{i.detail || "No additional connection details"}</p>
-                </div>
-                <Status
-                  tone={
-                    ["connected", "ready", "configured"].includes(i.status)
-                      ? "green"
-                      : "amber"
-                  }
-                >
-                  {humanStatus(i.status)}
-                </Status>
-              </div>
-            ))
-          ) : (
-            <div className="integration-empty">
-              <Icon name="Settings" />
-              <p>
-                No connections configured. Run{" "}
-                <code>crew-assistant doctor</code> to check setup.
-              </p>
-            </div>
-          )}
-        </div>
+      </Panel>
+      <AssistantSetup
+        currentName={state.assistant.name}
+        demo={state.demo}
+        onApplied={onApplied}
+      />
+      <section
+        className="tab-panel card settings-panel"
+        aria-label="What never changes"
+      >
+        <h2>What never changes</h2>
+        <ul className="plain-list soft">
+          <li>
+            The assistant plans and coordinates. It doesn't change code itself.
+          </li>
+          <li>
+            Teams change code only in a private copy of your repository, in a
+            sandbox with no network.
+          </li>
+          <li>
+            Nothing reaches your repository except by landing, as each project's
+            Landing tab says.
+          </li>
+          <li>A branch the team doesn't own is never overwritten.</li>
+        </ul>
       </section>
-      <section className="section-block">
-        <div className="section-heading">
-          <h2>Pause</h2>
-        </div>
-        <p className="section-description">
-          Pausing stops teams from starting their next step. A step already
-          running finishes first.
-        </p>
-        {control}
-      </section>
-      <section className="settings-boundaries">
-        <Icon name="Lock" size={20} />
-        <div>
-          <h3>Built-in boundaries</h3>
-          <p>
-            The assistant coordinates your projects. It cannot write project
-            code, deploy, access production data, or buy things. A personality
-            change cannot override these boundaries.
-          </p>
-        </div>
-      </section>
-    </section>
+    </>
   );
 }
 
-function ConfigurationFields({
+function numberOrEmpty(value: unknown) {
+  return typeof value === "number" ? value : "";
+}
+
+const usageFields = [
+  ["codex_max_used_percent", "Pause Codex teams at (% used)"],
+  ["claude_max_used_percent", "Pause Claude teams at (% used)"],
+] as const;
+
+function LimitsSection({
+  config,
+  onChange,
+}: {
+  config: Config;
+  onChange: (value: Config) => void;
+}) {
+  const limits = section(config.limits);
+  const usage = section(limits.role_usage);
+  const setLimit = (key: string, value: number) =>
+    onChange({ ...config, limits: { ...limits, [key]: value } });
+  const setUsage = (key: string, value: unknown) =>
+    onChange({
+      ...config,
+      limits: { ...limits, role_usage: { ...usage, [key]: value } },
+    });
+  return (
+    <>
+      <Panel title="Model calls">
+        <div className="form-row">
+          <label htmlFor="limits-max_model_calls_per_day">
+            Per day
+            <input
+              id="limits-max_model_calls_per_day"
+              type="number"
+              min={1}
+              max={100000}
+              value={numberOrEmpty(limits.max_model_calls_per_day)}
+              onChange={(e) =>
+                setLimit("max_model_calls_per_day", Number(e.target.value))
+              }
+            />
+          </label>
+          <label htmlFor="limits-max_model_turns">
+            Per request
+            <input
+              id="limits-max_model_turns"
+              type="number"
+              min={1}
+              max={32}
+              value={numberOrEmpty(limits.max_model_turns)}
+              onChange={(e) =>
+                setLimit("max_model_turns", Number(e.target.value))
+              }
+            />
+          </label>
+        </div>
+        <p className="hint">These count model calls, not money.</p>
+      </Panel>
+      <Panel title="Subscription use">
+        <div className="form-row">
+          {usageFields.map(([key, label]) => (
+            <label key={key} htmlFor={`role-usage-${key}`}>
+              {label}
+              <input
+                id={`role-usage-${key}`}
+                type="number"
+                min={0}
+                max={100}
+                value={numberOrEmpty(usage[key])}
+                onChange={(e) => setUsage(key, Number(e.target.value))}
+              />
+            </label>
+          ))}
+          <label htmlFor="role-usage-unavailable">
+            If use can't be checked
+            <select
+              id="role-usage-unavailable"
+              value={usage.on_unavailable === "pause" ? "pause" : "allow"}
+              onChange={(e) => setUsage("on_unavailable", e.target.value)}
+            >
+              <option value="allow">Carry on</option>
+              <option value="pause">Wait until it can be</option>
+            </select>
+          </label>
+        </div>
+        <p className="hint">
+          A paused team carries on by itself when its usage window resets. 0
+          never pauses.
+        </p>
+      </Panel>
+    </>
+  );
+}
+
+function AdvancedSection({
   config,
   onChange,
 }: {
@@ -246,14 +422,7 @@ function ConfigurationFields({
     group: string,
     key: string,
     label: string,
-    options: {
-      type?: string;
-      hint?: string;
-      min?: number;
-      max?: number;
-      env?: boolean;
-      list?: boolean;
-    } = {},
+    options: { hint?: string; env?: boolean; list?: boolean } = {},
   ) {
     const object = section(config[group]);
     const raw = object[key];
@@ -262,7 +431,7 @@ function ConfigurationFields({
         ? listDrafts[`${group}.${key}`]
         : Array.isArray(raw)
           ? raw.join(", ")
-          : typeof raw === "string" || typeof raw === "number"
+          : typeof raw === "string"
             ? raw
             : "";
     return (
@@ -270,10 +439,7 @@ function ConfigurationFields({
         {label}
         <input
           id={`${group}-${key}`}
-          type={options.type || "text"}
           value={value}
-          min={options.min}
-          max={options.max}
           pattern={options.env ? "[A-Za-z_][A-Za-z0-9_]*" : undefined}
           autoComplete="off"
           onChange={(e) => {
@@ -289,167 +455,49 @@ function ConfigurationFields({
                       .split(",")
                       .map((x) => x.trim())
                       .filter(Boolean)
-                  : options.type === "number"
-                    ? Number(text)
-                    : text,
+                  : text,
               },
             });
           }}
         />
-        {options.hint && <span className="field-hint">{options.hint}</span>}
+        {options.hint && <span className="hint">{options.hint}</span>}
       </label>
     );
   }
   return (
-    <div className="configuration-fields">
-      <details className="settings-group" open>
-        <summary>Model</summary>
-        <p className="field-hint">
-          Enter environment variable names for credentials. Never paste a token
-          or API key. Connection changes may require restarting the daemon.
-        </p>
-        <ModelSettings config={config} onChange={onChange} />
-      </details>
-      <details className="settings-group">
-        <summary>Advanced</summary>
-        <details className="advanced-connection">
-          <summary>Advanced: Slack bot and direct Linear API</summary>
-          <p className="field-hint">
-            Optional integrations for a dedicated bot identity or direct API
-            access. Named CLI connections above are the simpler starting point.
-            Bot connection changes require a daemon restart.
-          </p>
-          <div className="config-field-group">
-            <h3>Slack bot</h3>
-            {field("slack", "owner_user_id", "Your Slack user ID")}
-            {field("slack", "bot_token_env", "Bot token environment variable", {
-              env: true,
-            })}
-            {field("slack", "app_token_env", "App token environment variable", {
-              env: true,
-            })}
-          </div>
-          <div className="config-field-group">
-            <h3>Linear</h3>
-            <label className="profile-choice">
-              <input
-                type="checkbox"
-                checked={linear.import_assignments === true}
-                onChange={(e) =>
-                  onChange({
-                    ...config,
-                    linear: {
-                      ...linear,
-                      import_assignments: e.target.checked,
-                    },
-                  })
-                }
-                aria-describedby="linear-import-hint"
-              />
-              <span>Import assigned issues as projects</span>
-            </label>
-            <p className="field-hint" id="linear-import-hint">
-              Optional. Import your assigned issues from the teams below using
-              the direct API. Projects in crew-assistant do not require Linear;
-              keep this off unless you want automatic imports from this account.
-              Configured Linear CLI connections take precedence; enable imports
-              on those connections instead.
-            </p>
-            {field("linear", "api_key_env", "API key environment variable", {
-              env: true,
-            })}
-            {field("linear", "team_ids", "Watched team IDs", {
-              list: true,
-              hint: "Separate IDs with commas. Configure only the teams you want the assistant to access.",
-            })}
-          </div>
-        </details>
-      </details>
-      <details className="settings-group">
-        <summary>Limits</summary>
-        <p className="field-hint">
-          Model call counts are an operating limit, not a dollar budget.
-        </p>
-        <div className="config-field-group">
-          {field(
-            "limits",
-            "max_model_calls_per_day",
-            "Maximum model calls per day",
-            { type: "number", min: 1, max: 100000 },
-          )}
-          {field(
-            "limits",
-            "max_model_turns",
-            "Maximum model turns per request",
-            { type: "number", min: 1, max: 32 },
-          )}
-        </div>
-        <RoleUsageFields config={config} onChange={onChange} />
-      </details>
-    </div>
-  );
-}
-
-const usageEngines = [
-  ["codex_max_used_percent", "Hold Codex roles above (% of subscription used)"],
-  [
-    "claude_max_used_percent",
-    "Hold Claude roles above (% of subscription used)",
-  ],
-] as const;
-
-/**
- * Team roles wait, rather than fail, while a subscription is nearly used up.
- * The thresholds live one level deeper than the other limits.
- */
-function RoleUsageFields({
-  config,
-  onChange,
-}: {
-  config: Config;
-  onChange: (value: Config) => void;
-}) {
-  const limits = section(config.limits);
-  const usage = section(limits.role_usage);
-  const set = (key: string, value: unknown) =>
-    onChange({
-      ...config,
-      limits: { ...limits, role_usage: { ...usage, [key]: value } },
-    });
-  return (
-    <div className="config-field-group">
-      {usageEngines.map(([key, label]) => (
-        <label key={key} htmlFor={`role-usage-${key}`}>
-          {label}
-          <input
-            id={`role-usage-${key}`}
-            type="number"
-            min={0}
-            max={100}
-            value={numberOrEmpty(usage[key])}
-            onChange={(e) => set(key, Number(e.target.value))}
-          />
-        </label>
-      ))}
-      <label htmlFor="role-usage-unavailable">
-        When usage can't be checked
-        <select
-          id="role-usage-unavailable"
-          value={usage.on_unavailable === "pause" ? "pause" : "allow"}
-          onChange={(e) => set("on_unavailable", e.target.value)}
-        >
-          <option value="allow">Carry on</option>
-          <option value="pause">Wait until it can be</option>
-        </select>
-      </label>
-      <p className="field-hint">
-        A held role waits for its usage window to reset and then carries on by
-        itself. 0 turns the hold off for that engine.
+    <>
+      <p className="muted">
+        For a Slack bot of its own, or reading Linear directly. Connections are
+        the simpler way. Changes here need crew-assistant restarted.
       </p>
-    </div>
+      <Panel title="Slack bot">
+        {field("slack", "owner_user_id", "Your Slack user ID")}
+        {field("slack", "bot_token_env", "Bot token variable", {
+          env: true,
+          hint: "The environment variable's name, never the token.",
+        })}
+        {field("slack", "app_token_env", "App token variable", { env: true })}
+      </Panel>
+      <Panel title="Linear">
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={linear.import_assignments === true}
+            onChange={(e) =>
+              onChange({
+                ...config,
+                linear: { ...linear, import_assignments: e.target.checked },
+              })
+            }
+          />
+          <span>Add issues assigned to you as projects</span>
+        </label>
+        {field("linear", "api_key_env", "API key variable", { env: true })}
+        {field("linear", "team_ids", "Team IDs", {
+          list: true,
+          hint: "Separate with commas. Only these teams are read.",
+        })}
+      </Panel>
+    </>
   );
-}
-
-function numberOrEmpty(value: unknown) {
-  return typeof value === "number" ? value : "";
 }

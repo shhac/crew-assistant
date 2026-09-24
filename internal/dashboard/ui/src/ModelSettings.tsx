@@ -19,7 +19,6 @@ export type Catalog = {
 };
 
 const group = "model";
-const title = "Assistant";
 
 export function ModelSettings({
   config,
@@ -58,7 +57,7 @@ export function ModelSettings({
       .catch(() => {
         if (active)
           setError(
-            "Could not load model options. Your saved selection is unchanged.",
+            "Couldn't load the list of models. Your choice hasn't changed.",
           );
       })
       .finally(() => {
@@ -82,14 +81,9 @@ export function ModelSettings({
     onChange({ ...config, [group]: { ...model, model: id, effort } });
   };
   return (
-    <fieldset className="config-field-group">
-      <legend>{title} model</legend>
-      <p className="field-hint">
-        Used for conversation and coordination. The recommended selection is
-        ready to use.
-      </p>
+    <div className="form">
       <label htmlFor={`${group}-engine`}>
-        {title} engine
+        Runs on
         <select
           id={`${group}-engine`}
           value={value("engine")}
@@ -105,15 +99,15 @@ export function ModelSettings({
             })
           }
         >
-          <option value="codex">Codex CLI</option>
-          <option value="claude">Claude Code CLI</option>
-          <option value="openai-compatible">Custom API (advanced)</option>
+          <option value="codex">Codex</option>
+          <option value="claude">Claude Code</option>
+          <option value="openai-compatible">Another API</option>
         </select>
       </label>
       {localCLI && (
         <>
           <label htmlFor={`${group}-model`}>
-            {title} model
+            Model
             <select
               id={`${group}-model`}
               value={value("model")}
@@ -123,7 +117,7 @@ export function ModelSettings({
               {!selected && (
                 <option value={value("model")}>
                   {value("model")
-                    ? `${value("model")} (saved selection)`
+                    ? `${value("model")} (saved)`
                     : "Choose a model"}
                 </option>
               )}
@@ -131,19 +125,19 @@ export function ModelSettings({
                 <option key={option.id} value={option.id}>
                   {option.name}
                   {option.id === catalog?.default.model
-                    ? " — recommended"
+                    ? " (recommended)"
                     : option.is_default
-                      ? " — CLI default"
+                      ? " (its default)"
                       : ""}
                 </option>
               ))}
             </select>
           </label>
           {selected?.description && (
-            <p className="field-hint">{selected.description}</p>
+            <p className="hint">{selected.description}</p>
           )}
           <label htmlFor={`${group}-effort`}>
-            {title} reasoning effort
+            Reasoning effort
             <select
               id={`${group}-effort`}
               value={value("effort")}
@@ -151,7 +145,7 @@ export function ModelSettings({
               disabled={loading || !selected}
             >
               <option value="">
-                Model default
+                The model's default
                 {selected?.default_effort
                   ? ` (${selected.default_effort})`
                   : ""}
@@ -159,165 +153,160 @@ export function ModelSettings({
               {value("effort") &&
                 !efforts.some((effort) => effort.id === value("effort")) && (
                   <option value={value("effort")}>
-                    {value("effort")} (saved selection)
+                    {value("effort")} (saved)
                   </option>
                 )}
               {efforts.map((effort) => (
                 <option key={effort.id} value={effort.id}>
                   {effort.id}
-                  {effort.id === selected?.default_effort
-                    ? " — model default"
-                    : ""}
+                  {effort.id === selected?.default_effort ? " (default)" : ""}
                 </option>
               ))}
             </select>
           </label>
           {efforts.find((effort) => effort.id === value("effort"))
             ?.description && (
-            <p className="field-hint">
+            <p className="hint">
               {
                 efforts.find((effort) => effort.id === value("effort"))
                   ?.description
               }
             </p>
           )}
-          <p className="field-hint" role="status">
-            {loading
-              ? "Looking up available models…"
-              : error || catalog?.detail}
+          <p className="hint" role="status">
+            {loading ? "Finding models…" : error || catalog?.detail}
           </p>
           {catalog?.available && !selected && value("model") && (
-            <p className="field-hint">
-              Your saved model is not in this catalog. Choose an available model
-              when ready; it has not been changed.
+            <p className="hint">
+              Your saved model isn't in this list. It stays until you pick
+              another.
             </p>
           )}
-          <button
-            className="secondary"
-            type="button"
-            disabled={loading}
-            onClick={() => setRevision(revision + 1)}
-          >
-            Refresh model options
-          </button>
+          <div className="actions">
+            <button
+              className="btn btn-sm"
+              type="button"
+              disabled={loading}
+              onClick={() => setRevision(revision + 1)}
+            >
+              Refresh the list
+            </button>
+          </div>
         </>
       )}
-      <details>
-        <summary>Advanced model settings</summary>
-        <p className="field-hint">
-          These are optional overrides. Model discovery uses the saved login and
-          executable; save changes here before refreshing options.
-        </p>
-        <label htmlFor={`${group}-manual-model`}>
-          {title} custom model identifier
-          <input
-            id={`${group}-manual-model`}
-            value={value("model")}
-            onChange={(e) => change("model", e.target.value)}
-            autoComplete="off"
-          />
-        </label>
-        <label htmlFor={`${group}-manual-effort`}>
-          {title} custom reasoning effort
-          <input
-            id={`${group}-manual-effort`}
-            value={value("effort")}
-            onChange={(e) => change("effort", e.target.value)}
-            autoComplete="off"
-          />
-        </label>
-        {codex ? (
-          <>
-            <label htmlFor={`${group}-codex_bin`}>
-              {title} Codex executable
-              <input
-                id={`${group}-codex_bin`}
-                value={value("codex_bin")}
-                onChange={(e) => change("codex_bin", e.target.value)}
-              />
-            </label>
-            <label htmlFor={`${group}-codex_home`}>
-              {title} Codex home
-              <input
-                id={`${group}-codex_home`}
-                value={value("codex_home")}
-                onChange={(e) => change("codex_home", e.target.value)}
-                placeholder="Absolute path to a dedicated Codex directory"
-                autoComplete="off"
-                required
-              />
-              <span className="field-hint">
-                Configuration, login and session data stay here. After saving a
-                new path, sign in with <code>crew-assistant model login</code>.
-              </span>
-            </label>
-            <p className="field-hint">
-              Use a dedicated directory without global AGENTS files. Daemon turn
-              limits and process time/output bounds apply.
-            </p>
-          </>
-        ) : claude ? (
-          <>
-            <label htmlFor={`${group}-claude_bin`}>
-              {title} Claude executable
-              <input
-                id={`${group}-claude_bin`}
-                value={value("claude_bin")}
-                onChange={(e) => change("claude_bin", e.target.value)}
-              />
-            </label>
-            <label htmlFor={`${group}-claude_home`}>
-              {title} Claude configuration directory
-              <input
-                id={`${group}-claude_home`}
-                value={value("claude_home")}
-                onChange={(e) => change("claude_home", e.target.value)}
-                autoComplete="off"
-              />
-              <span className="field-hint">
-                Uses the existing Claude CLI login.
-              </span>
-            </label>
-          </>
-        ) : (
-          <>
-            <label htmlFor={`${group}-base_url`}>
-              {title} provider API base URL
-              <input
-                type="url"
-                id={`${group}-base_url`}
-                value={value("base_url")}
-                onChange={(e) => change("base_url", e.target.value)}
-              />
-            </label>
-            <label htmlFor={`${group}-api_key_env`}>
-              {title} API key environment variable
-              <input
-                id={`${group}-api_key_env`}
-                value={value("api_key_env")}
-                onChange={(e) => change("api_key_env", e.target.value)}
-                pattern="[A-Za-z_][A-Za-z0-9_]*"
-                autoComplete="off"
-              />
-              <span className="field-hint">
-                Enter a variable name, never its secret value.
-              </span>
-            </label>
-            <label htmlFor={`${group}-max_tokens`}>
-              {title} maximum output tokens per call
-              <input
-                type="number"
-                min={128}
-                max={131072}
-                id={`${group}-max_tokens`}
-                value={value("max_tokens")}
-                onChange={(e) => change("max_tokens", Number(e.target.value))}
-              />
-            </label>
-          </>
-        )}
+      <details className="disclosure">
+        <summary>More model settings</summary>
+        <div className="form disclosure-body">
+          <p className="hint">
+            Optional. The list above uses the saved login and program, so save
+            changes here before refreshing it.
+          </p>
+          <label htmlFor={`${group}-manual-model`}>
+            Model ID
+            <input
+              id={`${group}-manual-model`}
+              value={value("model")}
+              onChange={(e) => change("model", e.target.value)}
+              autoComplete="off"
+            />
+          </label>
+          <label htmlFor={`${group}-manual-effort`}>
+            Reasoning effort
+            <input
+              id={`${group}-manual-effort`}
+              value={value("effort")}
+              onChange={(e) => change("effort", e.target.value)}
+              autoComplete="off"
+            />
+          </label>
+          {codex ? (
+            <>
+              <label htmlFor={`${group}-codex_bin`}>
+                Codex program
+                <input
+                  id={`${group}-codex_bin`}
+                  value={value("codex_bin")}
+                  onChange={(e) => change("codex_bin", e.target.value)}
+                />
+              </label>
+              <label htmlFor={`${group}-codex_home`}>
+                Codex folder
+                <input
+                  id={`${group}-codex_home`}
+                  value={value("codex_home")}
+                  onChange={(e) => change("codex_home", e.target.value)}
+                  placeholder="A folder of its own, as an absolute path"
+                  autoComplete="off"
+                  required
+                />
+                <span className="hint">
+                  Codex keeps its settings, login and sessions here; use one
+                  without global AGENTS files. After changing it, sign in with{" "}
+                  <code>crew-assistant model login</code>.
+                </span>
+              </label>
+            </>
+          ) : claude ? (
+            <>
+              <label htmlFor={`${group}-claude_bin`}>
+                Claude program
+                <input
+                  id={`${group}-claude_bin`}
+                  value={value("claude_bin")}
+                  onChange={(e) => change("claude_bin", e.target.value)}
+                />
+              </label>
+              <label htmlFor={`${group}-claude_home`}>
+                Claude settings folder
+                <input
+                  id={`${group}-claude_home`}
+                  value={value("claude_home")}
+                  onChange={(e) => change("claude_home", e.target.value)}
+                  autoComplete="off"
+                />
+                <span className="hint">Uses your existing Claude login.</span>
+              </label>
+            </>
+          ) : (
+            <>
+              <label htmlFor={`${group}-base_url`}>
+                API address
+                <input
+                  type="url"
+                  id={`${group}-base_url`}
+                  value={value("base_url")}
+                  onChange={(e) => change("base_url", e.target.value)}
+                />
+              </label>
+              <label htmlFor={`${group}-api_key_env`}>
+                API key variable
+                <input
+                  id={`${group}-api_key_env`}
+                  value={value("api_key_env")}
+                  onChange={(e) => change("api_key_env", e.target.value)}
+                  pattern="[A-Za-z_][A-Za-z0-9_]*"
+                  autoComplete="off"
+                />
+                <span className="hint">
+                  The environment variable's name, never the key.
+                </span>
+              </label>
+              <label htmlFor={`${group}-max_tokens`}>
+                Most output tokens per call
+                <input
+                  type="number"
+                  min={128}
+                  max={131072}
+                  id={`${group}-max_tokens`}
+                  value={value("max_tokens")}
+                  onChange={(e) => change("max_tokens", Number(e.target.value))}
+                />
+              </label>
+            </>
+          )}
+        </div>
       </details>
-    </fieldset>
+    </div>
   );
 }
 

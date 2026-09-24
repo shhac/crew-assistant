@@ -1,7 +1,7 @@
-import { useAction } from "./ui";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { api, createProject, criteriaLines, type Project } from "./api";
 import { FileSystemPicker } from "./FileSystemPicker";
+import { ErrorNotice, Icon, useAction } from "./ui";
+import { createProject, criteriaLines, setTeam } from "./api";
 
 function directoryName(path: string) {
   return (
@@ -11,7 +11,8 @@ function directoryName(path: string) {
       .pop() || path
   );
 }
-function DirectoryList({
+
+export function DirectoryList({
   paths,
   onRemove,
 }: {
@@ -19,14 +20,14 @@ function DirectoryList({
   onRemove?: (path: string) => void;
 }) {
   return (
-    <ul className="project-directories">
+    <ul className="folders">
       {paths.map((path) => (
         <li key={path}>
-          <span title={path}>{path}</span>
+          <code title={path}>{path}</code>
           {onRemove && (
             <button
               type="button"
-              className="text-button"
+              className="btn btn-quiet btn-sm"
               aria-label={`Remove folder ${path}`}
               onClick={() => onRemove(path)}
             >
@@ -38,34 +39,57 @@ function DirectoryList({
     </ul>
   );
 }
-type ProjectKind = "draft" | "track";
+
+type Kind = "writing" | "code" | "tracking";
+
+const kinds: { kind: Kind; label: string; hint: string }[] = [
+  {
+    kind: "writing",
+    label: "Writing",
+    hint: "A writer drafts what you ask for, and a reviewer checks it against the brief.",
+  },
+  {
+    kind: "code",
+    label: "Code",
+    hint: "An implementer changes a private copy of the repository, a reviewer reads the change, and QA runs your check. Changes land as a new local branch until you choose otherwise.",
+  },
+  {
+    kind: "tracking",
+    label: "Tracking only",
+    hint: "Keep it in view. You can add a team later.",
+  },
+];
 
 export function NewProject({
   onClose,
   onCreated,
 }: {
   onClose: () => void;
-  onCreated: () => Promise<void>;
+  onCreated: (id: string) => Promise<void>;
 }) {
-  const [kind, setKind] = useState<ProjectKind>("draft");
+  const [kind, setKind] = useState<Kind>("writing");
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
   const [audience, setAudience] = useState("");
   const [constraints, setConstraints] = useState("");
   const [criteria, setCriteria] = useState("");
+  const [check, setCheck] = useState("");
   const [directories, setDirectories] = useState<string[]>([]);
   const [picking, setPicking] = useState(false);
-  const { busy, error, run } = useAction();
+  const [madeWithoutTeam, setMadeWithoutTeam] = useState("");
+  const { busy, error, setError, run } = useAction();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current;
     element?.showModal();
     return () => element?.close();
   }, []);
+  const code = kind === "code";
+  const goalRequired = kind !== "tracking";
   async function create(e: FormEvent) {
     e.preventDefault();
     await run(async () => {
-      await createProject({
+      const project = await createProject({
         title: title.trim(),
         directories,
         brief: {
@@ -74,77 +98,111 @@ export function NewProject({
           constraints: constraints.trim(),
           criteria: criteriaLines(criteria),
         },
-        template: kind === "draft" ? "draft" : "",
+        template: kind === "writing" ? "draft" : "",
       });
-      await onCreated();
+      if (code) {
+        try {
+          await setTeam(project.id, {
+            template: "code",
+            writer_engine: "",
+            reviewer_engine: "",
+            max_rounds: "",
+            deliver_to: "",
+            repo: directories[0],
+            branch_prefix: "",
+            check: check.trim(),
+            prepare: [],
+            sign: "",
+          });
+        } catch (failure) {
+          setMadeWithoutTeam(project.id);
+          throw failure;
+        }
+      }
+      await onCreated(project.id);
     });
   }
-  const goalRequired = kind === "draft";
+  if (madeWithoutTeam)
+    return (
+      <dialog
+        ref={dialog}
+        className="dialog"
+        aria-labelledby="new-project-title"
+        onCancel={onClose}
+      >
+        <h2 id="new-project-title">The project was made without its team</h2>
+        <ErrorNotice error={error} />
+        <p className="soft">Set the team up on the project's Team tab.</p>
+        <div className="actions">
+          <button
+            className="btn btn-primary"
+            onClick={() => void onCreated(madeWithoutTeam)}
+          >
+            Open the project
+          </button>
+        </div>
+      </dialog>
+    );
+  const ready =
+    title.trim() &&
+    (!goalRequired || goal.trim()) &&
+    (!code || (directories.length > 0 && check.trim()));
   return (
     <>
       <dialog
         ref={dialog}
-        className="project-dialog"
-        aria-labelledby="project-dialog-title"
+        className="dialog"
+        aria-labelledby="new-project-title"
         onCancel={(e) => {
           if (busy) e.preventDefault();
           else onClose();
         }}
       >
-        <div className="dialog-header">
-          <p className="eyebrow">BRING YOUR WORK TOGETHER</p>
+        <div className="dialog-head">
+          <h2 id="new-project-title">New project</h2>
           <button
             type="button"
-            className="icon-button"
-            aria-label="Close new project"
+            className="btn btn-quiet btn-icon"
+            aria-label="Close"
             disabled={busy}
             onClick={onClose}
           >
-            ×
+            <Icon name="Close" />
           </button>
         </div>
-        <h2 id="project-dialog-title">Add a project</h2>
-        <div
-          className="project-mode"
-          role="group"
-          aria-label="How the work gets done"
-        >
-          <button
-            type="button"
-            aria-pressed={kind === "draft"}
-            onClick={() => setKind("draft")}
-          >
-            Written work (writer + reviewer)
-          </button>
-          <button
-            type="button"
-            aria-pressed={kind === "track"}
-            onClick={() => setKind("track")}
-          >
-            Just track it
-          </button>
-        </div>
-        <p className="dialog-description">
-          {kind === "draft"
-            ? "A writer drafts what you ask for and a reviewer checks it against the brief. Nothing leaves the project until you approve it."
-            : "Keep the project and its folders in view. You can choose a team later."}
-        </p>
-        <form onSubmit={create}>
+        <form className="form" onSubmit={create}>
+          <div className="segmented" role="group" aria-label="Kind of project">
+            {kinds.map((k) => (
+              <button
+                key={k.kind}
+                type="button"
+                aria-pressed={kind === k.kind}
+                onClick={() => {
+                  setKind(k.kind);
+                  setError("");
+                }}
+              >
+                {k.label}
+              </button>
+            ))}
+          </div>
+          <p className="hint">{kinds.find((k) => k.kind === kind)?.hint}</p>
           <label htmlFor="project-title">
-            Project name
+            Name
             <input
               id="project-title"
+              className="field"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="A clear, useful name"
               maxLength={200}
               required
             />
           </label>
           <label htmlFor="project-goal">
-            {goalRequired ? "Goal" : "Goal (optional)"}
+            Goal{goalRequired ? "" : " (optional)"}
             <textarea
               id="project-goal"
+              className="field"
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
               placeholder="What is this project for?"
@@ -153,55 +211,71 @@ export function NewProject({
               required={goalRequired}
             />
           </label>
-          <details className="project-brief">
-            <summary>More about the brief (optional)</summary>
-            <BriefFields
-              idPrefix="project"
-              audience={audience}
-              constraints={constraints}
-              criteria={criteria}
-              onAudience={setAudience}
-              onConstraints={setConstraints}
-              onCriteria={setCriteria}
-            />
+          <details className="disclosure">
+            <summary>More about the brief</summary>
+            <div className="form disclosure-body">
+              <BriefFields
+                idPrefix="project"
+                audience={audience}
+                constraints={constraints}
+                criteria={criteria}
+                onAudience={setAudience}
+                onConstraints={setConstraints}
+                onCriteria={setCriteria}
+              />
+            </div>
           </details>
-          <section className="project-folder-choice">
-            <strong>Project folders (optional)</strong>
-            <DirectoryList
-              paths={directories}
-              onRemove={(path) =>
-                setDirectories((paths) =>
-                  paths.filter((value) => value !== path),
-                )
-              }
-            />
+          <div className="control">
+            {code ? "Repository" : "Folders (optional)"}
+            {directories.length > 0 && (
+              <DirectoryList
+                paths={directories}
+                onRemove={(path) =>
+                  setDirectories((paths) =>
+                    paths.filter((value) => value !== path),
+                  )
+                }
+              />
+            )}
+            <div className="actions">
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setPicking(true)}
+              >
+                {code
+                  ? directories.length
+                    ? "Change repository"
+                    : "Choose repository"
+                  : "Add folders"}
+              </button>
+            </div>
+          </div>
+          {code && (
+            <label htmlFor="project-check">
+              QA runs
+              <input
+                id="project-check"
+                className="field"
+                value={check}
+                placeholder="make check"
+                onChange={(e) => setCheck(e.target.value)}
+                required
+              />
+            </label>
+          )}
+          <ErrorNotice error={error} />
+          <div className="actions dialog-foot">
+            <button className="btn btn-primary" disabled={busy || !ready}>
+              Create project
+            </button>
             <button
               type="button"
-              className="button secondary"
-              onClick={() => setPicking(true)}
+              className="btn btn-quiet"
+              disabled={busy}
+              onClick={onClose}
             >
-              Choose folders
-            </button>
-            <p className="field-hint">
-              References to existing folders. Adding them does not start any
-              work or modify their contents.
-            </p>
-          </section>
-          {error && (
-            <div className="error-notice" role="alert">
-              {error}
-            </div>
-          )}
-          <div className="dialog-footer">
-            <p>
-              Creating a project starts no work. Ask for something on its page
-              when you are ready.
-            </p>
-            <button
-              className="button primary"
-              disabled={busy || !title.trim() || (goalRequired && !goal.trim())}
-            >
-              {busy ? "Adding…" : "Create project"}
+              Cancel
             </button>
           </div>
         </form>
@@ -209,11 +283,13 @@ export function NewProject({
       {picking && (
         <FileSystemPicker
           kind="directory"
-          multiple
+          multiple={!code}
           initialPath={directories[0]}
           onCancel={() => setPicking(false)}
           onSelect={(paths) => {
-            setDirectories((previous) => [...new Set([...previous, ...paths])]);
+            setDirectories((previous) =>
+              code ? paths.slice(0, 1) : [...new Set([...previous, ...paths])],
+            );
             if (!title.trim() && paths.length)
               setTitle(directoryName(paths[0]));
             setPicking(false);
@@ -245,13 +321,12 @@ export function BriefFields({
   return (
     <>
       <label htmlFor={`${idPrefix}-audience`}>
-        Audience
-        <textarea
+        Who it's for
+        <input
           id={`${idPrefix}-audience`}
+          className="field"
           value={audience}
           onChange={(e) => onAudience(e.target.value)}
-          placeholder="Who is it for?"
-          rows={2}
           maxLength={20000}
         />
       </label>
@@ -259,6 +334,7 @@ export function BriefFields({
         Constraints
         <textarea
           id={`${idPrefix}-constraints`}
+          className="field"
           value={constraints}
           onChange={(e) => onConstraints(e.target.value)}
           placeholder="Length, tone, anything to avoid"
@@ -267,128 +343,17 @@ export function BriefFields({
         />
       </label>
       <label htmlFor={`${idPrefix}-criteria`}>
-        What does done look like?
+        Done when
         <textarea
           id={`${idPrefix}-criteria`}
+          className="field"
           value={criteria}
           onChange={(e) => onCriteria(e.target.value)}
-          placeholder="One criterion per line"
+          placeholder="One point per line"
           rows={3}
           maxLength={20000}
         />
       </label>
     </>
-  );
-}
-
-export function ProjectDirectories({
-  project,
-  refresh,
-}: {
-  project: Project;
-  refresh: () => Promise<void>;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [picking, setPicking] = useState(false);
-  const [paths, setPaths] = useState(project.directories || []);
-  const { busy, error, setError, run } = useAction();
-  async function save() {
-    await run(async () => {
-      await api(`/api/projects/${encodeURIComponent(project.id)}/directories`, {
-        method: "PUT",
-        body: JSON.stringify({ directories: paths }),
-      });
-      await refresh();
-      setEditing(false);
-    });
-  }
-  return (
-    <section className="project-locations">
-      <div className="section-heading">
-        <h3>Project folders</h3>
-        {!editing && (
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => {
-              setPaths(project.directories || []);
-              setError("");
-              setEditing(true);
-            }}
-          >
-            {project.directories?.length ? "Edit folders" : "Attach folders"}
-          </button>
-        )}
-      </div>
-      <DirectoryList
-        paths={editing ? paths : project.directories || []}
-        onRemove={
-          editing && !busy
-            ? (path) =>
-                setPaths((previous) =>
-                  previous.filter((value) => value !== path),
-                )
-            : undefined
-        }
-      />
-      {!editing && !project.directories?.length && (
-        <p className="field-hint">No existing folders attached.</p>
-      )}
-      {editing && (
-        <div className="project-location-actions">
-          <button
-            type="button"
-            className="button secondary"
-            disabled={busy}
-            onClick={() => setPicking(true)}
-          >
-            Choose folders
-          </button>
-          <button
-            type="button"
-            className="button primary"
-            disabled={busy}
-            onClick={() => void save()}
-          >
-            {busy ? "Saving…" : "Save folders"}
-          </button>
-          <button
-            type="button"
-            className="text-button"
-            disabled={busy}
-            onClick={() => setEditing(false)}
-          >
-            Cancel
-          </button>
-        </div>
-      )}
-      {error && (
-        <div className="error-notice" role="alert">
-          {error}
-        </div>
-      )}
-      {project.scratch_directory && (
-        <details className="project-scratch">
-          <summary>Assistant scratch folder</summary>
-          <p className="field-hint">
-            A separate location for this project’s coordination notes and
-            artifacts.
-          </p>
-          <code>{project.scratch_directory}</code>
-        </details>
-      )}
-      {picking && (
-        <FileSystemPicker
-          kind="directory"
-          multiple
-          initialPath={paths[0]}
-          onCancel={() => setPicking(false)}
-          onSelect={(selection) => {
-            setPaths((previous) => [...new Set([...previous, ...selection])]);
-            setPicking(false);
-          }}
-        />
-      )}
-    </section>
   );
 }

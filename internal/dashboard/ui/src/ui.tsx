@@ -2,19 +2,29 @@ import { useState, type ReactNode } from "react";
 import { criteriaLines, errorText } from "./api";
 
 const icons: Record<string, string> = {
-  Overview: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
-  Projects: "M3 7h7l2-3h9v16H3z",
-  Decisions: "M12 3l9 9-9 9-9-9zM12 8v5M12 16h.01",
-  Memory: "M6 3h12v18l-6-4-6 4z",
-  Settings: "M4 7h16M4 17h16M8 4v6M16 14v6",
+  Inbox:
+    "M22 12h-6l-2 3h-4l-2-3H2M5.5 5.1L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.5-6.9A2 2 0 0016.8 4H7.2a2 2 0 00-1.7 1.1z",
+  Projects:
+    "M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z",
+  Memory: "M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z",
+  Settings:
+    "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
+  Search: "M11 4a7 7 0 100 14 7 7 0 000-14zM20 20l-3.5-3.5",
+  Eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 100 6 3 3 0 000-6z",
+  Branch:
+    "M6 3.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5zM6 15.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5zM18 5.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5zM6 8.5v7M18 10.5c0 4-5 4-9.5 6",
+  Copy: "M9 9h12v12H9zM5 15V5a2 2 0 012-2h10",
+  Up: "M12 19V5M6 11l6-6 6 6",
+  Down: "M12 5v14M6 13l6 6 6-6",
+  ChevronDown: "M6 9l6 6 6-6",
   Arrow: "M5 12h14M13 6l6 6-6 6",
   Plus: "M12 5v14M5 12h14",
   Close: "M6 6l12 12M18 6L6 18",
-  Send: "M12 19V5M6 11l6-6 6 6",
+  Send: "M22 2L11 13M22 2l-7 20-4-9-9-4z",
   Check: "M5 12l4 4L19 6",
   Pause: "M8 5v14M16 5v14",
   Play: "M7 4l14 8-14 8z",
-  Message: "M4 4h16v13H9l-5 4z",
+  Message: "M21 12a8 8 0 01-11.6 7.1L4 20l1-4.6A8 8 0 1121 12z",
   Lock: "M6 10h12v11H6zM8 10V6a4 4 0 018 0v4",
   Chevron: "M9 5l7 7-7 7",
   Expand:
@@ -24,7 +34,7 @@ const icons: Record<string, string> = {
   Clock: "M12 3a9 9 0 100 18 9 9 0 000-18zM12 7v5l3 2",
 };
 
-export function Icon({ name, size = 18 }: { name: string; size?: number }) {
+export function Icon({ name, size = 16 }: { name: string; size?: number }) {
   return (
     <svg
       width={size}
@@ -32,7 +42,7 @@ export function Icon({ name, size = 18 }: { name: string; size?: number }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth="1.8"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -42,44 +52,30 @@ export function Icon({ name, size = 18 }: { name: string; size?: number }) {
   );
 }
 
-export function Mark({ small = false }: { small?: boolean }) {
-  return (
-    <span
-      className={`assistant-mark ${small ? "small" : ""}`}
-      aria-hidden="true"
-    >
-      <i />
-      <i />
-      <i />
-      <i />
-    </span>
-  );
-}
-
-export function Status({
-  children,
-  tone = "",
-  plain = false,
-}: {
-  children: ReactNode;
-  tone?: string;
-  /** Keep a label's own wording instead of capitalising every word. */
-  plain?: boolean;
-}) {
-  return (
-    <span className={`status ${tone}${plain ? " plain" : ""}`}>
-      <span className="status-dot" />
-      {children}
-    </span>
-  );
-}
-
 export function ErrorNotice({ error }: { error: string }) {
   return error ? (
-    <div className="error-notice" role="alert">
+    <div className="error" role="alert">
       {error}
     </div>
   ) : null;
+}
+
+/** A status in its colour, always in the wording given (never re-cased). */
+export function Pill({
+  tone = "",
+  dot = false,
+  children,
+}: {
+  tone?: string;
+  dot?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <span className={`pill${tone ? ` tone-${tone}` : ""}`}>
+      {dot && <span className="dot" />}
+      {children}
+    </span>
+  );
 }
 
 export function humanStatus(value: string) {
@@ -132,52 +128,6 @@ export function sinceLabel(value?: string) {
   if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
   const days = Math.round(hours / 24);
   return `${days} ${days === 1 ? "day" : "days"} ago`;
-}
-
-export function Empty({
-  icon,
-  title,
-  children,
-  action,
-}: {
-  icon: string;
-  title: string;
-  children: ReactNode;
-  action?: ReactNode;
-}) {
-  return (
-    <div className="empty-state">
-      <span className="empty-icon">
-        <Icon name={icon} size={24} />
-      </span>
-      <h3>{title}</h3>
-      <p>{children}</p>
-      {action}
-    </div>
-  );
-}
-
-export function PageHeading({
-  eyebrow,
-  title,
-  description,
-  action,
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-  action?: ReactNode;
-}) {
-  return (
-    <div className="page-heading">
-      <div>
-        <p className="eyebrow">{eyebrow}</p>
-        <h1>{title}</h1>
-        <p className="page-description">{description}</p>
-      </div>
-      {action}
-    </div>
-  );
 }
 
 /**

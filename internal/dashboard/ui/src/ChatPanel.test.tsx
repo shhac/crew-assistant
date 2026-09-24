@@ -8,9 +8,15 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import { ChatPanel, SUGGESTION_DELAY } from "./ChatPanel";
+import {
+  ChatPanel,
+  SUGGESTION_DELAY,
+  wakeReport,
+  wakeSummary,
+} from "./ChatPanel";
 import { ConversationMarkdown } from "./ConversationMarkdown";
 import { normalizeState, type ChatTurn, type State } from "./api";
+import { fullDateLabel } from "./ui";
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
   cleanup();
@@ -120,7 +126,7 @@ describe("conversation", () => {
     ).toHaveLength(1);
     expect(input.value).toBe("");
     await tick(0);
-    expect(screen.getByText("Iris is working through it…")).toBeTruthy();
+    expect(screen.getByText("Iris is working")).toBeTruthy();
     typeAndSend("Another thought");
     await tick(0);
     expect(server.posts()).toHaveLength(2);
@@ -128,7 +134,7 @@ describe("conversation", () => {
     // status and it can be changed before it runs.
     const queue = screen.getByRole("region", { name: "Queued messages" });
     expect(within(queue).getByText("Another thought")).toBeTruthy();
-    expect(within(queue).getByText(/1 message queued/)).toBeTruthy();
+    expect(within(queue).getByText("Up next (1)")).toBeTruthy();
     state.messages = server.turns.map((t) => ({
       id: t.user_message_id!,
       role: "user",
@@ -165,6 +171,11 @@ describe("conversation", () => {
     const log = screen.getByRole("log");
     expect(within(log).getByText("Wake-up")).toBeTruthy();
     expect(within(log).getAllByText("You")).toHaveLength(1);
+    const wake = log.querySelector<HTMLDetailsElement>("details.wake")!;
+    expect(wake.open).toBe(false);
+    expect(wake.querySelector(".wake-line")?.textContent).toBe("Checked in");
+    expect(wake.querySelector("pre")?.textContent).toBe("wake-1 fired");
+    expect(log.querySelectorAll("article.message")).toHaveLength(1);
   });
   it("does not submit Shift+Enter or an IME composition", async () => {
     const server = backend();
@@ -194,11 +205,16 @@ describe("conversation", () => {
     const input = typeAndSend("My original request");
     fireEvent.change(input, { target: { value: "A second thought" } });
     await tick(0);
-    expect(screen.getByText("Delivery unconfirmed")).toBeTruthy();
+    expect(screen.getByText("Not confirmed yet")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "It stays here until it's confirmed. Retrying can't start a second reply.",
+      ),
+    ).toBeTruthy();
     expect(input.value).toBe("A second thought");
     await tick(6000);
     expect(server.posts()).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Retry delivery" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await tick(0);
     expect(server.posts()).toHaveLength(2);
     const bodies = server
@@ -222,11 +238,11 @@ describe("conversation", () => {
     expect(screen.getByText("Then review it")).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Cancel queued message: Then review it",
+        name: "Remove queued message: Then review it",
       }),
     );
     await tick(0);
-    expect(screen.getByText("Cancelled before starting")).toBeTruthy();
+    expect(screen.getByText("Cancelled")).toBeTruthy();
     expect(server.turns[0].status).toBe("running");
     expect(
       server.fetch.mock.calls.filter(([, o]) => o?.method === "DELETE"),
@@ -251,10 +267,11 @@ describe("conversation", () => {
     render(panel(initial(), refresh));
     await tick(0);
     const activity = screen.getByRole("group", {
-      name: "Assistant tool activity",
+      name: "What the assistant did",
     });
+    expect(within(activity).getByText("Creating project…")).toBeTruthy();
     expect(within(activity).getByText("Creating project")).toBeTruthy();
-    expect(within(activity).getByText("In progress")).toBeTruthy();
+    expect(within(activity).getByText("· Working")).toBeTruthy();
     expect(screen.getByText("Gathering the threads…")).toBeTruthy();
     server.turns[0] = {
       ...server.turns[0],
@@ -263,12 +280,9 @@ describe("conversation", () => {
       events: [{ ...server.turns[0].events[0], status: "completed" }],
     };
     await tick();
-    expect(within(activity).getByText("Completed")).toBeTruthy();
-    // A finished step collapses into a count so it stops competing with the
-    // reply, while still being one click away.
-    // One finished step is shown rather than hidden behind a summary that
-    // would cost a row and a click to save a row.
-    expect(within(activity).queryByText(/steps completed/)).toBeNull();
+    // Once replied, the steps fold into a summary of the work, one click away.
+    expect(within(activity).getByText("Worked · 1 step")).toBeTruthy();
+    expect(within(activity).queryByText("· Working")).toBeNull();
     expect(screen.queryByText("Gathering the threads…")).toBeNull();
     expect(refresh.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(server.posts()).toHaveLength(0);
@@ -303,10 +317,17 @@ describe("conversation", () => {
       within(screen.getByRole("log")).getAllByText("Prepare the project"),
     ).toHaveLength(2);
     expect(
-      screen.getByText("Reply interrupted · not automatically retried"),
+      screen.getByText("Stopped before finishing. Not retried."),
     ).toBeTruthy();
-    expect(screen.getByText("Failed", { exact: true })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Retry delivery" })).toBeNull();
+    expect(screen.getByRole("alert").textContent).toBe("Daemon restarted");
+    // The failed step is shown without opening the summary.
+    const activity = screen.getByRole("group", {
+      name: "What the assistant did",
+    });
+    const problems = activity.querySelector<HTMLElement>("ul.tools-problems")!;
+    expect(within(problems).getByText("· Failed")).toBeTruthy();
+    expect(within(activity).queryByText(/create_project/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     await tick();
     expect(server.posts()).toHaveLength(0);
   });
@@ -326,12 +347,36 @@ describe("conversation", () => {
     const input = typeAndSend("One more thing");
     fireEvent.change(input, { target: { value: "A next draft" } });
     await tick(0);
-    expect(screen.getByText("Message not sent")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Retry delivery" })).toBeNull();
+    expect(screen.getByText("Not sent")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     fireEvent.click(
-      screen.getByRole("button", { name: "Restore message to draft" }),
+      screen.getByRole("button", { name: "Put it back in the message box" }),
     );
     expect(input.value).toBe("A next draft\n\nOne more thing");
+    expect(document.activeElement).toBe(input);
+    expect(server.posts()).toHaveLength(1);
+  });
+  it("discards a rejected message without replaying it or touching the draft", async () => {
+    const server = backend();
+    const original = server.fetch.getMockImplementation()!;
+    server.fetch.mockImplementation(async (path, options) =>
+      options?.method === "POST"
+        ? {
+            ok: false,
+            status: 429,
+            json: async () => ({ error: "The message queue is full." }),
+          }
+        : original(path, options),
+    );
+    render(panel());
+    const input = typeAndSend("Never mind this");
+    fireEvent.change(input, { target: { value: "Something else" } });
+    await tick(0);
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.queryByText("Never mind this")).toBeNull();
+    expect(screen.queryByText("Not sent")).toBeNull();
+    expect(input.value).toBe("Something else");
+    await tick();
     expect(server.posts()).toHaveLength(1);
   });
   it("does not enqueue a draft twice when Enter repeats before React renders", async () => {
@@ -364,15 +409,15 @@ describe("conversation", () => {
     await tick();
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Cancel queued message: Prepare the project",
+        name: "Remove queued message: Prepare the project",
       }),
     );
     await tick(0);
-    expect(screen.getByText("Cancelled before starting")).toBeTruthy();
+    expect(screen.getByText("Cancelled")).toBeTruthy();
     await act(async () => {
       release(result({ turns: [stale] }));
     });
-    expect(screen.getByText("Cancelled before starting")).toBeTruthy();
+    expect(screen.getByText("Cancelled")).toBeTruthy();
     expect(
       screen.queryByRole("region", { name: "Queued messages" }),
     ).toBeNull();
@@ -393,11 +438,11 @@ describe("conversation", () => {
     render(panel());
     typeAndSend("Start the work");
     await tick(0);
-    fireEvent.click(screen.getByRole("button", { name: "Retry delivery" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await tick(0);
-    expect(screen.getByText("Delivery unconfirmed")).toBeTruthy();
+    expect(screen.getByText("Not confirmed yet")).toBeTruthy();
     expect(
-      screen.queryByRole("button", { name: "Restore message to draft" }),
+      screen.queryByRole("button", { name: "Put it back in the message box" }),
     ).toBeNull();
     expect(server.posts()).toHaveLength(2);
   });
@@ -420,9 +465,7 @@ describe("conversation", () => {
     typeAndSend("Second request");
     expect(screen.getByText("First request")).toBeTruthy();
     expect(screen.getByText("Second request")).toBeTruthy();
-    expect(
-      screen.getByText("Waiting to send · kept in this browser"),
-    ).toBeTruthy();
+    expect(screen.getByText("Waiting to send")).toBeTruthy();
     expect(server.posts()).toHaveLength(1);
     await act(async () => {
       release();
@@ -434,6 +477,38 @@ describe("conversation", () => {
     ]);
     expect(server.turns[0].status).toBe("running");
     expect(server.turns[1].status).toBe("queued");
+  });
+  it("cancels a message still waiting to send, without it ever being sent", async () => {
+    const server = backend();
+    const original = server.fetch.getMockImplementation()!;
+    let release!: () => void;
+    let first = true;
+    server.fetch.mockImplementation(async (path, options) => {
+      if (options?.method === "POST" && first) {
+        first = false;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return original(path, options);
+    });
+    render(panel());
+    typeAndSend("First request");
+    typeAndSend("Second request");
+    expect(screen.getByText("Sending…")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Cancel message: Second request" }),
+    );
+    expect(screen.queryByText("Second request")).toBeNull();
+    await act(async () => {
+      release();
+    });
+    await tick();
+    expect(server.posts()).toHaveLength(1);
+    expect(server.turns.map((t) => t.message)).toEqual(["First request"]);
+    expect(
+      server.fetch.mock.calls.some(([, o]) => o?.method === "DELETE"),
+    ).toBe(false);
   });
   it("holds later submissions until an uncertain delivery is resolved by its same-id retry", async () => {
     const server = backend();
@@ -451,12 +526,10 @@ describe("conversation", () => {
     typeAndSend("Second request");
     await tick(0);
     expect(server.posts()).toHaveLength(1);
-    expect(
-      screen.getByText("Waiting to send · kept in this browser"),
-    ).toBeTruthy();
+    expect(screen.getByText("Waiting to send")).toBeTruthy();
     await tick();
     expect(server.posts()).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Retry delivery" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await tick(0);
     expect(server.posts()).toHaveLength(3);
     expect(server.turns.map((t) => t.message)).toEqual([
@@ -484,8 +557,10 @@ describe("conversation", () => {
     ]);
     render(panel());
     await tick(0);
-    expect(screen.getByText("Outcome unconfirmed")).toBeTruthy();
-    expect(screen.queryByText("Failed", { exact: true })).toBeNull();
+    expect(
+      screen.getAllByText("· Stopped; outcome not confirmed").length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("· Failed")).toBeNull();
   });
   it("times out only the enqueue acknowledgement and keeps delivery uncertain", async () => {
     const server = backend();
@@ -503,15 +578,16 @@ describe("conversation", () => {
     typeAndSend("A stalled send");
     typeAndSend("Keep this next");
     await tick(15_000);
-    expect(screen.getByText("Delivery unconfirmed")).toBeTruthy();
+    expect(screen.getByText("Not confirmed yet")).toBeTruthy();
+    expect(
+      screen.getByText("No confirmation yet. Checking whether it arrived."),
+    ).toBeTruthy();
     expect(
       screen.getByText(
-        "Delivery confirmation timed out. Checking whether your message arrived.",
+        "The next messages wait until this one is confirmed. Keep this page open.",
       ),
     ).toBeTruthy();
-    expect(
-      screen.getByText("Waiting to send · kept in this browser"),
-    ).toBeTruthy();
+    expect(screen.getByText("Waiting to send")).toBeTruthy();
     expect(server.posts()).toHaveLength(1);
     expect(
       server.fetch.mock.calls.some(
@@ -611,7 +687,7 @@ describe("composer attachments", () => {
     expect(paste([textFile("Remember the milk", "note.txt")])).toBe(false);
     await tick(0);
     expect(within(attachments()!).getByText("note.txt")).toBeTruthy();
-    const send = screen.getByRole("button", { name: "Send message" });
+    const send = screen.getByRole("button", { name: "Send" });
     expect((send as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(send);
     await tick(0);
@@ -733,17 +809,17 @@ describe("composer attachments", () => {
     await tick(0);
     const input = typeAndSend("Review this");
     await tick(0);
-    expect(screen.getByText("Message not sent")).toBeTruthy();
+    expect(screen.getByText("Not sent")).toBeTruthy();
     expect(attachments()).toBeNull();
     fireEvent.click(
-      screen.getByRole("button", { name: "Restore message to draft" }),
+      screen.getByRole("button", { name: "Put it back in the message box" }),
     );
     expect(input.value).toBe("Review this");
     expect(within(attachments()!).getByText("draft.md")).toBeTruthy();
   });
 });
 describe("next-message suggestions", () => {
-  const defaultPlaceholder = "Ask Iris, or hand over an outcome…";
+  const defaultPlaceholder = "Message Iris";
   // A conversation that has settled on the assistant's reply `reply-1`.
   function settled(extra: State["messages"] = []) {
     const state = initial();
@@ -785,7 +861,9 @@ describe("next-message suggestions", () => {
     });
     expect(input().placeholder).toBe("What should I plant first?");
     expect(input().value).toBe("");
-    expect(screen.getByText(/Tab to use the suggestion/)).toBeTruthy();
+    expect(document.querySelector(".composer-hint")?.textContent).toBe(
+      "Tab takes the suggestion",
+    );
     // Enter on an empty draft never sends the suggestion.
     fireEvent.keyDown(input(), { key: "Enter" });
     await tick(0);
@@ -958,7 +1036,7 @@ describe("next-message suggestions", () => {
     await tick(0);
     expect(server.turns[0].status).toBe("running");
     expect(server.turns[0].loading_phrase).toBeUndefined();
-    expect(screen.getByText("Iris is working through it…")).toBeTruthy();
+    expect(screen.getByText("Iris is working")).toBeTruthy();
     // No suggestion is asked for while the reply is being written.
     await tick(SUGGESTION_DELAY * 3);
     expect(server.suggestions()).toHaveLength(0);
@@ -1051,7 +1129,7 @@ describe("next-message suggestions", () => {
     dropFile("plan.txt");
     await tick(0);
     expect(input().placeholder).toBe(defaultPlaceholder);
-    expect(screen.queryByText(/Tab to use the suggestion/)).toBeNull();
+    expect(screen.queryByText(/takes the suggestion/)).toBeNull();
     expect(fireEvent.keyDown(input(), { key: "Tab" })).toBe(true);
     expect(input().value).toBe("");
     fireEvent.click(
@@ -1060,5 +1138,226 @@ describe("next-message suggestions", () => {
     await tick(SUGGESTION_DELAY * 3);
     expect(input().placeholder).toBe(defaultPlaceholder);
     expect(server.suggestions()).toHaveLength(1);
+  });
+});
+describe("chat layout", () => {
+  it("heads the chat with the assistant's name and its controls", () => {
+    backend();
+    const onExpand = vi.fn();
+    const onClose = vi.fn();
+    const view = render(
+      <ChatPanel
+        state={initial()}
+        refresh={vi.fn(async () => {})}
+        expanded={false}
+        onExpand={onExpand}
+        onClose={onClose}
+      />,
+    );
+    const header = screen.getByRole("heading", { level: 2 }).parentElement!;
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Iris");
+    // Just the name and two controls: no tagline and no context strip.
+    expect(header.children).toHaveLength(3);
+    const widen = screen.getByRole("button", { name: "Widen the chat" });
+    expect(widen.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(widen);
+    expect(onExpand).toHaveBeenCalledTimes(1);
+    const close = screen.getByRole("button", { name: "Close chat" });
+    expect(close.classList.contains("mobile-close")).toBe(true);
+    fireEvent.click(close);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <ChatPanel
+        state={initial()}
+        refresh={vi.fn(async () => {})}
+        expanded
+        onExpand={onExpand}
+        onClose={onClose}
+      />,
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "Back to the work" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.queryByRole("button", { name: "Widen the chat" })).toBeNull();
+  });
+
+  it("welcomes an empty conversation with starters that fill the composer", () => {
+    const server = backend();
+    render(panel());
+    expect(
+      screen.getByText(
+        "Ask about your projects, or hand Iris something to do.",
+      ),
+    ).toBeTruthy();
+    const starters = screen
+      .getByText("Ask about your projects, or hand Iris something to do.")
+      .parentElement!.querySelectorAll("button");
+    expect(Array.from(starters).map((b) => b.textContent)).toEqual([
+      "What needs me today?",
+      "Start a new project",
+      "What do you remember about me?",
+    ]);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Start a new project" }),
+    );
+    const input = screen.getByLabelText("Message Iris") as HTMLTextAreaElement;
+    expect(input.value).toBe("Start a new project");
+    expect(document.activeElement).toBe(input);
+    // A starter fills the draft; it is not sent.
+    expect(server.posts()).toHaveLength(0);
+    expect(
+      screen.queryByText(/One conversation across your projects/),
+    ).toBeNull();
+  });
+
+  it("shows no welcome once there are messages, and bylines each one", () => {
+    backend();
+    const state = initial();
+    state.messages = [
+      {
+        id: "u1",
+        role: "user",
+        content: "Hello",
+        created_at: "2026-09-24T09:00:00Z",
+      },
+      {
+        id: "s1",
+        role: "system",
+        content: "Model changed",
+        created_at: "2026-09-24T09:00:01Z",
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "Hi there",
+        created_at: "2026-09-24T09:00:02Z",
+      },
+    ];
+    render(panel(state));
+    expect(screen.queryByText(/Ask about your projects/)).toBeNull();
+    const log = screen.getByRole("log");
+    const articles = Array.from(log.querySelectorAll("article"));
+    expect(articles.map((a) => a.className)).toEqual([
+      "message from-you",
+      "message from-assistant",
+      "message from-assistant",
+    ]);
+    expect(
+      articles.map((a) => a.querySelector(".message-by span")?.textContent),
+    ).toEqual(["You", "Status", "Iris"]);
+  });
+
+  it("describes the composer's keys when no suggestion shows", () => {
+    backend();
+    render(panel());
+    const hint = document.querySelector(".composer-hint")!;
+    expect(hint.textContent).toBe(
+      "Enter sends · Shift Enter new line · drop text files to attach",
+    );
+    expect(
+      Array.from(hint.querySelectorAll(".kbd")).map((k) => k.textContent),
+    ).toEqual(["Enter", "Shift Enter"]);
+    const input = screen.getByLabelText("Message Iris") as HTMLTextAreaElement;
+    expect(input.placeholder).toBe("Message Iris");
+    expect(
+      (screen.getByRole("button", { name: "Send" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  it("shows the model's status while a reply runs, and when it will try again", async () => {
+    const retryAt = "2026-09-16T12:05:00Z";
+    const server = backend([
+      savedTurn({
+        model_status: "Waiting for the model",
+        loading_phrase: "Gathering the threads…",
+        retry_at: retryAt,
+      }),
+    ]);
+    render(panel());
+    await tick(0);
+    expect(screen.getByText("Waiting for the model").textContent).toBe(
+      `Waiting for the model · trying again after ${fullDateLabel(retryAt)}; nothing already done is repeated`,
+    );
+    expect(screen.queryByText("Gathering the threads…")).toBeNull();
+    // A running turn needs no delivery line.
+    expect(document.querySelector(".turn-delivery")).toBeNull();
+    server.turns[0] = {
+      ...server.turns[0],
+      model_status: undefined,
+      retry_at: undefined,
+    };
+    await tick();
+    expect(screen.getByText("Gathering the threads…")).toBeTruthy();
+    expect(screen.queryByText(/trying again after/)).toBeNull();
+  });
+
+  it("says when live updates fail, and clears it once they return", async () => {
+    const server = backend();
+    const original = server.fetch.getMockImplementation()!;
+    let offline = true;
+    server.fetch.mockImplementation(async (path, options) => {
+      if (path === "/api/chat/turns" && offline) throw new Error("offline");
+      return original(path, options);
+    });
+    render(panel());
+    await tick(0);
+    expect(
+      screen.getByText(
+        "Can't get live updates (offline). Your messages are saved; trying again…",
+      ),
+    ).toBeTruthy();
+    offline = false;
+    await tick();
+    expect(screen.queryByText(/Can't get live updates/)).toBeNull();
+  });
+});
+describe("wake-ups", () => {
+  const note = "[A scheduled wake-up. Decide what to do.]\n";
+  it("summarises what happened when the report says", () => {
+    expect(
+      wakeSummary(
+        `${note}wake-1 — check the build\nwhat happened: the build passed\nwhat happened: a PR was merged`,
+      ),
+    ).toBe("the build passed · a PR was merged");
+  });
+  it("falls back to each wake's line, then to a plain check-in", () => {
+    expect(
+      wakeSummary(`${note}wake-1 — check the build\nwake-2 — chase the review`),
+    ).toBe("check the build · chase the review");
+    expect(wakeSummary(`${note}Nothing was due.`)).toBe("Checked in");
+  });
+  it("reports without the note addressed to the assistant", () => {
+    expect(wakeReport(`${note}wake-1 — check the build\n`)).toBe(
+      "wake-1 — check the build",
+    );
+    expect(wakeReport("wake-1 — check the build [soon]")).toBe(
+      "wake-1 — check the build [soon]",
+    );
+  });
+  it("shows the summary and the report in a wake-up message", () => {
+    backend();
+    const state = initial();
+    state.messages = [
+      {
+        id: "w1",
+        role: "user",
+        origin: "wake",
+        content: `${note}wake-1 — check the build\nwhat happened: the build passed`,
+        created_at: "2026-09-24T09:18:23Z",
+      },
+    ];
+    render(panel(state));
+    const wake = screen.getByRole("log").querySelector("details.wake")!;
+    const summary = wake.querySelector("summary")!;
+    expect(within(summary as HTMLElement).getByText("Wake-up")).toBeTruthy();
+    expect(
+      within(summary as HTMLElement).getByText("the build passed"),
+    ).toBeTruthy();
+    expect(wake.querySelector("pre")?.textContent).toBe(
+      "wake-1 — check the build\nwhat happened: the build passed",
+    );
   });
 });

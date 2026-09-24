@@ -1,18 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Avatar, Waiting } from "./Identity";
-import {
-  api,
-  APIError,
-  errorText,
-  pendingDecisions,
-  type ChatTurn,
-  type State,
-} from "./api";
+import { api, APIError, errorText, type ChatTurn, type State } from "./api";
 import { ConversationMarkdown } from "./ConversationMarkdown";
-import { dateLabel, Icon } from "./ui";
+import { dateLabel, fullDateLabel, Icon } from "./ui";
 import { ChatQueue, type QueueHold } from "./ChatQueue";
 import { ToolActivity } from "./ToolActivity";
-import { fullDateLabel } from "./ui";
 import {
   carriesFiles,
   composeMessage,
@@ -21,7 +12,6 @@ import {
   sizeLabel,
   type ComposerAsset,
 } from "./composerAssets";
-import "./chat.css";
 type VisibleTurn = Omit<ChatTurn, "status"> & {
   status:
     ChatTurn["status"] | "waiting" | "sending" | "unconfirmed" | "rejected";
@@ -66,29 +56,47 @@ function latestTurn(
     ? current
     : incoming;
 }
+/**
+ * What a wake-up says happened, for the owner. The message itself is written
+ * for the assistant: it opens with a note to the model and lists each wake's
+ * details line by line.
+ */
+export function wakeSummary(content: string) {
+  const happened = [...content.matchAll(/what happened: (.+)/g)].map(
+    (m) => m[1],
+  );
+  if (happened.length) return happened.join(" · ");
+  const waits = [...content.matchAll(/^wake-\S+ — (.+)$/gm)].map((m) => m[1]);
+  if (waits.length) return waits.join(" · ");
+  return "Checked in";
+}
+
+/** The wake-up's report without the note addressed to the assistant. */
+export function wakeReport(content: string) {
+  return content.replace(/^\[[^\]]*\]\s*/, "").trim();
+}
+
+/** A message's delivery, in a few words; nothing once all is well. */
 function delivery(turn: VisibleTurn) {
   switch (turn.status) {
     case "waiting":
-      return "Waiting to send · kept in this browser";
+      return "Waiting to send";
     case "sending":
       return "Sending…";
     case "unconfirmed":
-      return "Delivery unconfirmed";
+      return "Not confirmed yet";
     case "rejected":
-      return "Message not sent";
+      return "Not sent";
     case "queued":
-      return "Queued · will follow the current reply";
-    case "running":
-      return "Received · working on your request";
-    case "completed":
-      return "Reply complete";
+      return "Queued";
     case "cancelled":
-      return "Cancelled before starting";
+      return "Cancelled";
     case "interrupted":
-      return "Reply interrupted · not automatically retried";
+      return "Stopped before finishing. Not retried.";
     case "failed":
-      return "Reply failed · not automatically retried";
+      return "Failed. Not retried.";
   }
+  return "";
 }
 /**
  * What happened to one owner message: its delivery state, any recovery the
@@ -116,43 +124,61 @@ function TurnStatus({
   onRetry: (turn: VisibleTurn) => void;
 }) {
   if (!turn) return null;
+  const said = delivery(turn);
+  const retry = fullDateLabel(turn.retry_at);
   return (
-    <div className="chat-turn-status">
-      <span className="message-delivery">{delivery(turn)}</span>
-      {turn.status === "waiting" && (
-        <button
-          type="button"
-          className="chat-turn-action"
-          disabled={cancelling.has(turn.id)}
-          onClick={() => void onCancel(turn)}
-          aria-label={`Cancel queued message: ${turn.message}`}
-        >
-          Cancel
-        </button>
+    <div className="turn-status">
+      {said && (
+        <p className="turn-delivery">
+          {said}
+          {turn.status === "waiting" && (
+            <button
+              type="button"
+              className="link-button"
+              disabled={cancelling.has(turn.id)}
+              onClick={() => void onCancel(turn)}
+              aria-label={`Cancel message: ${turn.message}`}
+            >
+              Cancel
+            </button>
+          )}
+        </p>
       )}
       {turn.error && (
-        <p className="chat-turn-error" role="alert">
+        <p className="error" role="alert">
           {turn.error}
         </p>
       )}
       {turn.status === "unconfirmed" && (
-        <div className="chat-recovery">
-          <p>
-            Your message is kept here while delivery is checked. Retrying
-            delivery cannot start a second reply.
+        <div className="turn-recovery">
+          <p className="muted small">
+            It stays here until it's confirmed. Retrying can't start a second
+            reply.
           </p>
-          <button type="button" onClick={() => void onRetry(turn)}>
-            Retry delivery
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => void onRetry(turn)}
+          >
+            Retry
           </button>
         </div>
       )}
       {turn.status === "rejected" && (
-        <div className="chat-recovery">
-          <button type="button" onClick={() => onRestore(turn)}>
-            Restore message to draft
+        <div className="turn-recovery actions">
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => onRestore(turn)}
+          >
+            Put it back in the message box
           </button>
-          <button type="button" onClick={() => onDiscard(turn)}>
-            Discard message
+          <button
+            type="button"
+            className="btn btn-quiet btn-sm"
+            onClick={() => onDiscard(turn)}
+          >
+            Discard
           </button>
         </div>
       )}
@@ -160,18 +186,16 @@ function TurnStatus({
         <ToolActivity events={turn.events} live={live} />
       )}
       {turn.status === "running" && (
-        <Waiting
-          label={
-            turn.model_status ||
-            turn.loading_phrase ||
-            `${name} is working through it…`
-          }
-          detail={
-            fullDateLabel(turn.retry_at)
-              ? `Next attempt after ${fullDateLabel(turn.retry_at)}. Recorded actions will not be replayed.`
-              : "An answer or a clear decision is on its way."
-          }
-        />
+        <p className="turn-working" role="status">
+          <span className="dot" aria-hidden="true" />
+          {turn.model_status || turn.loading_phrase || `${name} is working`}
+          {retry && (
+            <span className="muted small">
+              {" "}
+              · trying again after {retry}; nothing already done is repeated
+            </span>
+          )}
+        </p>
       )}
     </div>
   );
@@ -269,8 +293,8 @@ export function ChatPanel({
         created_at: t.created_at,
       })),
   ].sort(chronological);
-  // The last rendered message in the thread. Only its turn may hold a
-  // completed step out of the accordion.
+  // The last rendered message in the thread. While it has no reply, its
+  // steps are summed up by what it is doing now rather than how it went.
   const newestMessageID = messages[messages.length - 1]?.id;
   const turnsByMessage = new Map(
     turns.map((t) => [t.user_message_id || t.id, t]),
@@ -393,9 +417,7 @@ export function ChatPanel({
         }
       } catch (err) {
         if (!stopped)
-          setPollError(
-            `Live conversation updates unavailable: ${errorText(err)}`,
-          );
+          setPollError(`Can't get live updates (${errorText(err)}).`);
       } finally {
         if (!stopped)
           timer = setTimeout(poll, turnsRef.current.some(active) ? 1000 : 3000);
@@ -471,7 +493,7 @@ export function ChatPanel({
                 ...t,
                 status: rejected ? "rejected" : "unconfirmed",
                 error: timedOut
-                  ? "Delivery confirmation timed out. Checking whether your message arrived."
+                  ? "No confirmation yet. Checking whether it arrived."
                   : errorText(err),
               }
             : t,
@@ -542,81 +564,42 @@ export function ChatPanel({
     }
   }
   return (
-    <>
-      <header className="chat-header">
-        <Avatar avatar={state.assistant.avatar} small />
-        <div>
-          <h2>{name}</h2>
-          <span>Your context, kept together</span>
-        </div>
+    <div className="chat">
+      <header className="chat-head">
+        <h2>{name}</h2>
         <button
-          className="icon-button chat-expand"
-          aria-label={expanded ? "Return to workspace" : "Expand conversation"}
+          className="btn btn-quiet btn-icon chat-expand"
+          aria-label={expanded ? "Back to the work" : "Widen the chat"}
           aria-pressed={expanded}
+          title={expanded ? "Back to the work" : "Widen the chat"}
           onClick={onExpand}
-          title={
-            expanded ? "Return to workspace" : "Make conversation the main view"
-          }
         >
           <Icon name={expanded ? "Shrink" : "Expand"} />
-          <span className="chat-expand-label">
-            {expanded ? "Return to workspace" : "Expand conversation"}
-          </span>
         </button>
         <button
-          className="icon-button mobile-close"
-          aria-label="Close conversation"
+          className="btn btn-quiet btn-icon mobile-close"
+          aria-label="Close chat"
+          title="Close chat (⌘J)"
           onClick={onClose}
         >
           <Icon name="Close" />
         </button>
       </header>
-      {expanded && (
-        <div className="chat-context-strip">
-          <span>YOUR WORK, WITH CONTEXT</span>
-          <p>
-            {state.projects.filter((p) => p.status !== "completed").length}{" "}
-            active projects <i>·</i> {pendingDecisions(state.decisions).length}{" "}
-            open decisions <i>·</i> one conversation
-          </p>
-        </div>
-      )}
       <div
-        className="chat-messages"
+        className="chat-log"
         ref={scroll}
         role="log"
-        aria-label="Conversation history"
+        aria-label="Conversation"
         aria-live="polite"
       >
         {messages.length ? (
-          messages.map((m) => (
-            <article
-              key={m.id}
-              className={`message ${"origin" in m && m.origin === "wake" ? "wake-message" : m.role === "user" ? "user-message" : "assistant-message"}`}
-            >
-              <div className="message-label">
-                {m.role === "user" && "origin" in m && m.origin === "wake"
-                  ? "Wake-up"
-                  : m.role === "user"
-                    ? "You"
-                    : m.role === "system"
-                      ? "Status"
-                      : name}
-                {m.created_at && (
-                  <time dateTime={m.created_at}>{dateLabel(m.created_at)}</time>
-                )}
-              </div>
-              <ConversationMarkdown
-                content={m.content}
-                projects={state.projects}
-                onProjectOpen={onProjectOpen}
-              />
+          messages.map((m) => {
+            const wake = "origin" in m && m.origin === "wake";
+            const turn = turnsByMessage.get(m.id);
+            const status = (
               <TurnStatus
-                turn={turnsByMessage.get(m.id)}
-                live={
-                  m.id === newestMessageID &&
-                  !turnReplied(turnsByMessage.get(m.id))
-                }
+                turn={turn}
+                live={m.id === newestMessageID && !turnReplied(turn)}
                 name={name}
                 cancelling={cancelling}
                 onCancel={cancel}
@@ -641,56 +624,96 @@ export function ChatPanel({
                 }
                 onRetry={enqueue}
               />
-            </article>
-          ))
+            );
+            if (wake)
+              return (
+                <details key={m.id} className="wake">
+                  <summary>
+                    <span className="pill">Wake-up</span>
+                    <span className="wake-line">{wakeSummary(m.content)}</span>
+                    {m.created_at && (
+                      <time className="muted small" dateTime={m.created_at}>
+                        {dateLabel(m.created_at)}
+                      </time>
+                    )}
+                  </summary>
+                  <pre className="wake-report">{wakeReport(m.content)}</pre>
+                  {status}
+                </details>
+              );
+            return (
+              <article
+                key={m.id}
+                className={`message ${m.role === "user" ? "from-you" : "from-assistant"}`}
+              >
+                <p className="message-by">
+                  <span>
+                    {m.role === "user"
+                      ? "You"
+                      : m.role === "system"
+                        ? "Status"
+                        : name}
+                  </span>
+                  {m.created_at && (
+                    <time dateTime={m.created_at}>
+                      {dateLabel(m.created_at)}
+                    </time>
+                  )}
+                </p>
+                <div className="message-body">
+                  <ConversationMarkdown
+                    content={m.content}
+                    projects={state.projects}
+                    onProjectOpen={onProjectOpen}
+                  />
+                </div>
+                {status}
+              </article>
+            );
+          })
         ) : (
           <div className="chat-welcome">
-            <span className="chat-orbit">
-              <Avatar avatar={state.assistant.avatar} />
-            </span>
-            <p className="eyebrow">A LITTLE LESS TO CARRY</p>
-            <h3>Start a conversation.</h3>
-            <p>
-              Share an outcome, ask about your projects, or tell {name} what
-              matters to you.
+            <p className="soft">
+              Ask about your projects, or hand {name} something to do.
             </p>
-            <div className="suggestions">
+            <div className="chat-starters">
               {[
-                "What needs my attention?",
-                "Help me set up a project.",
+                "What needs me today?",
+                "Start a new project",
                 "What do you remember about me?",
               ].map((text) => (
                 <button
                   key={text}
+                  type="button"
+                  className="btn btn-sm"
                   onClick={() => {
                     setDraft(text);
                     document.getElementById("chat-message")?.focus();
                   }}
                 >
                   {text}
-                  <Icon name="Arrow" size={13} />
                 </button>
               ))}
             </div>
           </div>
         )}
       </div>
-      <div className="chat-composer-wrap">
+      <div className="chat-foot">
         {error && (
-          <div className="error-notice" role="alert">
+          <p className="error" role="alert">
             {error}
-          </div>
+          </p>
         )}
         {pollError && (
-          <p className="chat-update-error" role="status">
-            {pollError} Your messages remain saved; reconnecting…
+          <p className="muted small" role="status">
+            {pollError} Your messages are saved; trying again…
           </p>
         )}
         {turns.some((t) => t.status === "waiting") &&
           turns.some((t) => t.status === "unconfirmed") && (
-            <p className="chat-queue-summary">
-              Waiting for delivery confirmation before sending the following
-              messages. Keep this page open.
+            <p className="queue-hint">
+              The next messages wait until this one is confirmed. Keep this page
+              open.
             </p>
           )}
         <ChatQueue
@@ -706,14 +729,14 @@ export function ChatPanel({
           onChanged={() => refreshRef.current()}
         />
         {assetErrors.length > 0 && (
-          <div className="error-notice composer-asset-errors" role="alert">
+          <div className="error" role="alert">
             {assetErrors.map((text, i) => (
               <p key={`${i}:${text}`}>{text}</p>
             ))}
           </div>
         )}
         <form
-          className={`chat-composer${dragging ? " composer-dragging" : ""}`}
+          className={`composer${dragging ? " dragging" : ""}`}
           onSubmit={send}
           onDragOver={(e) => {
             if (!carriesFiles(e.dataTransfer)) return;
@@ -737,16 +760,14 @@ export function ChatPanel({
             Message {name}
           </label>
           {(assets.length > 0 || reading > 0) && (
-            <ul className="composer-assets" aria-label="Attachments">
+            <ul className="attachments" aria-label="Attachments">
               {assets.map((asset) => (
                 <li key={asset.id}>
-                  <span className="composer-asset-name">{asset.name}</span>
-                  <span className="composer-asset-size">
-                    {sizeLabel(asset.size)}
-                  </span>
+                  <span className="attachment-name">{asset.name}</span>
+                  <span className="muted small">{sizeLabel(asset.size)}</span>
                   <button
                     type="button"
-                    className="icon-button"
+                    className="btn btn-quiet btn-icon btn-sm"
                     aria-label={`Remove attachment ${asset.name}`}
                     onClick={() =>
                       setAssets((current) =>
@@ -758,80 +779,83 @@ export function ChatPanel({
                   </button>
                 </li>
               ))}
-              {reading > 0 && (
-                <li className="composer-asset-reading">Reading files…</li>
-              )}
+              {reading > 0 && <li className="muted small">Reading files…</li>}
             </ul>
           )}
-          <textarea
-            id="chat-message"
-            value={message}
-            onChange={(e) => setDraft(e.target.value)}
-            onPaste={(e) => {
-              // Text always pastes as text. Files on the same clipboard (a
-              // copied file comes with its name as text) are still attached
-              // or refused with a reason, never dropped.
-              const files = Array.from(e.clipboardData.files || []);
-              if (!files.length) return;
-              if (!e.clipboardData.getData("text/plain")) e.preventDefault();
-              void addFiles(files);
-            }}
-            // A suggestion is shown, never committed: the draft stays empty
-            // and Send stays disabled until the owner takes it.
-            placeholder={
-              shownSuggestion || `Ask ${name}, or hand over an outcome…`
-            }
-            className={shownSuggestion ? "has-suggestion" : undefined}
-            rows={3}
-            maxLength={20000}
-            onKeyDown={(e) => {
-              if (
-                e.key === "Tab" &&
-                shownSuggestion &&
-                !e.shiftKey &&
-                !e.altKey &&
-                !e.ctrlKey &&
-                !e.metaKey
-              ) {
-                // Accepting makes it an ordinary draft to edit; it is not sent.
-                e.preventDefault();
-                setDraft(shownSuggestion);
-                return;
-              }
-              if (
-                e.key === "Enter" &&
-                !e.shiftKey &&
-                !e.nativeEvent.isComposing &&
-                e.keyCode !== 229
-              ) {
-                e.preventDefault();
-                e.currentTarget.form?.requestSubmit();
-              }
-            }}
-          />
-          <div className="composer-footer">
-            <span>
-              {shownSuggestion
-                ? "Tab to use the suggestion · or type your own"
-                : "Enter to send · Shift + Enter for a new line · Drop or paste text files to attach"}
-            </span>
+          <div className="composer-row">
+            <textarea
+              id="chat-message"
+              value={message}
+              onChange={(e) => setDraft(e.target.value)}
+              onPaste={(e) => {
+                // Text always pastes as text. Files on the same clipboard (a
+                // copied file comes with its name as text) are still attached
+                // or refused with a reason, never dropped.
+                const files = Array.from(e.clipboardData.files || []);
+                if (!files.length) return;
+                if (!e.clipboardData.getData("text/plain")) e.preventDefault();
+                void addFiles(files);
+              }}
+              // A suggestion is shown, never committed: the draft stays empty
+              // and Send stays disabled until the owner takes it.
+              placeholder={shownSuggestion || `Message ${name}`}
+              className={shownSuggestion ? "has-suggestion" : undefined}
+              rows={2}
+              maxLength={20000}
+              onKeyDown={(e) => {
+                if (
+                  e.key === "Tab" &&
+                  shownSuggestion &&
+                  !e.shiftKey &&
+                  !e.altKey &&
+                  !e.ctrlKey &&
+                  !e.metaKey
+                ) {
+                  // Accepting makes it an ordinary draft to edit; it is not sent.
+                  e.preventDefault();
+                  setDraft(shownSuggestion);
+                  return;
+                }
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing &&
+                  e.keyCode !== 229
+                ) {
+                  e.preventDefault();
+                  e.currentTarget.form?.requestSubmit();
+                }
+              }}
+            />
             <button
-              className="send-button"
+              className="btn btn-primary btn-icon"
               type="submit"
               disabled={(!message.trim() && !assets.length) || reading > 0}
-              aria-label="Send message"
+              aria-label="Send"
             >
-              <Icon name="Send" size={17} />
+              <Icon name="Send" size={15} />
             </button>
           </div>
+          <p className="composer-hint">
+            {shownSuggestion ? (
+              <>
+                <span className="kbd">Tab</span> takes the suggestion
+              </>
+            ) : (
+              <>
+                <span className="kbd">Enter</span> sends ·{" "}
+                <span className="kbd">Shift Enter</span> new line · drop text
+                files to attach
+              </>
+            )}
+          </p>
         </form>
         {suggestionsOff && (
-          <p className="chat-suggestions-off" role="status">
+          <p className="muted small" role="status">
             {suggestionsOff}
           </p>
         )}
-        <p className="chat-footnote">One conversation across your projects.</p>
       </div>
-    </>
+    </div>
   );
 }

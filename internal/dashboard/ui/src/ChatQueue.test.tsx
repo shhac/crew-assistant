@@ -104,7 +104,7 @@ describe("queued messages", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Edit message 1" }));
     });
-    fireEvent.change(screen.getByLabelText("Edit queued message"), {
+    fireEvent.change(screen.getByLabelText("Edit message"), {
       target: { value: "Do the first thing, carefully" },
     });
     await act(async () => {
@@ -128,10 +128,54 @@ describe("queued messages", () => {
         onChanged={vi.fn()}
       />,
     );
+    expect(screen.getByRole("status").textContent).toBe(
+      "Paused while you change it. It picks up again on its own.",
+    );
+  });
+
+  it("labels the queue with how many messages are up next", () => {
+    mount();
+    const queue = screen.getByRole("region", { name: "Queued messages" });
+    expect(within(queue).getByText("Up next (3)")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("removes a queued message through its owner", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const onCancel = vi.fn();
+    render(
+      <ChatQueue
+        turns={turns}
+        revision={7}
+        cancelling={new Set(["c"])}
+        onCancel={onCancel}
+        onChanged={vi.fn()}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Remove queued message: Then the second",
+      }),
+    );
+    expect(onCancel).toHaveBeenCalledWith("b");
+    // A removal already under way cannot be asked for twice.
     expect(
-      screen.getByText(/queue is paused while you change it/),
+      screen.getByRole("button", {
+        name: "Remove queued message: Then the third",
+      }),
+    ).toHaveProperty("disabled", true);
+  });
+
+  it("invites more writing while a reply runs and nothing is queued", () => {
+    render(<ChatQueue turns={[]} revision={0} running onChanged={vi.fn()} />);
+    expect(
+      screen.getByText(
+        "Keep writing if you like. Each message gets its own reply.",
+      ),
     ).toBeTruthy();
-    expect(screen.getByText(/resumes on its own/)).toBeTruthy();
+    expect(
+      screen.queryByRole("region", { name: "Queued messages" }),
+    ).toBeNull();
   });
 
   it("renders nothing when no message is waiting", () => {
@@ -205,7 +249,7 @@ describe("queued messages", () => {
     );
     const list = screen.getAllByRole("listitem");
     expect(
-      list.map((li) => li.querySelector(".chat-queue-text")?.textContent ?? ""),
+      list.map((li) => li.querySelector(".queue-text")?.textContent ?? ""),
     ).toEqual(["Do the first thing", "Then the second", "Then the third"]);
   });
 

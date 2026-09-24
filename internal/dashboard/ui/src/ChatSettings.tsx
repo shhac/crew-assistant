@@ -29,36 +29,25 @@ export function ChatSettings({
     });
 
   return (
-    <fieldset className="config-field-group">
-      <legend>Conversation</legend>
-      <label className="profile-choice">
+    <div className="form">
+      <label className="check">
         <input
           type="checkbox"
           checked={enabled}
           onChange={(event) => change({ enabled: event.target.checked })}
           aria-describedby="loading-phrases-hint"
         />
-        <span>Personalized loading phrases</span>
+        <span>Loading messages</span>
       </label>
-      <p className="field-hint" id="loading-phrases-hint">
-        A small model writes a brief loading message using only the last two
-        messages, without tools. One extra model request per turn counts toward
-        your shared model-call limit. If unavailable, a standard loading message
-        appears.
+      <p className="hint" id="loading-phrases-hint">
+        While the assistant works, a small model writes a short line about it,
+        from the last two messages only. It counts toward your model-call limit.
       </p>
-      {!local ? (
-        <p className="field-hint">
-          Your assistant uses an API provider. Loading messages use the standard
-          fallback and make no additional model requests.
-        </p>
-      ) : (
-        <p className="field-hint">
-          Loading messages and next-message suggestions use your {own.label} CLI
-          login ({own.detail}). If it is unavailable, they use your{" "}
-          {other.label} login ({other.detail}) instead, and a CLI that just
-          failed is left alone for a while. No other model is used.
-        </p>
-      )}
-    </fieldset>
+      <p className="hint">
+        {local
+          ? `Loading messages and next-message suggestions use your ${own.label} login (${own.detail}), or your ${other.label} login (${other.detail}) if that isn't working. No other model is used.`
+          : "The assistant uses an API, so loading messages are a fixed line and cost nothing extra."}
+      </p>
+    </div>
   );
 }

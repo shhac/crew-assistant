@@ -1,69 +1,147 @@
-import { ProjectRow } from "./OverviewPage";
-import { ProjectDetail } from "./ProjectDetail";
-import { Empty, Icon, PageHeading } from "./ui";
-import type { State } from "./api";
+import { useState } from "react";
+import { projectHref } from "./router";
+import {
+  isCode,
+  landsBy,
+  leadRequest,
+  projectGroup,
+  projectGroups,
+  requestStep,
+} from "./stages";
+import { Pill, sinceLabel } from "./ui";
+import { pendingDecisions, type Project, type State } from "./api";
 
-export function Projects({
+export function ProjectsPage({
   state,
-  selected,
-  onSelect,
   onNew,
-  refresh,
 }: {
   state: State;
-  selected: string | null;
-  onSelect: (id: string | null) => void;
   onNew: () => void;
-  refresh: () => Promise<void>;
 }) {
-  const project = state.projects.find((p) => p.id === selected);
-  if (project)
-    return (
-      <ProjectDetail
-        project={project}
-        state={state}
-        onBack={() => onSelect(null)}
-        refresh={refresh}
-      />
-    );
+  const [query, setQuery] = useState("");
+  const matches = (p: Project) =>
+    p.title.toLowerCase().includes(query.trim().toLowerCase());
+  const open = state.projects.filter(
+    (p) => p.status !== "completed" && matches(p),
+  );
+  const done = state.projects.filter(
+    (p) => p.status === "completed" && matches(p),
+  );
   return (
-    <section>
-      <PageHeading
-        eyebrow="OUTCOMES, WITH OWNERSHIP"
-        title="Projects"
-        description="What you're moving forward, and what done looks like."
-        action={
-          <button className="button primary" onClick={onNew}>
-            <Icon name="Plus" size={16} />
-            Add project
+    <div className="page">
+      <header className="page-header page-header-actions">
+        <h1>Projects</h1>
+        <div className="actions">
+          {state.projects.length > 4 && (
+            <label>
+              <span className="sr-only">Find a project</span>
+              <input
+                className="field"
+                type="search"
+                value={query}
+                placeholder="Find a project"
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </label>
+          )}
+          <button className="btn btn-primary" onClick={onNew}>
+            New project
           </button>
-        }
-      />
-      {state.projects.length ? (
-        <div className="project-list">
-          {state.projects.map((p) => (
-            <ProjectRow
-              key={p.id}
-              project={p}
-              state={state}
-              onSelect={() => onSelect(p.id)}
-            />
-          ))}
+        </div>
+      </header>
+      {!state.projects.length ? (
+        <div className="empty card">
+          <p>No projects yet.</p>
         </div>
       ) : (
-        <Empty
-          icon="Projects"
-          title="One outcome is a good start"
-          action={
-            <button className="button primary" onClick={onNew}>
-              Add project <Icon name="Arrow" size={15} />
-            </button>
-          }
-        >
-          Give the work a name and say what it is for. Then ask for what you
-          need, and approve it when it's right.
-        </Empty>
+        <div className="project-table card">
+          <div className="project-head label" aria-hidden="true">
+            <span>Project</span>
+            <span>Now</span>
+            <span>Lands by</span>
+            <span>Updated</span>
+          </div>
+          {projectGroups.map(({ group, label }) => {
+            const members = open.filter(
+              (p) => projectGroup(p, state.tasks) === group,
+            );
+            if (!members.length) return null;
+            return (
+              <section key={group} aria-label={label} className="project-group">
+                <h2 className="project-group-title">
+                  {label} <span className="count">{members.length}</span>
+                </h2>
+                <ul className="rows">
+                  {members.map((p) => (
+                    <ProjectRow key={p.id} project={p} state={state} />
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
+          {done.length > 0 && (
+            <details className="disclosure project-group">
+              <summary className="project-group-title">
+                Finished <span className="count">{done.length}</span>
+              </summary>
+              <ul className="rows">
+                {done.map((p) => (
+                  <ProjectRow key={p.id} project={p} state={state} />
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
       )}
-    </section>
+    </div>
+  );
+}
+
+function ProjectRow({ project, state }: { project: Project; state: State }) {
+  const own = state.tasks.filter((t) => t.project_id === project.id);
+  const lead = leadRequest(project, state.tasks);
+  const decision = lead?.decision_id
+    ? pendingDecisions(state.decisions).find((d) => d.id === lead.decision_id)
+    : undefined;
+  const open = own.filter(
+    (t) => !["delivered", "landed", "stopped"].includes(t.status),
+  ).length;
+  const kind = !project.playbook
+    ? "Tracking only"
+    : isCode(project.playbook)
+      ? "Code"
+      : "Writing";
+  return (
+    <li>
+      <a className="project-row" href={projectHref(project.id)}>
+        <span className="project-name">
+          <span className="project-title">{project.title}</span>
+          <span className="muted small">
+            {kind}
+            {open ? ` · ${open} open` : ""}
+          </span>
+        </span>
+        <span className="project-now">
+          {lead ? (
+            <>
+              {lead.status === "waiting" && (
+                <Pill tone="needs">{requestStep(lead, decision)}</Pill>
+              )}
+              <span>
+                {lead.status === "waiting"
+                  ? lead.objective
+                  : `${lead.objective}: ${requestStep(lead, decision)}`}
+              </span>
+            </>
+          ) : (
+            <span className="muted">
+              {project.playbook ? "Nothing asked for" : "No team yet"}
+            </span>
+          )}
+        </span>
+        <span className="soft small">{landsBy(project.playbook)}</span>
+        <span className="muted small">{sinceLabel(project.updated_at)}</span>
+      </a>
+    </li>
   );
 }

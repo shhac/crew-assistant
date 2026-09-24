@@ -1,3 +1,4 @@
+import { Icon } from "./ui";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTree } from "@headless-tree/react";
 import {
@@ -92,7 +93,7 @@ export function FileSystemPicker({
   return (
     <dialog
       ref={dialog}
-      className="filesystem-dialog"
+      className="dialog picker"
       aria-labelledby="filesystem-title"
       onCancel={(e) => {
         e.preventDefault();
@@ -101,7 +102,6 @@ export function FileSystemPicker({
     >
       <div className="filesystem-header">
         <div>
-          <p className="eyebrow">ON THE DAEMON’S COMPUTER</p>
           <h2 id="filesystem-title">
             Choose{" "}
             {kind === "directory"
@@ -113,40 +113,39 @@ export function FileSystemPicker({
         </div>
         <button
           type="button"
-          className="icon-button"
-          aria-label="Close filesystem picker"
+          className="btn btn-quiet btn-icon"
+          aria-label="Close"
           onClick={onCancel}
         >
-          ×
+          <Icon name="Close" />
         </button>
       </div>
       <div className="filesystem-body">
-        <p className="field-hint">
-          Browse one folder at a time. File contents stay unopened.
-        </p>
+        <p className="muted small">On the computer running crew-assistant.</p>
         <form className="filesystem-location" onSubmit={jump}>
           <label htmlFor="filesystem-path">
-            Folder path
+            Path
             <input
               id="filesystem-path"
+              className="field"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="Server home directory"
+              placeholder="Home folder"
               spellCheck={false}
             />
           </label>
-          <button className="button secondary" disabled={loading}>
+          <button className="btn" disabled={loading}>
             Go
           </button>
         </form>
         <div className="filesystem-toolbar">
           <button
             type="button"
-            className="text-button"
+            className="btn btn-quiet btn-sm"
             disabled={loading || !page?.parent}
             onClick={() => page?.parent && setTarget(page.parent)}
           >
-            ↑ Parent folder
+            <Icon name="Up" size={14} /> Up a folder
           </button>
           <label className="filesystem-hidden">
             <input
@@ -154,24 +153,24 @@ export function FileSystemPicker({
               checked={hidden}
               onChange={(e) => setHidden(e.target.checked)}
             />
-            Show hidden entries
+            Show hidden
           </label>
         </div>
         {error && (
-          <div className="error-notice" role="alert">
-            {error}
+          <div className="error" role="alert">
+            {error}{" "}
             <button
               type="button"
-              className="text-button"
+              className="link-button"
               onClick={() => setRevision((value) => value + 1)}
             >
-              Retry folder
+              Try again
             </button>
           </div>
         )}
         {loading && (
           <div className="filesystem-loading" role="status">
-            Loading folder…
+            Loading…
           </div>
         )}
         {page && !loading && (
@@ -187,16 +186,12 @@ export function FileSystemPicker({
         )}
         {page && kind !== "file" && (
           <div className="filesystem-current-row">
-            <p className="field-hint">
-              Clicking a folder in the list <strong>opens</strong> it. To choose
-              the folder you are looking at, use the button.
-            </p>
             <button
               type="button"
-              className="button secondary filesystem-current"
+              className="btn filesystem-current"
               onClick={chooseCurrent}
             >
-              Select this folder: <span>{page.path}</span>
+              Choose this folder: <code>{page.path}</code>
             </button>
           </div>
         )}
@@ -213,6 +208,7 @@ export function FileSystemPicker({
                   <span title={path}>{path}</span>
                   <button
                     type="button"
+                    className="btn btn-quiet btn-icon btn-sm"
                     aria-label={`Remove selection ${path}`}
                     onClick={() =>
                       setSelected((previous) =>
@@ -228,22 +224,22 @@ export function FileSystemPicker({
           )}
         </div>
       </div>
-      <div className="dialog-footer">
-        <p>
+      <div className="picker-foot">
+        <p className="muted small">
           {multiple
-            ? "Click an entry to select it and open it; Shift selects a range. Arrow keys navigate, Enter opens, and the button above selects the folder you are in."
-            : "Click an entry to select it. Arrow keys navigate, Enter opens, and the button above selects the folder you are in."}
+            ? "Click to choose; Shift-click for a range. Arrow keys move, Enter opens a folder."
+            : "Click to choose. Arrow keys move, Enter opens a folder."}
         </p>
-        <button type="button" className="button secondary" onClick={onCancel}>
+        <button type="button" className="btn btn-quiet" onClick={onCancel}>
           Cancel
         </button>
         <button
           type="button"
-          className="button primary"
+          className="btn btn-primary"
           disabled={!selected.length}
           onClick={() => onSelect(selected)}
         >
-          Use selection
+          {selected.length > 1 ? "Use these" : "Use this"}
         </button>
       </div>
     </dialog>
@@ -301,7 +297,7 @@ function DirectoryTree({
       rows.push({
         id: `more:${ownerID}`,
         data: {
-          name: "Load more entries",
+          name: "Show more",
           path: "",
           kind: "file",
           selectable: false,
@@ -325,7 +321,7 @@ function DirectoryTree({
       return dataRows(value, id);
     } catch (error) {
       const data: TreeData = {
-        name: "Retry loading folder",
+        name: "Try again",
         path: "",
         kind: "file",
         selectable: false,
@@ -336,7 +332,7 @@ function DirectoryTree({
       };
       const row = { id: `retry:${id}`, data };
       nodes.current.set(row.id, data);
-      setStatus(data.detail || "Folder unavailable");
+      setStatus(data.detail || "Can't open this folder");
       return [row];
     }
   }
@@ -346,7 +342,7 @@ function DirectoryTree({
     const path = data.directory;
     const ownerID = data.ownerID || "root";
     pending.current.add(path);
-    setStatus("Loading entries…");
+    setStatus("Loading…");
     try {
       const previous = pages.current.get(ownerID);
       const next = await fetchPage(
@@ -370,17 +366,17 @@ function DirectoryTree({
       pages.current.set(ownerID, merged);
       const item = treeRef.current?.getItemInstance(ownerID);
       await item?.invalidateChildrenIds();
-      setStatus("Entries loaded.");
+      setStatus("Loaded");
     } catch (error) {
       if (error instanceof APIError && error.status === 409) {
         pages.current.delete(ownerID);
         setStatus(
-          "This folder listing expired. Activate the row again to reload this folder.",
+          "This list is out of date. Open the folder again to reload it.",
         );
         return;
       }
       setStatus(
-        `Could not load entries: ${errorText(error)}. Activate the row to retry.`,
+        `Couldn't load more: ${errorText(error)}. Open it again to try again.`,
       );
     } finally {
       pending.current.delete(path);
@@ -451,7 +447,7 @@ function DirectoryTree({
     overscan: 8,
     initialRect: { width: 600, height: 342 },
   });
-  const containerProps = tree.getContainerProps("Server filesystem entries");
+  const containerProps = tree.getContainerProps("Folders and files");
   return (
     <>
       <div
@@ -529,11 +525,9 @@ function DirectoryTree({
           })}
         </div>
       </div>
-      {!items.length && (
-        <p className="field-hint">This folder has no matching entries.</p>
-      )}
+      {!items.length && <p className="muted small">Nothing here.</p>}
       <p className="filesystem-status" role="status">
-        {status || "Only expanded folders are loaded."}
+        {status}
       </p>
     </>
   );

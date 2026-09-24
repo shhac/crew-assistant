@@ -1,16 +1,15 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatPanel } from "./ChatPanel";
 import { NewProject } from "./ProjectForms";
-import { Avatar, validTheme } from "./Identity";
-import { PendingOperations } from "./PendingOperations";
-import { DecisionHistory } from "./DecisionHistory";
-import { DecisionCard } from "./DecisionCard";
-import { Overview } from "./OverviewPage";
-import { Projects } from "./ProjectsPage";
+import { InboxPage } from "./InboxPage";
+import { ProjectsPage } from "./ProjectsPage";
+import { ProjectPage } from "./ProjectPage";
 import { MemoryView } from "./MemoryPage";
 import { Settings } from "./SettingsPage";
 import { Login } from "./LoginScreen";
-import { pages, type Page } from "./navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Sidebar } from "./Sidebar";
+import { applyAppearance } from "./appearance";
+import { href, parseRoute, type Route } from "./router";
 import {
   api,
   APIError,
@@ -20,19 +19,37 @@ import {
   pendingDecisions,
   type State,
 } from "./api";
-import { Empty, ErrorNotice, Icon, Mark, PageHeading } from "./ui";
+import { ErrorNotice } from "./ui";
+
+const chatKey = "crew-assistant.chat";
+
+function rememberedChat() {
+  try {
+    return localStorage.getItem(chatKey) !== "closed";
+  } catch {
+    return true;
+  }
+}
+
+const narrow = () =>
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(max-width: 1000px)").matches;
 
 export function App() {
   const [state, setState] = useState<State | null>(null);
-  const [page, setPage] = useState<Page>("Overview");
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [route, setRoute] = useState<Route>(() =>
+    parseRoute(window.location.hash),
+  );
   const [authRequired, setAuthRequired] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const [newProject, setNewProject] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
+  // On a wide screen the conversation is a pane beside the work; on a narrow
+  // one it is a drawer over it, closed until asked for.
+  const [paneOpen, setPaneOpen] = useState(rememberedChat);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [chatExpanded, setChatExpanded] = useState(false);
-  const [controlBusy, setControlBusy] = useState(false);
-  const [controlError, setControlError] = useState("");
+  const [pausing, setPausing] = useState(false);
+  const [pauseError, setPauseError] = useState("");
   const request = useRef(0);
   const conversation = useRef<HTMLElement>(null);
   const refresh = useCallback(async () => {
@@ -67,12 +84,70 @@ export function App() {
     };
   }, [refresh]);
   useEffect(() => {
-    document.title = state?.assistant.name
-      ? `${page} · ${state.assistant.name}`
-      : "Crew Assistant";
-  }, [page, state?.assistant.name]);
+    const follow = () => {
+      const next = parseRoute(window.location.hash);
+      setRoute(next);
+      setChatExpanded(false);
+      setDrawerOpen(false);
+      if (!/^#\/./.test(window.location.hash))
+        window.history.replaceState(
+          window.history.state,
+          "",
+          `${window.location.pathname}${window.location.search}${href(next)}`,
+        );
+    };
+    follow();
+    window.addEventListener("hashchange", follow);
+    return () => window.removeEventListener("hashchange", follow);
+  }, []);
   useEffect(() => {
-    if (!chatOpen) return;
+    if (state) applyAppearance(state.assistant.theme);
+  }, [state?.assistant.theme]);
+  const needs = state
+    ? pendingDecisions(state.decisions).length + state.pending_operations.length
+    : 0;
+  const project =
+    route.page === "project"
+      ? state?.projects.find((p) => p.id === route.id)
+      : undefined;
+  useEffect(() => {
+    const titles: Record<Route["page"], string> = {
+      inbox: "Inbox",
+      projects: "Projects",
+      project: project?.title ?? "Project",
+      memory: "Memory",
+      settings: "Settings",
+    };
+    const name = state?.assistant.name || "Crew";
+    document.title = `${needs ? `(${needs}) ` : ""}${titles[route.page]} · ${name}`;
+  }, [route.page, project?.title, needs, state?.assistant.name]);
+  const toggleChat = useCallback(() => {
+    if (narrow()) {
+      setDrawerOpen((open) => !open);
+      return;
+    }
+    setPaneOpen((open) => {
+      try {
+        localStorage.setItem(chatKey, open ? "closed" : "open");
+      } catch {
+        // The choice still holds for this visit.
+      }
+      if (open) setChatExpanded(false);
+      return !open;
+    });
+  }, []);
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "j") {
+        event.preventDefault();
+        toggleChat();
+      }
+    };
+    document.addEventListener("keydown", keydown);
+    return () => document.removeEventListener("keydown", keydown);
+  }, [toggleChat]);
+  useEffect(() => {
+    if (!drawerOpen) return;
     const prior = document.activeElement as HTMLElement | null;
     conversation.current
       ?.querySelector<HTMLButtonElement>(".mobile-close")
@@ -80,7 +155,7 @@ export function App() {
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        setChatOpen(false);
+        setDrawerOpen(false);
       }
       // A Tab the conversation already handled (accepting a suggestion) is not
       // focus movement.
@@ -105,68 +180,21 @@ export function App() {
       document.removeEventListener("keydown", keydown);
       prior?.focus();
     };
-  }, [chatOpen]);
+  }, [drawerOpen]);
   useEffect(() => {
-    if (!window.matchMedia) return;
-    const desktop = window.matchMedia("(min-width: 1001px)");
+    if (typeof window.matchMedia !== "function") return;
+    const wide = window.matchMedia("(min-width: 1001px)");
     const changed = () => {
-      if (desktop.matches) setChatOpen(false);
+      if (wide.matches) setDrawerOpen(false);
       else setChatExpanded(false);
     };
-    desktop.addEventListener("change", changed);
-    return () => desktop.removeEventListener("change", changed);
+    wide.addEventListener("change", changed);
+    return () => wide.removeEventListener("change", changed);
   }, []);
-  useEffect(() => {
-    document.documentElement.dataset.theme = validTheme(state?.assistant.theme);
-  }, [state?.assistant.theme]);
-  useEffect(() => {
-    const follow = () => {
-      const page = pages.find(
-        (p) => window.location.hash === `#/${p.toLowerCase()}`,
-      );
-      if (page) {
-        setPage(page);
-        setSelectedProject(null);
-        return;
-      }
-      const match = /^#\/projects\/([^/]+)$/.exec(window.location.hash);
-      if (match) {
-        try {
-          setSelectedProject(decodeURIComponent(match[1]));
-          setPage("Projects");
-          setChatExpanded(false);
-          setChatOpen(false);
-        } catch {
-          /* Ignore malformed bookmarks. */
-        }
-      }
-    };
-    follow();
-    window.addEventListener("hashchange", follow);
-    return () => window.removeEventListener("hashchange", follow);
-  }, []);
-  function openProject(id: string) {
-    window.location.hash = `/projects/${encodeURIComponent(id)}`;
-    setSelectedProject(id);
-    setPage("Projects");
-    setChatExpanded(false);
-    setChatOpen(false);
-  }
-  function navigate(next: Page) {
-    // Each page has its own address, so it can be bookmarked or linked to.
-    window.history.replaceState(
-      window.history.state,
-      "",
-      `${window.location.pathname}${window.location.search}#/${next.toLowerCase()}`,
-    );
-    setChatExpanded(false);
-    setPage(next);
-    setSelectedProject(null);
-  }
   async function togglePause() {
     if (!state) return;
-    setControlBusy(true);
-    setControlError("");
+    setPausing(true);
+    setPauseError("");
     try {
       await api("/api/control", {
         method: "POST",
@@ -174,270 +202,137 @@ export function App() {
       });
       await refresh();
     } catch (error) {
-      setControlError(errorText(error));
+      setPauseError(errorText(error));
     } finally {
-      setControlBusy(false);
+      setPausing(false);
     }
   }
   if (authRequired)
     return <Login onSuccess={refresh} initialError={connectionError} />;
   if (!state)
     return (
-      <div className="loading-screen">
-        <Mark />
-        <h1>Crew Assistant</h1>
+      <div className="boot">
+        <span className="brand-mark" aria-hidden="true">
+          C
+        </span>
         <p role="status">
-          {connectionError
-            ? "The daemon is unavailable."
-            : "Connecting to your assistant…"}
+          {connectionError ? "Can't reach crew-assistant." : "Connecting…"}
         </p>
         <ErrorNotice error={connectionError} />
         {connectionError && (
-          <button className="button primary" onClick={() => void refresh()}>
+          <button className="btn btn-primary" onClick={() => void refresh()}>
             Try again
           </button>
         )}
       </div>
     );
-  const decisions = pendingDecisions(state.decisions);
-  const name = state.assistant.name || "Assistant";
+  const chatShown = paneOpen || drawerOpen;
+  const view = route.page === "project" ? `project/${route.id}` : route.page;
   return (
-    <div className={`app-shell ${chatExpanded ? "chat-expanded" : ""}`}>
-      <a
-        className="skip-link"
-        href={chatExpanded ? "#chat-message" : "#main-content"}
-      >
+    <div
+      className={`shell${paneOpen ? " pane-open" : ""}${chatExpanded ? " chat-expanded" : ""}${drawerOpen ? " drawer-open" : ""}`}
+    >
+      <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <aside className="sidebar" inert={chatOpen}>
-        <button
-          className="brand"
-          onClick={() => navigate("Overview")}
-          aria-label={`${name} overview`}
-        >
-          <Avatar avatar={state.assistant.avatar} small />
-          <span>
-            {name}
-            <small>PERSONAL ASSISTANT</small>
-          </span>
-        </button>
-        <div className="sidebar-rule" />
-        <nav aria-label="Main navigation">
-          {pages.map((item) => (
-            <button
-              key={item}
-              className={`nav-item ${page === item ? "active" : ""}`}
-              aria-current={page === item ? "page" : undefined}
-              onClick={() => navigate(item)}
-            >
-              <Icon name={item} />
-              <span>{item}</span>
-              {item === "Decisions" &&
-                decisions.length + state.pending_operations.length > 0 && (
-                  <span className="nav-count">
-                    {decisions.length + state.pending_operations.length}
-                  </span>
-                )}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-bottom">
-          <div className="private-label">
-            <Icon name="Lock" size={14} /> Your private workspace
-          </div>
-          <div className="daemon-card">
-            <span
-              className={`status-dot ${connectionError ? "offline" : state.paused ? "paused" : ""}`}
-            />
-            <div>
-              {connectionError
-                ? "Connection interrupted"
-                : state.paused
-                  ? "Dispatch paused"
-                  : "Daemon connected"}
-              <small>
-                {connectionError
-                  ? "Showing last received state"
-                  : state.paused
-                    ? "Existing work may continue"
-                    : "Coordination, with context"}
-              </small>
-            </div>
-          </div>
-          <button
-            className="text-button pause-button"
-            disabled={controlBusy || !!connectionError}
-            onClick={() => void togglePause()}
-          >
-            <Icon name={state.paused ? "Play" : "Pause"} size={13} />
-            {controlBusy
-              ? "Updating…"
-              : state.paused
-                ? "Resume dispatch"
-                : "Pause new work"}
-          </button>
-          <ErrorNotice error={controlError} />
-        </div>
-      </aside>
-      <div className="workspace" inert={chatOpen || chatExpanded}>
-        <header className="topbar">
-          <div className="breadcrumbs">
-            Workspace <span>/</span> <strong>{page}</strong>
-          </div>
-          <div className="topbar-actions">
-            <span className="local-label">
-              <span className="status-dot" />{" "}
-              {state.demo ? "Demo workspace" : "Personal workspace"}
-            </span>
-            <button
-              className="icon-button chat-toggle"
-              aria-label="Open conversation"
-              onClick={() => setChatOpen(true)}
-            >
-              <Icon name="Message" />
-            </button>
-            <button
-              className="owner-avatar"
-              aria-label="Open settings"
-              onClick={() => navigate("Settings")}
-            >
-              You
-            </button>
-          </div>
-        </header>
+      <Sidebar
+        state={state}
+        route={route}
+        needs={needs}
+        offline={!!connectionError}
+        chatOpen={chatShown}
+        onChat={toggleChat}
+        pausing={pausing}
+        pauseError={pauseError}
+        onPause={() => void togglePause()}
+      />
+      <div className="workspace" inert={drawerOpen || chatExpanded}>
         {state.demo && (
-          <div className="demo-banner">
-            Preview mode · Sample projects. No live work is running.
-          </div>
+          <p className="banner">
+            Demo: sample projects, and no models run. Nothing here is saved.
+          </p>
         )}
         {connectionError && (
-          <div className="connection-banner" role="status">
-            Connection interrupted. These are the last received updates.{" "}
-            <button onClick={() => void refresh()}>Reconnect</button>
-          </div>
+          <p className="banner banner-alert" role="status">
+            Can't reach crew-assistant. Showing what it last sent.{" "}
+            <button className="link-button" onClick={() => void refresh()}>
+              Retry
+            </button>
+          </p>
         )}
-        <main id="main-content" className="main-content">
-          {page === "Overview" && (
-            <Overview
+        <main id="main" tabIndex={-1}>
+          {route.page === "inbox" && (
+            <InboxPage
               state={state}
-              onNew={() => setNewProject(true)}
-              onNavigate={navigate}
-              onProject={openProject}
               refresh={refresh}
+              onNew={() => setNewProject(true)}
             />
           )}
-          {page === "Projects" && (
-            <Projects
-              state={state}
-              selected={selectedProject}
-              onSelect={(id) => (id ? openProject(id) : navigate("Projects"))}
-              onNew={() => setNewProject(true)}
-              refresh={refresh}
-            />
+          {route.page === "projects" && (
+            <ProjectsPage state={state} onNew={() => setNewProject(true)} />
           )}
-          {page === "Decisions" && (
-            <section>
-              <PageHeading
-                eyebrow="YOUR JUDGMENT, WHERE IT COUNTS"
-                title="Decisions"
-                description="The context, the trade-off, and a recommendation. Make the call and the work can move."
-              />
-              <PendingOperations
-                operations={state.pending_operations}
-                projects={state.projects}
+          {route.page === "project" &&
+            (project ? (
+              <ProjectPage
+                key={project.id}
+                project={project}
+                route={route}
+                state={state}
                 refresh={refresh}
               />
-              {decisions.length ? (
-                <div className="decision-list">
-                  {decisions.map((d) => (
-                    <DecisionCard
-                      key={d.id}
-                      decision={d}
-                      projects={state.projects}
-                      refresh={refresh}
-                    />
-                  ))}
-                </div>
-              ) : !state.pending_operations.length ? (
-                <Empty
-                  icon="Check"
-                  title="Nothing needs your decision"
-                  action={
-                    <button
-                      className="button secondary"
-                      onClick={() => navigate("Projects")}
-                    >
-                      View projects <Icon name="Arrow" size={15} />
-                    </button>
-                  }
-                >
-                  When your assistant needs your judgment, it will bring a clear
-                  recommendation here.
-                </Empty>
-              ) : null}
-              <DecisionHistory
-                decisions={state.decisions.filter(
-                  (d) => !decisions.includes(d),
-                )}
-                projects={state.projects}
-              />
-            </section>
+            ) : (
+              <div className="page">
+                <p className="muted">
+                  This project isn't here any more.{" "}
+                  <a href={href({ page: "projects" })}>See all projects</a>
+                </p>
+              </div>
+            ))}
+          {route.page === "memory" && (
+            <MemoryView state={state} refresh={refresh} />
           )}
-          {page === "Memory" && <MemoryView state={state} refresh={refresh} />}
-          {page === "Settings" && (
-            <Settings
-              state={state}
-              refresh={refresh}
-              control={
-                <>
-                  <button
-                    className="button secondary"
-                    disabled={controlBusy || !!connectionError}
-                    onClick={() => void togglePause()}
-                  >
-                    <Icon name={state.paused ? "Play" : "Pause"} size={14} />
-                    {controlBusy
-                      ? "Updating…"
-                      : state.paused
-                        ? "Resume dispatch"
-                        : "Pause new work"}
-                  </button>
-                  <ErrorNotice error={controlError} />
-                </>
-              }
-            />
+          {route.page === "settings" && (
+            <Settings state={state} refresh={refresh} section={route.section} />
           )}
         </main>
       </div>
-      <aside
-        ref={conversation}
-        role={chatOpen ? "dialog" : undefined}
-        aria-modal={chatOpen || undefined}
-        className={`conversation ${chatOpen ? "mobile-open" : ""}`}
-        aria-label={`Conversation with ${name}`}
-      >
-        <ChatPanel
-          onProjectOpen={openProject}
-          view={selectedProject ? `${page}/${selectedProject}` : page}
-          state={state}
-          refresh={refresh}
-          onClose={() => setChatOpen(false)}
-          expanded={chatExpanded}
-          onExpand={() => {
-            setChatExpanded(!chatExpanded);
-            requestAnimationFrame(() =>
-              document.getElementById("chat-message")?.focus(),
-            );
-          }}
-        />
-      </aside>
+      {chatShown && (
+        <aside
+          ref={conversation}
+          role={drawerOpen ? "dialog" : undefined}
+          aria-modal={drawerOpen || undefined}
+          className="chat-pane"
+          aria-label="Chat"
+        >
+          <ChatPanel
+            onProjectOpen={(id) => {
+              window.location.hash = href({
+                page: "project",
+                id,
+                tab: "board",
+              });
+            }}
+            view={view}
+            state={state}
+            refresh={refresh}
+            onClose={() => (drawerOpen ? setDrawerOpen(false) : toggleChat())}
+            expanded={chatExpanded}
+            onExpand={() => {
+              setChatExpanded(!chatExpanded);
+              requestAnimationFrame(() =>
+                document.getElementById("chat-message")?.focus(),
+              );
+            }}
+          />
+        </aside>
+      )}
       {newProject && (
         <NewProject
           onClose={() => setNewProject(false)}
-          onCreated={async () => {
+          onCreated={async (id) => {
             setNewProject(false);
-            navigate("Projects");
             await refresh();
+            window.location.hash = href({ page: "project", id, tab: "board" });
           }}
         />
       )}

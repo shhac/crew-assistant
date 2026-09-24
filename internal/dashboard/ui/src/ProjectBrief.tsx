@@ -3,7 +3,7 @@ import { BriefFields } from "./ProjectForms";
 import { CriteriaList, dateLabel, ErrorNotice, useAction } from "./ui";
 import { criteriaLines, updateBrief, type Brief, type Project } from "./api";
 
-export function BriefCard({
+export function BriefTab({
   project,
   refresh,
 }: {
@@ -12,29 +12,29 @@ export function BriefCard({
 }) {
   const [editing, setEditing] = useState(false);
   const brief = project.brief;
-  return (
-    <section className="project-card" aria-label="Brief">
-      <div className="section-heading">
-        <h2>Brief</h2>
-        {!editing && (
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => setEditing(true)}
-          >
-            {brief.goal ? "Edit brief" : "Write the brief"}
-          </button>
-        )}
-      </div>
-      {editing ? (
+  if (editing)
+    return (
+      <section className="tab-panel card">
         <BriefEditor
           project={project}
           onDone={() => setEditing(false)}
           refresh={refresh}
         />
-      ) : (
-        <BriefView brief={brief} />
-      )}
+      </section>
+    );
+  return (
+    <section className="tab-panel card">
+      <div className="panel-head">
+        <h2>Brief</h2>
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={() => setEditing(true)}
+        >
+          {brief.goal ? "Edit" : "Write the brief"}
+        </button>
+      </div>
+      <BriefView brief={brief} />
     </section>
   );
 }
@@ -43,17 +43,16 @@ function BriefView({ brief }: { brief: Brief }) {
   if (!brief.goal)
     return (
       <p className="muted">
-        No brief yet. A brief says what the project is for, so the work can be
-        judged against it.
+        No brief yet. The team checks its work against it.
       </p>
     );
   return (
-    <dl className="brief-fields">
+    <dl className="facts">
       <dt>Goal</dt>
       <dd>{brief.goal}</dd>
       {brief.audience && (
         <>
-          <dt>Audience</dt>
+          <dt>For</dt>
           <dd>{brief.audience}</dd>
         </>
       )}
@@ -63,18 +62,18 @@ function BriefView({ brief }: { brief: Brief }) {
           <dd>{brief.constraints}</dd>
         </>
       )}
-      <dt>What done looks like</dt>
+      <dt>Done when</dt>
       <dd>
         <CriteriaList
           criteria={brief.criteria}
-          empty="No criteria recorded."
+          empty="Nothing listed."
           marker
         />
       </dd>
-      <dd className="field-hint">
+      <dt className="sr-only">Version</dt>
+      <dd className="muted small">
         Version {brief.version}
-        {dateLabel(brief.updated_at) &&
-          ` · updated ${dateLabel(brief.updated_at)}`}
+        {dateLabel(brief.updated_at) && ` · ${dateLabel(brief.updated_at)}`}
       </dd>
     </dl>
   );
@@ -111,11 +110,12 @@ function BriefEditor({
     });
   }
   return (
-    <form className="project-card-form" onSubmit={save}>
+    <form className="form" onSubmit={save} aria-label="Brief">
       <label htmlFor="brief-goal">
         Goal
         <textarea
           id="brief-goal"
+          className="field"
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
           placeholder="What is this project for?"
@@ -134,22 +134,22 @@ function BriefEditor({
         onCriteria={setCriteria}
       />
       {brief.version > 0 && (
-        <p className="field-hint">
+        <p className="hint">
           Saving makes version {brief.version + 1}. Work under way is checked
-          again against it.
+          against it.
         </p>
       )}
       <ErrorNotice error={error} />
-      <div className="form-actions">
+      <div className="actions">
         <button
-          className="button primary"
+          className="btn btn-primary"
           type="submit"
           disabled={busy || !goal.trim()}
         >
-          {busy ? "Saving…" : "Save brief"}
+          Save brief
         </button>
         <button
-          className="text-button"
+          className="btn btn-quiet"
           type="button"
           disabled={busy}
           onClick={onDone}

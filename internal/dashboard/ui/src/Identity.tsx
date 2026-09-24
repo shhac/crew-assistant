@@ -1,41 +1,9 @@
 import type { CSSProperties } from "react";
 
-export type Theme = "graphite-sage" | "ink-blue" | "charcoal-amber";
 export interface AvatarSpec {
   shape?: "orb" | "spark" | "leaf";
   background?: string;
   accent?: string;
-}
-export const themes: {
-  id: Theme;
-  name: string;
-  description: string;
-  colors: string[];
-}[] = [
-  {
-    id: "graphite-sage",
-    name: "Graphite + sage",
-    description: "Quiet neutrals, a little warmth.",
-    colors: ["#1b1d20", "#a9c5b2"],
-  },
-  {
-    id: "ink-blue",
-    name: "Ink + soft blue",
-    description: "Cool, clear and focused.",
-    colors: ["#151b25", "#a9c5e8"],
-  },
-  {
-    id: "charcoal-amber",
-    name: "Charcoal + amber",
-    description: "Soft contrast, a warmer glow.",
-    colors: ["#211f1d", "#e4c292"],
-  },
-];
-function isTheme(value?: string): value is Theme {
-  return themes.some((t) => t.id === value);
-}
-export function validTheme(value?: string): Theme {
-  return isTheme(value) ? value : "graphite-sage";
 }
 function safeColor(value: string | undefined, fallback: string) {
   return value && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
@@ -99,57 +67,5 @@ export function Avatar({
         )}
       </svg>
     </span>
-  );
-}
-export function Waiting({ label, detail }: { label: string; detail?: string }) {
-  return (
-    <div className="waiting-indicator" role="status">
-      <span className="waiting-orbit" aria-hidden="true">
-        <i />
-        <i />
-        <i />
-      </span>
-      <div>
-        <strong>{label}</strong>
-        {detail && <span>{detail}</span>}
-      </div>
-    </div>
-  );
-}
-export function ThemePicker({
-  value,
-  onChange,
-}: {
-  value?: string;
-  onChange: (theme: Theme) => void;
-}) {
-  return (
-    <fieldset className="theme-picker">
-      <legend>Workspace palette</legend>
-      <div className="theme-options">
-        {themes.map((theme) => (
-          <button
-            key={theme.id}
-            type="button"
-            className={`theme-option ${validTheme(value) === theme.id ? "selected" : ""}`}
-            aria-pressed={validTheme(value) === theme.id}
-            onClick={() => onChange(theme.id)}
-          >
-            <span
-              className="theme-swatch"
-              aria-hidden="true"
-              style={{ background: theme.colors[0] }}
-            >
-              <i style={{ background: theme.colors[1] }} />
-            </span>
-            <strong>{theme.name}</strong>
-            <small>{theme.description}</small>
-          </button>
-        ))}
-      </div>
-      <p className="field-hint">
-        All palettes are designed for dark mode. Saved with your assistant.
-      </p>
-    </fieldset>
   );
 }

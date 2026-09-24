@@ -41,31 +41,15 @@ export function ConnectionsSettings({
 }) {
   return (
     <section
-      className="connections-settings"
+      className="tab-panel card settings-panel"
       aria-labelledby="connections-title"
     >
-      <div className="settings-section-title">
-        <span className="connection-heading-symbol" aria-hidden="true">
-          ↗
-        </span>
-        <div>
-          <h2 id="connections-title">Your connected accounts</h2>
-          <p>
-            Connections are optional resources for your projects. Keep work and
-            personal accounts distinct, and choose what your assistant can read.
-          </p>
-        </div>
-      </div>
-      {!connections.length && (
-        <div className="connections-empty">
-          <p>Your projects live in crew-assistant.</p>
-          <span>
-            Add existing folders or create projects without connecting any
-            service. Personal projects need no Linear workspace. Connect Linear,
-            Slack, Notion or Fathom when their context is useful.
-          </span>
-        </div>
-      )}
+      <h2 id="connections-title">Connections</h2>
+      <p className="soft">
+        Optional. They let the assistant read from services you use. Keep work
+        and personal accounts separate.
+      </p>
+      {!connections.length && <p className="muted">No connections.</p>}
       {connections.map((connection, index) => (
         <ConnectionEditor
           key={connection.id}
@@ -79,28 +63,30 @@ export function ConnectionsSettings({
           onRemove={() => onChange(connections.filter((_, i) => i !== index))}
         />
       ))}
-      <button
-        type="button"
-        className="button secondary"
-        onClick={() =>
-          onChange([
-            ...connections,
-            {
-              id: `connection-${Math.random().toString(36).slice(2, 10)}`,
-              name: "",
-              tool: "lin",
-              profiles: [],
-              import_assignments: false,
-            },
-          ])
-        }
-      >
-        Add a connection
-      </button>
-      <p className="field-hint">
-        Accounts authenticate through their CLI. No credentials are entered
-        here. Choose at least one profile for Linear, Slack or Fathom. Notion
-        uses the account already selected in its CLI; no profile is needed.
+      <div className="actions">
+        <button
+          type="button"
+          className="btn"
+          onClick={() =>
+            onChange([
+              ...connections,
+              {
+                id: `connection-${Math.random().toString(36).slice(2, 10)}`,
+                name: "",
+                tool: "lin",
+                profiles: [],
+                import_assignments: false,
+              },
+            ])
+          }
+        >
+          Add a connection
+        </button>
+      </div>
+      <p className="hint">
+        Each signs in through that service's own CLI, so no passwords go in
+        here. Linear, Slack and Fathom need at least one account chosen; Notion
+        uses the one its CLI has.
       </p>
     </section>
   );
@@ -146,32 +132,34 @@ function ConnectionEditor({
   const discovered = (discovery?.profiles || []).map((p) => p.name);
   const names = [...new Set([...discovered, ...connection.profiles])];
   return (
-    <fieldset className="connection-editor">
-      <legend>
+    <fieldset className="connection card">
+      <legend className="sr-only">
         {connection.name || `New ${service?.name || "connection"} connection`}
       </legend>
-      <div className="connection-editor-heading">
-        <span className="integration-symbol" aria-hidden="true">
-          {service?.name.slice(0, 1)}
-        </span>
-        <p>{service?.description}</p>
+      <div className="panel-head">
+        <p>
+          <strong>
+            {connection.name || `New ${service?.name ?? ""} connection`}
+          </strong>{" "}
+          <span className="muted small">{service?.description}</span>
+        </p>
         <button
           type="button"
-          className="text-button"
+          className="btn btn-quiet btn-sm btn-danger"
           onClick={onRemove}
           aria-label={`Remove connection ${connection.name || index + 1}`}
         >
           Remove
         </button>
       </div>
-      <div className="connection-name-grid">
+      <div className="form-row">
         <label htmlFor={`connection-${index}-name`}>
-          Connection name
+          Name
           <input
             id={`connection-${index}-name`}
             value={connection.name}
             onChange={(e) => onChange({ ...connection, name: e.target.value })}
-            placeholder="e.g. Work projects"
+            placeholder="Work"
             required
             maxLength={80}
           />
@@ -200,7 +188,7 @@ function ConnectionEditor({
       </div>
       {connection.tool === "lin" && (
         <>
-          <label className="profile-choice">
+          <label className="check">
             <input
               type="checkbox"
               checked={connection.import_assignments ?? false}
@@ -212,48 +200,46 @@ function ConnectionEditor({
               }
               aria-describedby={`connection-${index}-import-hint`}
             />
-            <span>Import assigned issues as projects</span>
+            <span>Add issues assigned to you as projects</span>
           </label>
-          <p className="field-hint" id={`connection-${index}-import-hint`}>
-            Optional. Automatically add issues assigned to you from the selected
-            profiles. Leave off to use Linear only as context. Connecting a work
-            workspace does not require tracking personal projects there.
+          <p className="hint" id={`connection-${index}-import-hint`}>
+            Leave off to use Linear only for reading.
           </p>
         </>
       )}
-      <div className="profile-selection-heading">
-        <strong>
+      <div className="panel-head">
+        <span className="label">
           {usesDefaultAccount
-            ? "CLI default account"
+            ? "Uses the account its CLI has"
             : connection.tool === "agent-slack"
-              ? "Workspace aliases"
-              : "Allowed account profiles"}
-        </strong>
+              ? "Workspaces it may use"
+              : "Accounts it may use"}
+        </span>
         <button
           type="button"
-          className="text-button"
+          className="btn btn-quiet btn-sm"
           disabled={loading}
           onClick={() => setRevision(revision + 1)}
         >
-          {loading ? "Finding profiles…" : "Refresh profiles"}
+          {loading ? "Looking…" : "Refresh"}
         </button>
       </div>
       {error && (
-        <p className="error-notice" role="alert">
+        <p className="error" role="alert">
           {error}
         </p>
       )}
-      {discovery?.detail && <p className="field-hint">{discovery.detail}</p>}
+      {discovery?.detail && <p className="hint">{discovery.detail}</p>}
       {!usesDefaultAccount && !loading && !names.length && (
-        <p className="field-hint">
-          No profiles found. Set up an account with{" "}
-          <code>{connection.tool}</code>, then refresh.
+        <p className="hint">
+          None found. Sign in with the {service?.name} CLI (
+          <code>{connection.tool}</code>), then refresh.
         </p>
       )}
       {!usesDefaultAccount && (
-        <div className="profile-choices">
+        <div className="choices">
           {names.map((name) => (
-            <label key={name} className="profile-choice">
+            <label key={name} className="check">
               <input
                 type="checkbox"
                 checked={connection.profiles.includes(name)}
@@ -280,7 +266,7 @@ function ConnectionEditor({
                   </small>
                 )}
                 {!discovered.includes(name) && !loading && (
-                  <small>Saved profile; currently unavailable</small>
+                  <small>Saved, but not found now</small>
                 )}
               </span>
             </label>
@@ -290,10 +276,10 @@ function ConnectionEditor({
       {usesDefaultAccount && connection.profiles.length > 0 && (
         <button
           type="button"
-          className="button secondary"
+          className="btn btn-sm"
           onClick={() => onChange({ ...connection, profiles: [] })}
         >
-          Use CLI default account
+          Use the CLI's account
         </button>
       )}
     </fieldset>

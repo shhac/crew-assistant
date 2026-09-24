@@ -1,0 +1,271 @@
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -40px;
+  z-index: 50;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--invert);
+  color: var(--on-invert);
+}
+
+.skip-link:focus {
+  top: 12px;
+}
+
+.boot {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  color: var(--soft);
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--invert);
+  color: var(--on-invert);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* Layout: navigation, work, and the conversation when it is open. */
+.shell {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.shell.pane-open {
+  grid-template-columns: 224px minmax(0, 1fr) 400px;
+}
+
+.shell.pane-open.chat-expanded {
+  grid-template-columns: 224px 0 minmax(0, 1fr);
+}
+
+.shell.chat-expanded .workspace {
+  display: none;
+}
+
+.app-nav {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  height: 100vh;
+  padding: 14px 10px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.brand:hover {
+  text-decoration: none;
+}
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-label {
+  padding: 0 10px 4px;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--soft);
+  font: 400 14px var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.nav-link:hover {
+  background: var(--sunken);
+  text-decoration: none;
+}
+
+.nav-link[aria-current="page"],
+.nav-link[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 500;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.nav-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-hint {
+  opacity: 0.8;
+}
+
+.nav-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.nav-status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.workspace {
+  min-width: 0;
+}
+
+.banner {
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--wait-bg);
+  color: var(--soft);
+  font-size: 13px;
+}
+
+.banner-alert {
+  background: var(--block-bg);
+  color: var(--block);
+}
+
+main:focus {
+  outline: none;
+}
+
+.chat-pane {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 1180px;
+  padding: 26px 32px 48px;
+}
+
+.page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.page-header-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 1250px) {
+  .shell.pane-open {
+    grid-template-columns: 200px minmax(0, 1fr) 360px;
+  }
+  .shell:not(.pane-open) {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1000px) {
+  .shell,
+  .shell.pane-open {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+  .shell.pane-open:not(.drawer-open) .chat-pane {
+    display: none;
+  }
+  .shell.drawer-open .chat-pane {
+    position: fixed;
+    z-index: 40;
+    right: 0;
+    top: 0;
+    width: min(420px, 100%);
+    box-shadow: var(--shadow-raised);
+  }
+  .page {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 700px) {
+  .shell,
+  .shell.pane-open {
+    display: block;
+  }
+  .app-nav {
+    position: sticky;
+    z-index: 30;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    height: auto;
+    padding: 8px 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+  }
+  .brand > span:last-child,
+  .nav-projects,
+  .nav-status,
+  .nav-hint {
+    display: none;
+  }
+  .nav-link .nav-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .nav-group {
+    flex-direction: row;
+  }
+  .page {
+    padding: 16px;
+  }
+}
