@@ -201,6 +201,18 @@ func CurrentBranch(ctx context.Context, dir string) (string, error) {
 	return strings.TrimSpace(current), nil
 }
 
+// BranchTip reads a branch's tip in a repository without changing anything.
+func BranchTip(ctx context.Context, dir, branch string) (string, error) {
+	if _, err := run(ctx, dir, "check-ref-format", "--branch", branch); err != nil {
+		return "", fmt.Errorf("%q is not a valid branch name", branch)
+	}
+	tip, err := run(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	if err != nil {
+		return "", fmt.Errorf("there is no branch %s", branch)
+	}
+	return strings.TrimSpace(tip), nil
+}
+
 // Fetch brings the owner's branch into the clone and returns its tip. It
 // fetches from the repository's path, never a configured remote whose
 // settings could name a command to run.
@@ -228,6 +240,32 @@ func (r Repo) Contains(ctx context.Context, tip, commit string) (bool, error) {
 	return false, err
 }
 
+// MergeClean merges commit into tip without touching any working tree. It
+// returns the new merge commit, or "" when the two conflict and someone has to
+// resolve them.
+func (r Repo) MergeClean(ctx context.Context, tip, commit, message string) (string, error) {
+	tree, err := run(ctx, r.Workspace(), "merge-tree", "--write-tree", "--no-messages", tip, commit)
+	var status *gitError
+	if errors.As(err, &status) && status.code == 1 {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Fields(tree)
+	if len(lines) == 0 {
+		return "", errors.New("git merge-tree wrote no tree")
+	}
+	out, err := run(ctx, r.Workspace(), "commit-tree", lines[0], "-p", tip, "-p", commit, "-m", message)
+	return strings.TrimSpace(out), err
+}
+
+// ChangedFiles lists what differs between two commits.
+func (r Repo) ChangedFiles(ctx context.Context, from, to string) ([]string, error) {
+	out, err := run(ctx, r.Workspace(), "diff", "--no-ext-diff", "--no-textconv", "--name-only", from+".."+to)
+	return strings.Fields(out), err
+}
+
 // Merge brings commit into the checked-out task branch without committing, so
 // the implementer's next revision records the merged result. It returns the
 // files left with conflicts for the implementer to resolve.
@@ -251,7 +289,9 @@ func (r Repo) Snapshot(ctx context.Context, base, previous, message string) (str
 	if _, err := run(ctx, r.Workspace(), "add", "-A"); err != nil {
 		return "", nil, err
 	}
-	if _, err := run(ctx, r.Workspace(), "rev-parse", "--quiet", "--verify", "MERGE_HEAD"); err == nil {
+	_, mergeErr := run(ctx, r.Workspace(), "rev-parse", "--quiet", "--verify", "MERGE_HEAD")
+	merging := mergeErr == nil
+	if merging {
 		// Completing a merge: refuse to record conflicts nobody resolved.
 		check, _ := run(ctx, r.Workspace(), "diff", "--cached", "--check")
 		var left []string
@@ -264,7 +304,9 @@ func (r Repo) Snapshot(ctx context.Context, base, previous, message string) (str
 			return "", nil, fmt.Errorf("conflict markers are still in %s", strings.Join(slices.Compact(left), ", "))
 		}
 	}
-	if _, err := run(ctx, r.Workspace(), "diff", "--cached", "--quiet"); err != nil {
+	// A merge is recorded even when it changes no files: the task must then
+	// contain what it merged, or it would try to catch up forever.
+	if _, err := run(ctx, r.Workspace(), "diff", "--cached", "--quiet"); err != nil || merging {
 		if _, err = run(ctx, r.Workspace(), "commit", "--quiet", "--no-verify", "-m", message); err != nil {
 			return "", nil, err
 		}
@@ -427,7 +469,7 @@ var (
 // receivePack runs the receiving side of a push into the owner's repository
 // with their hooks and file-system monitor off. Their repository's own rules,
 // such as receive.denyCurrentBranch, still apply.
-const receivePack = "git -c core.hooksPath=/dev/null -c core.fsmonitor=false receive-pack"
+var receivePack = "git " + strings.Join(append(append([]string(nil), safety...), "-c", "receive.autogc=false"), " ") + " receive-pack"
 
 // PushFastForward lands commit on target in the owner's repository by a plain
 // push: never forced, so it only succeeds when target has not moved past what
@@ -525,5 +567,7 @@ func gitEnvironment() []string {
 		"GIT_PAGER=cat",
 		"GIT_NO_REPLACE_OBJECTS=1",
 		"GIT_OPTIONAL_LOCKS=0",
+		// Refusals are read from git's own words.
+		"LC_ALL=C",
 	)
 }

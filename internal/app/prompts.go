@@ -86,9 +86,9 @@ const repoInstructions = "First read the repository's own instructions for contr
 
 // catchUpText tells the implementer that work landed and has been merged
 // into their branch, and what is left to them.
-func catchUpText(landed core.Landing, conflicts []string) string {
+func catchUpText(what string, conflicts []string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "\nSince this task started, another task in the project landed: %q, on branch %s. It has been merged into this branch for you", landed.Objective, landed.Branch)
+	fmt.Fprintf(&b, "\nSince this task started, %s. That has been merged into this branch for you", what)
 	if len(conflicts) > 0 {
 		fmt.Fprintf(&b, ", and these files have conflict markers you must resolve: %s", strings.Join(conflicts, ", "))
 	} else {

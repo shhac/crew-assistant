@@ -35,7 +35,8 @@ type Wake struct {
 	ExpiresAt   time.Time  `json:"expires_at"`
 	FiredAt     *time.Time `json:"fired_at,omitempty"`
 	DeliveredAt *time.Time `json:"delivered_at,omitempty"`
-	CheckedAt   *time.Time `json:"checked_at,omitempty"`
+	// Attempts counts wake-up turns that failed to carry this wake.
+	Attempts int `json:"attempts,omitempty"`
 }
 
 const (
@@ -153,20 +154,6 @@ func (s *Service) Waiting(ctx context.Context) ([]Wake, error) {
 	return out, nil
 }
 
-// Checked records that the watcher looked, without a change.
-func (s *Service) Checked(ctx context.Context, id string) error {
-	return s.store.update(ctx, func(v *Snapshot) error {
-		for i := range v.Wakes {
-			if v.Wakes[i].ID == id {
-				now := s.now().UTC()
-				v.Wakes[i].CheckedAt = &now
-				return nil
-			}
-		}
-		return nil
-	})
-}
-
 // FireWake records the change the watcher saw. An assistant's wake joins the
 // queued wake-up turn, or starts one; a task's waits for its next round.
 func (s *Service) FireWake(ctx context.Context, id, observed, event string, timedOut bool) (Wake, error) {
@@ -212,6 +199,32 @@ func (s *Service) TakeTaskWakes(ctx context.Context, taskID, owner string) ([]Wa
 	return out, err
 }
 
+// settleTaskWakes fires every waiting wake on a task whose status now
+// matches, or has changed from what was seen when the wake was registered.
+func settleTaskWakes(v *Snapshot, now time.Time) {
+	for i := range v.Wakes {
+		w := &v.Wakes[i]
+		if w.Status != WakeWaiting || w.On != WakeOnTask {
+			continue
+		}
+		t := task(v, w.Target)
+		if t == nil {
+			continue
+		}
+		if (w.Match != "" && t.Status != w.Match) || (w.Match == "" && t.Status == w.Baseline) {
+			continue
+		}
+		w.Status, w.Observed, w.FiredAt = WakeFired, t.Status, &now
+		w.Event = fmt.Sprintf("%q is now %s", t.Objective, t.Status)
+		if t.Detail != "" {
+			w.Event += ": " + t.Detail
+		}
+		if w.Owner == WakeAssistant {
+			queueWakeTurn(v, w.ID, now)
+		}
+	}
+}
+
 // queueWakeTurn adds the wake to the assistant's queued wake-up turn, so
 // several that fire while it is busy arrive together, each with its own times.
 func queueWakeTurn(v *Snapshot, id string, now time.Time) {
@@ -240,7 +253,9 @@ func removeFromWakeTurns(v *Snapshot, id string) {
 		}
 		t.WakeIDs = kept
 		if len(kept) == 0 {
-			t.Status = "cancelled"
+			now := time.Now().UTC()
+			t.Status, t.FinishedAt = "cancelled", &now
+			v.ChatQueueRevision++
 		}
 	}
 }

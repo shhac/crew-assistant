@@ -96,9 +96,52 @@ func TestAssistantWakesArriveTogetherWithTheirOwnTimes(t *testing.T) {
 	if last.Origin != OriginWake {
 		t.Fatalf("the conversation does not mark the wake-up: %+v", last)
 	}
+	// A turn that fails does not count as delivered: the wakes come again.
+	if err = s.FinishChat(testContext, turn.ID, "failed", "", "model unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.StartNextChat(testContext)
+	if err != nil || again.Origin != OriginWake || len(again.WakeIDs) != 2 {
+		t.Fatalf("the wakes were lost with the failed turn: %+v %v", again, err)
+	}
+	if err = s.FinishChat(testContext, again.ID, "completed", "Landing the second feature.", ""); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ = s.Snapshot(testContext)
 	for _, w := range snap.Wakes {
-		if w.Status != WakeDelivered || w.DeliveredAt == nil {
-			t.Fatalf("not marked delivered: %+v", w)
+		if w.Status != WakeDelivered || w.DeliveredAt == nil || w.Attempts != 1 {
+			t.Fatalf("not marked delivered after the completed turn: %+v", w)
+		}
+	}
+}
+
+func TestAWakeOnATaskFiresInTheChangeThatMatchesIt(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	task, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "x"})
+	w, err := s.RegisterWake(testContext, WakeInput{Owner: WakeAssistant, On: WakeOnTask, Target: task.ID, Match: TaskLanded, Baseline: task.Status, Prompt: "land the next one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The task passes through landed and on within one change of the loop's
+	// view; the wake still sees it.
+	for _, status := range []string{TaskWriting, TaskLanded} {
+		s.UpdateTask(testContext, task.ID, func(t *Task, _ *Project) (string, error) {
+			t.Status = status
+			return "", nil
+		})
+	}
+	snap, _ := s.Snapshot(testContext)
+	for _, got := range snap.Wakes {
+		if got.ID == w.ID && (got.Status != WakeFired || got.Observed != TaskLanded) {
+			t.Fatalf("the wake did not fire on landing: %+v", got)
+		}
+	}
+	already, _ := s.RegisterWake(testContext, WakeInput{Owner: WakeAssistant, On: WakeOnTask, Target: task.ID, Match: TaskLanded, Baseline: TaskLanded})
+	snap, _ = s.Snapshot(testContext)
+	for _, got := range snap.Wakes {
+		if got.ID == already.ID && got.Status != WakeFired {
+			t.Fatalf("a condition that already held never fired: %+v", got)
 		}
 	}
 }

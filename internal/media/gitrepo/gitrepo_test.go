@@ -294,6 +294,38 @@ func TestPushLandsOnlyByFastForwardAndFollowsTheOwnersCheckoutRules(t *testing.T
 	}
 }
 
+func TestAMergeThatChangesNoFilesIsStillRecorded(t *testing.T) {
+	source := ownerRepo(t)
+	r, err := Open(ctx, t.TempDir(), source, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, err := r.Begin(ctx, "crew-task/a", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Workspace(), "same.go"), "package main\n")
+	landed, _, _ := r.Snapshot(ctx, base, base, "a")
+	if _, _, err = r.Begin(ctx, "crew-task/b", ""); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Workspace(), "same.go"), "package main\n")
+	b1, _, _ := r.Snapshot(ctx, base, base, "b, identical")
+	if err = r.Reset(ctx, "crew-task/b", b1); err != nil {
+		t.Fatal(err)
+	}
+	if conflicts, err := r.Merge(ctx, landed); err != nil || len(conflicts) != 0 {
+		t.Fatalf("conflicts %v err %v", conflicts, err)
+	}
+	merged, _, err := r.Snapshot(ctx, landed, b1, "catch up")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in, _ := r.Contains(ctx, merged, landed); !in {
+		t.Fatal("the merge was not recorded, so the task never catches up")
+	}
+}
+
 func TestPlantedHooksAndFsmonitorNeverRunAsTheDaemon(t *testing.T) {
 	source := ownerRepo(t)
 	r, err := Open(ctx, t.TempDir(), source, nil)

@@ -114,6 +114,8 @@ func (a *App) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 		return true, a.review(ctx, p, t, m)
 	case core.TaskDeciding:
 		return true, a.decide(ctx, p, t)
+	case core.TaskLanding:
+		return true, a.land(ctx, p, t, m)
 	}
 	return false, nil
 }
@@ -196,12 +198,17 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 		return err
 	}
 	caughtUp := ""
-	if behind, err := m.behind(ctx, t); err != nil {
+	l, err := m.behind(ctx, t)
+	if err != nil {
 		return a.roleFailed(ctx, t, "The workspace", err)
-	} else if behind {
-		moved, conflicts, err := m.catchUp(ctx, t)
+	}
+	if l != nil {
+		moved, clean, conflicts, err := m.catchUp(ctx, t, *l)
 		if err != nil {
-			return a.roleFailed(ctx, t, "The workspace", fmt.Errorf("catching up with %s: %w", p.Landed.Objective, err))
+			return a.roleFailed(ctx, t, "The workspace", fmt.Errorf("catching up: %s: %w", l.What, err))
+		}
+		if clean != "" && t.CatchUp {
+			return a.recordCatchUp(ctx, moved, m, clean, *l)
 		}
 		if t, err = a.Core.UpdateTask(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
 			task.Base, task.From = moved.Base, moved.From
@@ -209,7 +216,7 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 		}); err != nil {
 			return err
 		}
-		caughtUp = catchUpText(*p.Landed, conflicts)
+		caughtUp = catchUpText(l.What, conflicts)
 	}
 	spec := a.roleSpec(writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp))
 	spec.Resume = t.WriterSession
@@ -229,7 +236,7 @@ func (a *App) write(ctx context.Context, p core.Project, t core.Task, m medium) 
 		revision.BriefVersion, revision.Summary, revision.At = p.Brief.Version, clip(result.Text, 2000), time.Now().UTC()
 		t.Revisions = append(t.Revisions, revision)
 		t.WriterSession = result.Session
-		t.Failures, t.RetryAt = 0, time.Time{}
+		t.Failures, t.RetryAt, t.CatchUp = 0, time.Time{}, false
 		t.Status, t.Detail = core.TaskReviewing, fmt.Sprintf("Draft %d written; reviewing", n)
 		return fmt.Sprintf("%s wrote draft %d of %s", writers[0].Name, n, t.Objective), nil
 	})
@@ -385,10 +392,15 @@ func (a *App) askForDelivery(ctx context.Context, p core.Project, t core.Task, r
 	if err != nil {
 		return a.roleFailed(ctx, t, "The workspace", err)
 	}
-	if behind, err := m.behind(ctx, t); err != nil {
+	l, err := m.behind(ctx, t)
+	if err != nil {
 		return a.roleFailed(ctx, t, "The workspace", err)
-	} else if behind {
-		return a.catchUpRound(ctx, t, *p.Landed)
+	}
+	if l != nil {
+		return a.catchUpRound(ctx, t, *l)
+	}
+	if approvalStands(t) || !taskPlaybook(p, t).Land.AsksFirst() {
+		return a.startLanding(ctx, t, false)
 	}
 	where := m.deliveryNote(t)
 	_, err = a.Core.OpenTaskDecision(ctx, t.ID, decisionDelivery, core.DecisionInput{
@@ -495,9 +507,9 @@ func (a *App) applyAnswer(ctx context.Context, p core.Project, t core.Task, d co
 		return a.stopTask(ctx, t, "the owner stopped it")
 	case d.Kind == decisionDelivery && strings.EqualFold(answer, choiceApprove),
 		d.Kind == decisionEscalation && strings.EqualFold(answer, choiceAcceptDraft):
-		return a.deliver(ctx, p, t)
+		return a.startLanding(ctx, t, true)
 	case d.Kind == decisionFailure && strings.EqualFold(answer, choiceTryAgain) && t.ResumeStatus == resumeDelivery:
-		return a.deliver(ctx, p, t)
+		return a.startLanding(ctx, t, false)
 	case d.Kind == decisionFailure && strings.EqualFold(answer, choiceTryAgain):
 		_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			if t.Status == core.TaskStopped {
@@ -530,120 +542,6 @@ func (a *App) applyAnswer(ctx context.Context, p core.Project, t core.Task, d co
 		}
 		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", fmt.Sprintf("Revising with your direction (round %d)", t.Round)
 		return fmt.Sprintf("Revising %s with the owner's direction", t.Objective), nil
-	})
-	return err
-}
-
-// deliver performs the one outward step: copying the approved draft to the
-// project's delivery folder, if it has one.
-func (a *App) deliver(ctx context.Context, p core.Project, t core.Task) error {
-	if len(t.Revisions) == 0 {
-		return errors.New("nothing to deliver")
-	}
-	r := t.Revisions[len(t.Revisions)-1]
-	m, err := a.mediumFor(ctx, p, taskPlaybook(p, t))
-	if err != nil {
-		return err
-	}
-	if behind, err := m.behind(ctx, t); err != nil {
-		return err
-	} else if behind {
-		return a.catchUpRound(ctx, t, *p.Landed)
-	}
-	target, err := m.deliver(ctx, t, r)
-	{
-		if err != nil {
-			if _, updateErr := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-				if t.Status == core.TaskStopped {
-					return "", nil
-				}
-				t.ResumeStatus = resumeDelivery
-				return "", nil
-			}); updateErr != nil {
-				return updateErr
-			}
-			_, openErr := a.Core.OpenTaskDecision(ctx, t.ID, decisionFailure, core.DecisionInput{
-				Title:          fmt.Sprintf("Draft %d of %s couldn't be delivered", r.N, t.Objective),
-				Context:        clip(err.Error(), 600),
-				Recommendation: choiceTryAgain + " once the cause is fixed",
-				Choices:        []string{choiceTryAgain, choiceStop},
-			})
-			return openErr
-		}
-	}
-	_, err = a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
-		if t.Status == core.TaskStopped {
-			return "", nil
-		}
-		t.Status, t.DecisionID, t.DeliveredTo = core.TaskDelivered, "", target
-		t.Detail = fmt.Sprintf("Draft %d approved", r.N)
-		if target != "" {
-			t.Detail += " and delivered to " + target
-		}
-		if r.Ref != "" {
-			p.Landed = &core.Landing{TaskID: t.ID, Objective: t.Objective, Commit: r.Ref, Branch: target, At: time.Now().UTC()}
-		}
-		return t.Objective + ": " + t.Detail, nil
-	})
-	if err != nil || r.Ref == "" {
-		return err
-	}
-	return a.supersedeStaleApprovals(ctx, p.ID)
-}
-
-// supersedeStaleApprovals replaces any approval another task in the project
-// is waiting on with a round that catches up with what just landed, so the
-// owner is never asked to approve work that is out of date.
-func (a *App) supersedeStaleApprovals(ctx context.Context, projectID string) error {
-	snap, err := a.Core.Snapshot(ctx)
-	if err != nil {
-		return err
-	}
-	p, ok := findProject(snap, projectID)
-	if !ok || p.Landed == nil {
-		return nil
-	}
-	for _, t := range snap.Tasks {
-		if t.ProjectID != projectID || t.Status != core.TaskWaiting || t.DecisionID == "" {
-			continue
-		}
-		d, ok := findDecision(snap, t.DecisionID)
-		if !ok || d.Status != "open" || (d.Kind != decisionDelivery && d.Kind != decisionEscalation) {
-			continue
-		}
-		m, err := a.mediumFor(ctx, p, taskPlaybook(p, t))
-		if err != nil {
-			return err
-		}
-		if behind, err := m.behind(ctx, t); err != nil || !behind {
-			if err != nil {
-				return err
-			}
-			continue
-		}
-		if err = a.catchUpRound(ctx, t, *p.Landed); err != nil {
-			return err
-		}
-		if _, err = a.Core.DismissDecision(ctx, d.ID, p.Landed.Objective+" landed first; this is catching up with it and will ask again"); err != nil && !errors.Is(err, core.ErrConflict) {
-			return err
-		}
-	}
-	return nil
-}
-
-// catchUpRound sends a task back to its implementer to take in work that
-// landed after it started. It is the team's job, not the owner's.
-func (a *App) catchUpRound(ctx context.Context, t core.Task, landed core.Landing) error {
-	_, err := a.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Status == core.TaskStopped || t.Status == core.TaskDelivered {
-			return "", nil
-		}
-		t.Round++
-		if t.MaxRounds < t.Round {
-			t.MaxRounds = t.Round
-		}
-		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", "Catching up with "+landed.Objective+", which landed first"
-		return t.Objective + " is catching up with " + landed.Objective, nil
 	})
 	return err
 }
@@ -693,7 +591,7 @@ func (a *App) StopTask(ctx context.Context, projectID, taskID string) (core.Task
 		if t.ProjectID != projectID {
 			return "", core.ErrNotFound
 		}
-		if t.Status == core.TaskDelivered || t.Status == core.TaskStopped {
+		if t.Finished() {
 			return "", fmt.Errorf("this task has already finished: %w", core.ErrConflict)
 		}
 		decisionID = t.DecisionID

@@ -159,6 +159,9 @@ func (s *Service) CancelChat(ctx context.Context, id string) (ChatTurn, error) {
 			t.Status = "cancelled"
 			v.ChatQueueRevision++
 			t.FinishedAt = &now
+			if t.Origin == OriginWake {
+				settleWakeTurn(v, t, "cancelled", now)
+			}
 			out = *t
 			return nil
 		}
@@ -202,6 +205,9 @@ func (s *Service) FinishChat(ctx context.Context, id, status, reply, reason stri
 				t.AssistantMessageID = uid()
 				v.Messages = append(v.Messages, Message{ID: t.AssistantMessageID, Role: "assistant", Content: reply, CreatedAt: now})
 			}
+			if t.Origin == OriginWake {
+				settleWakeTurn(v, t, status, now)
+			}
 			return nil
 		}
 		return ErrNotFound
@@ -224,6 +230,9 @@ func (s *Service) RecoverChatTurns(ctx context.Context) error {
 			t.ModelStatus = ""
 			t.RetryAt = time.Time{}
 			t.Error = "The assistant stopped before this turn finished. Recorded actions were preserved; the message was not replayed."
+			if t.Origin == OriginWake {
+				settleWakeTurn(v, t, "interrupted", now)
+			}
 			for j := range t.Events {
 				if t.Events[j].Status == "running" {
 					t.Events[j].Status = "interrupted"
@@ -311,7 +320,7 @@ func wakeTurnMessage(v *Snapshot, ids []string, now time.Time) string {
 	for _, id := range ids {
 		for i := range v.Wakes {
 			if w := &v.Wakes[i]; w.ID == id && w.Status == WakeFired {
-				w.Status, w.DeliveredAt = WakeDelivered, &now
+				w.DeliveredAt = &now
 				wakes = append(wakes, *w)
 			}
 		}
@@ -320,4 +329,35 @@ func wakeTurnMessage(v *Snapshot, ids []string, now time.Time) string {
 		return "[Wake-up from the daemon, not a message from the owner] The wake-ups this turn was for were cancelled. Nothing to do."
 	}
 	return "[Wake-up from the daemon, not a message from the owner. You asked to be woken; act on your continuation if it still applies, and tell the owner only what they need to know.]\n\n" + WakeReport(wakes, now)
+}
+
+// maxWakeAttempts bounds how often a wake is offered again after the turn
+// carrying it failed, so a model that keeps failing cannot loop forever.
+const maxWakeAttempts = 3
+
+// settleWakeTurn finishes the wakes a wake-up turn carried. They count as
+// delivered only when the assistant completed the turn; otherwise they are
+// offered again in a later turn, unless the owner cancelled it.
+func settleWakeTurn(v *Snapshot, t *ChatTurn, status string, now time.Time) {
+	for _, id := range t.WakeIDs {
+		for i := range v.Wakes {
+			w := &v.Wakes[i]
+			if w.ID != id || w.Status != WakeFired {
+				continue
+			}
+			switch {
+			case status == "completed":
+				w.Status = WakeDelivered
+			case status == "cancelled":
+				w.Status = WakeCancelled
+			case w.Attempts+1 >= maxWakeAttempts:
+				w.Attempts++
+				w.Status = WakeDelivered
+			default:
+				w.Attempts++
+				w.DeliveredAt = nil
+				queueWakeTurn(v, w.ID, now)
+			}
+		}
+	}
 }
