@@ -24,7 +24,7 @@ func derive(v *Snapshot, t *Task) {
 	if t.Status != TaskReviewing && t.Status != TaskDeciding {
 		return
 	}
-	if next, ok := t.NextChecker(briefVersion(v, *t)); ok {
+	if next, ok := t.nextChecker(briefVersion(v, *t)); ok {
 		t.Checking = next.Name
 	}
 }
@@ -86,8 +86,8 @@ func (t Task) Judged(role string, revision, briefVersion int) bool {
 	return false
 }
 
-// NextChecker is the first checker still to judge the latest revision.
-func (t Task) NextChecker(briefVersion int) (Role, bool) {
+// nextChecker is the first checker still to judge the latest revision.
+func (t Task) nextChecker(briefVersion int) (Role, bool) {
 	n := len(t.Revisions)
 	if n == 0 {
 		return Role{}, false
@@ -106,7 +106,7 @@ func checkStage(v *Snapshot, t Task) string {
 	if len(t.Revisions) == 0 {
 		return StageImplementing
 	}
-	next, ok := t.NextChecker(briefVersion(v, t))
+	next, ok := t.nextChecker(briefVersion(v, t))
 	switch {
 	case !ok:
 		return lastCheck(t)

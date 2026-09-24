@@ -255,12 +255,10 @@ func proposal(cfg config.Config, arguments string) (*IdentityRecommendation, err
 	if strings.TrimSpace(in.Rationale) == "" || len(in.Rationale) > 4000 {
 		return nil, fmt.Errorf("%w: the rationale is empty or longer than 4000 characters", errUnusableProposal)
 	}
-	svg, err := avatar.SVG()
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errUnusableProposal, err)
-	}
+	// Validated above, so it always draws.
+	svg, _ := avatar.SVG()
 	var id [16]byte
-	if _, err = rand.Read(id[:]); err != nil {
+	if _, err := rand.Read(id[:]); err != nil {
 		return nil, err
 	}
 	return &IdentityRecommendation{ID: hex.EncodeToString(id[:]), Name: in.Name, Personality: in.Personality, Avatar: avatar, Rationale: in.Rationale, AvatarSVG: svg}, nil

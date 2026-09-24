@@ -226,15 +226,12 @@ func Load(path string) (Config, error) {
 	if data, err = dropLoadingModelChoice(data, sections); err != nil {
 		return c, err
 	}
-	legacyModel := false
 	if raw, exists := sections["model"]; exists {
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &fields); err != nil {
 			return c, fmt.Errorf("decode model config: %w", err)
 		}
-		_, explicitEngine := fields["engine"]
-		legacyModel = !explicitEngine
-		if legacyModel {
+		if _, explicitEngine := fields["engine"]; !explicitEngine {
 			c.Model.Engine = "openai-compatible"
 			c.Model.Model = ""
 			c.Model.Effort = ""

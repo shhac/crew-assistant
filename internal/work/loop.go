@@ -432,7 +432,7 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 	// A draft written for an older brief that passes against the current one
 	// is still a pass.
 	case len(questions) == 0 && len(changes) == 0:
-		return lp.askForDelivery(ctx, p, t, r, current)
+		return lp.askForDelivery(ctx, p, t, r)
 	case len(questions) > 0:
 		q := questions[0]
 		_, err := lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionQuestion, core.DecisionInput{
@@ -485,7 +485,7 @@ func reviewDigest(verdicts []core.Verdict) string {
 	return strings.TrimSpace(b.String())
 }
 
-func (lp *Loop) askForDelivery(ctx context.Context, p core.Project, t core.Task, r core.Revision, verdicts []core.Verdict) error {
+func (lp *Loop) askForDelivery(ctx context.Context, p core.Project, t core.Task, r core.Revision) error {
 	m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
