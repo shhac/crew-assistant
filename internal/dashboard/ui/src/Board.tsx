@@ -192,8 +192,13 @@ function TodoColumn({
   const [dragging, setDragging] = useState("");
   const reorder = (ids: string[]) =>
     run(async () => {
-      await orderTasks(project.id, ids);
-      await refresh();
+      // A refused order was usually made from a stale list; fetch the
+      // current one either way so the next try starts from it.
+      try {
+        await orderTasks(project.id, ids);
+      } finally {
+        await refresh();
+      }
     });
   const ids = tasks.map((t) => t.id);
   const move = (from: number, to: number) => {

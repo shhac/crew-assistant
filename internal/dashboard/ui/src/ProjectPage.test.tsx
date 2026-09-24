@@ -207,6 +207,73 @@ describe("the board", () => {
       },
     ]);
   });
+  it("moves a request down the to-do list", async () => {
+    show(project(), {
+      tasks: [
+        task({ id: "a", objective: "A" }),
+        task({ id: "b", objective: "B" }),
+      ],
+    });
+    expect(
+      screen.getByRole("button", { name: "Move “B” down" }),
+    ).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("button", { name: "Move “A” down" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/tasks/order",
+        method: "PUT",
+        body: { task_ids: ["b", "a"] },
+      },
+    ]);
+  });
+  it("drops a dragged request where it lands in the to-do list", async () => {
+    show(project(), {
+      tasks: [
+        task({ id: "a", objective: "A" }),
+        task({ id: "b", objective: "B" }),
+        task({ id: "c", objective: "C" }),
+      ],
+    });
+    const card = (name: string) => {
+      const item = screen.getByRole("link", { name }).closest("li");
+      if (!item) throw new Error(`No card for ${name}`);
+      return item;
+    };
+    fireEvent.dragStart(card("A"), { dataTransfer: { effectAllowed: "" } });
+    fireEvent.dragOver(card("C"));
+    fireEvent.drop(card("C"));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/tasks/order",
+        method: "PUT",
+        body: { task_ids: ["b", "c", "a"] },
+      },
+    ]);
+  });
+  it("fetches the current to-do list when a reorder is refused", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: "The to-do list changed; try again" }),
+      })),
+    );
+    show(project(), {
+      tasks: [
+        task({ id: "a", objective: "A" }),
+        task({ id: "b", objective: "B" }),
+      ],
+    });
+    expect(refresh).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Move “B” up" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "The to-do list changed; try again",
+    );
+    expect(refresh).toHaveBeenCalled();
+  });
   it("asks the team for something, with how it will be judged", async () => {
     show(project());
     fireEvent.change(screen.getByLabelText("What do you want?"), {
