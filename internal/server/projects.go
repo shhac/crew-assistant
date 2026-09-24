@@ -6,7 +6,6 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/app"
 	"github.com/shhac/crew-assistant/internal/core"
-	"github.com/shhac/crew-assistant/internal/engine"
 )
 
 // registerProjectWork serves the owner's direct controls over a project: its
@@ -26,12 +25,11 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("PUT /api/projects/{id}/team", func(w http.ResponseWriter, r *http.Request) {
-		var in engine.SetTeamArgs
+		var in app.TeamChoice
 		if decode(w, r, &in) != nil {
 			return
 		}
-		in.ProjectID = r.PathValue("id")
-		v, err := a.SetTeam(r.Context(), in)
+		v, err := a.SetTeam(r.Context(), r.PathValue("id"), in)
 		if err != nil {
 			problem(w, err)
 			return
@@ -40,12 +38,11 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("PUT /api/projects/{id}/landing", func(w http.ResponseWriter, r *http.Request) {
-		var in engine.SetLandingArgs
+		var in core.LandPolicy
 		if decode(w, r, &in) != nil {
 			return
 		}
-		in.ProjectID = r.PathValue("id")
-		v, err := a.SetLanding(r.Context(), in)
+		v, err := a.SetLanding(r.Context(), r.PathValue("id"), in)
 		if err != nil {
 			problem(w, err)
 			return

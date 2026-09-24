@@ -9,13 +9,27 @@ import (
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
-	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/media"
 )
 
 // teamFrom builds a playbook from a template and the few choices the assistant
 // may make about it. Anything left empty keeps the template's choice.
-func teamFrom(in engine.SetTeamArgs) (core.Playbook, error) {
+// TeamChoice is a team as the owner or the assistant chooses it. max_rounds
+// is text, as a form or a tool sends it.
+type TeamChoice struct {
+	Template       string `json:"template"`
+	WriterEngine   string `json:"writer_engine"`
+	ReviewerEngine string `json:"reviewer_engine"`
+	MaxRounds      string `json:"max_rounds"`
+	DeliverTo      string `json:"deliver_to"`
+	// Code teams only.
+	Repo         string   `json:"repo"`
+	BranchPrefix string   `json:"branch_prefix"`
+	Check        string   `json:"check"`
+	Prepare      []string `json:"prepare"`
+}
+
+func teamFrom(in TeamChoice) (core.Playbook, error) {
 	template := in.Template
 	if template == "" {
 		template = "draft"
@@ -53,7 +67,7 @@ func teamFrom(in engine.SetTeamArgs) (core.Playbook, error) {
 }
 
 // SetTeam applies a team choice made in the dashboard or by the assistant.
-func (a *App) SetTeam(ctx context.Context, in engine.SetTeamArgs) (core.Project, error) {
+func (a *App) SetTeam(ctx context.Context, projectID string, in TeamChoice) (core.Project, error) {
 	playbook, err := teamFrom(in)
 	if err != nil {
 		return core.Project{}, err
@@ -63,7 +77,7 @@ func (a *App) SetTeam(ctx context.Context, in engine.SetTeamArgs) (core.Project,
 		if err != nil {
 			return core.Project{}, err
 		}
-		p, ok := findProject(snap, in.ProjectID)
+		p, ok := findProject(snap, projectID)
 		if !ok {
 			return core.Project{}, core.ErrNotFound
 		}
@@ -84,18 +98,18 @@ func (a *App) SetTeam(ctx context.Context, in engine.SetTeamArgs) (core.Project,
 	if err = playbook.Validate(); err != nil {
 		return core.Project{}, err
 	}
-	return a.Core.SetPlaybook(ctx, in.ProjectID, playbook)
+	return a.Core.SetPlaybook(ctx, projectID, playbook)
 }
 
 // SetLanding sets what landing means for a code project. The owner and the
 // assistant can; nothing inside the project can. Tasks already under way keep
 // the policy they started with.
-func (a *App) SetLanding(ctx context.Context, in engine.SetLandingArgs) (core.Project, error) {
+func (a *App) SetLanding(ctx context.Context, projectID string, land core.LandPolicy) (core.Project, error) {
 	snap, err := a.Core.Snapshot(ctx)
 	if err != nil {
 		return core.Project{}, err
 	}
-	p, ok := findProject(snap, in.ProjectID)
+	p, ok := findProject(snap, projectID)
 	if !ok {
 		return core.Project{}, core.ErrNotFound
 	}
@@ -103,11 +117,12 @@ func (a *App) SetLanding(ctx context.Context, in engine.SetLandingArgs) (core.Pr
 		return core.Project{}, errors.New("landing policies are for code teams; choose a code team first")
 	}
 	playbook := *p.Playbook
-	playbook.Land = core.LandPolicy{Means: strings.TrimSpace(in.Means), Via: in.Via, Target: strings.TrimSpace(in.Target), Method: in.Method, GitHub: strings.TrimSpace(in.GitHub), Approve: in.Approve}
+	land.Means, land.Target, land.GitHub = strings.TrimSpace(land.Means), strings.TrimSpace(land.Target), strings.TrimSpace(land.GitHub)
+	playbook.Land = land
 	if err = playbook.Validate(); err != nil {
 		return core.Project{}, err
 	}
-	return a.Core.SetPlaybook(ctx, in.ProjectID, playbook)
+	return a.Core.SetPlaybook(ctx, projectID, playbook)
 }
 
 // RevisionPreview returns what one revision holds, for the owner to read.

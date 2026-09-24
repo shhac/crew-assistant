@@ -200,13 +200,13 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		return a.SetTeam(ctx, in)
+		return a.SetTeam(ctx, in.ProjectID, TeamChoice{Template: in.Template, WriterEngine: in.WriterEngine, ReviewerEngine: in.ReviewerEngine, MaxRounds: in.MaxRounds, DeliverTo: in.DeliverTo, Repo: in.Repo, BranchPrefix: in.BranchPrefix, Check: in.Check, Prepare: in.Prepare})
 	case "set_landing":
 		var in engine.SetLandingArgs
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		return a.SetLanding(ctx, in)
+		return a.SetLanding(ctx, in.ProjectID, core.LandPolicy{Means: in.Means, Via: in.Via, Target: in.Target, Method: in.Method, GitHub: in.GitHub, Approve: in.Approve})
 	case "land_task":
 		var in engine.LandTaskArgs
 		if err := args(raw, &in); err != nil {
@@ -218,7 +218,7 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		return a.WakeMeWhen(ctx, in)
+		return a.WakeMeWhen(ctx, WakeRequest(in))
 	case "list_wakes":
 		if err := args(raw, &struct{}{}); err != nil {
 			return nil, err

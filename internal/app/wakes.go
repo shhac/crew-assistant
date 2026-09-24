@@ -10,7 +10,6 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
-	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/integrations/github"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 )
@@ -21,11 +20,21 @@ const wakeCheckEvery = 15 * time.Second
 
 // WakeMeWhen registers one of the assistant's wakes. The baseline is read now,
 // so a change is measured from what the assistant could see when it asked.
-func (a *App) WakeMeWhen(ctx context.Context, in engine.WakeArgs) (core.Wake, error) {
+func (a *App) WakeMeWhen(ctx context.Context, in WakeRequest) (core.Wake, error) {
 	return a.registerWake(ctx, core.WakeAssistant, "", in)
 }
 
-func (a *App) registerWake(ctx context.Context, owner, taskID string, in engine.WakeArgs) (core.Wake, error) {
+// WakeRequest is one wake as an agent asks for it; timeout is a duration.
+type WakeRequest struct {
+	On        string `json:"on"`
+	ProjectID string `json:"project_id"`
+	Target    string `json:"target"`
+	Match     string `json:"match"`
+	Prompt    string `json:"prompt"`
+	Timeout   string `json:"timeout"`
+}
+
+func (a *App) registerWake(ctx context.Context, owner, taskID string, in WakeRequest) (core.Wake, error) {
 	timeout := time.Duration(0)
 	if in.Timeout != "" {
 		d, err := time.ParseDuration(in.Timeout)
@@ -231,8 +240,8 @@ func (a *App) wakeTask(ctx context.Context, taskID, event string) error {
 
 // wakeBlock is what an implementer may end its reply with.
 type wakeBlock struct {
-	WakeMeWhen []engine.WakeArgs `json:"wake_me_when"`
-	Cancel     []string          `json:"cancel"`
+	WakeMeWhen []WakeRequest `json:"wake_me_when"`
+	Cancel     []string      `json:"cancel"`
 }
 
 // splitWakeBlock takes a trailing ```wake block off the implementer's reply.

@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/core"
-	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/roles"
 )
 
@@ -89,7 +88,7 @@ func TestCodeTaskRunsInACloneAndDeliversALocalBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = a.SetTeam(ctx, engine.SetTeamArgs{ProjectID: p.ID, Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
+	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
 		t.Fatal(err)
 	}
 	// The earlier documents task from loopApp is not what this test is about.
@@ -184,10 +183,10 @@ func TestACodeTeamOnlyWorksOnTheProjectsOwnFolders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = a.SetTeam(ctx, engine.SetTeamArgs{ProjectID: p.ID, Template: "code", Check: "make check"}); err == nil {
+	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check"}); err == nil {
 		t.Fatal("a code team was set on a project with no repository")
 	}
-	if _, err = a.SetTeam(ctx, engine.SetTeamArgs{ProjectID: p.ID, Template: "code", Check: "make check", Repo: t.TempDir()}); err == nil {
+	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check", Repo: t.TempDir()}); err == nil {
 		t.Fatal("a code team was pointed at a folder the project does not link")
 	}
 }
@@ -224,7 +223,7 @@ func TestTheSecondChangeCatchesUpWhenTheFirstLands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = a.SetTeam(ctx, engine.SetTeamArgs{ProjectID: p.ID, Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
+	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ := a.Core.Snapshot(ctx)
@@ -315,7 +314,7 @@ func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = a.SetTeam(ctx, engine.SetTeamArgs{ProjectID: p.ID, Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
+	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ := a.Core.Snapshot(ctx)
@@ -354,11 +353,11 @@ func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
 	ownerGit(t, source, "add", "owner.go")
 	ownerGit(t, source, "commit", "-q", "-m", "owner work")
 	ownerWork := ownerGit(t, source, "rev-parse", "HEAD")
-	if _, err = a.SetLanding(ctx, engine.SetLandingArgs{ProjectID: p.ID, Via: core.LandPush, Target: "main", Means: "fast-forward main"}); err != nil {
+	if _, err = a.SetLanding(ctx, p.ID, core.LandPolicy{Via: core.LandPush, Target: "main", Means: "fast-forward main"}); err != nil {
 		t.Fatal(err)
 	}
 	// Changing the team's engines never changes where its work lands.
-	changed, err := a.SetTeam(ctx, engine.SetTeamArgs{ProjectID: p.ID, Template: "code", ReviewerEngine: "claude", BranchPrefix: "paul/", Check: "make check"})
+	changed, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", ReviewerEngine: "claude", BranchPrefix: "paul/", Check: "make check"})
 	if err != nil || changed.Playbook.Land.Target != "main" || changed.Playbook.Land.Way() != core.LandPush {
 		t.Fatalf("choosing a team reset the landing policy: %+v %v", changed.Playbook, err)
 	}
@@ -448,10 +447,10 @@ func TestATargetThatKeepsMovingComesToTheOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = a.SetTeam(ctx, engine.SetTeamArgs{ProjectID: p.ID, Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
+	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = a.SetLanding(ctx, engine.SetLandingArgs{ProjectID: p.ID, Via: core.LandPush, Target: "main"}); err != nil {
+	if _, err = a.SetLanding(ctx, p.ID, core.LandPolicy{Via: core.LandPush, Target: "main"}); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ := a.Core.Snapshot(ctx)
@@ -502,7 +501,7 @@ func TestLandingRefusesWhenItCannotTellTheOrder(t *testing.T) {
 	a.runner = runner
 	ctx := context.Background()
 	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{source}, Brief: core.BriefInput{Goal: "x"}})
-	if _, err := a.SetTeam(ctx, engine.SetTeamArgs{ProjectID: p.ID, Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ := a.Core.Snapshot(ctx)
@@ -523,7 +522,7 @@ func TestLandingRefusesWhenItCannotTellTheOrder(t *testing.T) {
 		t.Status, t.Revisions = core.TaskDelivered, []core.Revision{{N: 1, Ref: strings.Repeat("f", 40)}}
 		return "", nil
 	})
-	if _, err := a.SetLanding(ctx, engine.SetLandingArgs{ProjectID: p.ID, Via: core.LandPush, Target: "main"}); err != nil {
+	if _, err := a.SetLanding(ctx, p.ID, core.LandPolicy{Via: core.LandPush, Target: "main"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.LandTask(ctx, p.ID, task.ID); err == nil || !strings.Contains(err.Error(), "could not tell") {

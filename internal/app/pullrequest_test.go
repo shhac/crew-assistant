@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
-	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/integrations/github"
 )
 
@@ -134,10 +133,10 @@ func newPRScenario(t *testing.T, reviews int) *prScenario {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = a.SetTeam(ctx, engine.SetTeamArgs{ProjectID: p.ID, Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
+	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = a.SetLanding(ctx, engine.SetLandingArgs{ProjectID: p.ID, Via: core.LandPullRequest, Target: "main", GitHub: "o/r", Method: "squash"}); err != nil {
+	if _, err = a.SetLanding(ctx, p.ID, core.LandPolicy{Via: core.LandPullRequest, Target: "main", GitHub: "o/r", Method: "squash"}); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ := a.Core.Snapshot(ctx)
