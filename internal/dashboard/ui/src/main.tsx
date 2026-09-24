@@ -10,7 +10,11 @@ import "@fontsource/ibm-plex-mono/latin-500.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/shell.css";
-import "./styles/work.css";
+import "./styles/inbox.css";
+import "./styles/projects.css";
+import "./styles/project.css";
+import "./styles/board.css";
+import "./styles/request.css";
 import "./styles/chat.css";
 import "./styles/pages.css";
 

@@ -1,0 +1,82 @@
+/* Projects */
+.project-table {
+  overflow: hidden;
+}
+
+.project-head,
+.project-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.8fr) minmax(0, 0.9fr) 90px;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+}
+
+.project-head {
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.project-group {
+  border-top: 1px solid var(--line);
+}
+
+.project-group:first-of-type {
+  border-top: 0;
+}
+
+.project-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 4px;
+  font-size: 13px;
+}
+
+.project-group > .rows > li,
+.project-group .rows > li {
+  border-top: 1px solid var(--line);
+}
+
+.project-group > .rows > li:first-child {
+  border-top: 0;
+}
+
+.project-row {
+  color: var(--text);
+}
+
+.project-row:hover {
+  background: var(--panel);
+  text-decoration: none;
+}
+
+.project-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.project-now {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.project-now > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1000px) {
+  .project-head {
+    display: none;
+  }
+  .project-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}

@@ -285,6 +285,11 @@ kbd,
   box-shadow: var(--shadow);
 }
 
+.rows {
+  padding: 0;
+  list-style: none;
+}
+
 .rows > * + * {
   border-top: 1px solid var(--line);
 }
@@ -303,6 +308,74 @@ kbd,
 
 .section-title h2 {
   font-size: 14px;
+}
+
+.tab-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 820px;
+}
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 820px;
+  padding: 18px 20px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 10px 20px;
+}
+
+.facts > dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.fact-row {
+  display: contents;
+}
+
+.fact-row > dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.facts dd {
+  overflow-wrap: anywhere;
+}
+
+.criteria-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.criteria-list li {
+  display: flex;
+  gap: 8px;
+}
+
+.criteria-dot {
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  margin-top: 8px;
+  border-radius: 50%;
+  background: var(--muted);
 }
 
 /* Forms */
@@ -368,6 +441,32 @@ select.field {
   margin: 2px 0 0;
 }
 
+.segmented {
+  display: flex;
+  padding: 3px;
+  border-radius: var(--radius);
+  background: var(--sunken);
+}
+
+.segmented button {
+  flex: 1;
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--soft);
+  font: 500 13px var(--font-sans);
+  cursor: pointer;
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow:
+    var(--shadow),
+    0 0 0 1px var(--line);
+}
+
 fieldset {
   min-width: 0;
   margin: 0;
@@ -415,11 +514,52 @@ fieldset {
   transform: rotate(90deg);
 }
 
+.disclosure-body {
+  padding-top: 12px;
+}
+
+/* Dialogs */
+.dialog {
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-raised);
+}
+
+.dialog::backdrop {
+  background: var(--scrim);
+}
+
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.dialog-foot {
+  padding-top: 6px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     transition: none !important;
     animation: none !important;
+  }
+}
+
+@media (max-width: 1000px) {
+  .facts {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px 0;
+  }
+  .facts dd {
+    margin-bottom: 8px;
   }
 }

@@ -1,0 +1,155 @@
+/* Inbox */
+.inbox {
+  max-width: 900px;
+}
+
+.decision {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+}
+
+.decision-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.decision-reversible {
+  margin-left: auto;
+}
+
+.decision-title {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.decision-context {
+  color: var(--soft);
+  white-space: pre-line;
+}
+
+.decision-context.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.decision-recommendation {
+  color: var(--soft);
+}
+
+.decision-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.decision-section h4 {
+  margin: 0;
+}
+
+.decision-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.decision-close {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.evidence li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.happens {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 20px;
+  color: var(--soft);
+}
+
+.progress-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
+  color: var(--text);
+}
+
+.progress-row:hover {
+  background: var(--panel);
+  text-decoration: none;
+}
+
+.progress-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.progress-title,
+.project-title {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-step {
+  color: var(--soft);
+  font-size: 13px;
+}
+
+.landed-today {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  font-size: 13px;
+}
+
+.past-decisions > summary {
+  padding: 4px 0 10px;
+}
+
+.past-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 16px;
+}
+
+.past-title {
+  font-weight: 500;
+}
+
+@media (max-width: 1000px) {
+  .progress-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .progress-step,
+  .progress-since {
+    grid-column: 2;
+  }
+}

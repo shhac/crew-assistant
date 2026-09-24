@@ -1,0 +1,100 @@
+/* A project */
+.project-page {
+  max-width: none;
+}
+
+.crumbs {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.project-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.project-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.tabs {
+  display: flex;
+  flex-direction: row;
+  gap: 22px;
+  margin-top: 8px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.tab {
+  padding: 8px 0 9px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.tab[aria-current="page"] {
+  color: var(--text);
+  border-bottom-color: var(--text);
+}
+
+.folders {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.folders li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  overflow-wrap: anywhere;
+}
+
+.folder-choice {
+  padding: 6px 0;
+}
+
+.activity {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  list-style: none;
+}
+
+.activity li {
+  display: grid;
+  grid-template-columns: 110px 88px minmax(0, 1fr);
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.activity li:first-child {
+  border-top: 0;
+}
+
+@media (max-width: 1000px) {
+  .activity li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
