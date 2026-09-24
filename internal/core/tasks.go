@@ -168,6 +168,15 @@ func task(v *Snapshot, id string) *Task {
 	return nil
 }
 
+func decision(v *Snapshot, id string) *Decision {
+	for i := range v.Decisions {
+		if v.Decisions[i].ID == id {
+			return &v.Decisions[i]
+		}
+	}
+	return nil
+}
+
 // QueueTask asks for an outcome. It starts when the loop reaches it.
 func (s *Service) QueueTask(ctx context.Context, projectID string, in TaskInput) (Task, error) {
 	if !required(in.Objective) {

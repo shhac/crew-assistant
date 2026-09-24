@@ -95,3 +95,34 @@ func TestAskingTheReviewerChecksTheLatestDraftNow(t *testing.T) {
 		t.Fatalf("the failed check should be on the approval, not counted: %+v / %q", task.Verdicts, d.Context)
 	}
 }
+
+func TestAMessageToSomeoneNoLongerOnTheTeamFailsWithoutACheck(t *testing.T) {
+	runner := &scriptedRunner{reviews: []string{pass}}
+	a, p, task := loopApp(t, runner, "")
+	ctx := context.Background()
+	if _, err := a.loopStep(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	m, err := a.MessageTeam(ctx, p.ID, task.ID, "reviewer", core.FromOwner, "Is it warm enough?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		t.Roles = t.RolesOf(core.RoleImplementer)
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	if progressed, err := a.answerMessage(ctx, snap); !progressed || err != nil {
+		t.Fatalf("progressed %v, err %v", progressed, err)
+	}
+	snap, _ = a.Core.Snapshot(ctx)
+	got := snap.Tasks[0].Messages[0]
+	if got.ID != m.ID || got.Status != core.MessageFailed || !strings.Contains(got.Reply, m.To) {
+		t.Fatalf("message %+v", got)
+	}
+	if len(runner.seen) != 1 {
+		t.Fatalf("a check ran for a role not on the team: %d turns", len(runner.seen))
+	}
+}

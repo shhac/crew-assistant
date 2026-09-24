@@ -161,10 +161,8 @@ func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
 	}
 	entry := m.Text
 	var open *Decision
-	for i := range v.Decisions {
-		if d := &v.Decisions[i]; t.Status == TaskWaiting && d.ID == t.DecisionID && d.Status == DecisionOpen {
-			open = d
-		}
+	if d := decision(v, t.DecisionID); t.Status == TaskWaiting && d != nil && d.Status == DecisionOpen {
+		open = d
 	}
 	if open != nil && open.Kind == DecisionQuestion {
 		entry = "Answer to a reviewer's question (" + text.Clip(open.Context, 300) + "): " + m.Text
@@ -237,10 +235,8 @@ func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID strin
 			counted.Asked = m.ID
 			t.Verdicts = append(t.Verdicts, counted)
 		case verdict.Outcome != VerdictPass && t.Status == TaskWaiting:
-			for i := range v.Decisions {
-				if d := &v.Decisions[i]; d.ID == t.DecisionID && d.Status == DecisionOpen && d.Approves() {
-					d.Context += fmt.Sprintf("\n\nAsked directly, %s did not pass it: %s", m.To, verdict.Summary)
-				}
+			if d := decision(v, t.DecisionID); d != nil && d.Status == DecisionOpen && d.Approves() {
+				d.Context += fmt.Sprintf("\n\nAsked directly, %s did not pass it: %s", m.To, verdict.Summary)
 			}
 		}
 		t.UpdatedAt = now

@@ -28,11 +28,9 @@ func (lp *Loop) answerMessage(ctx context.Context, snap core.Snapshot) (bool, er
 	if !ok {
 		return false, nil
 	}
-	var role core.Role
-	for _, r := range t.Roles {
-		if r.Name == m.To {
-			role = r
-		}
+	role, ok := t.Role(m.To)
+	if !ok {
+		return true, lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, nil, m.To+" is not on this task's team")
 	}
 	if wait, _ := lp.usageWait(ctx, role); !wait.IsZero() {
 		return false, nil

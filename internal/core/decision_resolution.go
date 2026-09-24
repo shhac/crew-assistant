@@ -42,34 +42,31 @@ func (s *Service) DismissDecision(ctx context.Context, id, reason string) (Decis
 func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, reason string) (Decision, error) {
 	var out Decision
 	err := s.store.update(ctx, func(v *Snapshot) error {
-		for i := range v.Decisions {
-			d := &v.Decisions[i]
-			if d.ID != id {
-				continue
-			}
-			if d.Status != DecisionOpen {
-				return fmt.Errorf("decision already closed: %w", ErrConflict)
-			}
-			if disposition == DispositionChoice && !slices.Contains(d.Choices, answer) {
-				return fmt.Errorf("%q is not one of this decision's choices: %w", answer, ErrConflict)
-			}
-			now := s.now().UTC()
-			d.ResolvedAt = &now
-			d.Disposition = disposition
-			if disposition == DispositionDismissed {
-				d.Status = DecisionDismissed
-				d.ResolutionReason = reason
-				d.Answer = ""
-				record(v, now, d.ProjectID, "decision.dismissed", d.Title+": "+reason)
-			} else {
-				d.Status = DecisionResolved
-				d.Answer = answer
-				record(v, now, d.ProjectID, "decision.resolved", d.Title+": "+answer)
-			}
-			out = *d
-			return nil
+		d := decision(v, id)
+		if d == nil {
+			return ErrNotFound
 		}
-		return ErrNotFound
+		if d.Status != DecisionOpen {
+			return fmt.Errorf("decision already closed: %w", ErrConflict)
+		}
+		if disposition == DispositionChoice && !slices.Contains(d.Choices, answer) {
+			return fmt.Errorf("%q is not one of this decision's choices: %w", answer, ErrConflict)
+		}
+		now := s.now().UTC()
+		d.ResolvedAt = &now
+		d.Disposition = disposition
+		if disposition == DispositionDismissed {
+			d.Status = DecisionDismissed
+			d.ResolutionReason = reason
+			d.Answer = ""
+			record(v, now, d.ProjectID, "decision.dismissed", d.Title+": "+reason)
+		} else {
+			d.Status = DecisionResolved
+			d.Answer = answer
+			record(v, now, d.ProjectID, "decision.resolved", d.Title+": "+answer)
+		}
+		out = *d
+		return nil
 	})
 	return out, err
 }

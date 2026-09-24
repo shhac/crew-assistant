@@ -60,6 +60,16 @@ func (t Task) RolesOf(kind string) []Role {
 	return out
 }
 
+// Role is the task's team member with this name.
+func (t Task) Role(name string) (Role, bool) {
+	for _, r := range t.Roles {
+		if r.Name == name {
+			return r, true
+		}
+	}
+	return Role{}, false
+}
+
 // Checkers judge each revision in this order: every reviewer, then QA.
 func (t Task) Checkers() []Role {
 	return append(t.RolesOf(RoleReviewer), t.RolesOf(RoleQA)...)
@@ -125,10 +135,8 @@ func lastCheck(t Task) string {
 // whoever asked it; a failure with the step that failed.
 func waitingStage(v *Snapshot, t Task) string {
 	var kind string
-	for _, d := range v.Decisions {
-		if d.ID == t.DecisionID {
-			kind = d.Kind
-		}
+	if d := decision(v, t.DecisionID); d != nil {
+		kind = d.Kind
 	}
 	switch kind {
 	case DecisionDelivery, DecisionUpdate:
@@ -143,7 +151,10 @@ func waitingStage(v *Snapshot, t Task) string {
 	case DecisionQuestion:
 		if n := len(t.Revisions); n > 0 {
 			for _, verdict := range t.Verdicts {
-				if verdict.Revision == t.Revisions[n-1].N && verdict.Outcome == VerdictQuestion && roleKind(t, verdict.Role) == RoleQA {
+				if verdict.Revision != t.Revisions[n-1].N || verdict.Outcome != VerdictQuestion {
+					continue
+				}
+				if r, ok := t.Role(verdict.Role); ok && r.Kind == RoleQA {
 					return StageQA
 				}
 			}
@@ -151,13 +162,4 @@ func waitingStage(v *Snapshot, t Task) string {
 		return StageReviewing
 	}
 	return lastCheck(t)
-}
-
-func roleKind(t Task, name string) string {
-	for _, r := range t.Roles {
-		if r.Name == name {
-			return r.Kind
-		}
-	}
-	return ""
 }
