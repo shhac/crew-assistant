@@ -82,6 +82,21 @@ describe("the shell", () => {
     expect(screen.getByLabelText("Message Iris")).toBeTruthy();
     expect(screen.queryByText(/^Demo:/)).toBeNull();
   });
+  it("shows the assistant's avatar as the favicon and in the navigation", async () => {
+    const icon = document.createElement("link");
+    icon.rel = "icon";
+    icon.href = "data:,";
+    document.head.append(icon);
+    state.assistant.avatar_svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
+    const url = `data:image/svg+xml,${encodeURIComponent(state.assistant.avatar_svg)}`;
+    render(<App />);
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+    const brand = within(nav).getByRole("link", { name: "Iris" });
+    expect(brand.querySelector("img")?.getAttribute("src")).toBe(url);
+    expect(brand.textContent).toBe("Iris");
+    await waitFor(() => expect(icon.getAttribute("href")).toBe(url));
+    icon.remove();
+  });
   it("sends old addresses to the inbox and says when a project is gone", async () => {
     window.history.replaceState(null, "", "/#/decisions");
     render(<App />);

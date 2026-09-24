@@ -16,7 +16,12 @@ const recommendation = {
   id: "proposal-1",
   name: "Rowan",
   personality: "Calm, direct, and thoughtful.",
-  avatar: { shape: "leaf", background: "#202424", accent: "#aacbbb" },
+  avatar: {
+    background: "#202424",
+    marks: [{ d: "M20 20h88v88z", color: "#aacbbb", stroke_width: 0 }],
+  },
+  avatar_svg:
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><path d="M20 20h88v88z" fill="#aacbbb"/></svg>',
   rationale: "A quiet style to match your preferences.",
 };
 let requests: { path: string; options?: RequestInit }[];
@@ -83,6 +88,22 @@ it("keeps a proposed identity unchanged until the owner applies it", async () =>
       requests.find((r) => r.path.endsWith("/apply"))!.options!.body as string,
     ),
   ).toEqual({ recommendation_id: "proposal-1", accepted: true });
+});
+it("previews the avatar the server drew, and at tab-icon size", async () => {
+  render(
+    <AssistantSetup currentName="Iris" demo={false} onApplied={vi.fn()} />,
+  );
+  await screen.findByRole("heading", { level: 3, name: "Rowan" });
+  const url = `data:image/svg+xml,${encodeURIComponent(recommendation.avatar_svg)}`;
+  const images = [...document.querySelectorAll(".setup-proposal img")];
+  expect(
+    images.map((i) => [i.getAttribute("src"), i.getAttribute("width")]),
+  ).toEqual([
+    [url, "96"],
+    [url, "16"],
+  ]);
+  expect(screen.getByText("As the tab icon")).toBeTruthy();
+  expect(document.querySelector(".setup-proposal svg")).toBeNull();
 });
 it("restores a previously applied recommendation without offering to apply it again", async () => {
   response = () => ({

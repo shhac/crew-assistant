@@ -1,5 +1,15 @@
 import type { Connection } from "./ConnectionsSettings";
-import type { AvatarSpec } from "./Identity";
+export interface AvatarMark {
+  d: string;
+  color: string;
+  stroke_width: number;
+}
+export interface AvatarSpec {
+  shape?: string;
+  background?: string;
+  accent?: string;
+  marks?: AvatarMark[];
+}
 export interface Brief {
   version: number;
   goal: string;
@@ -269,6 +279,7 @@ export interface State {
     personality: string;
     theme?: string;
     avatar?: AvatarSpec;
+    avatar_svg?: string;
   };
   projects: Project[];
   tasks: Task[];

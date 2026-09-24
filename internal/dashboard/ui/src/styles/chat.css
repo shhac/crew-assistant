@@ -14,6 +14,10 @@
   border-bottom: 1px solid var(--line);
 }
 
+.chat-head .avatar {
+  margin-right: 4px;
+}
+
 .chat-head h2 {
   flex: 1;
   font-size: 14px;
@@ -37,6 +41,7 @@
 
 .message-by {
   display: flex;
+  align-items: center;
   gap: 8px;
   color: var(--muted);
   font-size: 12px;

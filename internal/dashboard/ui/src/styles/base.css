@@ -81,6 +81,11 @@ kbd,
   display: none !important;
 }
 
+.avatar {
+  display: block;
+  flex-shrink: 0;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

@@ -142,27 +142,17 @@
   gap: 12px;
 }
 
-.identity-avatar {
-  display: inline-flex;
-  flex-shrink: 0;
+.setup-proposal-name {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.setup-favicon {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: var(--avatar-bg);
-  color: var(--avatar-accent);
-}
-
-.identity-avatar svg {
-  width: 84%;
-  height: 84%;
-}
-
-.identity-avatar.small {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  gap: 6px;
 }
 
 /* Memory */

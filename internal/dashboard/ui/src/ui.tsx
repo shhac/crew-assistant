@@ -52,6 +52,27 @@ export function Icon({ name, size = 16 }: { name: string; size?: number }) {
   );
 }
 
+/** The address of a drawn avatar, for an img or the favicon. */
+export const avatarURL = (svg: string) =>
+  `data:image/svg+xml,${encodeURIComponent(svg)}`;
+
+/**
+ * A drawn avatar. It is only ever shown as an image, so nothing in the SVG
+ * can run or reach the page.
+ */
+export function Avatar({ svg, size }: { svg?: string; size: number }) {
+  if (!svg) return null;
+  return (
+    <img
+      className="avatar"
+      src={avatarURL(svg)}
+      alt=""
+      width={size}
+      height={size}
+    />
+  );
+}
+
 export function ErrorNotice({ error }: { error: string }) {
   return error ? (
     <div className="error" role="alert">

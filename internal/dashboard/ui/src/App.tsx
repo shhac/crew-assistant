@@ -20,7 +20,7 @@ import {
   setPaused,
   type State,
 } from "./api";
-import { ErrorNotice, useAction } from "./ui";
+import { avatarURL, ErrorNotice, useAction } from "./ui";
 import { useChatPane } from "./chatPane";
 
 export function App() {
@@ -83,6 +83,12 @@ export function App() {
   useEffect(() => {
     if (state) applyAppearance(state.assistant.theme);
   }, [state?.assistant.theme]);
+  const avatar = state?.assistant.avatar_svg;
+  useEffect(() => {
+    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!avatar || !icon) return;
+    icon.href = avatarURL(avatar);
+  }, [avatar]);
   const needs = state
     ? pendingDecisions(state.decisions).length + state.pending_operations.length
     : 0;

@@ -180,6 +180,32 @@ describe("conversation", () => {
     expect(log.querySelector("details")).toBeNull();
     expect(log.querySelectorAll("article.message")).toHaveLength(1);
   });
+  it("puts the assistant's avatar in the header and its bylines only", () => {
+    const state = initial();
+    state.assistant.avatar_svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
+    state.messages = [
+      {
+        id: "w1",
+        role: "user",
+        origin: "wake",
+        content: "[Wake-up from the daemon] wake-1 fired",
+      },
+      { id: "u1", role: "user", content: "Hello" },
+      { id: "a1", role: "assistant", content: "Hi" },
+    ];
+    render(panel(state));
+    const url = `data:image/svg+xml,${encodeURIComponent(state.assistant.avatar_svg)}`;
+    const head = screen.getByRole("heading", { name: "Iris" }).parentElement!;
+    expect(head.querySelector("img")?.getAttribute("src")).toBe(url);
+    expect(head.querySelector("img")?.getAttribute("width")).toBe("20");
+    const log = screen.getByRole("log");
+    const [yours, theirs] = log.querySelectorAll("article.message");
+    expect(yours.querySelector("img")).toBeNull();
+    expect(theirs.querySelector(".message-by img")?.getAttribute("src")).toBe(
+      url,
+    );
+    expect(log.querySelector("div.wake img")).toBeNull();
+  });
   it("does not submit Shift+Enter or an IME composition", async () => {
     const server = backend();
     render(panel());

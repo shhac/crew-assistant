@@ -1,6 +1,6 @@
 import { href, projectHref, type Route } from "./router";
 import { projectGroup, projectTasks } from "./stages";
-import { ErrorNotice, Icon } from "./ui";
+import { Avatar, ErrorNotice, Icon } from "./ui";
 import type { State } from "./api";
 
 const dotTone = {
@@ -41,9 +41,13 @@ export function Sidebar({
   return (
     <nav className="app-nav" aria-label="Main">
       <a className="brand" href={href({ page: "inbox" })}>
-        <span className="brand-mark" aria-hidden="true">
-          C
-        </span>
+        {state.assistant.avatar_svg ? (
+          <Avatar svg={state.assistant.avatar_svg} size={26} />
+        ) : (
+          <span className="brand-mark" aria-hidden="true">
+            C
+          </span>
+        )}
         <span>{state.assistant.name || "Assistant"}</span>
       </a>
       <div className="nav-group">
