@@ -12,13 +12,16 @@ import (
 )
 
 // Member is someone the owner keeps on their team across projects: a named
-// implementer, reviewer or QA with an avatar and what it has learned. A
-// project's team copies a member into a role; learnings travel with the
-// member into every task it starts.
+// planner, implementer, reviewer or QA, or several of them, with an avatar
+// and what it has learned. A project's team copies a member into a role;
+// learnings travel with the member into every task it starts.
 type Member struct {
-	ID           string        `json:"id"`
-	Name         string        `json:"name"`
-	Kind         string        `json:"kind"`
+	ID    string   `json:"id"`
+	Name  string   `json:"name"`
+	Kinds []string `json:"kinds"`
+	// LegacyKind is the one kind a member held before members could hold
+	// several; it is read into Kinds and never written again.
+	LegacyKind   string        `json:"kind,omitempty"`
 	Engine       string        `json:"engine"`
 	Model        string        `json:"model,omitempty"`
 	Effort       string        `json:"effort,omitempty"`
@@ -34,8 +37,10 @@ type Member struct {
 }
 
 type MemberInput struct {
-	Name         string         `json:"name"`
-	Kind         string         `json:"kind"`
+	Name  string   `json:"name"`
+	Kinds []string `json:"kinds"`
+	// Kind is the one kind older clients send; it counts as Kinds.
+	Kind         string         `json:"kind,omitempty"`
 	Engine       string         `json:"engine"`
 	Model        string         `json:"model"`
 	Effort       string         `json:"effort"`
@@ -78,13 +83,27 @@ func (s *Service) updateMember(ctx context.Context, id string, fn func(*Member, 
 	return out, err
 }
 
+// memberKinds are the roles a member can hold, in the order a team works.
+var memberKinds = []string{RolePlanner, RoleImplementer, RoleReviewer, RoleQA}
+
+// kinds is what the member is asked to hold, taking an older client's single
+// kind as the list.
+func (in MemberInput) kinds() []string {
+	if len(in.Kinds) == 0 && in.Kind != "" {
+		return []string{in.Kind}
+	}
+	return in.Kinds
+}
+
+// Holds reports whether the member holds a kind of role.
+func (m Member) Holds(kind string) bool { return slices.Contains(m.Kinds, kind) }
+
 func (in MemberInput) validate(v *Snapshot, id string) error {
 	name := strings.TrimSpace(in.Name)
 	if name == "" || len(name) > 40 {
 		return errors.New("a member needs a name of 1 to 40 characters")
 	}
-	switch strings.ToLower(name) {
-	case RoleImplementer, RoleReviewer, RoleQA:
+	if slices.Contains(memberKinds, strings.ToLower(name)) {
 		return fmt.Errorf("%q names a kind of role; give the member a name of its own", name)
 	}
 	for _, m := range v.Members {
@@ -92,10 +111,17 @@ func (in MemberInput) validate(v *Snapshot, id string) error {
 			return fmt.Errorf("there is already a member called %s", m.Name)
 		}
 	}
-	switch in.Kind {
-	case RoleImplementer, RoleReviewer, RoleQA:
-	default:
-		return errors.New("kind must be implementer, reviewer or qa")
+	kinds := in.kinds()
+	if len(kinds) == 0 {
+		return errors.New("a member needs at least one role")
+	}
+	for i, kind := range kinds {
+		if !slices.Contains(memberKinds, kind) {
+			return fmt.Errorf("%q is not a role; roles are %s", kind, strings.Join(memberKinds, ", "))
+		}
+		if slices.Contains(kinds[:i], kind) {
+			return fmt.Errorf("%s is listed twice", kind)
+		}
 	}
 	if in.Engine != "codex" && in.Engine != "claude" {
 		return errors.New("engine must be codex or claude")
@@ -131,7 +157,7 @@ func (s *Service) SaveMember(ctx context.Context, id string, in MemberInput) (Me
 			v.Members = append(v.Members, Member{ID: uid(), Avatar: config.DefaultAvatar(in.Name), Learnings: []Learning{}, CreatedAt: s.now().UTC()})
 			m = &v.Members[len(v.Members)-1]
 		}
-		m.Name, m.Kind, m.Engine = strings.TrimSpace(in.Name), in.Kind, in.Engine
+		m.Name, m.Kinds, m.Engine = strings.TrimSpace(in.Name), in.kinds(), in.Engine
 		m.Model, m.Effort, m.Instructions = strings.TrimSpace(in.Model), strings.TrimSpace(in.Effort), strings.TrimSpace(in.Instructions)
 		// A drawn picture is changed only by drawing again.
 		if in.Avatar != nil {
@@ -166,4 +192,34 @@ func (s *Service) SetMemberPicture(ctx context.Context, id, image, look string) 
 		return nil
 	})
 	return err
+}
+
+// foldLegacyKinds reads the single kind older state kept, for members and for
+// every seat on a team, into the kinds they hold now.
+func foldLegacyKinds(v *Snapshot) {
+	fold := func(kinds *[]string, legacy *string) {
+		if len(*kinds) == 0 && *legacy != "" {
+			*kinds = []string{*legacy}
+		}
+		*legacy = ""
+	}
+	seats := func(roles []Role) {
+		for i := range roles {
+			fold(&roles[i].Kinds, &roles[i].LegacyKind)
+		}
+	}
+	for i := range v.Members {
+		fold(&v.Members[i].Kinds, &v.Members[i].LegacyKind)
+	}
+	for i := range v.Projects {
+		if v.Projects[i].Playbook != nil {
+			seats(v.Projects[i].Playbook.Roles)
+		}
+	}
+	for i := range v.Tasks {
+		seats(v.Tasks[i].Roles)
+		if v.Tasks[i].Playbook != nil {
+			seats(v.Tasks[i].Playbook.Roles)
+		}
+	}
 }

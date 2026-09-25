@@ -30,7 +30,7 @@ func TestPlaybookValidation(t *testing.T) {
 	cases := map[string]func(*Playbook){
 		"no reviewer": func(p *Playbook) { p.Roles = p.Roles[:1] },
 		"two writers": func(p *Playbook) {
-			p.Roles = append(p.Roles, Role{Name: "Second", Kind: RoleImplementer, Engine: "codex"})
+			p.Roles = append(p.Roles, Role{Name: "Second", Kinds: []string{RoleImplementer}, Engine: "codex"})
 		},
 		"unknown engine":     func(p *Playbook) { p.Roles[1].Engine = "other" },
 		"duplicate names":    func(p *Playbook) { p.Roles[1].Name = p.Roles[0].Name },

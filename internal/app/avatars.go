@@ -16,9 +16,19 @@ import (
 )
 
 var kindWords = map[string]string{
+	core.RolePlanner:     "the planner, who works out what each task needs",
 	core.RoleImplementer: "the implementer, who writes the work",
 	core.RoleReviewer:    "a reviewer, who checks the work carefully",
 	core.RoleQA:          "QA, who runs the checks",
+}
+
+// roleWords says what a member does, in the roles it holds.
+func roleWords(kinds []string) string {
+	var words []string
+	for _, kind := range kinds {
+		words = append(words, kindWords[kind])
+	}
+	return strings.Join(words, " and ")
 }
 
 // CodexPainter draws with Codex, as the config says at the time of drawing.
@@ -152,7 +162,7 @@ func (a *App) DrawMember(ctx context.Context, id, look string) error {
 	if err != nil {
 		return err
 	}
-	character := m.Name + ", " + kindWords[m.Kind] + " on a small software team."
+	character := m.Name + ", " + roleWords(m.Kinds) + " on a small software team."
 	if m.Instructions != "" {
 		character += " How they work: " + text.Clip(m.Instructions, 200)
 	}

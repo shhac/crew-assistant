@@ -12,7 +12,7 @@ import (
 
 func TestAMemberHasANameOfItsOwnAndAFace(t *testing.T) {
 	s, _ := fixture(t)
-	ada, err := s.SaveMember(testContext, "", MemberInput{Name: " Ada ", Kind: RoleImplementer, Engine: "claude", Model: "opus"})
+	ada, err := s.SaveMember(testContext, "", MemberInput{Name: " Ada ", Kinds: []string{RoleImplementer}, Engine: "claude", Model: "opus"})
 	if err != nil || ada.Name != "Ada" || ada.Avatar.Validate() != nil || ada.Learnings == nil {
 		t.Fatalf("member %+v %v", ada, err)
 	}
@@ -20,23 +20,23 @@ func TestAMemberHasANameOfItsOwnAndAFace(t *testing.T) {
 		t.Fatal("a new member's face should come from its name")
 	}
 	for _, in := range []MemberInput{
-		{Name: "ADA", Kind: RoleReviewer, Engine: "codex"},
-		{Name: "Reviewer", Kind: RoleReviewer, Engine: "codex"},
+		{Name: "ADA", Kinds: []string{RoleReviewer}, Engine: "codex"},
+		{Name: "Reviewer", Kinds: []string{RoleReviewer}, Engine: "codex"},
 		{Name: "Rune", Kind: "manager", Engine: "codex"},
-		{Name: "Rune", Kind: RoleReviewer, Engine: "gpt"},
-		{Name: "", Kind: RoleReviewer, Engine: "codex"},
-		{Name: "Rune", Kind: RoleReviewer, Engine: "codex", Avatar: &config.Avatar{Shape: "orb", Background: "#000000", Accent: "javascript:"}},
+		{Name: "Rune", Kinds: []string{RoleReviewer}, Engine: "gpt"},
+		{Name: "", Kinds: []string{RoleReviewer}, Engine: "codex"},
+		{Name: "Rune", Kinds: []string{RoleReviewer}, Engine: "codex", Avatar: &config.Avatar{Shape: "orb", Background: "#000000", Accent: "javascript:"}},
 	} {
 		if _, err := s.SaveMember(testContext, "", in); err == nil {
 			t.Errorf("accepted %+v", in)
 		}
 	}
 	drawn := config.Avatar{Background: "#101820", Accent: "#ffffff", Marks: []config.Mark{{D: "M10 10\nL118 118", Color: "#ffffff", StrokeWidth: 8}}}
-	ada, err = s.SaveMember(testContext, ada.ID, MemberInput{Name: "Ada", Kind: RoleImplementer, Engine: "claude", Instructions: "Small commits.", Avatar: &drawn})
+	ada, err = s.SaveMember(testContext, ada.ID, MemberInput{Name: "Ada", Kinds: []string{RoleImplementer}, Engine: "claude", Instructions: "Small commits.", Avatar: &drawn})
 	if err != nil || ada.Instructions != "Small commits." || ada.Avatar.Marks[0].D != "M10 10 L118 118" {
 		t.Fatalf("update %+v %v", ada, err)
 	}
-	if _, err = s.SaveMember(testContext, "missing", MemberInput{Name: "Zed", Kind: RoleQA, Engine: "codex"}); !errors.Is(err, ErrNotFound) {
+	if _, err = s.SaveMember(testContext, "missing", MemberInput{Name: "Zed", Kinds: []string{RoleQA}, Engine: "codex"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("updating a member that does not exist: %v", err)
 	}
 	snap, _ := s.Snapshot(testContext)

@@ -396,7 +396,7 @@ func TestOnlyAnImplementerWithAConversationCanBeToldToCompactOrStartAfresh(t *te
 	}
 	if _, err := s.UpdateTask(ctx, task.ID, func(t *Task, _ *Project) (string, error) {
 		t.Status = TaskReviewing
-		t.Roles = []Role{{Name: "Writer", Kind: RoleImplementer, Engine: "claude"}}
+		t.Roles = []Role{{Name: "Writer", Kinds: []string{RoleImplementer}, Engine: "claude"}}
 		t.WriterSession = []byte(`{"engine":"claude","id":"writer"}`)
 		return "", nil
 	}); err != nil {

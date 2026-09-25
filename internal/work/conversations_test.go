@@ -16,7 +16,7 @@ func askImplementer(t *testing.T, a *Loop, task core.Task, next string) {
 	if next == core.WriterCompact {
 		if _, err := a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			for i := range t.Roles {
-				if t.Roles[i].Kind == core.RoleImplementer {
+				if t.Roles[i].Holds(core.RoleImplementer) {
 					t.Roles[i].Engine = "codex"
 				}
 			}

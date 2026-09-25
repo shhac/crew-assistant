@@ -75,6 +75,9 @@ type codeRunner struct {
 }
 
 func (r *codeRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
+	if strings.Contains(spec.Prompt, "Plan this task before anything is written") {
+		return r.scriptedRunner.Run(ctx, spec)
+	}
 	checking := strings.Contains(spec.Prompt, "Run exactly this") || strings.Contains(spec.Prompt, "Do not modify anything")
 	if !checking {
 		r.mu.Lock()

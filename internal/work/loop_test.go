@@ -28,7 +28,12 @@ type scriptedRunner struct {
 	onWriter func(dir string)
 	// writerText replaces the writer's reply when set.
 	writerText string
+	// plans answer planner turns in order; after them, a plan with nothing
+	// unclear and nothing to wait for.
+	plans []string
 }
+
+const plainPlan = `{"summary": "Do the task as asked.", "exists": [], "changes": ["the change"], "out_of_scope": [], "questions": [], "depends_on": []}`
 
 func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, error) {
 	r.mu.Lock()
@@ -40,6 +45,13 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 		if err != nil {
 			return roles.Result{}, err
 		}
+	}
+	if !spec.Write && strings.Contains(spec.Prompt, "Plan this task before anything is written") {
+		reply := plainPlan
+		if len(r.plans) > 0 {
+			reply, r.plans = r.plans[0], r.plans[1:]
+		}
+		return roles.Result{Text: reply}, nil
 	}
 	if spec.Write {
 		r.writes++

@@ -11,7 +11,7 @@ import (
 func TestLearningsAreKeptWithinABoundAndCanBeForgotten(t *testing.T) {
 	s, _ := fixture(t)
 	p := newProject(t, s)
-	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Rune", Kind: RoleReviewer, Engine: "codex"})
+	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Rune", Kinds: []string{RoleReviewer}, Engine: "codex"})
 	add := func(when, text, projectID string) (Member, error) {
 		return s.AddLearning(testContext, m.ID, LearnedByOwner, LearningInput{When: when, Text: text, ProjectID: projectID})
 	}
@@ -45,7 +45,7 @@ func TestLearningsAreKeptWithinABoundAndCanBeForgotten(t *testing.T) {
 func TestAMembersOwnLearningsMakeRoomButNeverPushOutTheOwners(t *testing.T) {
 	s, _ := fixture(t)
 	p := newProject(t, s)
-	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kind: RoleImplementer, Engine: "claude"})
+	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kinds: []string{RoleImplementer}, Engine: "claude"})
 	learn := func(when string) error {
 		_, err := s.RecordLearning(testContext, m.ID, "task", LearningInput{When: when, Text: "Do the thing.", ProjectID: p.ID}, []string{"/secret/repo"})
 		return err
@@ -95,7 +95,7 @@ func TestAMembersOwnLearningsMakeRoomButNeverPushOutTheOwners(t *testing.T) {
 
 func TestAMemberFullOfTheOwnersLearningsKeepsThemAll(t *testing.T) {
 	s, _ := fixture(t)
-	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kind: RoleImplementer, Engine: "claude"})
+	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kinds: []string{RoleImplementer}, Engine: "claude"})
 	for i := 0; i < maxLearnings; i++ {
 		s.AddLearning(testContext, m.ID, LearnedByOwner, LearningInput{Text: fmt.Sprint("Owner ", i)})
 	}
@@ -108,7 +108,7 @@ func TestAMemberFullOfTheOwnersLearningsKeepsThemAll(t *testing.T) {
 // one could forge another learning or an instruction.
 func TestALearningsWhenIsOneLine(t *testing.T) {
 	s, _ := fixture(t)
-	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kind: RoleImplementer, Engine: "claude"})
+	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kinds: []string{RoleImplementer}, Engine: "claude"})
 	for _, when := range []string{"a\nb", "a\rb"} {
 		if _, err := s.AddLearning(testContext, m.ID, LearnedByOwner, LearningInput{When: when, Text: "Do it."}); err == nil || !strings.Contains(err.Error(), "one line") {
 			t.Errorf("AddLearning kept when %q: %v", when, err)
@@ -121,7 +121,7 @@ func TestALearningsWhenIsOneLine(t *testing.T) {
 
 func TestALearningWithoutAWhenIsHeadedByItsOpeningWords(t *testing.T) {
 	s, _ := fixture(t)
-	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kind: RoleImplementer, Engine: "claude"})
+	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kinds: []string{RoleImplementer}, Engine: "claude"})
 	text := "Run the whole suite. Not just the package you changed.\nMore detail."
 	m, err := s.AddLearning(testContext, m.ID, LearnedByOwner, LearningInput{Text: text})
 	if err != nil || m.Learnings[0].When != "Run the whole suite" {
@@ -166,7 +166,7 @@ func TestAFinishedTaskLetsGoOfWhatItsRolesWereTold(t *testing.T) {
 	for _, status := range []string{TaskStopped, TaskLanded} {
 		task, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "A draft " + status})
 		got, err := s.UpdateTask(testContext, task.ID, func(t *Task, _ *Project) (string, error) {
-			t.Roles = []Role{{Name: "Ada", Kind: RoleImplementer, Member: "m", Learnings: []Learning{{Text: "x"}}}}
+			t.Roles = []Role{{Name: "Ada", Kinds: []string{RoleImplementer}, Member: "m", Learnings: []Learning{{Text: "x"}}}}
 			t.Status = status
 			return "", nil
 		})

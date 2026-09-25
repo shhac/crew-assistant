@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 func briefText(p core.Project, t core.Task) string {
@@ -41,6 +42,7 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string) string {
 	code := isCode(p, t)
 	var b strings.Builder
 	b.WriteString(briefText(p, t))
+	b.WriteString(planText(t))
 	last := len(t.Revisions)
 	switch {
 	case caughtUp != "":
@@ -112,7 +114,7 @@ Reply with only this JSON object:
 
 // checkerPrompt asks a reviewer to judge a revision, or QA to run the check.
 func checkerPrompt(p core.Project, t core.Task, r core.Revision, checker core.Role, playbook *core.Playbook) string {
-	if checker.Kind == core.RoleQA && playbook != nil {
+	if checker.Holds(core.RoleQA) && playbook != nil {
 		var b strings.Builder
 		fmt.Fprintf(&b, "This repository holds a proposed change for: %s\n\nRun exactly this from the repository root, once:\n\n    %s\n\n", t.Objective, playbook.Check)
 		b.WriteString(`Do not change, fix or commit anything; only run the check and read its output.
@@ -124,12 +126,13 @@ Use "question" only if the check cannot run at all for a reason the implementer 
 	if isCode(p, t) {
 		var b strings.Builder
 		b.WriteString(briefText(p, t))
+		b.WriteString(planText(t))
 		fmt.Fprintf(&b, "\nThis repository holds a proposed change for this task: the commits between %s and HEAD (run `git diff %s..HEAD` and read whatever else you need). %s Do not modify anything.\n", t.Base, t.Base, repoInstructions)
 		if playbook != nil && playbook.Check != "" {
 			fmt.Fprintf(&b, "QA runs `%s` separately, so you need not run it or report on it.\n", playbook.Check)
 		}
 		b.WriteString(`
-Review it as a careful senior engineer, against the task and every criterion above: correctness first, then tests, then design and fit with the repository's conventions. Use:
+Review it as a careful senior engineer, against the task and every criterion above: correctness first, then tests, then design and fit with the repository's conventions. Where there is a plan, say if the change goes beyond it or the brief without reason. Use:
 - "pass" only when you would merge it as it is;
 - "revise" when something should change, with one finding per issue, naming the criterion or file it concerns;
 - "question" only when the task is genuinely ambiguous and you cannot judge without the owner.`)
@@ -142,6 +145,7 @@ Review it as a careful senior engineer, against the task and every criterion abo
 func reviewerPrompt(p core.Project, t core.Task, r core.Revision) string {
 	var b strings.Builder
 	b.WriteString(briefText(p, t))
+	b.WriteString(planText(t))
 	fmt.Fprintf(&b, "\nThe current directory holds draft %d: %s.\nRead every file. Do not modify anything.\n", r.N, strings.Join(r.Files, ", "))
 	b.WriteString(`
 Judge the draft strictly against the goal, audience, constraints and every criterion above. Use:
@@ -191,4 +195,57 @@ func parseVerdict(text string) (core.Verdict, error) {
 		return core.Verdict{}, errors.New("the review asked for changes without naming any")
 	}
 	return core.Verdict{Outcome: v.Outcome, Summary: strings.TrimSpace(v.Summary), Findings: v.Findings, Question: strings.TrimSpace(v.Question)}, nil
+}
+
+// planText is the plan a planner left on the task, as the implementer and
+// the reviewers read it.
+func planText(t core.Task) string {
+	if t.Plan == nil {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nThe plan %s worked out before this was written:\n%s\n", t.Plan.Role, t.Plan.Summary)
+	section := func(title string, items []string) {
+		if len(items) == 0 {
+			return
+		}
+		b.WriteString(title + ":\n")
+		for _, item := range items {
+			fmt.Fprintf(&b, "- %s\n", item)
+		}
+	}
+	section("What already exists", t.Plan.Exists)
+	section("What will change", t.Plan.Changes)
+	section("Out of scope", t.Plan.OutOfScope)
+	return b.String()
+}
+
+// plannerPrompt asks the planner to work out what a task needs before
+// anything is written: it reads, and changes nothing.
+func plannerPrompt(p core.Project, t core.Task, others []core.Task) string {
+	var b strings.Builder
+	b.WriteString(briefText(p, t))
+	if isCode(p, t) {
+		b.WriteString("\nYou are in a clone of the repository, on the branch this task will be written on. " + repoInstructions + "\n")
+	} else {
+		b.WriteString("\nThe current directory is where this task's draft will be written.\n")
+	}
+	b.WriteString(`
+Plan this task before anything is written. Read what you need to, and change nothing. Work out:
+- what already exists that the task can use or that it describes as missing, naming files and functions;
+- what will change, briefly;
+- what is out of scope, so the implementer does not drift;
+- what is unclear enough that the owner must answer before work starts. Ask only what you cannot reasonably decide; the implementer uses judgment for the rest;
+- which of the project's other unfinished tasks, below, this one cannot start before, because it builds on what they will change.
+`)
+	if len(others) > 0 {
+		b.WriteString("\nThe project's other unfinished tasks:\n")
+		for _, other := range others {
+			fmt.Fprintf(&b, "- %s (%s): %s\n", other.ID, other.Status, text.Clip(other.Objective, 200))
+		}
+	}
+	b.WriteString(`
+Reply with only this JSON object:
+{"summary": "the plan in a few sentences", "exists": ["..."], "changes": ["..."], "out_of_scope": ["..."], "questions": ["only what the owner must answer"], "depends_on": ["ids of tasks above this one must wait for"]}`)
+	return b.String()
 }

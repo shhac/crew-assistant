@@ -15,7 +15,7 @@ func TestTheAssistantCanStaffATeamAndRecordALearning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rn, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kind: core.RoleReviewer, Engine: "codex"})
+	rn, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "codex"})
 	call := func(name string, in map[string]any) (any, error) {
 		raw, _ := json.Marshal(in)
 		return a.Execute(ctx, name, raw)

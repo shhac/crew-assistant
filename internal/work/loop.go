@@ -138,6 +138,8 @@ func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 		return true, err
 	}
 	switch t.Status {
+	case core.TaskPlanning:
+		return true, lp.planTask(ctx, p, t, m)
 	case core.TaskWriting:
 		return true, lp.write(ctx, p, t, m)
 	case core.TaskReviewing:
@@ -424,7 +426,7 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 	defer cleanup()
 	playbook := taskPlaybook(p, t)
 	base := checkerPrompt(p, t, r, checker, playbook) + note + learnedGuide(checker, true)
-	spec, cleanupLearnings, err := lp.roleSpec(t, checker, dir, checker.Kind == core.RoleQA, m, base)
+	spec, cleanupLearnings, err := lp.roleSpec(t, checker, dir, checker.Holds(core.RoleQA), m, base)
 	if err != nil {
 		return core.Verdict{}, err
 	}
@@ -658,8 +660,16 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 			t.AddDirection(&d, answer)
 		}
 		t.NextRound()
-		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", "Revising with your answer"
-		return fmt.Sprintf("Revising %s with your direction", t.Objective), nil
+		status, detail, activity := core.TaskWriting, "Revising with your answer", fmt.Sprintf("Revising %s with your direction", t.Objective)
+		if len(t.Revisions) == 0 {
+			detail, activity = "Starting with your answer", fmt.Sprintf("Starting %s with your answer", t.Objective)
+		}
+		// A planner that failed plans again, with the owner's words to go on.
+		if d.Kind == core.DecisionFailure && t.ResumeStatus == core.TaskPlanning {
+			status, detail, t.ResumeStatus = core.TaskPlanning, "Planning again with your answer", ""
+		}
+		t.Status, t.DecisionID, t.Detail = status, "", detail
+		return activity, nil
 	})
 	return err
 }

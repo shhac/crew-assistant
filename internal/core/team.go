@@ -50,6 +50,10 @@ func (m TeamMessage) Open() bool { return m.Status == MessageWaiting || m.Status
 // NextRound starts another round. max_rounds is where the owner is asked,
 // not a cap on work, so it moves up with the round.
 func (t *Task) NextRound() {
+	// Nothing has been written yet, so the first round has not happened.
+	if len(t.Revisions) == 0 {
+		return
+	}
 	t.Round++
 	t.MaxRounds = max(t.MaxRounds, t.Round)
 }
@@ -107,9 +111,13 @@ func (s *Service) SendTeamMessage(ctx context.Context, projectID, taskID, to, fr
 		if err != nil {
 			return err
 		}
+		kind := role.Working()
+		if kind == "" {
+			return fmt.Errorf("%s only plans, before the work starts; message the implementer instead: %w", role.Name, ErrConflict)
+		}
 		now := s.now().UTC()
-		out = TeamMessage{ID: uid(), To: role.Name, Kind: role.Kind, From: from, Text: message, Status: MessageWaiting, At: now}
-		if role.Kind == RoleImplementer {
+		out = TeamMessage{ID: uid(), To: role.Name, Kind: kind, From: from, Text: message, Status: MessageWaiting, At: now}
+		if kind == RoleImplementer {
 			if err := direct(v, t, &out, now); err != nil {
 				return err
 			}
@@ -134,7 +142,7 @@ func addressee(team []Role, to string) (Role, error) {
 		if strings.EqualFold(r.Name, to) {
 			return r, nil
 		}
-		if strings.EqualFold(r.Kind, to) {
+		if r.Holds(strings.ToLower(to)) {
 			byKind = append(byKind, r)
 		}
 		names = append(names, r.Name)
@@ -189,7 +197,7 @@ func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
 func (t *Task) AddDirection(d *Decision, words string) int {
 	entry := words
 	if d != nil && d.Kind == DecisionQuestion {
-		entry = "Answer to a reviewer's question (" + text.Clip(d.Context, 300) + "): " + words
+		entry = "Answer to a question (" + text.Clip(d.Context, 300) + "): " + words
 	}
 	t.Direction = append(t.Direction, entry)
 	return len(t.Direction) - 1

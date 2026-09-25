@@ -64,19 +64,19 @@ func drawMembers(members []core.Member, store avatars.Store) error {
 
 var (
 	codeTeam = []core.Role{
-		{Name: "Implementer", Kind: core.RoleImplementer, Engine: "claude"},
-		{Name: "Reviewer", Kind: core.RoleReviewer, Engine: "codex"},
-		{Name: "QA", Kind: core.RoleQA, Engine: "claude"},
+		{Name: "Implementer", Kinds: []string{core.RoleImplementer}, Engine: "claude"},
+		{Name: "Reviewer", Kinds: []string{core.RoleReviewer}, Engine: "codex"},
+		{Name: "QA", Kinds: []string{core.RoleQA}, Engine: "claude"},
 	}
 	// The crew-assistant project is staffed by two of the owner's members.
 	crewTeam = []core.Role{
-		{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude", Model: "opus", Member: "demo-ada"},
-		{Name: "Rune", Kind: core.RoleReviewer, Engine: "codex", Member: "demo-rune"},
-		{Name: "QA", Kind: core.RoleQA, Engine: "claude"},
+		{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude", Model: "opus", Member: "demo-ada"},
+		{Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "codex", Member: "demo-rune"},
+		{Name: "QA", Kinds: []string{core.RoleQA}, Engine: "claude"},
 	}
 	writingTeam = []core.Role{
-		{Name: "Writer", Kind: core.RoleImplementer, Engine: "claude"},
-		{Name: "Reviewer", Kind: core.RoleReviewer, Engine: "codex"},
+		{Name: "Writer", Kinds: []string{core.RoleImplementer}, Engine: "claude"},
+		{Name: "Reviewer", Kinds: []string{core.RoleReviewer}, Engine: "codex"},
 	}
 )
 
@@ -201,13 +201,13 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 			{ID: "demo-m4", Role: "assistant", Content: "`make check` passed. It's in your inbox, ready to land on main.", CreatedAt: ago(4 * time.Minute)},
 		},
 		Members: []core.Member{
-			{ID: "demo-ada", Name: "Ada", Kind: core.RoleImplementer, Engine: "claude", Model: "opus", Instructions: "Prefer small, reviewable commits.", CreatedAt: ago(20 * 24 * time.Hour),
+			{ID: "demo-ada", Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude", Model: "opus", Instructions: "Prefer small, reviewable commits.", CreatedAt: ago(20 * 24 * time.Hour),
 				Avatar: config.Avatar{Look: "Short violet bob, determined bright eyes, small round glasses, on yellow.", Background: "#1d1b2e", Accent: "#c3b1e1", Marks: []config.Mark{{D: "M64 22 L100 104 H80 L72 84 H56 L48 104 H28 Z", Color: "#c3b1e1"}, {D: "M60 70 H68 L64 58 Z", Color: "#1d1b2e"}}},
 				Learnings: []core.Learning{
 					{ID: "demo-l1", When: "Finishing a change", Text: "Run the whole test suite before finishing, not only the package you changed. A change in one package often breaks a test in another that imports it.", Source: core.LearnedByOwner, ProjectID: crew.ID, At: ago(9 * 24 * time.Hour)},
 					{ID: "demo-l2", When: "Writing text people will read", Text: "Keep copy plain and specific. Say what happens, in sentence case, and cut any line the layout already makes obvious; filler gets rewritten.", Source: core.LearnedByMember, ProjectID: crew.ID, At: ago(2 * 24 * time.Hour)},
 				}},
-			{ID: "demo-rune", Name: "Rune", Kind: core.RoleReviewer, Engine: "codex", Instructions: "Read the tests before the code.", CreatedAt: ago(20 * 24 * time.Hour),
+			{ID: "demo-rune", Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "codex", Instructions: "Read the tests before the code.", CreatedAt: ago(20 * 24 * time.Hour),
 				Avatar: config.Avatar{Look: "Messy sky-blue hair with a cowlick, calm thoughtful eyes, a pencil behind one ear, on deep teal.", Background: "#10202b", Accent: "#8ecae6", Marks: []config.Mark{{D: "M40 30 H80 A22 22 0 0 1 80 74 H52 L88 104", Color: "#8ecae6", StrokeWidth: 12}, {D: "M40 30 V104", Color: "#8ecae6", StrokeWidth: 12}}},
 				Learnings: []core.Learning{
 					{ID: "demo-l3", When: "Reviewing error handling", Text: "Ask for a test of the failure path, not only the happy one: for example, what a save does when the disk is full.", Source: core.LearnedByMember, ProjectID: crew.ID, At: ago(5 * 24 * time.Hour)},

@@ -47,7 +47,7 @@ func TestCodexDrawsAMemberInTheBackground(t *testing.T) {
 	painter := &fakePainter{}
 	a.Painter = painter
 	ctx := context.Background()
-	m, err := a.CreateMember(ctx, core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude", Instructions: "Small commits."})
+	m, err := a.CreateMember(ctx, core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude", Instructions: "Small commits."})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestCodexDrawsAMemberInTheBackground(t *testing.T) {
 		t.Fatalf("a redraw should keep the new look and picture: %+v", snap.Members[0].Avatar)
 	}
 	// Saving the member's details keeps the picture.
-	if _, err := a.Core.SaveMember(ctx, m.ID, core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "codex", Avatar: &snap.Members[0].Avatar}); err != nil {
+	if _, err := a.Core.SaveMember(ctx, m.ID, core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "codex", Avatar: &snap.Members[0].Avatar}); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := a.Snapshot(ctx)
@@ -86,7 +86,7 @@ func TestADrawingThatFailsSaysSoAndOneAtATimeIsDrawn(t *testing.T) {
 	painter := &fakePainter{fail: errors.New("no image tool"), block: make(chan struct{})}
 	a.Painter = painter
 	ctx := context.Background()
-	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kind: core.RoleReviewer, Engine: "codex"})
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "codex"})
 	if err := a.DrawMember(ctx, m.ID, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestAPainterThatCannotDrawNowIsNotAsked(t *testing.T) {
 	painter := &gatedPainter{notNow: errors.New("Waiting for Codex usage to reset")}
 	a.Painter = painter
 	ctx := context.Background()
-	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kind: core.RoleReviewer, Engine: "codex"})
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "codex"})
 	if err := a.DrawMember(ctx, m.ID, ""); !errors.Is(err, painter.notNow) {
 		t.Fatalf("the gate's reason should be returned: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestAPainterThatCannotDrawNowIsNotAsked(t *testing.T) {
 func TestWithoutAPainterAMemberIsKeptAndSaysItWasNotDrawn(t *testing.T) {
 	a := testApp(t)
 	ctx := context.Background()
-	m, err := a.CreateMember(ctx, core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	m, err := a.CreateMember(ctx, core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
 	if err != nil || m.ID == "" {
 		t.Fatalf("the member should be kept: %+v %v", m, err)
 	}
@@ -166,7 +166,7 @@ func TestTheLongestLookReachesThePainterWhole(t *testing.T) {
 	painter := &fakePainter{}
 	a.Painter = painter
 	ctx := context.Background()
-	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude", Instructions: strings.Repeat("Small commits. ", 20)})
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude", Instructions: strings.Repeat("Small commits. ", 20)})
 	look := "Violet" + strings.Repeat(" violet", (config.MaxLook-10)/7) + " bob"
 	look += strings.Repeat("!", config.MaxLook-len(look))
 	if err := a.DrawMember(ctx, m.ID, look); err != nil {
@@ -210,7 +210,7 @@ func TestOnlyOneOfManyRequestsToDrawAMemberStartsIt(t *testing.T) {
 	painter := &countingPainter{release: make(chan struct{})}
 	a.Painter = painter
 	ctx := context.Background()
-	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
 	const n = 16
 	start := make(chan struct{})
 	errs := make(chan error, n)
@@ -248,7 +248,7 @@ func TestDrawingsOfDifferentMembersNeverOverlap(t *testing.T) {
 	a.Painter = painter
 	ctx := context.Background()
 	for _, name := range []string{"Ada", "Rune", "Zed"} {
-		m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: name, Kind: core.RoleImplementer, Engine: "claude"})
+		m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: name, Kinds: []string{core.RoleImplementer}, Engine: "claude"})
 		if err := a.DrawMember(ctx, m.ID, ""); err != nil {
 			t.Fatal(err)
 		}
@@ -288,7 +288,7 @@ func TestStoppingTheDaemonStopsADrawing(t *testing.T) {
 	life, stop := context.WithCancel(context.Background())
 	a.setLife(life)
 	ctx := context.Background()
-	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
 	if err := a.DrawMember(ctx, m.ID, "Violet bob"); err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestARestartedAppDoesNotShowADrawingUnderWay(t *testing.T) {
 	painter := &fakePainter{block: make(chan struct{})}
 	a.Painter = painter
 	ctx := context.Background()
-	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
 	if err := a.DrawMember(ctx, m.ID, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestDeletingAMemberWhileItIsDrawnLeavesNothingBusy(t *testing.T) {
 	painter := &fakePainter{block: make(chan struct{})}
 	a.Painter = painter
 	ctx := context.Background()
-	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
 	if err := a.DrawMember(ctx, m.ID, ""); err != nil {
 		t.Fatal(err)
 	}

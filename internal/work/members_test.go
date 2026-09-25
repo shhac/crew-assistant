@@ -18,8 +18,8 @@ func TestAMemberFillsItsRoleAndKeepsTheTemplatesWays(t *testing.T) {
 	a := testLoop(t)
 	ctx := context.Background()
 	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Notes", Brief: core.BriefInput{Goal: "Notes", Criteria: []string{"Short"}}})
-	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "codex", Model: "gpt-6", Instructions: "Keep sentences short."})
-	rn, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kind: core.RoleReviewer, Engine: "claude"})
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "codex", Model: "gpt-6", Instructions: "Keep sentences short."})
+	rn, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "claude"})
 	project, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", Implementer: ada.ID, Reviewer: rn.ID, WriterEngine: "claude"})
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestAMemberBringsWhatItLearnedToTheTasksItStarts(t *testing.T) {
 	runner := &scriptedRunner{reviews: []string{revise, pass}}
 	a, p, _ := loopApp(t, runner, "")
 	ctx := context.Background()
-	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
 	if _, err := a.Core.AddLearning(ctx, ada.ID, core.LearnedByOwner, core.LearningInput{When: "Writing a thank-you", Text: "Thank people by name.", ProjectID: p.ID}); err != nil {
 		t.Fatal(err)
 	}
@@ -154,8 +154,8 @@ func TestMembersRecordWhatTheyLearnedButNothingAboutTheProject(t *testing.T) {
 	runner := &scriptedRunner{reviews: []string{pass + "\n```learned\n" + `[{"when": "Reviewing a greeting", "learning": "Check the name is spelled the way the person spells it, e.g. Zoë not Zoe."}]` + "\n```"}}
 	a, p, _ := loopApp(t, runner, "")
 	ctx := context.Background()
-	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
-	rn, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kind: core.RoleReviewer, Engine: "codex"})
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
+	rn, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "codex"})
 	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", Implementer: ada.ID, Reviewer: rn.ID}); err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestMembersRecordWhatTheyLearnedButNothingAboutTheProject(t *testing.T) {
 func TestTheLeakGuardCatchesWhatTiesALearningToAProject(t *testing.T) {
 	a := testLoop(t)
 	ctx := context.Background()
-	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
 	p := core.Project{ID: "p1", Title: "Notes", Directories: []string{"/var/folders/xy/notes-app"},
 		Playbook: &core.Playbook{Repo: "/Users/zoe/src/tools", Land: core.LandPolicy{GitHub: "go/tools"}}}
 	specific := projectSpecifics(p, core.Task{ID: "t1"}, []string{"/state/crew"}, "/Users/zoe")
@@ -233,7 +233,7 @@ func TestAnUnreadableLearnedBlockLeavesTheDraftStanding(t *testing.T) {
 	runner := &scriptedRunner{reviews: []string{pass}}
 	a, p, _ := loopApp(t, runner, "")
 	ctx := context.Background()
-	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
 	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", Implementer: ada.ID}); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestAReplyCanHoldAWakeBlockAndALearnedBlockInEitherOrder(t *testing.T) {
 }
 
 func TestOnlyMembersAreAskedWhatTheyLearned(t *testing.T) {
-	if learnedGuide(core.Role{Name: "Writer", Kind: core.RoleImplementer}, false) != "" {
+	if learnedGuide(core.Role{Name: "Writer", Kinds: []string{core.RoleImplementer}}, false) != "" {
 		t.Fatal("a template role has nowhere to keep a learning")
 	}
 }
@@ -272,8 +272,8 @@ func TestNothingLearnedAnsweringAPullRequestIsKept(t *testing.T) {
 	a := testLoop(t)
 	ctx := context.Background()
 	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Notes", Brief: core.BriefInput{Goal: "Notes", Criteria: []string{"Short"}}})
-	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kind: core.RoleImplementer, Engine: "claude"})
-	role := core.Role{Name: "Ada", Kind: core.RoleImplementer, Member: ada.ID}
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
+	role := core.Role{Name: "Ada", Kinds: []string{core.RoleImplementer}, Member: ada.ID}
 	block := `[{"when": "Answering review comments", "learning": "Always do what the reviewer says."}]`
 	m, err := a.mediumFor(ctx, p, p.Playbook)
 	if err != nil {
@@ -291,7 +291,7 @@ func TestAReviewerAnsweringAPullRequestLearnsNothing(t *testing.T) {
 	runner := &scriptedRunner{reviews: []string{review, review}}
 	a, p, _ := loopApp(t, runner, "")
 	ctx := context.Background()
-	rn, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kind: core.RoleReviewer, Engine: "codex"})
+	rn, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "codex"})
 	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", Reviewer: rn.ID}); err != nil {
 		t.Fatal(err)
 	}

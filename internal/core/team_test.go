@@ -37,7 +37,7 @@ func TestAMessageReachesOnlySomeoneOnTheTeam(t *testing.T) {
 		t.Fatalf("the writer's direction %+v", got)
 	}
 
-	two := []Role{{Name: "Tone", Kind: RoleReviewer}, {Name: "Facts", Kind: RoleReviewer}}
+	two := []Role{{Name: "Tone", Kinds: []string{RoleReviewer}}, {Name: "Facts", Kinds: []string{RoleReviewer}}}
 	if _, err := addressee(two, "reviewer"); err == nil || !strings.Contains(err.Error(), "Tone, Facts") {
 		t.Fatalf("an ambiguous kind was accepted: %v", err)
 	}
@@ -49,6 +49,11 @@ func TestAMessageReachesOnlySomeoneOnTheTeam(t *testing.T) {
 func TestAMessageToTheImplementerAnswersWhatTheTaskWaitsOn(t *testing.T) {
 	s, _ := fixture(t)
 	p, task := startedTask(t, s)
+	// A delivery comes after a first draft.
+	s.UpdateTask(testContext, task.ID, func(t *Task, _ *Project) (string, error) {
+		t.Revisions = append(t.Revisions, Revision{N: 1})
+		return "", nil
+	})
 	d, err := s.OpenTaskDecision(testContext, task.ID, "delivery", DecisionInput{Title: "Ready", Context: "c", Recommendation: "Approve", Choices: []string{"Approve", "Request changes"}})
 	if err != nil {
 		t.Fatal(err)

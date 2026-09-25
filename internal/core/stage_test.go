@@ -7,7 +7,7 @@ import (
 )
 
 func TestATaskSitsOnTheBoardWhereTheLoopHasGotTo(t *testing.T) {
-	team := []Role{{Name: "Implementer", Kind: RoleImplementer}, {Name: "Reviewer", Kind: RoleReviewer}, {Name: "QA", Kind: RoleQA}}
+	team := []Role{{Name: "Implementer", Kinds: []string{RoleImplementer}}, {Name: "Reviewer", Kinds: []string{RoleReviewer}}, {Name: "QA", Kinds: []string{RoleQA}}}
 	noQA := team[:2]
 	drafted := []Revision{{N: 1}, {N: 2}}
 	reviewed := []Verdict{{Revision: 2, Role: "Reviewer", Outcome: VerdictPass}}
@@ -47,7 +47,7 @@ func TestATaskSitsOnTheBoardWhereTheLoopHasGotTo(t *testing.T) {
 // After the brief changes, every checker judges the revision again, so the
 // board goes back to reviewing and names who is at work, as the loop does.
 func TestABriefChangeSendsTheBoardBackToReviewing(t *testing.T) {
-	team := []Role{{Name: "Implementer", Kind: RoleImplementer}, {Name: "Rune", Kind: RoleReviewer}, {Name: "QA", Kind: RoleQA}}
+	team := []Role{{Name: "Implementer", Kinds: []string{RoleImplementer}}, {Name: "Rune", Kinds: []string{RoleReviewer}}, {Name: "QA", Kinds: []string{RoleQA}}}
 	v := &Snapshot{
 		Projects: []Project{{ID: "p", Brief: Brief{Version: 2}}},
 		Tasks: []Task{{ProjectID: "p", Status: TaskReviewing, Roles: team, Revisions: []Revision{{N: 1}}, Verdicts: []Verdict{

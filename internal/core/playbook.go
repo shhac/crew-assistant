@@ -6,14 +6,21 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
-// Role is one member of a project team. Exactly one implementer produces the
-// artifact; reviewers judge it against the brief and never change it.
+// Role is one seat on a project team: a name, the kinds of role it holds,
+// and how it runs. Exactly one implementer produces the artifact; reviewers
+// judge it against the brief and never change it; a planner works out what
+// a task needs before anything is written. A seat can hold the planner role
+// alongside one other, as when the owner's Ada both plans and implements.
 type Role struct {
-	Name         string `json:"name"`
-	Kind         string `json:"kind"`
+	Name  string   `json:"name"`
+	Kinds []string `json:"kinds"`
+	// LegacyKind is the one kind a seat held before seats could hold several;
+	// it is read into Kinds and never written again.
+	LegacyKind   string `json:"kind,omitempty"`
 	Engine       string `json:"engine"`
 	Model        string `json:"model,omitempty"`
 	Effort       string `json:"effort,omitempty"`
@@ -24,12 +31,31 @@ type Role struct {
 	Learnings []Learning `json:"learnings,omitempty"`
 }
 
+// Holds reports whether the seat holds a kind of role.
+func (r Role) Holds(kind string) bool { return slices.Contains(r.Kinds, kind) }
+
+// Working is the seat's one kind other than planner: what it does once the
+// work has started, and what a message to it reaches. A seat that only plans
+// has none.
+func (r Role) Working() string {
+	for _, kind := range r.Kinds {
+		if kind != RolePlanner {
+			return kind
+		}
+	}
+	return ""
+}
+
 const (
 	RoleImplementer = "implementer"
 	RoleReviewer    = "reviewer"
 	// RoleQA runs the playbook's check command against a revision and reports
 	// what failed. It may write while it runs; the medium discards it after.
 	RoleQA = "qa"
+	// RolePlanner works out, before anything is written, what the task needs:
+	// what exists, what will change, what is unclear and what it waits on.
+	// It only reads.
+	RolePlanner = "planner"
 )
 
 // Playbook is how a project's work gets done. It is data with a small fixed
@@ -161,8 +187,8 @@ var Templates = map[string]Playbook{
 		Template: "draft",
 		Medium:   MediumDocuments,
 		Roles: []Role{
-			{Name: "Writer", Kind: RoleImplementer, Engine: "claude", Instructions: "Write the deliverable the brief asks for as files in the working directory. Prefer Markdown."},
-			{Name: "Reviewer", Kind: RoleReviewer, Engine: "codex", Instructions: "Judge the draft strictly against the brief's goal, audience, constraints and criteria."},
+			{Name: "Writer", Kinds: []string{RoleImplementer}, Engine: "claude", Instructions: "Write the deliverable the brief asks for as files in the working directory. Prefer Markdown."},
+			{Name: "Reviewer", Kinds: []string{RoleReviewer}, Engine: "codex", Instructions: "Judge the draft strictly against the brief's goal, audience, constraints and criteria."},
 		},
 		MaxRounds: 3,
 		Deliver:   "owner",
@@ -171,9 +197,10 @@ var Templates = map[string]Playbook{
 		Template: "code",
 		Medium:   MediumGit,
 		Roles: []Role{
-			{Name: "Implementer", Kind: RoleImplementer, Engine: "claude", Model: "opus", Instructions: "Implement the task in this repository with tests, following the repository's own conventions and instructions."},
-			{Name: "Reviewer", Kind: RoleReviewer, Engine: "codex", Instructions: "Review the change against the brief and the task's criteria, as a careful senior engineer: correctness first, then design and tests."},
-			{Name: "QA", Kind: RoleQA, Engine: "codex", Instructions: "Run the project's check exactly as given and report what failed."},
+			{Name: "Planner", Kinds: []string{RolePlanner}, Engine: "claude", Instructions: "Work out what this task needs before anything is written: read the repository, find what already exists, and say what will change, what is out of scope, what is unclear and what it has to wait for."},
+			{Name: "Implementer", Kinds: []string{RoleImplementer}, Engine: "claude", Model: "opus", Instructions: "Implement the task in this repository with tests, following the repository's own conventions and instructions."},
+			{Name: "Reviewer", Kinds: []string{RoleReviewer}, Engine: "codex", Instructions: "Review the change against the brief and the task's criteria, as a careful senior engineer: correctness first, then design and tests."},
+			{Name: "QA", Kinds: []string{RoleQA}, Engine: "codex", Instructions: "Run the project's check exactly as given and report what failed."},
 		},
 		MaxRounds:    3,
 		Deliver:      "owner",
@@ -230,21 +257,48 @@ func (p Playbook) Validate() error {
 		if r.Engine != "codex" && r.Engine != "claude" {
 			return fmt.Errorf("role %s: engine must be codex or claude", r.Name)
 		}
-		switch r.Kind {
-		case RoleImplementer:
+		if err := seatKinds(r); err != nil {
+			return err
+		}
+		switch {
+		case r.Holds(RoleImplementer):
 			implementers++
-		case RoleReviewer:
+		case r.Holds(RoleReviewer):
 			reviewers++
-		case RoleQA:
-			if strings.TrimSpace(p.Check) == "" {
-				return fmt.Errorf("role %s runs the check, but the team has no check command", r.Name)
-			}
-		default:
-			return fmt.Errorf("role %s: kind must be implementer, reviewer or qa", r.Name)
+		case r.Holds(RoleQA) && strings.TrimSpace(p.Check) == "":
+			return fmt.Errorf("role %s runs the check, but the team has no check command", r.Name)
 		}
 	}
 	if implementers != 1 || reviewers < 1 {
 		return errors.New("a playbook needs exactly one implementer and at least one reviewer")
+	}
+	return nil
+}
+
+// seatKinds checks what one seat holds: known kinds, each once, and at most
+// one of implementer, reviewer and QA. Verdicts and messages name the seat,
+// so a seat that both reviewed and ran QA would have its verdicts collide,
+// and one that reviewed its own work would not be a review. The planner role
+// sits alongside any one of them.
+func seatKinds(r Role) error {
+	if len(r.Kinds) == 0 {
+		return fmt.Errorf("role %s holds no kind of role", r.Name)
+	}
+	working := 0
+	for i, kind := range r.Kinds {
+		switch kind {
+		case RoleImplementer, RoleReviewer, RoleQA:
+			working++
+		case RolePlanner:
+		default:
+			return fmt.Errorf("role %s: kind must be planner, implementer, reviewer or qa", r.Name)
+		}
+		if slices.Contains(r.Kinds[:i], kind) {
+			return fmt.Errorf("role %s holds %s twice", r.Name, kind)
+		}
+	}
+	if working > 1 {
+		return fmt.Errorf("role %s can hold only one of implementer, reviewer and QA, alongside planning", r.Name)
 	}
 	return nil
 }

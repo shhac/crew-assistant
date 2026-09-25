@@ -27,9 +27,12 @@ type Task struct {
 	// Answered is a task waiting on a decision the owner has already made:
 	// the loop takes the answer at its next step, so it no longer needs
 	// the owner. Derived with Stage.
-	Answered bool   `json:"answered,omitempty"`
-	Detail   string `json:"detail,omitempty"`
-	Roles    []Role `json:"roles,omitempty"`
+	Answered bool `json:"answered,omitempty"`
+	// WaitsFor names the unfinished tasks this one depends on, derived with
+	// Stage, so the board can say what it waits for.
+	WaitsFor []string `json:"waits_for,omitempty"`
+	Detail   string   `json:"detail,omitempty"`
+	Roles    []Role   `json:"roles,omitempty"`
 	// Playbook is the team's setup as it was when the task started: its
 	// medium and, for code, the repository, check and branch prefix.
 	Playbook  *Playbook `json:"playbook,omitempty"`
@@ -45,7 +48,15 @@ type Task struct {
 	// the team, with their replies.
 	Messages  []TeamMessage `json:"messages,omitempty"`
 	Revisions []Revision    `json:"revisions"`
-	Verdicts  []Verdict     `json:"verdicts"`
+	// Plan is what the planner worked out before anything was written. It is
+	// kept on the task, so everyone who works on it reads the same plan
+	// rather than inheriting a conversation.
+	Plan *Plan `json:"plan,omitempty"`
+	// DependsOn names tasks in the same project that must have landed before
+	// this one starts. Without stacking, a task never builds on work that has
+	// not landed.
+	DependsOn []string  `json:"depends_on,omitempty"`
+	Verdicts  []Verdict `json:"verdicts"`
 	// WriterSession resumes the implementer across rounds. Reviewers always
 	// start fresh, so no earlier judgement anchors the next.
 	WriterSession json.RawMessage `json:"writer_session,omitempty"`
@@ -86,8 +97,11 @@ type Task struct {
 // Task statuses. Writing, reviewing and deciding are the loop's own; waiting
 // means an owner decision is open; the rest are final.
 const (
-	TaskQueued    = "queued"
-	TaskWriting   = "writing"
+	TaskQueued  = "queued"
+	TaskWriting = "writing"
+	// TaskPlanning is the planner working out what the task needs, before
+	// anything is written.
+	TaskPlanning  = "planning"
 	TaskReviewing = "reviewing"
 	TaskDeciding  = "deciding"
 	TaskWaiting   = "waiting"
@@ -101,7 +115,7 @@ const (
 )
 
 func (t Task) Active() bool {
-	return t.Status == TaskWriting || t.Status == TaskReviewing || t.Status == TaskDeciding || t.Status == TaskLanding
+	return t.Status == TaskPlanning || t.Status == TaskWriting || t.Status == TaskReviewing || t.Status == TaskDeciding || t.Status == TaskLanding
 }
 
 // Finished reports a task that will do nothing more on its own.
@@ -167,6 +181,7 @@ type Finding struct {
 type TaskInput struct {
 	Objective string   `json:"objective"`
 	Criteria  []string `json:"criteria"`
+	DependsOn []string `json:"depends_on,omitempty"`
 }
 
 func task(v *Snapshot, id string) *Task {
@@ -205,6 +220,11 @@ func (s *Service) QueueTask(ctx context.Context, projectID string, in TaskInput)
 		if !required(p.Brief.Goal) {
 			return errors.New("give the project a brief before asking for work")
 		}
+		deps, err := dependencies(v, out, in.DependsOn)
+		if err != nil {
+			return err
+		}
+		out.DependsOn = deps
 		v.Tasks = append(v.Tasks, out)
 		record(v, now, projectID, "task.queued", out.Objective)
 		return nil
@@ -227,7 +247,7 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 		}
 		for i := range v.Tasks {
 			t := &v.Tasks[i]
-			if t.Status != TaskQueued {
+			if t.Status != TaskQueued || len(waitsFor(v, *t)) > 0 {
 				continue
 			}
 			p := project(v, t.ProjectID)
@@ -243,6 +263,9 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 			t.MaxRounds = p.Playbook.MaxRounds
 			t.Round = 1
 			t.Status = TaskWriting
+			if len(t.RolesOf(RolePlanner)) > 0 && t.Plan == nil {
+				t.Status = TaskPlanning
+			}
 			t.Detail = ""
 			t.UpdatedAt = now
 			out, found = *t, true

@@ -5,6 +5,7 @@ package core
 // so a board can never disagree with what the loop is doing.
 const (
 	StageTodo         = "todo"
+	StagePlanning     = "planning"
 	StageImplementing = "implementing"
 	StageReviewing    = "reviewing"
 	StageQA           = "qa"
@@ -20,7 +21,15 @@ func deriveStages(v *Snapshot) {
 }
 
 func derive(v *Snapshot, t *Task) {
-	t.Stage, t.Checking, t.Answered = stageOf(v, *t), "", false
+	t.Stage, t.Checking, t.Answered, t.WaitsFor = stageOf(v, *t), "", false, nil
+	if t.Status == TaskQueued {
+		t.WaitsFor = waitsFor(v, *t)
+	}
+	if t.Status == TaskPlanning {
+		if planners := t.RolesOf(RolePlanner); len(planners) > 0 {
+			t.Checking = planners[0].Name
+		}
+	}
 	if t.Status == TaskWaiting {
 		d := decision(v, t.DecisionID)
 		t.Answered = d != nil && d.Status != DecisionOpen
@@ -37,6 +46,8 @@ func stageOf(v *Snapshot, t Task) string {
 	switch t.Status {
 	case TaskQueued:
 		return StageTodo
+	case TaskPlanning:
+		return StagePlanning
 	case TaskWriting:
 		return StageImplementing
 	case TaskReviewing, TaskDeciding:
@@ -57,7 +68,7 @@ func stageOf(v *Snapshot, t Task) string {
 func (t Task) RolesOf(kind string) []Role {
 	var out []Role
 	for _, r := range t.Roles {
-		if r.Kind == kind {
+		if r.Holds(kind) {
 			out = append(out, r)
 		}
 	}
@@ -114,7 +125,7 @@ func checkStage(v *Snapshot, t Task) string {
 	switch {
 	case !ok:
 		return lastCheck(t)
-	case next.Kind == RoleQA:
+	case next.Holds(RoleQA):
 		return StageQA
 	}
 	return StageReviewing
@@ -153,12 +164,16 @@ func waitingStage(v *Snapshot, t Task) string {
 		resumed.Status = t.ResumeStatus
 		return stageOf(v, resumed)
 	case DecisionQuestion:
+		// Before anything is written, only the planner asks.
+		if len(t.Revisions) == 0 {
+			return StagePlanning
+		}
 		if n := len(t.Revisions); n > 0 {
 			for _, verdict := range t.Verdicts {
 				if verdict.Revision != t.Revisions[n-1].N || verdict.Outcome != VerdictQuestion {
 					continue
 				}
-				if r, ok := t.Role(verdict.Role); ok && r.Kind == RoleQA {
+				if r, ok := t.Role(verdict.Role); ok && r.Holds(RoleQA) {
 					return StageQA
 				}
 			}

@@ -30,7 +30,13 @@ type TeamChoice struct {
 	Implementer string `json:"implementer_member"`
 	Reviewer    string `json:"reviewer_member"`
 	QA          string `json:"qa_member"`
+	// Planner is the member who plans each task first, or NoPlanner for a
+	// team that starts writing at once.
+	Planner string `json:"planner_member"`
 }
+
+// NoPlanner, as the planner, leaves planning out of a team.
+const NoPlanner = "none"
 
 // teamFrom builds a playbook from a template and the few choices the assistant
 // may make about it. Anything left empty keeps the template's choice.
@@ -46,14 +52,19 @@ func teamFrom(in TeamChoice, snap core.Snapshot) (core.Playbook, error) {
 	playbook.Roles = append([]core.Role(nil), playbook.Roles...)
 	for i := range playbook.Roles {
 		switch {
-		case playbook.Roles[i].Kind == core.RoleImplementer && in.WriterEngine != "":
+		case playbook.Roles[i].Holds(core.RoleImplementer) && in.WriterEngine != "":
 			playbook.Roles[i].Engine = in.WriterEngine
-		case playbook.Roles[i].Kind == core.RoleReviewer && in.ReviewerEngine != "":
+		case playbook.Roles[i].Holds(core.RoleReviewer) && in.ReviewerEngine != "":
 			playbook.Roles[i].Engine = in.ReviewerEngine
 		}
 	}
-	for _, slot := range [][2]string{{core.RoleImplementer, in.Implementer}, {core.RoleReviewer, in.Reviewer}, {core.RoleQA, in.QA}} {
-		if slot[1] == "" {
+	if in.Planner == NoPlanner {
+		playbook.Roles = slices.DeleteFunc(playbook.Roles, func(r core.Role) bool { return r.Working() == "" })
+	}
+	// The planner comes last, so a member who also fills another seat plans
+	// from that seat.
+	for _, slot := range [][2]string{{core.RoleImplementer, in.Implementer}, {core.RoleReviewer, in.Reviewer}, {core.RoleQA, in.QA}, {core.RolePlanner, in.Planner}} {
+		if slot[1] == "" || slot[1] == NoPlanner {
 			continue
 		}
 		if err := fillRole(&playbook, slot[0], slot[1], snap); err != nil {
@@ -80,20 +91,27 @@ func teamFrom(in TeamChoice, snap core.Snapshot) (core.Playbook, error) {
 	return playbook, nil
 }
 
-// fillRole puts a member in the template's role of that kind. The template's
-// instructions stay, since they say how this kind of work is done here; the
-// member's own follow them.
+// fillRole puts a member in the template's seat for that kind of role. The
+// template's instructions stay, since they say how this kind of work is done
+// here; the member's own follow them. A member already in another seat takes
+// the role in that seat instead, so it is one seat, working on one thing at a
+// time, rather than the same member twice.
 func fillRole(playbook *core.Playbook, kind, id string, snap core.Snapshot) error {
 	m, ok := snap.Member(id)
 	if !ok {
 		return fmt.Errorf("there is no team member %q: %w", id, core.ErrNotFound)
 	}
-	if m.Kind != kind {
-		return fmt.Errorf("%s is a %s, not a %s", m.Name, m.Kind, kind)
+	if !m.Holds(kind) {
+		return fmt.Errorf("%s doesn't hold the %s role; they hold %s", m.Name, kind, strings.Join(m.Kinds, ", "))
 	}
-	slot := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Kind == kind })
+	slot := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Holds(kind) })
 	if slot < 0 {
 		return fmt.Errorf("a %s team has no %s for %s to fill", playbook.Template, kind, m.Name)
+	}
+	if seat := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Member == m.ID }); seat >= 0 && seat != slot {
+		playbook.Roles[seat].Kinds = append(append([]string(nil), playbook.Roles[seat].Kinds...), kind)
+		playbook.Roles = slices.Delete(playbook.Roles, slot, slot+1)
+		return nil
 	}
 	r := &playbook.Roles[slot]
 	r.Name, r.Engine, r.Model, r.Effort, r.Member = m.Name, m.Engine, m.Model, m.Effort, m.ID
