@@ -16,6 +16,7 @@ import {
   needsYou,
   orderLine,
   projectTasks,
+  readyLabel,
   requestStep,
 } from "./stages";
 import { Avatar } from "./Avatar";
@@ -27,6 +28,7 @@ import {
   type Decision,
   type Member,
   type Project,
+  type Stage,
   type State,
   type Task,
 } from "./api";
@@ -49,44 +51,62 @@ export function Board({
   // The server's order is the order work starts in; keep it.
   const tasks = projectTasks(project, state.tasks);
   const columns = boardColumns(project, tasks);
-  const done = latestFirst(tasks.filter((t) => t.stage === "done"));
-  const stopped = tasks.filter((t) => t.stage === "stopped");
+  const at = (stage: Stage) => tasks.filter((t) => t.stage === stage);
+  const ready = at("ready");
+  const done = latestFirst(at("done"));
+  const stopped = at("stopped");
+  const cards = (list: Task[]) => (
+    <CardList
+      tasks={list}
+      decisionFor={(t) => decisionFor(t, state.decisions)}
+      members={state.members}
+    />
+  );
   return (
     <div className="board-page">
       <AskForm project={project} refresh={refresh} />
+      {ready.length > 0 && (
+        <section className="board-ready" aria-label={readyLabel(project)}>
+          <h2 className="board-lane-title">
+            {readyLabel(project)}
+            <span className="count">{ready.length}</span>
+          </h2>
+          {cards(ready)}
+        </section>
+      )}
       {tasks.length === 0 ? (
         <p className="muted">Nothing asked for yet.</p>
       ) : (
         <div className="board" role="list" aria-label="Board">
-          {columns.map((column) => {
-            const cards = tasks.filter((t) => t.stage === column.stage);
-            return (
-              <section
-                key={column.stage}
-                className={`board-column${cards.length ? "" : " empty"}`}
-                role="listitem"
-                aria-label={column.label}
-              >
-                <h2 className="board-column-title">
-                  {column.label}
-                  <span className="count">{cards.length}</span>
-                </h2>
-                {column.stage === "todo" ? (
-                  <TodoColumn
-                    tasks={cards}
-                    project={project}
-                    refresh={refresh}
-                  />
-                ) : (
-                  <CardList
-                    tasks={cards}
-                    decisionFor={(t) => decisionFor(t, state.decisions)}
-                    members={state.members}
-                  />
-                )}
-              </section>
-            );
-          })}
+          {columns.map((column) => (
+            <div key={column.key} className="board-column">
+              {column.lanes.map((lane) => {
+                const list = at(lane.stage);
+                return (
+                  <section
+                    key={lane.stage}
+                    className={`board-lane${list.length ? "" : " quiet"}`}
+                    role="listitem"
+                    aria-label={lane.label}
+                  >
+                    <h2 className="board-lane-title">
+                      {lane.label}
+                      <span className="count">{list.length}</span>
+                    </h2>
+                    {lane.stage === "todo" ? (
+                      <TodoColumn
+                        tasks={list}
+                        project={project}
+                        refresh={refresh}
+                      />
+                    ) : (
+                      cards(list)
+                    )}
+                  </section>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
       {done.length > 0 && (

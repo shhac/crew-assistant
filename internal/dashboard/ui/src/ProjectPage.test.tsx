@@ -183,11 +183,31 @@ describe("the board", () => {
     expect(
       within(column("Implementing")).getByText("Round 2 · Implementer working"),
     ).toBeTruthy();
+    const ready = screen.getByRole("region", { name: "Ready to land" });
+    expect(within(ready).getByText("Waiting for your approval")).toBeTruthy();
+    expect(within(ready).getByRole("link", { name: "Fourth" })).toBeTruthy();
     expect(
-      within(column("Ready to land")).getByText("Waiting for your approval"),
-    ).toBeTruthy();
+      screen.queryByRole("listitem", { name: "Ready to land" }),
+    ).toBeNull();
     expect(within(column("QA")).queryAllByRole("link")).toHaveLength(0);
     expect(screen.getByText("1 needs you")).toBeTruthy();
+  });
+  it("lays the columns out in groups, with QA above reviewing and empty lanes kept quiet", () => {
+    show(project(), {
+      tasks: [
+        started({ status: "reviewing", stage: "reviewing", checking: "R" }),
+      ],
+    });
+    const columns = [...document.querySelectorAll(".board-column")].map((c) =>
+      [...c.querySelectorAll(".board-lane")].map((l) =>
+        l.getAttribute("aria-label"),
+      ),
+    );
+    expect(columns).toEqual([["To do"], ["Implementing"], ["QA", "Reviewing"]]);
+    const lane = (name: string) => screen.getByRole("listitem", { name });
+    expect(lane("QA").classList.contains("quiet")).toBe(true);
+    expect(lane("Reviewing").classList.contains("quiet")).toBe(false);
+    expect(screen.queryByRole("region", { name: "Ready to land" })).toBeNull();
   });
   it("shows a request being researched in its own column, with its researcher", () => {
     const researcher: Member = {
@@ -220,7 +240,7 @@ describe("the board", () => {
     });
     const columns = screen
       .getAllByRole("listitem")
-      .filter((c) => c.classList.contains("board-column"))
+      .filter((c) => c.classList.contains("board-lane"))
       .map((c) => c.getAttribute("aria-label"));
     expect(columns.slice(0, 3)).toEqual([
       "To do",
@@ -233,7 +253,7 @@ describe("the board", () => {
       `/api/avatars/${"a".repeat(32)}/small`,
     );
   });
-  it("shows a request with the designer in the column of whoever asked, and what came back", () => {
+  it("shows a request with the designer in the design lane, below research, and what came back", () => {
     const dee: Member = {
       id: "m5",
       name: "Dee",
@@ -249,7 +269,7 @@ describe("the board", () => {
     const withDee = started({
       roles,
       status: "designing",
-      stage: "implementing",
+      stage: "designing",
       checking: "Dee",
       with_designer: true,
       design: [
@@ -276,11 +296,16 @@ describe("the board", () => {
       members: [dee],
       tasks: [withDee],
     });
-    const implementing = screen.getByRole("listitem", { name: "Implementing" });
+    const designing = screen.getByRole("listitem", { name: "Designing" });
     expect(
-      within(implementing).getByText("With Dee for design input"),
+      within(designing).getByText("With Dee for design input"),
     ).toBeTruthy();
-    expect(implementing.querySelector("img")?.getAttribute("src")).toBe(
+    expect(
+      within(
+        screen.getByRole("listitem", { name: "Implementing" }),
+      ).queryByText("With Dee for design input"),
+    ).toBeNull();
+    expect(designing.querySelector("img")?.getAttribute("src")).toBe(
       `/api/avatars/${"d".repeat(32)}/small`,
     );
     cleanup();
@@ -508,7 +533,7 @@ describe("the board", () => {
       show(project(), { tasks: tasks() });
       const columns = screen
         .getAllByRole("listitem")
-        .filter((c) => c.classList.contains("board-column"));
+        .filter((c) => c.classList.contains("board-lane"));
       expect(columns.map((c) => c.getAttribute("aria-label"))).not.toContain(
         "Landed",
       );

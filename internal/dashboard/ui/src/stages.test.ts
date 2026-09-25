@@ -10,6 +10,7 @@ import {
   projectGroup,
   projectKind,
   projectTasks,
+  readyLabel,
   requestStep,
   needsYou,
   orderLine,
@@ -73,35 +74,39 @@ const decision = (kind: string): Decision => ({
   status: "open",
 });
 
+const lanes = (p: Project, tasks: Task[] = []) =>
+  boardColumns(p, tasks).map((c) => c.lanes.map((l) => l.label));
+const hasLane = (p: Project, tasks: Task[], stage: string) =>
+  boardColumns(p, tasks).some((c) => c.lanes.some((l) => l.stage === stage));
+
 describe("the board", () => {
   it("names its columns for the kind of work and shows QA only when there is QA", () => {
-    expect(boardColumns(project(code()), []).map((c) => c.label)).toEqual([
-      "To do",
-      "Implementing",
-      "Reviewing",
-      "QA",
-      "Ready to land",
+    expect(lanes(project(code()))).toEqual([
+      ["To do"],
+      ["Implementing"],
+      ["QA", "Reviewing"],
     ]);
-    expect(boardColumns(project(writing), []).map((c) => c.label)).toEqual([
-      "To do",
-      "Writing",
-      "Reviewing",
-      "Ready",
+    expect(lanes(project(writing))).toEqual([
+      ["To do"],
+      ["Writing"],
+      ["Reviewing"],
     ]);
-    // A request that started with QA keeps its column after the team changes.
+    // A request that started with QA keeps its lane after the team changes.
     const pinned = task({
       status: "reviewing",
       stage: "qa",
       roles: code().roles,
     });
-    expect(
-      boardColumns(project(writing), [pinned]).some((c) => c.stage === "qa"),
-    ).toBe(true);
+    expect(hasLane(project(writing), [pinned], "qa")).toBe(true);
+  });
+  it("keeps work ready to go out above the columns, under its own name", () => {
+    expect(hasLane(project(code()), [], "ready")).toBe(false);
+    expect(readyLabel(project(code()))).toBe("Ready to land");
+    expect(readyLabel(project(writing))).toBe("Ready");
   });
   it("keeps finished work out of the columns, under its own name", () => {
-    const stages = (p: Project) => boardColumns(p, []).map((c) => c.stage);
-    expect(stages(project(code()))).not.toContain("done");
-    expect(stages(project(writing))).not.toContain("done");
+    expect(hasLane(project(code()), [], "done")).toBe(false);
+    expect(hasLane(project(writing), [], "done")).toBe(false);
     expect(doneLabel(project(code()))).toBe("Landed");
     expect(doneLabel(project(writing))).toBe("Delivered");
   });
@@ -132,18 +137,14 @@ describe("the board", () => {
         ...code().roles,
       ],
     });
-    expect(boardColumns(project(planned()), []).map((c) => c.label)).toEqual([
-      "To do",
-      "Researching",
-      "Implementing",
-      "Reviewing",
-      "QA",
-      "Ready to land",
+    expect(lanes(project(planned()))).toEqual([
+      ["To do"],
+      ["Researching"],
+      ["Implementing"],
+      ["QA", "Reviewing"],
     ]);
     const has = (tasks: Task[]) =>
-      boardColumns(project(code()), tasks).some(
-        (c) => c.stage === "researching",
-      );
+      hasLane(project(code()), tasks, "researching");
     expect(has([])).toBe(false);
     expect(has([task({ status: "queued", roles: planned().roles })])).toBe(
       true,
@@ -349,25 +350,36 @@ describe("the board", () => {
     const dee = { name: "Dee", kinds: ["designer"], engine: "claude" };
     const withDee = task({
       status: "designing",
-      stage: "researching",
+      stage: "designing",
       checking: "Dee",
       with_designer: true,
     });
     expect(requestStep(withDee)).toBe("With Dee for design input");
     expect(
       requestStep(
-        task({ status: "designing", stage: "implementing", roles: [dee] }),
+        task({ status: "designing", stage: "designing", roles: [dee] }),
       ),
     ).toBe("With Dee for design input");
     expect(requestTone(withDee)).toBe("work");
     expect(underWay(withDee)).toBe(true);
     expect(projectGroup([withDee])).toBe("working");
-    // No column of its own: it stays where whoever asked left it.
+  });
+  it("shows design below research, when the team designs or a request is with the designer", () => {
+    const dee = { name: "Dee", kinds: ["designer"], engine: "claude" };
+    const designs = { ...code(), roles: [...code().roles, dee] };
+    expect(lanes(project(designs))).toEqual([
+      ["To do"],
+      ["Designing"],
+      ["Implementing"],
+      ["QA", "Reviewing"],
+    ]);
+    const researcher = { name: "Ada", kinds: ["researcher"], engine: "claude" };
     expect(
-      boardColumns(project(code()), [withDee]).some(
-        (c) => (c.stage as string) === "designing",
-      ),
-    ).toBe(false);
+      lanes(project({ ...designs, roles: [researcher, ...designs.roles] }))[1],
+    ).toEqual(["Researching", "Designing"]);
+    const withDee = task({ status: "designing", stage: "designing" });
+    expect(hasLane(project(code()), [withDee], "designing")).toBe(true);
+    expect(hasLane(project(code()), [], "designing")).toBe(false);
   });
   it("names the researcher while a request is researched", () => {
     expect(

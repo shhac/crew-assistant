@@ -238,6 +238,7 @@ export type TaskStatus =
 export type Stage =
   | "todo"
   | "researching"
+  | "designing"
   | "implementing"
   | "reviewing"
   | "qa"
