@@ -23,6 +23,29 @@
   font-size: 14px;
 }
 
+.chat-session {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 10px 4px 18px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chat-session-about {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  column-gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-session .btn-sm {
+  flex-shrink: 0;
+}
+
 .chat-log {
   display: flex;
   flex: 1;

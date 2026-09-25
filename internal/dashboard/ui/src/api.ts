@@ -386,6 +386,26 @@ export interface ChatTurn {
   /** "assistant" for a command the assistant asked for itself. */
   origin?: string;
 }
+/**
+ * The model session the current conversation runs on, when its engine keeps
+ * one; a conversation run turn by turn has none.
+ */
+export interface ChatSession {
+  engine: "claude" | "codex" | (string & {});
+  model: string;
+  started_at: string;
+  /** How it was last opened: new, picked up again, or new because the old one couldn't be resumed. */
+  opened: "fresh" | "resumed" | "rebuilt";
+  seen_at?: string;
+  compactions?: number;
+  /** Tokens in the model's context after the latest turn. */
+  context_used?: number;
+  context_window?: number;
+  /** The latest turn's input tokens, and how many the provider served from cache. */
+  input?: number;
+  cached_input?: number;
+  updated_at: string;
+}
 /** A past conversation, archived by /new or /clear. */
 export interface ConversationEntry {
   id: string;

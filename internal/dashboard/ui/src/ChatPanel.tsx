@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { api, APIError, errorText, type ChatTurn, type State } from "./api";
+import {
+  api,
+  APIError,
+  errorText,
+  type ChatSession,
+  type ChatTurn,
+  type State,
+} from "./api";
 import { ConversationMarkdown } from "./ConversationMarkdown";
 import { Avatar } from "./Avatar";
 import { dateLabel, fullDateLabel, Icon } from "./ui";
@@ -96,6 +103,77 @@ function commandLabel(command: string) {
       return "Start a fresh conversation";
   }
   return "Command";
+}
+
+const percent = (part: number, whole: number) =>
+  `${Math.round((part / whole) * 100)}%`;
+
+/** The session in a line, leaving out whatever it has not reported. */
+function sessionParts(session: ChatSession) {
+  const parts = [
+    session.engine.charAt(0).toUpperCase() + session.engine.slice(1),
+    session.model,
+  ];
+  if (session.context_used && session.context_window)
+    parts.push(
+      `${percent(session.context_used, session.context_window)} of context`,
+    );
+  if (session.input)
+    parts.push(`${percent(session.cached_input ?? 0, session.input)} cached`);
+  if (session.compactions) parts.push(`compacted ${session.compactions}×`);
+  return parts.filter(Boolean);
+}
+
+function sessionOpened(session: ChatSession) {
+  switch (session.opened) {
+    case "resumed":
+      return "Picked up where it left off";
+    case "rebuilt":
+      return "Started afresh: the last session couldn't be resumed";
+  }
+  return "";
+}
+
+const sessionCommands = [
+  { command: "compact", label: "Compact" },
+  { command: "new", label: "Start fresh" },
+];
+
+/**
+ * The model session the conversation runs on, with the commands that act on
+ * it. Both wait while anything is still being sent or answered.
+ */
+function SessionLine({
+  session,
+  busy,
+  onCommand,
+}: {
+  session: ChatSession;
+  busy: boolean;
+  onCommand: (command: string) => void;
+}) {
+  const line = sessionParts(session).join(" · ");
+  const opened = sessionOpened(session);
+  return (
+    <div className="chat-session" role="group" aria-label="Model session">
+      <p className="chat-session-about">
+        <span className="chat-session-line">{line}</span>
+        {opened && <span className="chat-session-opened">{opened}</span>}
+      </p>
+      {sessionCommands.map(({ command, label }) => (
+        <button
+          key={command}
+          type="button"
+          className="btn btn-quiet btn-sm"
+          disabled={busy}
+          title={`${commandLabel(command)} (/${command})`}
+          onClick={() => onCommand(command)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 /** A message's delivery, in a few words; nothing once all is well. */
@@ -281,6 +359,7 @@ export function ChatPanel({
     hold?: QueueHold | null;
     revision: number;
   }>({ revision: 0 });
+  const [session, setSession] = useState<ChatSession | null>(null);
   const [cancelling, setCancelling] = useState<Set<string>>(new Set());
   const [history, setHistory] = useState(false);
   // Asks the daemon for its turns at once, as after picking up a past
@@ -421,9 +500,11 @@ export function ChatPanel({
           hold: QueueHold | null;
           revision: number;
           conversation?: string;
+          session?: ChatSession;
         }>("/api/chat/turns");
         if (stopped) return;
         setQueue({ hold: result.hold, revision: result.revision });
+        setSession(result.session ?? null);
         const incoming = result.turns || [];
         // The daemon lists every turn of the current conversation and every
         // turn still waiting. A turn it already knew of when asked, and left
@@ -583,12 +664,20 @@ export function ChatPanel({
       setAssetErrors([tooLarge]);
       return;
     }
+    submit(
+      composed,
+      attached.length ? { text: submitted, assets: attached } : undefined,
+    );
+    setDraft("");
+    assetsRef.current = [];
+    setAssets([]);
+    setAssetErrors([]);
+  }
+  function submit(composed: string, draft?: VisibleTurn["draft"]) {
     const turn: VisibleTurn = {
       id: crypto.randomUUID(),
       message: composed,
-      draft: attached.length
-        ? { text: submitted, assets: attached }
-        : undefined,
+      draft,
       // The daemon has not seen this message yet, so it has no revision of its
       // own; it gets one once the queue accepts it.
       revision: 0,
@@ -597,10 +686,6 @@ export function ChatPanel({
       events: [],
     };
     setTurns((current) => [...current, turn]);
-    setDraft("");
-    assetsRef.current = [];
-    setAssets([]);
-    setAssetErrors([]);
     void enqueue(turn);
   }
   async function cancel(turn: VisibleTurn) {
@@ -660,6 +745,13 @@ export function ChatPanel({
           <Icon name="Close" />
         </button>
       </header>
+      {session && !history && (
+        <SessionLine
+          session={session}
+          busy={turns.some(unsettled)}
+          onCommand={(command) => submit(`/${command}`)}
+        />
+      )}
       {history && (
         <ChatHistory
           name={name}

@@ -16,7 +16,12 @@ import {
   wakeSummary,
 } from "./ChatPanel";
 import { ConversationMarkdown } from "./ConversationMarkdown";
-import { normalizeState, type ChatTurn, type State } from "./api";
+import {
+  normalizeState,
+  type ChatSession,
+  type ChatTurn,
+  type State,
+} from "./api";
 import { fullDateLabel } from "./ui";
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
@@ -1814,5 +1819,145 @@ describe("slash commands and past conversations", () => {
     expect(
       screen.getByRole("region", { name: "Past conversations" }),
     ).toBeTruthy();
+  });
+});
+describe("model session", () => {
+  const line = () => screen.queryByRole("group", { name: "Model session" });
+  const session = (overrides: Partial<ChatSession> = {}): ChatSession => ({
+    engine: "claude",
+    model: "opus",
+    started_at: "2026-09-16T12:00:00Z",
+    opened: "fresh",
+    updated_at: "2026-09-16T12:05:00Z",
+    ...overrides,
+  });
+  // A daemon whose conversation runs on the session given, if any.
+  function daemon(current?: ChatSession) {
+    const turns: ChatTurn[] = [];
+    const shown = { session: current };
+    const fetch = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === "/api/chat/turns")
+        return result({
+          turns: turns.map((t) => ({ ...t })),
+          session: shown.session,
+        });
+      if (path === "/api/chat/suggestion")
+        return result({ after: "", suggestion: "" });
+      if (path === "/api/chat/conversations")
+        return result({ conversations: [] });
+      if (path === "/api/chat/messages") {
+        const body = JSON.parse(String(options?.body));
+        const turn: ChatTurn = {
+          ...body,
+          status: "running",
+          created_at: new Date().toISOString(),
+          revision: 0,
+          events: [],
+          command: commandIn(body.message),
+        };
+        turns.push(turn);
+        return result(turn);
+      }
+      throw new Error(`Unexpected request ${path}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+    return {
+      turns,
+      shown,
+      sent: () =>
+        fetch.mock.calls
+          .filter(([p]) => p === "/api/chat/messages")
+          .map(([, o]) => JSON.parse(String(o?.body)).message),
+    };
+  }
+
+  it("says what the session runs on and how full it is, leaving out what is unknown", async () => {
+    const server = daemon(
+      session({
+        context_used: 84_000,
+        context_window: 200_000,
+        input: 10_000,
+        cached_input: 9_000,
+        compactions: 2,
+      }),
+    );
+    render(panel());
+    await tick(0);
+    expect(line()!.textContent).toContain(
+      "Claude · opus · 42% of context · 90% cached · compacted 2×",
+    );
+    // A fresh session says nothing about how it was opened.
+    expect(line()!.textContent).not.toContain("Picked up");
+    expect(line()!.textContent).not.toContain("Started afresh");
+    server.shown.session = session({
+      engine: "codex",
+      model: "gpt-5",
+      context_used: 1_000,
+      cached_input: 0,
+    });
+    await tick(3000);
+    expect(line()!.querySelector(".chat-session-about")!.textContent).toBe(
+      "Codex · gpt-5",
+    );
+  });
+
+  it("says when it picked up where it left off, or had to start afresh", async () => {
+    const server = daemon(session({ opened: "resumed" }));
+    render(panel());
+    await tick(0);
+    expect(
+      within(line()!).getByText("Picked up where it left off"),
+    ).toBeTruthy();
+    server.shown.session = session({ opened: "rebuilt" });
+    await tick(3000);
+    expect(
+      within(line()!).getByText(
+        "Started afresh: the last session couldn't be resumed",
+      ),
+    ).toBeTruthy();
+    expect(line()!.textContent).not.toContain("Picked up");
+  });
+
+  it("shows nothing for a conversation run turn by turn", async () => {
+    daemon();
+    render(panel());
+    await tick(0);
+    expect(line()).toBeNull();
+    expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start fresh" })).toBeNull();
+  });
+
+  it("compacts or starts fresh as typing the command would, once nothing is running", async () => {
+    const server = daemon(session());
+    render(panel());
+    await tick(0);
+    const compact = () =>
+      screen.getByRole<HTMLButtonElement>("button", { name: "Compact" });
+    const fresh = () =>
+      screen.getByRole<HTMLButtonElement>("button", { name: "Start fresh" });
+    fireEvent.click(compact());
+    await tick(0);
+    expect(server.sent()).toEqual(["/compact"]);
+    const row = screen
+      .getByRole("log")
+      .querySelector<HTMLElement>(".chat-command")!;
+    expect(within(row).getByText("/compact")).toBeTruthy();
+    expect(compact().disabled).toBe(true);
+    expect(fresh().disabled).toBe(true);
+    Object.assign(server.turns[0], { status: "completed" });
+    await tick(3000);
+    expect(compact().disabled).toBe(false);
+    fireEvent.click(fresh());
+    await tick(0);
+    expect(server.sent()).toEqual(["/compact", "/new"]);
+  });
+
+  it("stays out of the way while a past conversation is open", async () => {
+    daemon(session());
+    render(panel());
+    await tick(0);
+    fireEvent.click(screen.getByRole("button", { name: "Past conversations" }));
+    await tick(0);
+    expect(line()).toBeNull();
   });
 });
