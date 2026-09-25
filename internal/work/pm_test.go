@@ -134,4 +134,8 @@ func TestAPMJoinsTheSeatItsMemberAlreadyHolds(t *testing.T) {
 	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", PM: rex.ID}); err == nil {
 		t.Fatal("a member without the pm role became the PM")
 	}
+	ivy, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ivy", Kinds: []string{core.RolePlanner, core.RoleImplementer}, Engine: "claude"})
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", Implementer: ivy.ID, Planner: ivy.ID}); err == nil || !strings.Contains(err.Error(), "has no planner") {
+		t.Fatalf("a draft team took a planner: %v", err)
+	}
 }

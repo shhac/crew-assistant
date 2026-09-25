@@ -62,7 +62,7 @@ func teamFrom(in TeamChoice, snap core.Snapshot) (core.Playbook, error) {
 		}
 	}
 	if in.Planner == NoPlanner {
-		playbook.Roles = slices.DeleteFunc(playbook.Roles, func(r core.Role) bool { return r.Working() == "" })
+		playbook.Roles = slices.DeleteFunc(playbook.Roles, func(r core.Role) bool { return r.Holds(core.RolePlanner) && r.Working() == "" })
 	}
 	// The planner and the PM come last, so a member who also fills another
 	// seat plans or keeps the list from that seat.
@@ -108,23 +108,19 @@ func fillRole(playbook *core.Playbook, kind, id string, snap core.Snapshot) erro
 		return fmt.Errorf("%s doesn't hold the %s role; they hold %s", m.Name, kind, strings.Join(m.Kinds, ", "))
 	}
 	slot := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Holds(kind) })
-	seat := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Member == m.ID })
-	if slot < 0 && kind == core.RolePM {
-		// No template has a PM; the member brings the seat, or adds it to
-		// the one they already fill.
-		if seat >= 0 {
-			playbook.Roles[seat].Kinds = append(append([]string(nil), playbook.Roles[seat].Kinds...), kind)
-			return nil
+	// No template has a PM, so only the PM may join a team without a slot.
+	if slot < 0 && kind != core.RolePM {
+		return fmt.Errorf("a %s team has no %s for %s to fill", playbook.Template, kind, m.Name)
+	}
+	if seat := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Member == m.ID }); seat >= 0 && seat != slot {
+		playbook.Roles[seat].Kinds = slices.Concat(playbook.Roles[seat].Kinds, []string{kind})
+		if slot >= 0 {
+			playbook.Roles = slices.Delete(playbook.Roles, slot, slot+1)
 		}
-		playbook.Roles = append(playbook.Roles, core.Role{Name: m.Name, Kinds: []string{kind}, Engine: m.Engine, Model: m.Model, Effort: m.Effort, Member: m.ID, Instructions: m.Instructions})
 		return nil
 	}
 	if slot < 0 {
-		return fmt.Errorf("a %s team has no %s for %s to fill", playbook.Template, kind, m.Name)
-	}
-	if seat >= 0 && seat != slot {
-		playbook.Roles[seat].Kinds = append(append([]string(nil), playbook.Roles[seat].Kinds...), kind)
-		playbook.Roles = slices.Delete(playbook.Roles, slot, slot+1)
+		playbook.Roles = append(playbook.Roles, core.Role{Name: m.Name, Kinds: []string{kind}, Engine: m.Engine, Model: m.Model, Effort: m.Effort, Member: m.ID, Instructions: m.Instructions})
 		return nil
 	}
 	r := &playbook.Roles[slot]
