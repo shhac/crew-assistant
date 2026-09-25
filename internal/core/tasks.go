@@ -99,6 +99,8 @@ type Task struct {
 	// project owns for it.
 	Proposal  *Proposal `json:"proposal,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	// StartedAt is when the task first left the to-do list.
+	StartedAt time.Time `json:"started_at,omitzero"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
@@ -252,11 +254,9 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 	var out Task
 	found := false
 	err := s.store.update(ctx, func(v *Snapshot) error {
-		for _, t := range v.Tasks {
-			if t.Active() {
-				out, found = t, true
-				return nil
-			}
+		if t, ok := furthestAlong(v.Tasks, s.now()); ok {
+			out, found = t, true
+			return nil
 		}
 		for i := range v.Tasks {
 			t := &v.Tasks[i]
@@ -281,6 +281,9 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 			}
 			t.Detail = ""
 			t.UpdatedAt = now
+			if t.StartedAt.IsZero() {
+				t.StartedAt = now
+			}
 			out, found = *t, true
 			record(v, now, t.ProjectID, "task.started", t.Objective)
 			return nil
@@ -288,6 +291,54 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 		return nil
 	})
 	return out, found, err
+}
+
+// progress ranks how far along an active task is, from working out what it
+// needs to landing it.
+var progress = map[string]int{TaskResearching: 0, TaskDesigning: 1, TaskWriting: 2, TaskReviewing: 3, TaskDeciding: 4, TaskLanding: 5}
+
+// furthestAlong is the active task to carry on with: of those not waiting to
+// retry, the one furthest along, then the one with more drafts done, then the
+// one started longest ago. Finishing started work first keeps the time each
+// task spends between leaving the to-do list and landing as short as it can
+// be. Only when every active task is waiting to retry is one of them given.
+func furthestAlong(tasks []Task, now time.Time) (Task, bool) {
+	var best, waiting Task
+	found, anyWaiting := false, false
+	for _, t := range tasks {
+		switch {
+		case !t.Active():
+		case t.RetryAt.After(now):
+			if !anyWaiting {
+				waiting, anyWaiting = t, true
+			}
+		case !found || ahead(t, best):
+			best, found = t, true
+		}
+	}
+	if found {
+		return best, true
+	}
+	return waiting, anyWaiting
+}
+
+func ahead(a, b Task) bool {
+	if progress[a.Status] != progress[b.Status] {
+		return progress[a.Status] > progress[b.Status]
+	}
+	if len(a.Revisions) != len(b.Revisions) {
+		return len(a.Revisions) > len(b.Revisions)
+	}
+	return a.started().Before(b.started())
+}
+
+// started is when the task left the to-do list; tasks started before that
+// was recorded count from when they were asked for.
+func (t Task) started() time.Time {
+	if !t.StartedAt.IsZero() {
+		return t.StartedAt
+	}
+	return t.CreatedAt
 }
 
 // OrderTasks sets the order a project's queued tasks start in. ids must be
