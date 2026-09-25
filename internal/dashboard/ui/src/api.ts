@@ -513,6 +513,8 @@ export interface State {
   activity: Activity[];
   integrations: Integration[];
   paused: boolean;
+  // The daemon is finishing the work in progress before it stops.
+  stopping: boolean;
   demo: boolean;
 }
 export type Config = Record<string, unknown> & {
@@ -575,6 +577,7 @@ export function normalizeState(raw: Partial<State>): State {
     activity: raw.activity ?? [],
     integrations: raw.integrations ?? [],
     paused: raw.paused ?? false,
+    stopping: raw.stopping ?? false,
     demo: raw.demo ?? false,
   };
 }

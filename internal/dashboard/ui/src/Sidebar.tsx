@@ -149,14 +149,26 @@ export function Sidebar({
             style={{
               color: offline
                 ? "var(--block)"
-                : state.paused
+                : state.stopping || state.paused
                   ? "var(--needs)"
                   : "var(--done)",
             }}
           />
-          {offline ? "Offline" : state.paused ? "Paused" : "Running"}
+          {offline
+            ? "Offline"
+            : state.stopping
+              ? "Stopping"
+              : state.paused
+                ? "Paused"
+                : "Running"}
         </p>
-        {state.paused && !offline && (
+        {state.stopping && !offline && (
+          <p className="hint">
+            Finishing the steps already running, then crew-assistant stops.
+            Nothing new starts.
+          </p>
+        )}
+        {state.paused && !state.stopping && !offline && (
           <p className="hint">
             Nothing new starts. Steps already running finish.
           </p>
@@ -164,7 +176,7 @@ export function Sidebar({
         <button
           type="button"
           className="btn btn-sm"
-          disabled={pausing || offline}
+          disabled={pausing || offline || state.stopping}
           onClick={onPause}
         >
           {state.paused ? "Resume teams" : "Pause all teams"}
