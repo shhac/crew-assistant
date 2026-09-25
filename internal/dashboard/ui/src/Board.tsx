@@ -9,7 +9,9 @@ import { atWork } from "./members";
 import {
   boardColumns,
   decisionFor,
+  doneLabel,
   isOpenMessage,
+  latestFirst,
   needsYou,
   orderLine,
   projectTasks,
@@ -27,8 +29,6 @@ import {
   type State,
   type Task,
 } from "./api";
-
-const shownDone = 6;
 
 /** What a queued request waits to land first, or "" when it waits for nothing. */
 const waitsLine = (task: Task) =>
@@ -48,6 +48,7 @@ export function Board({
   // The server's order is the order work starts in; keep it.
   const tasks = projectTasks(project, state.tasks);
   const columns = boardColumns(project, tasks);
+  const done = latestFirst(tasks.filter((t) => t.stage === "done"));
   const stopped = tasks.filter((t) => t.stage === "stopped");
   return (
     <div className="board-page">
@@ -77,10 +78,7 @@ export function Board({
                   />
                 ) : (
                   <CardList
-                    tasks={
-                      column.stage === "done" ? [...cards].reverse() : cards
-                    }
-                    limit={column.stage === "done" ? shownDone : undefined}
+                    tasks={cards}
                     decisionFor={(t) => decisionFor(t, state.decisions)}
                     members={state.members}
                   />
@@ -89,6 +87,37 @@ export function Board({
             );
           })}
         </div>
+      )}
+      {done.length > 0 && (
+        <details className="disclosure landed">
+          <summary>
+            {doneLabel(project)} ({done.length})
+          </summary>
+          <ul className="card rows">
+            {done.map((t) => {
+              const ref = t.revisions?.at(-1)?.ref;
+              return (
+                <li key={t.id}>
+                  <a
+                    className="landed-row"
+                    href={requestHref(t.project_id, t.id)}
+                  >
+                    {t.objective}
+                    <span className="muted small">
+                      {requestStep(t)}
+                      {ref && (
+                        <>
+                          {" · "}
+                          <code>{ref.slice(0, 7)}</code>
+                        </>
+                      )}
+                    </span>
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </details>
       )}
       {stopped.length > 0 && (
         <details className="disclosure stopped">
@@ -114,20 +143,16 @@ export function Board({
 
 function CardList({
   tasks,
-  limit,
   decisionFor,
   members,
 }: {
   tasks: Task[];
-  limit?: number;
   decisionFor: (t: Task) => Decision | undefined;
   members: Member[];
 }) {
-  const [all, setAll] = useState(false);
-  const shown = limit && !all ? tasks.slice(0, limit) : tasks;
   return (
     <ul className="board-cards">
-      {shown.map((t) => (
+      {tasks.map((t) => (
         <li key={t.id}>
           <BoardCard
             task={t}
@@ -136,13 +161,6 @@ function CardList({
           />
         </li>
       ))}
-      {limit && tasks.length > limit && !all && (
-        <li>
-          <button className="link-button small" onClick={() => setAll(true)}>
-            Show all {tasks.length}
-          </button>
-        </li>
-      )}
     </ul>
   );
 }
@@ -160,7 +178,6 @@ function BoardCard({
   children?: ReactNode;
 }) {
   const open = (task.messages ?? []).filter(isOpenMessage).length;
-  const ref = task.revisions?.at(-1)?.ref;
   return (
     <article className={`board-card${needsYou(task) ? " needs" : ""}`}>
       <a
@@ -181,14 +198,11 @@ function BoardCard({
           )}
         </p>
       )}
-      {(open > 0 || (task.stage === "done" && ref)) && (
+      {open > 0 && (
         <p className="board-card-meta muted small">
-          {open > 0 && (
-            <span>
-              <Icon name="Message" size={12} /> {open} waiting for a reply
-            </span>
-          )}
-          {task.stage === "done" && ref && <code>{ref.slice(0, 7)}</code>}
+          <span>
+            <Icon name="Message" size={12} /> {open} waiting for a reply
+          </span>
         </p>
       )}
       {children}

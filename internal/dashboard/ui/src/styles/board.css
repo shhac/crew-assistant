@@ -161,10 +161,12 @@
   opacity: 0.5;
 }
 
+.landed > summary,
 .stopped > summary {
   padding: 4px 0 10px;
 }
 
+.landed-row,
 .stopped-row {
   display: flex;
   flex-direction: column;

@@ -406,6 +406,133 @@ describe("the board", () => {
     ).toBe("#/projects/p1/team");
     expect(screen.queryByRole("link", { name: "Landing" })).toBeNull();
   });
+  describe("its landed requests", () => {
+    const landed = (id: string, objective: string, at: string) =>
+      started({
+        id,
+        objective,
+        status: "landed",
+        stage: "done",
+        updated_at: at,
+        revisions: [
+          { n: 1, brief_version: 2, files: [], ref: `${id}c0ffee12345` },
+        ],
+      });
+    const tasks = () => [
+      task({ id: "t1", objective: "Queued" }),
+      landed("a1", "Older", "2026-09-21T10:00:00Z"),
+      landed("b2", "Newest", "2026-09-23T10:00:00Z"),
+      started({
+        id: "s1",
+        objective: "Called off",
+        status: "stopped",
+        stage: "stopped",
+      }),
+      landed("c3", "Middle", "2026-09-22T10:00:00Z"),
+    ];
+    const region = (name: string) =>
+      screen.getByText(name).closest("details") as HTMLDetailsElement;
+    const state = (list: Task[]) =>
+      normalizeState({
+        assistant: { name: "Iris", personality: "" },
+        projects: [project()],
+        tasks: list,
+      });
+
+    it("keeps them out of the columns, folded away with a count, apart from stopped ones", () => {
+      show(project(), { tasks: tasks() });
+      const columns = screen
+        .getAllByRole("listitem")
+        .filter((c) => c.classList.contains("board-column"));
+      expect(columns.map((c) => c.getAttribute("aria-label"))).not.toContain(
+        "Landed",
+      );
+      for (const c of columns)
+        for (const name of ["Older", "Newest", "Middle", "Called off"])
+          expect(within(c).queryByText(name)).toBeNull();
+      const done = region("Landed (3)");
+      expect(done.open).toBe(false);
+      expect(done.classList.contains("landed")).toBe(true);
+      expect(within(done).queryByText("Called off")).toBeNull();
+      const stopped = region("Stopped (1)");
+      expect(within(stopped).queryByText(/Older|Newest|Middle/)).toBeNull();
+      expect(within(stopped).getByText("Called off")).toBeTruthy();
+    });
+    it("opens and folds, listing the most recently landed first", () => {
+      show(project(), { tasks: tasks() });
+      const done = region("Landed (3)");
+      fireEvent.click(screen.getByText("Landed (3)"));
+      expect(done.open).toBe(true);
+      const links = within(done).getAllByRole("link");
+      expect(links.map((a) => a.firstChild?.textContent)).toEqual([
+        "Newest",
+        "Middle",
+        "Older",
+      ]);
+      expect(links[0].getAttribute("href")).toBe("#/projects/p1/requests/b2");
+      expect(within(links[0]).getByText("b2c0ffe")).toBeTruthy();
+      fireEvent.click(screen.getByText("Landed (3)"));
+      expect(done.open).toBe(false);
+    });
+    it("calls them delivered for work that isn't code", () => {
+      show(project({ playbook: writingTeam }), {
+        tasks: [
+          task({
+            id: "w1",
+            objective: "The note",
+            status: "delivered",
+            stage: "done",
+          }),
+        ],
+      });
+      expect(region("Delivered (1)")).toBeTruthy();
+      expect(screen.queryByText(/Landed/)).toBeNull();
+    });
+    it("opens a landed request as before", () => {
+      show(project(), { tasks: tasks() }, { request: "b2" });
+      const panel = screen.getByRole("complementary", { name: "Newest" });
+      expect(
+        within(panel).getByText(
+          "This request is finished. Ask for a new one to change it.",
+        ),
+      ).toBeTruthy();
+    });
+    it("stays open across a refresh, leaving an open request and focus alone", () => {
+      window.history.replaceState(null, "", "/#/projects/p1/requests/b2");
+      const view = show(project(), { tasks: tasks() }, { request: "b2" });
+      const panel = screen.getByRole("complementary", { name: "Newest" });
+      fireEvent.click(screen.getByText("Landed (3)"));
+      const field = document.body.appendChild(
+        document.createElement("textarea"),
+      );
+      try {
+        field.focus();
+        field.value = "a draft";
+        view.rerender(
+          <ProjectPage
+            project={project()}
+            route={{ page: "project", id: "p1", tab: "board", request: "b2" }}
+            state={state([
+              ...tasks(),
+              landed("d4", "Just landed", "2026-09-24T10:00:00Z"),
+            ])}
+            refresh={refresh}
+          />,
+        );
+        const done = region("Landed (4)");
+        expect(done.open).toBe(true);
+        expect(
+          within(done).getAllByRole("link")[0].firstChild?.textContent,
+        ).toBe("Just landed");
+        expect(document.activeElement).toBe(field);
+        expect(field.value).toBe("a draft");
+        expect(panel.isConnected).toBe(true);
+        expect(window.location.hash).toBe("#/projects/p1/requests/b2");
+      } finally {
+        field.remove();
+      }
+    });
+  });
 });
 
 describe("a request", () => {

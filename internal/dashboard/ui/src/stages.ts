@@ -89,8 +89,30 @@ export function boardColumns(project: Project, tasks: Task[]): Column[] {
     { stage: "reviewing", label: "Reviewing" },
     ...(qa ? [{ stage: "qa" as const, label: "QA" }] : []),
     { stage: "ready", label: code ? "Ready to land" : "Ready" },
-    { stage: "done", label: code ? "Landed" : "Delivered" },
   ];
+}
+
+/** What the board calls finished work, kept apart from the columns. */
+export const doneLabel = (project: Project) =>
+  isCode(project.playbook) ? "Landed" : "Delivered";
+
+const when = (at?: string) => (at ? Date.parse(at) || 0 : 0);
+
+/**
+ * Finished requests, the most recently finished first. A task's update time
+ * is when it finished; ties fall back to when it was asked for, then to the
+ * server's order reversed.
+ */
+export function latestFirst(tasks: Task[]) {
+  return tasks
+    .map((task, i) => ({ task, i }))
+    .sort(
+      (a, b) =>
+        when(b.task.updated_at) - when(a.task.updated_at) ||
+        when(b.task.created_at) - when(a.task.created_at) ||
+        b.i - a.i,
+    )
+    .map((x) => x.task);
 }
 
 export function roleName(task: Task, kind: string, fallback: string) {

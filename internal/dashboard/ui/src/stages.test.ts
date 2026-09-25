@@ -3,7 +3,9 @@ import {
   boardColumns,
   decisionFor,
   decisionKind,
+  doneLabel,
   isOpenMessage,
+  latestFirst,
   leadRequest,
   projectGroup,
   projectKind,
@@ -79,14 +81,12 @@ describe("the board", () => {
       "Reviewing",
       "QA",
       "Ready to land",
-      "Landed",
     ]);
     expect(boardColumns(project(writing), []).map((c) => c.label)).toEqual([
       "To do",
       "Writing",
       "Reviewing",
       "Ready",
-      "Delivered",
     ]);
     // A request that started with QA keeps its column after the team changes.
     const pinned = task({
@@ -97,6 +97,32 @@ describe("the board", () => {
     expect(
       boardColumns(project(writing), [pinned]).some((c) => c.stage === "qa"),
     ).toBe(true);
+  });
+  it("keeps finished work out of the columns, under its own name", () => {
+    const stages = (p: Project) => boardColumns(p, []).map((c) => c.stage);
+    expect(stages(project(code()))).not.toContain("done");
+    expect(stages(project(writing))).not.toContain("done");
+    expect(doneLabel(project(code()))).toBe("Landed");
+    expect(doneLabel(project(writing))).toBe("Delivered");
+  });
+  it("lists finished work the most recently finished first", () => {
+    const ids = (tasks: Task[]) => latestFirst(tasks).map((t) => t.id);
+    expect(
+      ids([
+        task({ id: "a", updated_at: "2026-09-20T10:00:00Z" }),
+        task({ id: "b", updated_at: "2026-09-22T10:00:00.5Z" }),
+        task({ id: "c", updated_at: "2026-09-22T10:00:00Z" }),
+      ]),
+    ).toEqual(["b", "c", "a"]);
+    // Ties fall back to when it was asked for, then the server's order reversed.
+    expect(
+      ids([
+        task({ id: "a", created_at: "2026-09-19T10:00:00Z" }),
+        task({ id: "b", created_at: "2026-09-18T10:00:00Z" }),
+        task({ id: "c" }),
+        task({ id: "d" }),
+      ]),
+    ).toEqual(["a", "b", "d", "c"]);
   });
   it("shows planning when the team plans, or while a request still does", () => {
     const planned = (): Playbook => ({
@@ -113,7 +139,6 @@ describe("the board", () => {
       "Reviewing",
       "QA",
       "Ready to land",
-      "Landed",
     ]);
     const has = (tasks: Task[]) =>
       boardColumns(project(code()), tasks).some((c) => c.stage === "planning");
