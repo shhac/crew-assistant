@@ -463,3 +463,29 @@ func TestChoosingATeamWakesTheLoop(t *testing.T) {
 	default:
 	}
 }
+
+// Stop is the owner's to choose on every decision a task brings them, and it
+// always ends the task for good.
+func TestChoosingStopEndsTheTaskWhateverItWasWaitingOn(t *testing.T) {
+	for _, kind := range []string{core.DecisionFailure, core.DecisionQuestion, core.DecisionDelivery, core.DecisionEscalation, core.DecisionUpdate} {
+		for _, resume := range []string{"", core.TaskWriting} {
+			runner := &scriptedRunner{reviews: []string{pass, pass, pass, pass}}
+			a, _, task := loopApp(t, runner, "")
+			ctx := context.Background()
+			a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
+				t.Status, t.ResumeStatus = core.TaskWaiting, resume
+				return "", nil
+			})
+			d, err := a.Core.OpenTaskDecision(ctx, task.ID, kind, core.DecisionInput{Title: "Well?", Context: "It needs you.", Recommendation: "Go on", Choices: []string{choiceTryAgain, choiceStop}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.Core.ChooseDecision(ctx, d.ID, choiceStop); err != nil {
+				t.Fatal(err)
+			}
+			if got := settle(t, a); got.Status != core.TaskStopped || runner.writes != 0 {
+				t.Errorf("%s (resuming %q): %s after %d writes", kind, resume, got.Status, runner.writes)
+			}
+		}
+	}
+}

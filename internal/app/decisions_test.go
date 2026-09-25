@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -56,5 +59,42 @@ func TestTheAssistantReadsOneTaskInFullWithinItsProject(t *testing.T) {
 	}
 	if _, err := read("another-project"); err == nil {
 		t.Fatal("a task was read through the wrong project")
+	}
+}
+
+// An open decision is sent to the owner once: claimed before sending, never
+// sent again, and a send that failed stays pending for inspection rather than
+// being tried again blind.
+func TestEachOpenDecisionIsSentToTheOwnerOnce(t *testing.T) {
+	a := testApp(t)
+	ctx := context.Background()
+	open := func(title string) core.Decision {
+		d, err := a.Core.CreateDecision(ctx, core.DecisionInput{Title: title, Context: "Ready", Recommendation: "Approve", Choices: []string{"Approve", "Stop"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	first, failing := open("First"), open("Failing")
+	var sent []string
+	send := func(_ context.Context, text string) error {
+		sent = append(sent, text)
+		if strings.HasPrefix(text, "Failing") {
+			return errors.New("slack is down")
+		}
+		return nil
+	}
+	a.notify(ctx, send)
+	a.notify(ctx, send)
+	if len(sent) != 2 || !slices.ContainsFunc(sent, func(s string) bool { return strings.HasPrefix(s, first.Title) }) {
+		t.Fatalf("each decision should be sent once: %q", sent)
+	}
+	pending, _ := a.Core.PendingEvents(ctx)
+	if len(pending) != 1 || pending[0] != "notify:decision:"+failing.ID {
+		t.Fatalf("the failed send should stay pending: %v", pending)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	if !slices.ContainsFunc(snap.Activity, func(e core.Activity) bool { return e.Kind == "operation.interrupted" }) {
+		t.Fatal("the failed send should be noted for inspection")
 	}
 }
