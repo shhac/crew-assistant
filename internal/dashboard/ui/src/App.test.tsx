@@ -575,7 +575,10 @@ describe("settings", () => {
     const config = {
       assistant: { ...state.assistant, theme: "system" },
       dashboard: { addr: "127.0.0.1:8340" },
-      model: { model: "configured-model", api_key_env: "TEST_MODEL_KEY" },
+      model: { model: "configured-model" },
+      engines: {
+        "openai-compatible": { base_url: "", api_key_env: "TEST_MODEL_KEY" },
+      },
     };
     respond = (path) => ({ body: path === "/api/config" ? config : state });
     window.history.replaceState(null, "", "/#/settings");
@@ -680,23 +683,54 @@ describe("settings", () => {
       engine: "codex",
       model: "gpt-6-astra",
       effort: "high",
-      codex_bin: "codex",
-      codex_home: "/fixture/assistant-login",
-      base_url: "https://api.example.test/v1",
-      api_key_env: "PA_KEY",
       max_tokens: 4096,
+    };
+    const engines = {
+      codex: {
+        bin: "codex",
+        home: "/fixture/assistant-login",
+        usage_floor: { "5h_percent": 20 },
+      },
+      claude: { home: "/fixture/claude-login" },
+      "openai-compatible": {
+        base_url: "https://api.example.test/v1",
+        api_key_env: "PA_KEY",
+      },
     };
     const config = {
       assistant: state.assistant,
       model,
-      worker_model: { ...model, api_key_env: "WORKER_KEY" },
+      worker_model: { ...model, engine: "claude" },
+      engines,
     };
-    respond = (path) => ({ body: path === "/api/config" ? config : state });
+    const defaults = {
+      engines: {
+        codex: { bin: "codex", home: "/fixture/default-codex" },
+        claude: { bin: "claude", home: "/fixture/default-claude" },
+      },
+      usage_floor: 10,
+      on_unknown_usage: "allow",
+      openai_base_url: "https://api.example.test/default",
+    };
+    respond = (path) => ({
+      body:
+        path === "/api/config"
+          ? config
+          : path === "/api/config/defaults"
+            ? defaults
+            : state,
+    });
     window.history.replaceState(null, "", "/#/settings/model");
     render(<App />);
     expect(await screen.findByLabelText("Runs on")).toHaveProperty(
       "value",
       "codex",
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Codex program")).toHaveProperty(
+        "placeholder",
+        "codex",
+      ),
     );
     expect(screen.getByLabelText("Model ID")).toHaveProperty(
       "value",
@@ -718,9 +752,10 @@ describe("settings", () => {
     const saved = JSON.parse(
       writes().find((c) => c.path === "/api/config")!.options!.body as string,
     );
-    expect(saved.model).toEqual({
-      ...model,
-      codex_home: "/fixture/other-login",
+    expect(saved.model).toEqual(model);
+    expect(saved.engines).toEqual({
+      ...engines,
+      codex: { ...engines.codex, home: "/fixture/other-login" },
     });
     expect(saved.worker_model).toEqual(config.worker_model);
   });

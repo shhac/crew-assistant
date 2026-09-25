@@ -14,9 +14,11 @@ import { ErrorNotice, Pill, humanStatus, useAction } from "./ui";
 import {
   errorText,
   getConfig,
+  getConfigDefaults,
   putConfig,
   redrawAssistant,
   type Config,
+  type ConfigDefaults,
   type State,
 } from "./api";
 
@@ -52,6 +54,7 @@ export function Settings({
   const [saved, setSaved] = useState<Config | null>(null);
   const [draft, setDraft] = useState<Config | null>(null);
   const [loadError, setLoadError] = useState("");
+  const [defaults, setDefaults] = useState<ConfigDefaults>();
   const saving = useAction();
   useEffect(() => {
     let alive = true;
@@ -64,6 +67,12 @@ export function Settings({
       .catch((e) => {
         if (alive) setLoadError(errorText(e));
       });
+    // Without the defaults, blank fields just show no placeholder.
+    getConfigDefaults()
+      .then((value) => {
+        if (alive) setDefaults(value);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -158,7 +167,11 @@ export function Settings({
               )}
               {current === "model" && (
                 <Panel title="The assistant's model">
-                  <ModelSettings config={draft} onChange={setDraft} />
+                  <ModelSettings
+                    config={draft}
+                    defaults={defaults}
+                    onChange={setDraft}
+                  />
                 </Panel>
               )}
               {current === "chat" && (
@@ -204,7 +217,11 @@ export function Settings({
                 </>
               )}
               {current === "limits" && (
-                <LimitsSettings config={draft} onChange={setDraft} />
+                <LimitsSettings
+                  config={draft}
+                  defaults={defaults}
+                  onChange={setDraft}
+                />
               )}
               {current === "advanced" && (
                 <AdvancedSettings config={draft} onChange={setDraft} />

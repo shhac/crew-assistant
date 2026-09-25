@@ -9,7 +9,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 const config = {
-  model: { engine: "codex", codex_home: "/synthetic/login" },
+  model: { engine: "codex" },
+  engines: { codex: { home: "/synthetic/login" } },
   chat: {
     other: "preserved",
     loading_phrases: { enabled: true },

@@ -12,9 +12,21 @@ const model = {
   engine: "codex",
   model: "thinker",
   effort: "high",
-  codex_home: "/test/login",
 };
-const config = { model } as Config;
+const engines = {
+  codex: { home: "/test/login", usage_floor: { "5h_percent": 20 } },
+  claude: { bin: "/test/claude" },
+};
+const config = { model, engines } as Config;
+const defaults = {
+  engines: {
+    codex: { bin: "codex", home: "/test/default-codex" },
+    claude: { bin: "claude", home: "/test/default-claude" },
+  },
+  usage_floor: 10,
+  on_unknown_usage: "allow" as const,
+  openai_base_url: "https://api.example.test/v1",
+};
 const catalog = {
   available: true,
   engine: "codex",
@@ -215,7 +227,7 @@ it("labels the advanced settings for each engine and fetches no list for an API"
   });
   expect(changed).toHaveBeenLastCalledWith({
     ...config,
-    model: { ...model, codex_bin: "/bin/codex" },
+    engines: { ...engines, codex: { ...engines.codex, bin: "/bin/codex" } },
   });
   view.rerender(
     <ModelSettings
@@ -242,4 +254,86 @@ it("labels the advanced settings for each engine and fetches no list for an API"
     model: { engine: "openai-compatible", max_tokens: 8192 },
   });
   expect(fetch).not.toHaveBeenCalled();
+});
+it("shows what a blank engine setting falls back to", () => {
+  vi.stubGlobal("fetch", vi.fn());
+  const view = render(
+    <ModelSettings
+      config={{ model: { engine: "codex" } }}
+      defaults={defaults}
+      onChange={() => {}}
+    />,
+  );
+  expect(
+    screen.getByLabelText<HTMLInputElement>("Codex program").placeholder,
+  ).toBe("codex");
+  expect(
+    screen.getByLabelText<HTMLInputElement>(/^Codex folder/).placeholder,
+  ).toBe("/test/default-codex");
+  view.rerender(
+    <ModelSettings
+      config={{ model: { engine: "claude" } }}
+      defaults={defaults}
+      onChange={() => {}}
+    />,
+  );
+  expect(
+    screen.getByLabelText<HTMLInputElement>("Claude program").placeholder,
+  ).toBe("claude");
+  expect(
+    screen.getByLabelText<HTMLInputElement>(/^Claude settings folder/)
+      .placeholder,
+  ).toBe("/test/default-claude");
+  view.rerender(
+    <ModelSettings
+      config={{ model: { engine: "openai-compatible" } }}
+      defaults={defaults}
+      onChange={() => {}}
+    />,
+  );
+  expect(
+    screen.getByLabelText<HTMLInputElement>("API address").placeholder,
+  ).toBe("https://api.example.test/v1");
+});
+it("clears a blanked engine setting so the default applies, keeping the other engine's", () => {
+  vi.stubGlobal("fetch", vi.fn());
+  const changed = vi.fn();
+  const claude = { ...config, model: { engine: "claude" } };
+  render(<ModelSettings config={claude} onChange={changed} />);
+  fireEvent.change(screen.getByLabelText("Claude program"), {
+    target: { value: "" },
+  });
+  expect(changed).toHaveBeenLastCalledWith({
+    ...claude,
+    engines: { codex: engines.codex, claude: {} },
+  });
+  fireEvent.change(screen.getByLabelText(/^Claude settings folder/), {
+    target: { value: "/test/claude-home" },
+  });
+  expect(changed).toHaveBeenLastCalledWith({
+    ...claude,
+    engines: {
+      codex: engines.codex,
+      claude: { bin: "/test/claude", home: "/test/claude-home" },
+    },
+  });
+});
+it("writes the API address and key variable to the API engine", () => {
+  vi.stubGlobal("fetch", vi.fn());
+  const changed = vi.fn();
+  const api = {
+    model: { engine: "openai-compatible", model: "m" },
+    engines: {
+      ...engines,
+      "openai-compatible": { base_url: "", api_key_env: "" },
+    },
+  };
+  render(<ModelSettings config={api} onChange={changed} />);
+  fireEvent.change(screen.getByLabelText(/^API key variable/), {
+    target: { value: "TEST_KEY" },
+  });
+  expect(changed).toHaveBeenLastCalledWith({
+    ...api,
+    engines: { ...engines, "openai-compatible": { api_key_env: "TEST_KEY" } },
+  });
 });

@@ -113,6 +113,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function section(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }
+/**
+ * withSettings merges fields into a group, dropping any left blank so the
+ * server applies its default.
+ */
+export function withSettings(
+  value: unknown,
+  fields: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries({ ...section(value), ...fields }).filter(
+      ([, v]) => v !== undefined && v !== "",
+    ),
+  );
+}
+/** withEngine merges fields into one engine's settings, keeping the rest. */
+export function withEngine(
+  config: Config,
+  engine: string,
+  fields: Record<string, unknown>,
+): Config {
+  const engines = section(config.engines);
+  return {
+    ...config,
+    engines: { ...engines, [engine]: withSettings(engines[engine], fields) },
+  };
+}
 export interface LandPolicy {
   means?: string;
   via?: "branch" | "push" | "pull-request" | (string & {});
@@ -573,6 +599,18 @@ export function getConfig() {
 }
 export function putConfig(config: Config) {
   return api("/api/config", { method: "PUT", body: JSON.stringify(config) });
+}
+/** What a blank engine setting falls back to, for showing in its place. */
+export interface ConfigDefaults {
+  engines?: Partial<
+    Record<"codex" | "claude", { bin?: string; home?: string }>
+  >;
+  usage_floor?: number;
+  on_unknown_usage?: "allow" | "pause";
+  openai_base_url?: string;
+}
+export function getConfigDefaults() {
+  return api<ConfigDefaults>("/api/config/defaults");
 }
 export function resolveDecision(
   id: string,
