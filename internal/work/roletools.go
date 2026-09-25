@@ -26,7 +26,7 @@ type roleTools struct {
 	taskID    string
 	// status is the task's status when the turn started. A link is made
 	// only while the task is still there, since a turn the owner stopped
-	// runs on but must change nothing.
+	// runs on but must change nothing; core checks it in the same change.
 	status string
 	// by is how its links are marked.
 	by string
@@ -37,20 +37,22 @@ type roleTools struct {
 }
 
 func (lp *Loop) toolsFor(t core.Task, kind, memberID string) roleTools {
-	relations := []string{core.RelationRelatesTo}
+	return roleTools{lp: lp, projectID: t.ProjectID, taskID: t.ID, status: t.Status, by: core.TeamLinker(memberID, kind), relations: relationsFor(kind)}
+}
+
+// relationsFor is what a role may link its task as: the researcher decides
+// what a task waits for; the others only point at related work.
+func relationsFor(kind string) []string {
 	if kind == core.RoleResearcher {
-		relations = []string{core.RelationDependsOn, core.RelationBlocks, core.RelationRelatesTo}
+		return []string{core.RelationDependsOn, core.RelationBlocks, core.RelationRelatesTo}
 	}
-	if kind == core.RolePM {
-		relations = nil
-	}
-	return roleTools{lp: lp, projectID: t.ProjectID, taskID: t.ID, status: t.Status, by: core.TeamLinker(memberID, kind), relations: relations}
+	return []string{core.RelationRelatesTo}
 }
 
 // projectTools are the PM's: it looks across the list rather than working
 // on one task, and changes links only through its answer.
-func (lp *Loop) projectTools(projectID, memberID string) roleTools {
-	return roleTools{lp: lp, projectID: projectID, by: core.TeamLinker(memberID, core.RolePM)}
+func (lp *Loop) projectTools(projectID string) roleTools {
+	return roleTools{lp: lp, projectID: projectID}
 }
 
 // guide tells the role what its tools are for.
@@ -125,44 +127,21 @@ func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (
 		return r.list(ctx, in["which"], in["related_to"], in["text"])
 	case "read_task":
 		return r.read(ctx, in["task_id"])
-	case "link_tasks":
-		if !slices.Contains(r.relations, in["relation"]) {
-			return "", fmt.Errorf("you may link your task only as %s", strings.Join(r.relations, ", "))
-		}
-		if err := r.stillWorking(ctx); err != nil {
-			return "", err
-		}
-		if _, err := r.lp.LinkTasks(ctx, r.projectID, r.taskID, in["relation"], in["other_task_id"], r.by); err != nil {
-			return "", hideProjects(err)
-		}
-		return "Linked.", nil
-	case "unlink_tasks":
+	case "link_tasks", "unlink_tasks":
 		if len(r.relations) == 0 {
 			return "", errors.New("you cannot change links")
 		}
-		if err := r.stillWorking(ctx); err != nil {
-			return "", err
+		l := core.Link{Project: r.projectID, Task: r.taskID, Relation: in["relation"], Other: in["other_task_id"], By: r.by, Relations: r.relations, While: r.status}
+		change, done := r.lp.LinkTasks, "Linked."
+		if name == "unlink_tasks" {
+			change, done = r.lp.UnlinkTasks, "Unlinked."
 		}
-		if _, err := r.lp.UnlinkTasks(ctx, r.projectID, r.taskID, in["other_task_id"], r.by); err != nil {
+		if _, err := change(ctx, l); err != nil {
 			return "", hideProjects(err)
 		}
-		return "Unlinked.", nil
+		return done, nil
 	}
 	return "", fmt.Errorf("there is no tool %q", name)
-}
-
-// stillWorking refuses a change once the task has moved on without this
-// turn, such as the owner stopping it.
-func (r roleTools) stillWorking(ctx context.Context) error {
-	snap, err := r.lp.Core.Snapshot(ctx)
-	if err != nil {
-		return err
-	}
-	t, ok := findTask(snap, r.projectID, r.taskID)
-	if !ok || t.Finished() || t.Status != r.status {
-		return errors.New("your task has moved on, so this turn changes nothing more")
-	}
-	return nil
 }
 
 // hideProjects keeps a refusal from saying anything about tasks outside
@@ -212,16 +191,23 @@ func (r roleTools) list(ctx context.Context, which, relatedTo, contains string) 
 	return b.String(), nil
 }
 
+// linkGroup is one kind of link a task has, with the tasks at the other end.
+type linkGroup struct {
+	name string
+	ids  []string
+}
+
+func linkGroups(t core.Task) []linkGroup {
+	return []linkGroup{{"depends on", t.DependsOn}, {"blocks", t.Blocks}, {"relates to", t.RelatesTo}}
+}
+
 func linkedTo(a, b core.Task) bool {
-	return slices.Contains(a.DependsOn, b.ID) || slices.Contains(a.Blocks, b.ID) || slices.Contains(a.RelatesTo, b.ID)
+	return slices.ContainsFunc(linkGroups(a), func(g linkGroup) bool { return slices.Contains(g.ids, b.ID) })
 }
 
 func linksLine(t core.Task) string {
 	var parts []string
-	for _, l := range []struct {
-		name string
-		ids  []string
-	}{{"depends on", t.DependsOn}, {"blocks", t.Blocks}, {"relates to", t.RelatesTo}} {
+	for _, l := range linkGroups(t) {
 		if len(l.ids) > 0 {
 			parts = append(parts, l.name+" "+strings.Join(l.ids, ", "))
 		}
@@ -246,13 +232,10 @@ func (r roleTools) read(ctx context.Context, id string) (string, error) {
 	for _, c := range t.Criteria {
 		fmt.Fprintf(&b, "- criterion: %s\n", text.Clip(c, 300))
 	}
-	for _, l := range []struct {
-		name string
-		ids  []string
-	}{{"Depends on", t.DependsOn}, {"Blocks", t.Blocks}, {"Relates to", t.RelatesTo}} {
+	for _, l := range linkGroups(t) {
 		for _, other := range l.ids {
 			if o, ok := findTask(snap, r.projectID, other); ok {
-				fmt.Fprintf(&b, "%s: %s (%s) %s\n", l.name, o.ID, o.Status, text.Clip(o.Objective, 200))
+				fmt.Fprintf(&b, "- %s %s (%s): %s\n", l.name, o.ID, o.Status, text.Clip(o.Objective, 200))
 			}
 		}
 	}

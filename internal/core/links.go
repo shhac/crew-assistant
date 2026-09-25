@@ -50,8 +50,9 @@ func linkKey(relation, id string) string { return relation + ":" + id }
 // leaves alone.
 func overrules(by string) bool { return by == LinkedByOwner || by == LinkedByAssistant }
 
-// heldByOwner says whether the owner or the assistant set t's link to id.
-func heldByOwner(t Task, relation, id string) bool {
+// HeldByOwner says whether the owner or the assistant set t's link to id,
+// which the team leaves alone.
+func (t Task) HeldByOwner(relation, id string) bool {
 	return overrules(t.LinkedBy[linkKey(relation, id)].By)
 }
 
@@ -92,31 +93,43 @@ func linked(a, b Task) string {
 	return ""
 }
 
-// LinkTasks relates taskID to otherID: it depends on it, blocks it, or
-// relates to it. by is who asked, which decides who may undo it. A team
-// member may make a task depend on another only while it has not started
-// its work, and not change a finished task at all.
-func (s *Service) LinkTasks(ctx context.Context, projectID, taskID, relation, otherID, by string) (Task, error) {
+// Link is one change to how two tasks of a project relate.
+type Link struct {
+	Project, Task, Other string
+	// Relation is what Task is to Other: it depends on it, blocks it, or
+	// relates to it. Unlinking takes away whichever it is.
+	Relation string
+	// By is who asks, which decides who may undo it.
+	By string
+	// Relations, when set, are the only relations By may make or take
+	// away, as a team role's are.
+	Relations []string
+	// While, when set, is the status Task must still be in: a role's turn
+	// changes nothing once its task has moved on without it.
+	While string
+}
+
+// LinkTasks relates two tasks. A team member may make a task depend on
+// another only while it has not begun its work, and never change a finished
+// task.
+func (s *Service) LinkTasks(ctx context.Context, l Link) (Task, error) {
 	var out Task
 	err := s.store.update(ctx, func(v *Snapshot) error {
-		t, other, err := pair(v, projectID, taskID, otherID)
+		t, other, err := pair(v, l)
 		if err != nil {
 			return err
 		}
 		if existing := linked(*t, *other); existing != "" {
 			return fmt.Errorf("“%s” and “%s” are already linked (%s); unlink them first: %w", t.Objective, other.Objective, relationWords(existing), ErrConflict)
 		}
-		if !overrules(by) && t.Finished() {
-			return fmt.Errorf("“%s” has finished, so the team no longer changes it: %w", t.Objective, ErrConflict)
+		if err := l.allows(l.Relation); err != nil {
+			return err
 		}
 		now := s.now().UTC()
-		switch relation {
+		switch l.Relation {
 		case RelationDependsOn, RelationBlocks:
-			dependent, dep := t, other
-			if relation == RelationBlocks {
-				dependent, dep = other, t
-			}
-			if err := mayWait(*dependent, by); err != nil {
+			dependent, dep := orient(l.Relation, t, other)
+			if err := mayWait(*dependent, l.By); err != nil {
 				return err
 			}
 			deps, err := dependencies(v, *dependent, append(slices.Clone(dependent.DependsOn), dep.ID))
@@ -124,58 +137,53 @@ func (s *Service) LinkTasks(ctx context.Context, projectID, taskID, relation, ot
 				return err
 			}
 			dependent.DependsOn = deps
-			mark(dependent, RelationDependsOn, dep.ID, by, now)
-			dependent.UpdatedAt = now
+			mark(dependent, RelationDependsOn, dep.ID, l.By, now)
 			record(v, now, t.ProjectID, "task.linked", fmt.Sprintf("%s waits for %s", dependent.Objective, dep.Objective))
 		case RelationRelatesTo:
 			t.RelatesTo = append(t.RelatesTo, other.ID)
 			other.RelatesTo = append(other.RelatesTo, t.ID)
-			mark(t, RelationRelatesTo, other.ID, by, now)
-			mark(other, RelationRelatesTo, t.ID, by, now)
-			t.UpdatedAt, other.UpdatedAt = now, now
+			mark(t, RelationRelatesTo, other.ID, l.By, now)
+			mark(other, RelationRelatesTo, t.ID, l.By, now)
 			record(v, now, t.ProjectID, "task.linked", fmt.Sprintf("%s relates to %s", t.Objective, other.Objective))
 		default:
-			return fmt.Errorf("a task depends on, blocks or relates to another, not %q", relation)
+			return fmt.Errorf("a task depends on, blocks or relates to another, not %q", l.Relation)
 		}
-		linksChanged(v, t.ProjectID, by)
+		t.UpdatedAt, other.UpdatedAt = now, now
+		linksChanged(v, t.ProjectID, l.By)
 		derive(v, t)
-		derive(v, other)
 		out = *t
 		return nil
 	})
 	return out, err
 }
 
-// UnlinkTasks takes away whatever links taskID and otherID. The team may
-// take away only links the team set.
-func (s *Service) UnlinkTasks(ctx context.Context, projectID, taskID, otherID, by string) (Task, error) {
+// UnlinkTasks takes away whatever links two tasks. The team may take away
+// only links the team set.
+func (s *Service) UnlinkTasks(ctx context.Context, l Link) (Task, error) {
 	var out Task
 	err := s.store.update(ctx, func(v *Snapshot) error {
-		t, other, err := pair(v, projectID, taskID, otherID)
+		t, other, err := pair(v, l)
 		if err != nil {
 			return err
 		}
-		if !overrules(by) && t.Finished() {
-			return fmt.Errorf("“%s” has finished, so the team no longer changes it: %w", t.Objective, ErrConflict)
-		}
 		relation := linked(*t, *other)
-		dependent, dep := t, other
-		if relation == RelationBlocks {
-			dependent, dep = other, t
-		}
-		switch relation {
-		case "":
+		if relation == "" {
 			return fmt.Errorf("“%s” and “%s” are not linked: %w", t.Objective, other.Objective, ErrNotFound)
-		case RelationRelatesTo:
-			if !overrules(by) && heldByOwner(*t, RelationRelatesTo, other.ID) {
+		}
+		if err := l.allows(relation); err != nil {
+			return err
+		}
+		if relation == RelationRelatesTo {
+			if !overrules(l.By) && t.HeldByOwner(RelationRelatesTo, other.ID) {
 				return ownersLink(t, other)
 			}
 			t.RelatesTo = slices.DeleteFunc(t.RelatesTo, func(id string) bool { return id == other.ID })
 			other.RelatesTo = slices.DeleteFunc(other.RelatesTo, func(id string) bool { return id == t.ID })
 			unmark(t, RelationRelatesTo, other.ID)
 			unmark(other, RelationRelatesTo, t.ID)
-		default:
-			if !overrules(by) && heldByOwner(*dependent, RelationDependsOn, dep.ID) {
+		} else {
+			dependent, dep := orient(relation, t, other)
+			if !overrules(l.By) && dependent.HeldByOwner(RelationDependsOn, dep.ID) {
 				return ownersLink(t, other)
 			}
 			dependent.DependsOn = slices.DeleteFunc(dependent.DependsOn, func(id string) bool { return id == dep.ID })
@@ -184,25 +192,46 @@ func (s *Service) UnlinkTasks(ctx context.Context, projectID, taskID, otherID, b
 		now := s.now().UTC()
 		t.UpdatedAt, other.UpdatedAt = now, now
 		record(v, now, t.ProjectID, "task.unlinked", fmt.Sprintf("%s and %s are no longer linked", t.Objective, other.Objective))
-		linksChanged(v, t.ProjectID, by)
+		linksChanged(v, t.ProjectID, l.By)
 		derive(v, t)
-		derive(v, other)
 		out = *t
 		return nil
 	})
 	return out, err
 }
 
-// pair is the two tasks a link joins, both in projectID.
-func pair(v *Snapshot, projectID, taskID, otherID string) (*Task, *Task, error) {
-	t, other := task(v, strings.TrimSpace(taskID)), task(v, strings.TrimSpace(otherID))
+// allows refuses a relation l's asker may not make or take away.
+func (l Link) allows(relation string) error {
+	if l.Relations != nil && !slices.Contains(l.Relations, relation) {
+		return fmt.Errorf("you may link or unlink only as %s: %w", strings.Join(l.Relations, ", "), ErrConflict)
+	}
+	return nil
+}
+
+// orient is which of two linked tasks waits for which: blocking is
+// depending seen from the other end.
+func orient(relation string, t, other *Task) (dependent, dep *Task) {
+	if relation == RelationBlocks {
+		return other, t
+	}
+	return t, other
+}
+
+// pair is the two tasks a link joins, both in l's project, provided the
+// asker may still change the first.
+func pair(v *Snapshot, l Link) (*Task, *Task, error) {
+	t, other := task(v, strings.TrimSpace(l.Task)), task(v, strings.TrimSpace(l.Other))
 	switch {
-	case t == nil || t.ProjectID != projectID:
+	case t == nil || t.ProjectID != l.Project:
 		return nil, nil, ErrNotFound
 	case other == nil || other.ProjectID != t.ProjectID:
-		return nil, nil, fmt.Errorf("there is no task %q in this project: %w", otherID, ErrNotFound)
+		return nil, nil, fmt.Errorf("there is no task %q in this project: %w", l.Other, ErrNotFound)
 	case other.ID == t.ID:
 		return nil, nil, errors.New("a task cannot be linked to itself")
+	case l.While != "" && t.Status != l.While:
+		return nil, nil, fmt.Errorf("the task has moved on, so this changes nothing more: %w", ErrConflict)
+	case !overrules(l.By) && t.Finished():
+		return nil, nil, fmt.Errorf("“%s” has finished, so the team no longer changes it: %w", t.Objective, ErrConflict)
 	}
 	return t, other, nil
 }
@@ -245,11 +274,36 @@ func relationWords(relation string) string {
 	return "they relate"
 }
 
+// pmSetsDepends makes proposed the team's part of what t waits for, keeping
+// what the owner or assistant set, and says whether that changed anything.
+// A PM that got the whole list wrong changes nothing, rather than releasing
+// the task; and once t has begun its work, the PM can take the team's
+// dependencies away but not add any, as a role cannot.
+func pmSetsDepends(v *Snapshot, t *Task, proposed []string, now time.Time) bool {
+	team, owners := teamDependsOn(*t)
+	proposed = slices.DeleteFunc(slices.Clone(proposed), func(dep string) bool { return slices.Contains(owners, dep) })
+	if mayWait(*t, LinkedByPM) != nil {
+		proposed = slices.DeleteFunc(proposed, func(dep string) bool { return !slices.Contains(team, dep) })
+	}
+	deps := possibleDependencies(v, Task{ID: t.ID, ProjectID: t.ProjectID}, proposed)
+	if (len(deps) == 0 && len(proposed) > 0) || slices.Equal(deps, team) {
+		return false
+	}
+	for _, dep := range team {
+		if !slices.Contains(deps, dep) {
+			unmark(t, RelationDependsOn, dep)
+		}
+	}
+	t.DependsOn = append(slices.Clone(owners), deps...)
+	markAll(t, deps, LinkedByPM, now)
+	return true
+}
+
 // teamDependsOn is the part of t's dependencies the team set, which the PM
 // may replace; the owner's and the assistant's are kept.
 func teamDependsOn(t Task) (team, owners []string) {
 	for _, id := range t.DependsOn {
-		if heldByOwner(t, RelationDependsOn, id) {
+		if t.HeldByOwner(RelationDependsOn, id) {
 			owners = append(owners, id)
 		} else {
 			team = append(team, id)
@@ -269,22 +323,3 @@ func blocking(v *Snapshot) map[string][]string {
 	}
 	return out
 }
-
-// blocksOf is the tasks that depend on id, from index when deriving the
-// whole snapshot, so a snapshot of many tasks is not scanned once per task.
-func blocksOf(v *Snapshot, id string, index map[string][]string) []string {
-	if index != nil {
-		return index[id]
-	}
-	var out []string
-	for _, t := range v.Tasks {
-		if slices.Contains(t.DependsOn, id) {
-			out = append(out, t.ID)
-		}
-	}
-	return out
-}
-
-// HeldByOwner says whether the owner or the assistant set t's link to id,
-// which the team leaves alone.
-func (t Task) HeldByOwner(relation, id string) bool { return heldByOwner(t, relation, id) }

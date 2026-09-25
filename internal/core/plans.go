@@ -150,10 +150,6 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 
 // researcherLinker is how the links a task's researcher adds are marked.
 func researcherLinker(t Task) string {
-	for _, r := range t.Roles {
-		if slices.Contains(r.Kinds, RoleResearcher) {
-			return TeamLinker(r.Member, RoleResearcher)
-		}
-	}
-	return TeamLinker("", RoleResearcher)
+	researcher, _ := t.Researcher()
+	return TeamLinker(researcher.Member, RoleResearcher)
 }

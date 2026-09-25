@@ -102,7 +102,7 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		if decode(w, r, &in) != nil {
 			return
 		}
-		v, err := a.Work.LinkTasks(r.Context(), r.PathValue("id"), r.PathValue("task"), in.Relation, in.Task, core.LinkedByOwner)
+		v, err := a.Work.LinkTasks(r.Context(), core.Link{Project: r.PathValue("id"), Task: r.PathValue("task"), Relation: in.Relation, Other: in.Task, By: core.LinkedByOwner})
 		if err != nil {
 			problem(w, err)
 			return
@@ -110,7 +110,7 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("DELETE /api/projects/{id}/tasks/{task}/links/{other}", func(w http.ResponseWriter, r *http.Request) {
-		v, err := a.Work.UnlinkTasks(r.Context(), r.PathValue("id"), r.PathValue("task"), r.PathValue("other"), core.LinkedByOwner)
+		v, err := a.Work.UnlinkTasks(r.Context(), core.Link{Project: r.PathValue("id"), Task: r.PathValue("task"), Other: r.PathValue("other"), By: core.LinkedByOwner})
 		if err != nil {
 			problem(w, err)
 			return

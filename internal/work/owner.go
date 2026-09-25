@@ -20,17 +20,16 @@ func (lp *Loop) QueueTask(ctx context.Context, projectID string, in core.TaskInp
 	return t, err
 }
 
-// LinkTasks relates two tasks on behalf of by; unlinking can release a
-// task that waited.
-func (lp *Loop) LinkTasks(ctx context.Context, projectID, taskID, relation, otherID, by string) (core.Task, error) {
-	t, err := lp.Core.LinkTasks(ctx, projectID, taskID, relation, otherID, by)
+// LinkTasks relates two tasks; unlinking can release a task that waited.
+func (lp *Loop) LinkTasks(ctx context.Context, l core.Link) (core.Task, error) {
+	t, err := lp.Core.LinkTasks(ctx, l)
 	lp.nudgeUnless(err)
 	return t, err
 }
 
-// UnlinkTasks takes away the link between two tasks on behalf of by.
-func (lp *Loop) UnlinkTasks(ctx context.Context, projectID, taskID, otherID, by string) (core.Task, error) {
-	t, err := lp.Core.UnlinkTasks(ctx, projectID, taskID, otherID, by)
+// UnlinkTasks takes away the link between two tasks.
+func (lp *Loop) UnlinkTasks(ctx context.Context, l core.Link) (core.Task, error) {
+	t, err := lp.Core.UnlinkTasks(ctx, l)
 	lp.nudgeUnless(err)
 	return t, err
 }

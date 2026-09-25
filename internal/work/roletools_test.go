@@ -58,7 +58,7 @@ func TestARoleSeesItsProjectsTasksAndLinksOnlyItsOwn(t *testing.T) {
 	if got := callTool(t, researcher, "list_tasks", map[string]string{"which": "", "related_to": second.ID, "text": ""}); !strings.Contains(got.Content, first.ID) || strings.Contains(got.Content, third.ID) {
 		t.Fatalf("related filter: %s", got.Content)
 	}
-	if got := callTool(t, researcher, "read_task", map[string]string{"task_id": first.ID}); !strings.Contains(got.Content, "Depends on: "+second.ID) {
+	if got := callTool(t, researcher, "read_task", map[string]string{"task_id": first.ID}); !strings.Contains(got.Content, "- depends on "+second.ID) {
 		t.Fatalf("read shows links: %s", got.Content)
 	}
 
@@ -74,7 +74,16 @@ func TestARoleSeesItsProjectsTasksAndLinksOnlyItsOwn(t *testing.T) {
 		t.Fatalf("mark %v", linkedSecond.LinkedBy)
 	}
 
-	pm := a.toolsFor(first, core.RolePM, "")
+	// A role limited to related work can't take away what a task waits
+	// for, even a link the team set.
+	if got := callTool(t, reviewer, "unlink_tasks", map[string]string{"other_task_id": first.ID}); !got.IsError {
+		t.Fatal("a reviewer released a task the researcher made wait")
+	}
+	if got := callTool(t, researcher, "unlink_tasks", map[string]string{"other_task_id": second.ID}); got.IsError {
+		t.Fatalf("the researcher couldn't take back its own link: %s", got.Content)
+	}
+
+	pm := a.projectTools(p.ID)
 	if names := toolNames(pm); len(names) != 2 {
 		t.Fatalf("the PM links through its answer, not tools: %v", names)
 	}
@@ -117,6 +126,29 @@ func TestEachRoleGetsItsTools(t *testing.T) {
 		link := spec.Tools[2].Description
 		if (status == core.TaskResearching) != strings.Contains(link, "depends_on") {
 			t.Errorf("%s may link as: %s", status, link)
+		}
+	}
+}
+
+func TestATurnPlaysTheRoleItsStepCallsFor(t *testing.T) {
+	both := core.Role{Kinds: []string{core.RoleResearcher, core.RoleImplementer}}
+	qa := core.Role{Kinds: []string{core.RoleQA}}
+	for _, tc := range []struct {
+		status string
+		role   core.Role
+		want   string
+	}{
+		{core.TaskResearching, both, core.RoleResearcher},
+		{core.TaskDesigning, both, core.RoleDesigner},
+		{core.TaskWriting, both, core.RoleImplementer},
+		{core.TaskReviewing, qa, core.RoleQA},
+		{core.TaskDeciding, qa, core.RoleQA},
+		{core.TaskReviewing, core.Role{Kinds: []string{core.RoleReviewer}}, core.RoleReviewer},
+		{core.TaskLanding, both, core.RoleImplementer},
+		{core.TaskLanding, qa, core.RoleQA},
+	} {
+		if got := turnKind(core.Task{Status: tc.status}, tc.role); got != tc.want {
+			t.Errorf("%s with %v: %s, want %s", tc.status, tc.role.Kinds, got, tc.want)
 		}
 	}
 }

@@ -46,23 +46,9 @@ func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (s
 			if t == nil || t.ProjectID != projectID {
 				continue
 			}
-			// The PM sets the team's part of what a task waits for; what the
-			// owner or assistant set stays however the PM answers.
-			team, owners := teamDependsOn(*t)
-			proposed := slices.DeleteFunc(slices.Clone(in.Depends[id]), func(dep string) bool { return slices.Contains(owners, dep) })
-			deps := possibleDependencies(v, Task{ID: t.ID, ProjectID: t.ProjectID, DependsOn: owners}, proposed)
-			// A list the PM got entirely wrong changes nothing, rather than
-			// releasing the task.
-			if (len(deps) == 0 && len(proposed) > 0) || slices.Equal(deps, team) {
+			if !pmSetsDepends(v, t, in.Depends[id], now) {
 				continue
 			}
-			for _, dep := range team {
-				if !slices.Contains(deps, dep) {
-					unmark(t, RelationDependsOn, dep)
-				}
-			}
-			t.DependsOn = append(slices.Clone(owners), deps...)
-			markAll(t, deps, LinkedByPM, now)
 			changed = append(changed, "what “"+t.Objective+"” waits for")
 		}
 		if order := pmOrder(v, p, in.Order); order != nil {

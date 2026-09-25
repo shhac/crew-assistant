@@ -260,8 +260,10 @@ func turnKind(t core.Task, r core.Role) string {
 		}
 		return core.RoleReviewer
 	}
-	if len(r.Kinds) > 0 {
-		return r.Kinds[0]
+	// Any other step, such as QA checking a landing, is a check: research's
+	// wider reach comes only with researching.
+	if r.Holds(core.RoleQA) {
+		return core.RoleQA
 	}
 	return core.RoleImplementer
 }

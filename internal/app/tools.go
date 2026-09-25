@@ -95,10 +95,10 @@ var toolActions = map[string]toolAction{
 		return a.Work.QueueTask(ctx, in.ProjectID, core.TaskInput{Objective: in.Objective, Criteria: in.Criteria, DependsOn: in.DependsOn}, core.LinkedByAssistant)
 	}),
 	"link_tasks": with(func(a *App, ctx context.Context, in engine.LinkTasksArgs) (any, error) {
-		return a.Work.LinkTasks(ctx, in.ProjectID, in.TaskID, in.Relation, in.OtherTaskID, core.LinkedByAssistant)
+		return a.Work.LinkTasks(ctx, core.Link{Project: in.ProjectID, Task: in.TaskID, Relation: in.Relation, Other: in.OtherTaskID, By: core.LinkedByAssistant})
 	}),
 	"unlink_tasks": with(func(a *App, ctx context.Context, in engine.UnlinkTasksArgs) (any, error) {
-		return a.Work.UnlinkTasks(ctx, in.ProjectID, in.TaskID, in.OtherTaskID, core.LinkedByAssistant)
+		return a.Work.UnlinkTasks(ctx, core.Link{Project: in.ProjectID, Task: in.TaskID, Other: in.OtherTaskID, By: core.LinkedByAssistant})
 	}),
 	"order_tasks": with(func(a *App, ctx context.Context, in engine.OrderTasksArgs) (any, error) {
 		return a.Core.OrderTasks(ctx, in.ProjectID, in.TaskIDs, core.OrderedByAssistant)

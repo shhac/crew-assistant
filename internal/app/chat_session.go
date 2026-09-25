@@ -16,7 +16,6 @@ import (
 	"github.com/shhac/lib-agent-harness/session"
 )
 
-
 // chatSessionIdle is how long a session no turn has used stays open.
 const chatSessionIdle = 30 * time.Minute
 
