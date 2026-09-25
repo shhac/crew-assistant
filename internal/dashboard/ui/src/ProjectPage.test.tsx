@@ -616,6 +616,75 @@ describe("a request", () => {
     );
     expect(screen.getByRole("button", { name: "Send to Ada" })).toBeTruthy();
   });
+  it("shows the plan with only the parts it has, and who planned it", () => {
+    show(
+      project(),
+      {
+        tasks: [
+          started({
+            status: "writing",
+            stage: "implementing",
+            plan: {
+              summary: "Wrap the lookup in a cache.",
+              exists: ["A lookup in store.go"],
+              changes: ["Add a cache in front of it"],
+              role: "Planner",
+              at: new Date(Date.now() - 5 * 60000).toISOString(),
+            },
+          }),
+        ],
+      },
+      { request: "t1" },
+    );
+    const plan = screen.getByRole("region", { name: "Plan" });
+    expect(within(plan).getByText("Wrap the lookup in a cache.")).toBeTruthy();
+    expect(within(plan).getByText("What exists")).toBeTruthy();
+    expect(within(plan).getByText("Add a cache in front of it")).toBeTruthy();
+    expect(within(plan).queryByText("Out of scope")).toBeNull();
+    expect(within(plan).queryByRole("button")).toBeNull();
+    expect(
+      within(plan).getByText("Planned by Planner · 5 min ago"),
+    ).toBeTruthy();
+  });
+  it("folds a long plan to its summary until asked", () => {
+    show(
+      project(),
+      {
+        tasks: [
+          started({
+            status: "writing",
+            stage: "implementing",
+            plan: {
+              summary: "Wrap the lookup in a cache.",
+              exists: ["A lookup", "A store"],
+              changes: ["A cache"],
+              out_of_scope: ["Eviction"],
+              role: "Ada",
+              at: "2026-09-21T10:00:00Z",
+            },
+          }),
+        ],
+      },
+      { request: "t1" },
+    );
+    const plan = screen.getByRole("region", { name: "Plan" });
+    expect(within(plan).getByText("Wrap the lookup in a cache.")).toBeTruthy();
+    expect(within(plan).queryByText("Eviction")).toBeNull();
+    fireEvent.click(
+      within(plan).getByRole("button", { name: "Show the plan" }),
+    );
+    expect(within(plan).getByText("Out of scope")).toBeTruthy();
+    expect(within(plan).getByText("Eviction")).toBeTruthy();
+    expect(within(plan).queryByRole("button")).toBeNull();
+  });
+  it("shows no plan for a request that has none", () => {
+    show(
+      project(),
+      { tasks: [started({ status: "writing" })] },
+      { request: "t1" },
+    );
+    expect(screen.queryByRole("region", { name: "Plan" })).toBeNull();
+  });
   it("keeps an answer to a decision that repeats a message to the implementer", () => {
     const told = started({
       status: "writing",

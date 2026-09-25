@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { DecisionCard } from "./DecisionCard";
 import { Drafts } from "./Drafts";
+import { RequestPlan } from "./RequestPlan";
 import { TeamThread } from "./TeamThread";
 import {
   decisionFor,
@@ -133,6 +134,7 @@ export function RequestPanel({
             waitingOn={decision?.kind}
             refresh={refresh}
           />
+          {task.plan && <RequestPlan plan={task.plan} />}
           <Drafts
             project={project}
             task={task}

@@ -160,12 +160,23 @@
 
 .findings,
 .said,
+.plan-list,
 .file-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding-left: 18px;
   color: var(--soft);
+}
+
+.plan-part {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plan-more {
+  align-self: flex-start;
 }
 
 .draft-files {
