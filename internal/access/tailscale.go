@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/shhac/lib-agent-mcp/tailscale"
+
+	"github.com/shhac/crew-assistant/internal/procgroup"
 )
 
 type Runner func(context.Context, ...string) ([]byte, error)
@@ -31,7 +33,9 @@ type ownership struct {
 func DefaultTailscale() Tailscale {
 	return Tailscale{
 		Run: func(ctx context.Context, args ...string) ([]byte, error) {
-			return exec.CommandContext(ctx, "tailscale", args...).Output()
+			cmd := exec.CommandContext(ctx, "tailscale", args...)
+			procgroup.Detach(cmd)
+			return cmd.Output()
 		},
 		Wire: tailscale.Wire,
 	}

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/procgroup"
 )
 
 type Runner func(context.Context, string, []string) ([]byte, error)
@@ -312,6 +313,7 @@ func run(ctx context.Context, name string, args []string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
+	procgroup.Detach(cmd)
 	cmd.WaitDelay = time.Second
 	cmd.Env = commandEnvironment(name, args)
 	var out bounded

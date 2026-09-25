@@ -19,6 +19,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/shhac/crew-assistant/internal/procgroup"
 )
 
 const (
@@ -84,6 +86,7 @@ func (r Repo) Readable() []string {
 // from outside any repository so no project setting can move it.
 var moduleCache = sync.OnceValue(func() string {
 	cmd := exec.Command("go", "env", "GOMODCACHE")
+	procgroup.Detach(cmd)
 	cmd.Dir = os.TempDir()
 	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOFLAGS=")
 	out, err := cmd.Output()
@@ -166,7 +169,9 @@ func (r Repo) copyPrepared() error {
 		if runtime.GOOS == "darwin" {
 			args = []string{"-Rc", from, to} // copy-on-write clones on APFS
 		}
-		if out, err := exec.Command("cp", args...).CombinedOutput(); err != nil {
+		cmd := exec.Command("cp", args...)
+		procgroup.Detach(cmd)
+		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("copying %s into the clone: %s", clean, strings.TrimSpace(string(out)))
 		}
 	}

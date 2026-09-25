@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/shhac/crew-assistant/internal/procgroup"
 )
 
 // Runner runs gh with args and returns what it printed.
@@ -27,6 +29,7 @@ func New() Client { return Client{Run: runGH} }
 
 func runGH(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
+	procgroup.Detach(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

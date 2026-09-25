@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/shhac/crew-assistant/internal/procgroup"
 )
 
 // validBranch refuses anything git would not take as a branch name, before it
@@ -34,6 +36,7 @@ func run(ctx context.Context, dir string, args ...string) (string, error) {
 func runIn(ctx context.Context, dir string, env []string, args ...string) (string, error) {
 	full := append(append([]string(nil), safety...), args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
+	procgroup.Detach(cmd)
 	cmd.Dir = dir
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
