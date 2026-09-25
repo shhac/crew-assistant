@@ -144,3 +144,30 @@ func TestASlackMessageAsTheDaemonStopsIsQueuedAndSaysSo(t *testing.T) {
 	}
 	queuedTurn(t, a, "Anything new?")
 }
+
+// A stop that comes while the queue waits for the conversation, which an
+// identity interview holds, still tells whoever waits for an answer.
+func TestAStopBeforeTheQueueStartsStillAnswersWaiters(t *testing.T) {
+	a := testApp(t)
+	a.chat <- struct{}{} // an interview holds the conversation
+	graceful, stopTaking := context.WithCancel(context.Background())
+	stop := lifecycle.Stop{Graceful: graceful, Force: context.Background()}
+	a.setStop(stop)
+	queue := make(chan error, 1)
+	go func() { queue <- a.RunChatQueue(stop) }()
+	waiting := chatAsync(a, "Hello")
+	queuedTurn(t, a, "Hello")
+	stopTaking()
+	select {
+	case r := <-waiting:
+		if !errors.Is(r.err, ErrStopping) {
+			t.Fatalf("heard %v", r.err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the sender waited through the stop")
+	}
+	<-a.chat
+	if err := <-queue; err != nil {
+		t.Fatal(err)
+	}
+}

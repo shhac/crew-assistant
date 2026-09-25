@@ -92,14 +92,20 @@ func (a *App) Chat(ctx context.Context, message string) (engine.Result, error) {
 func (a *App) RunChatQueue(stop lifecycle.Stop) (queueErr error) {
 	owned := false
 	defer func() {
-		if !owned {
+		// A stop ends this run's answers whether or not the queue ever took
+		// the conversation; a queue that found another running leaves that
+		// one's waiters alone.
+		if stop.Stopping() {
+			a.closeChatWaiters()
 			return
 		}
-		if queueErr != nil && !stop.Stopping() {
-			a.chatFailed.Store(true)
-			a.Status("chat", "Conversation", "error", ErrChatQueueUnavailable.Error())
+		if owned {
+			if queueErr != nil {
+				a.chatFailed.Store(true)
+				a.Status("chat", "Conversation", "error", ErrChatQueueUnavailable.Error())
+			}
+			a.closeChatWaiters()
 		}
-		a.closeChatWaiters()
 	}()
 	select {
 	case a.chat <- struct{}{}:
