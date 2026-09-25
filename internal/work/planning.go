@@ -14,11 +14,10 @@ import (
 // is written. The planner only reads, starts afresh every time, and leaves
 // its plan on the task, where the implementer and the reviewers read it.
 func (lp *Loop) planTask(ctx context.Context, p core.Project, t core.Task, m medium) error {
-	planners := t.RolesOf(core.RolePlanner)
-	if len(planners) == 0 {
+	planner, ok := t.Planner()
+	if !ok {
 		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
 	}
-	planner := planners[0]
 	// A plan recorded before a restart is not paid for twice.
 	if t.Plan != nil {
 		return lp.askPlanQuestions(ctx, t)

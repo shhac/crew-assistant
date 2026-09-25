@@ -31,6 +31,14 @@ type Role struct {
 	Learnings []Learning `json:"learnings,omitempty"`
 }
 
+// roleKinds are the kinds of role a member or seat can hold, in the order a
+// team works.
+var roleKinds = []string{RolePM, RolePlanner, RoleImplementer, RoleReviewer, RoleQA}
+
+// working reports whether a kind of role does the work once it has started,
+// rather than planning it or keeping the list.
+func working(kind string) bool { return kind != RolePlanner && kind != RolePM }
+
 // Holds reports whether the seat holds a kind of role.
 func (r Role) Holds(kind string) bool { return slices.Contains(r.Kinds, kind) }
 
@@ -38,12 +46,11 @@ func (r Role) Holds(kind string) bool { return slices.Contains(r.Kinds, kind) }
 // once the work has started, and what a message to it reaches. A seat that
 // only plans or keeps the list has none.
 func (r Role) Working() string {
-	for _, kind := range r.Kinds {
-		if kind != RolePlanner && kind != RolePM {
-			return kind
-		}
+	i := slices.IndexFunc(r.Kinds, working)
+	if i < 0 {
+		return ""
 	}
-	return ""
+	return r.Kinds[i]
 }
 
 const (
@@ -288,20 +295,19 @@ func seatKinds(r Role) error {
 	if len(r.Kinds) == 0 {
 		return fmt.Errorf("role %s holds no kind of role", r.Name)
 	}
-	working := 0
+	doing := 0
 	for i, kind := range r.Kinds {
-		switch kind {
-		case RoleImplementer, RoleReviewer, RoleQA:
-			working++
-		case RolePlanner, RolePM:
-		default:
-			return fmt.Errorf("role %s: kind must be planner, pm, implementer, reviewer or qa", r.Name)
+		if !slices.Contains(roleKinds, kind) {
+			return fmt.Errorf("role %s: kind must be one of %s", r.Name, strings.Join(roleKinds, ", "))
 		}
 		if slices.Contains(r.Kinds[:i], kind) {
 			return fmt.Errorf("role %s holds %s twice", r.Name, kind)
 		}
+		if working(kind) {
+			doing++
+		}
 	}
-	if working > 1 {
+	if doing > 1 {
 		return fmt.Errorf("role %s can hold only one of implementer, reviewer and QA, alongside planning and PM", r.Name)
 	}
 	return nil

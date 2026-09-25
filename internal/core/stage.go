@@ -26,8 +26,8 @@ func derive(v *Snapshot, t *Task) {
 		t.WaitsFor = waitsFor(v, *t)
 	}
 	if t.Status == TaskPlanning {
-		if planners := t.RolesOf(RolePlanner); len(planners) > 0 {
-			t.Checking = planners[0].Name
+		if planner, ok := t.Planner(); ok {
+			t.Checking = planner.Name
 		}
 	}
 	if t.Status == TaskWaiting {
@@ -73,6 +73,16 @@ func (t Task) RolesOf(kind string) []Role {
 		}
 	}
 	return out
+}
+
+// Planner is the seat that plans the task before anything is written, if
+// its team has one.
+func (t Task) Planner() (Role, bool) {
+	planners := t.RolesOf(RolePlanner)
+	if len(planners) == 0 {
+		return Role{}, false
+	}
+	return planners[0], true
 }
 
 // Role is the task's team member with this name.

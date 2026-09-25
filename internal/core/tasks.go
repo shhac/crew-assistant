@@ -264,7 +264,7 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 			t.MaxRounds = p.Playbook.MaxRounds
 			t.Round = 1
 			t.Status = TaskWriting
-			if len(t.RolesOf(RolePlanner)) > 0 && t.Plan == nil {
+			if _, plans := t.Planner(); plans && t.Plan == nil {
 				t.Status = TaskPlanning
 			}
 			t.Detail = ""

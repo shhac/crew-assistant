@@ -83,9 +83,6 @@ func (s *Service) updateMember(ctx context.Context, id string, fn func(*Member, 
 	return out, err
 }
 
-// memberKinds are the roles a member can hold, in the order a team works.
-var memberKinds = []string{RolePM, RolePlanner, RoleImplementer, RoleReviewer, RoleQA}
-
 // kinds is what the member is asked to hold, taking an older client's single
 // kind as the list.
 func (in MemberInput) kinds() []string {
@@ -103,7 +100,7 @@ func (in MemberInput) validate(v *Snapshot, id string) error {
 	if name == "" || len(name) > 40 {
 		return errors.New("a member needs a name of 1 to 40 characters")
 	}
-	if slices.Contains(memberKinds, strings.ToLower(name)) {
+	if slices.Contains(roleKinds, strings.ToLower(name)) {
 		return fmt.Errorf("%q names a kind of role; give the member a name of its own", name)
 	}
 	for _, m := range v.Members {
@@ -116,8 +113,8 @@ func (in MemberInput) validate(v *Snapshot, id string) error {
 		return errors.New("a member needs at least one role")
 	}
 	for i, kind := range kinds {
-		if !slices.Contains(memberKinds, kind) {
-			return fmt.Errorf("%q is not a role; roles are %s", kind, strings.Join(memberKinds, ", "))
+		if !slices.Contains(roleKinds, kind) {
+			return fmt.Errorf("%q is not a role; roles are %s", kind, strings.Join(roleKinds, ", "))
 		}
 		if slices.Contains(kinds[:i], kind) {
 			return fmt.Errorf("%s is listed twice", kind)
