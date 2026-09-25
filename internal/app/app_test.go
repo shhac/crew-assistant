@@ -99,3 +99,25 @@ func TestTheAppIsBuiltWhole(t *testing.T) {
 		t.Fatal("a demo drew with Codex")
 	}
 }
+
+// A change to the config file, such as `crew-assistant config set`, reaches
+// the running daemon without a restart.
+func TestTheDaemonTakesOnAChangedConfigFile(t *testing.T) {
+	a := testApp(t)
+	cfg := a.Config()
+	cfg.Limits.RoleUsage.ClaudeMaxUsedPercent = 98
+	if err := config.Save(a.configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := a.ReloadConfig(); err != nil || !changed || a.Config().Limits.RoleUsage.ClaudeMaxUsedPercent != 98 {
+		t.Fatalf("changed %v, %v, limit %d", changed, err, a.Config().Limits.RoleUsage.ClaudeMaxUsedPercent)
+	}
+	if changed, err := a.ReloadConfig(); err != nil || changed {
+		t.Fatalf("an unchanged file changed something: %v %v", changed, err)
+	}
+	cfg.Slack.OwnerUserID = "U123"
+	config.Save(a.configPath, cfg)
+	if _, err := a.ReloadConfig(); err == nil || a.Config().Slack.OwnerUserID != "" {
+		t.Fatal("a change that needs a restart was taken on")
+	}
+}

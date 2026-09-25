@@ -87,6 +87,19 @@ func (a *App) UpdateConfig(cfg config.Config) error {
 // updateConfigLocked requires a.mu to preserve atomic read-modify-write updates.
 func (a *App) updateConfigLocked(cfg config.Config) error {
 	cfg.Assistant.Theme = config.NormalizeTheme(cfg.Assistant.Theme)
+	if err := a.checkConfigLocked(cfg); err != nil {
+		return err
+	}
+	if err := config.Save(a.configPath, cfg); err != nil {
+		return err
+	}
+	return a.applyConfigLocked(cfg)
+}
+
+// checkConfigLocked refuses a config the running daemon can't take on:
+// an invalid one, or one that moves the dashboard or Slack, which only a
+// restart can.
+func (a *App) checkConfigLocked(cfg config.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -97,14 +110,38 @@ func (a *App) updateConfigLocked(cfg config.Config) error {
 	if !bytes.Equal(oldNetwork, newNetwork) || !bytes.Equal(oldSlack, newSlack) {
 		return errors.New("dashboard and Slack connection changes require stopping the daemon and editing its config")
 	}
-	if err := config.Save(a.configPath, cfg); err != nil {
-		return err
-	}
+	return nil
+}
+
+func (a *App) applyConfigLocked(cfg config.Config) error {
 	if err := a.Core.UpdateConfig(cfg); err != nil {
 		return err
 	}
 	a.cfg = cfg
 	return nil
+}
+
+// ReloadConfig takes on the config file as it now is, when something other
+// than the dashboard changed it, such as `crew-assistant config set`, so a new
+// limit or model applies without a restart. It reports whether anything
+// changed.
+func (a *App) ReloadConfig() (bool, error) {
+	cfg, err := config.Load(a.configPath)
+	if err != nil {
+		return false, err
+	}
+	cfg.Assistant.Theme = config.NormalizeTheme(cfg.Assistant.Theme)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	was, _ := json.Marshal(a.cfg)
+	now, _ := json.Marshal(cfg)
+	if bytes.Equal(was, now) {
+		return false, nil
+	}
+	if err := a.checkConfigLocked(cfg); err != nil {
+		return false, err
+	}
+	return true, a.applyConfigLocked(cfg)
 }
 func (a *App) Status(id, name, state, detail string) {
 	a.mu.Lock()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -41,6 +42,11 @@ func (a *App) Run(ctx context.Context, noDispatch bool) error {
 	go func() {
 		defer listeners.Done()
 		a.Work.RunWakes(ctx)
+	}()
+	listeners.Add(1)
+	go func() {
+		defer listeners.Done()
+		a.watchConfig(ctx)
 	}()
 	pending, err := a.Core.PendingEvents(ctx)
 	if err != nil {
@@ -168,4 +174,42 @@ func (a *App) notify(ctx context.Context, send func(context.Context, string) err
 			return send(ctx, d.Title+"\nRecommendation: "+d.Recommendation+"\n"+d.Context+"\nResolve this decision in the dashboard.")
 		})
 	}
+}
+
+// watchConfig takes on the config file whenever it changes on disk, and
+// wakes the loop so work held by an old limit is looked at again at once.
+func (a *App) watchConfig(ctx context.Context) {
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+	seen := configStamp(a.configPath)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		stamp := configStamp(a.configPath)
+		if stamp == seen {
+			continue
+		}
+		seen = stamp
+		changed, err := a.ReloadConfig()
+		if err != nil {
+			a.Status("config", "Configuration", "error", "The config file changed but couldn't be used: "+err.Error())
+			continue
+		}
+		if changed {
+			a.Status("config", "Configuration", "connected", "Reloaded from the config file")
+			a.Work.Nudge()
+		}
+	}
+}
+
+// configStamp is what changes when the config file does.
+func configStamp(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", info.ModTime().UnixNano(), info.Size())
 }
