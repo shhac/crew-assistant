@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/shhac/crew-assistant/internal/config"
 )
 
 func runConfig(t *testing.T, dir string, args ...string) (map[string]any, error) {
@@ -67,6 +70,33 @@ func TestConfigGetSetUnsetOnAFileInTheEarlierLayout(t *testing.T) {
 	for _, gone := range []string{"role_usage", "claude_home", "1w_percent", "future"} {
 		if strings.Contains(string(data), gone) {
 			t.Fatalf("%s still in the file:\n%s", gone, data)
+		}
+	}
+}
+
+// Each engine's keys write to that engine and leave the other as it was.
+func TestEngineKeysLandOnTheirEngine(t *testing.T) {
+	for _, name := range []string{"codex", "claude"} {
+		dir := t.TempDir()
+		for key, value := range map[string]string{"bin": "/opt/" + name, "home": "/synthetic/" + name, "usage_floor.5h_percent": "3", "usage_floor.1w_percent": "4", "on_unknown_usage": "pause"} {
+			if _, err := runConfig(t, dir, "set", "engines."+name+"."+key, value); err != nil {
+				t.Fatal(key, err)
+			}
+		}
+		cfg, err := config.Load(filepath.Join(dir, "config.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		set, _ := cfg.Engines.CLI(name)
+		if set.Bin != "/opt/"+name || set.Home != "/synthetic/"+name || *set.UsageFloor.FiveHourPercent != 3 || *set.UsageFloor.WeekPercent != 4 || set.OnUnknownUsage != "pause" {
+			t.Fatalf("%s: %+v", name, set)
+		}
+		other := "claude"
+		if name == "claude" {
+			other = "codex"
+		}
+		if untouched, _ := cfg.Engines.CLI(other); !reflect.DeepEqual(untouched, config.CLIEngine{}) {
+			t.Fatalf("setting %s changed %s: %+v", name, other, untouched)
 		}
 	}
 }

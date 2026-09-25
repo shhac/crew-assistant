@@ -37,6 +37,9 @@ func TestDoctorDoesNotRequireUnusedExternalResources(t *testing.T) {
 				cfg.Connections = []config.Connection{{ID: "work", Name: "Work", Tool: "lin", Profiles: []string{"company"}}}
 			}
 			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(`{"futur": 1}`), 0600); err != nil {
+				t.Fatal(err)
+			}
 			if err := config.Save(path, cfg); err != nil {
 				t.Fatal(err)
 			}
@@ -64,6 +67,9 @@ func TestDoctorDoesNotRequireUnusedExternalResources(t *testing.T) {
 				t.Fatal(err)
 			}
 			text := string(raw)
+			if !strings.Contains(text, `"name":"config keys","ok":false,"problems":["futur is not a setting this version knows`) {
+				t.Fatalf("an unknown key wasn't reported: %s", text)
+			}
 			if strings.Contains(text, cfg.Linear.APIKeyEnv) != tc.wantCredential {
 				t.Fatalf("unexpected Linear requirement: %s", text)
 			}

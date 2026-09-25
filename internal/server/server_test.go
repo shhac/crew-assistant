@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -231,7 +232,18 @@ func TestAConfigInTheEarlierLayoutStillSaves(t *testing.T) {
 	if w := call("GET", "/api/config/defaults", ""); !strings.Contains(w.Body.String(), `"usage_floor":10`) || !strings.Contains(w.Body.String(), `"bin":"claude"`) {
 		t.Fatal("defaults", w.Body.String())
 	}
-	if w := call("PUT", "/api/config", `{"model":{"engine":"codex","typo":1}}`); w.Code != 400 {
-		t.Fatal("an unknown key in a saved config was accepted", w.Code)
+	before := a.Config()
+	for _, body := range []string{
+		`{"model":{"engine":"codex","typo":1}}`,
+		`{"model":{"engine":"codex","codex_home":"/synthetic/codex","typo":1}}`,
+		`{} {}`,
+		`{"model":{"codex_home":"/synthetic/codex"}} {}`,
+	} {
+		if w := call("PUT", "/api/config", body); w.Code != 400 {
+			t.Errorf("%s was accepted: %d", body, w.Code)
+		}
+	}
+	if !reflect.DeepEqual(a.Config(), before) {
+		t.Fatal("a refused config changed the saved one")
 	}
 }

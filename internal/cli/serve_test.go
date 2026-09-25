@@ -82,3 +82,21 @@ ready:
 	}
 	_ = lock.Unlock()
 }
+
+func TestOnlyARealStartRewritesAnEarlierConfig(t *testing.T) {
+	old := `{"model":{"engine":"claude","model":"opus","effort":"","max_tokens":4096,"claude_home":"/synthetic/claude"}}`
+	for _, demo := range []bool{true, false} {
+		path := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(path, []byte(old), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := loadServeConfig(path, demo)
+		if err != nil || cfg.Engines.Claude.Home != "/synthetic/claude" {
+			t.Fatalf("demo %v: %+v %v", demo, cfg.Engines, err)
+		}
+		data, _ := os.ReadFile(path)
+		if rewritten := string(data) != old; rewritten == demo {
+			t.Fatalf("demo %v rewrote the file: %v\n%s", demo, rewritten, data)
+		}
+	}
+}
