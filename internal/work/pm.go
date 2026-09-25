@@ -50,22 +50,22 @@ func (lp *Loop) pmTurn(ctx context.Context, snap core.Snapshot, p core.Project, 
 	base := pmPrompt(snap, p)
 	// The PM reads only what its prompt carries: no repository, no writing.
 	spec := lp.baseSpec(seat, dir, base)
-	for attempt := 0; attempt < 2; attempt++ {
-		result, err := lp.runner.Run(ctx, spec)
-		if err != nil {
-			return lp.Core.SkipPM(ctx, p.ID, text.Clip(err.Error(), 300))
-		}
-		answer, questions, err := parsePM(result.Text)
-		if err != nil {
-			spec.Prompt = retryPrompt(base, err)
-			continue
-		}
-		if _, err := lp.Core.ApplyPM(ctx, p.ID, answer); err != nil {
-			return err
-		}
-		return lp.askPMQuestions(ctx, p, seat, questions)
+	var answer core.PMAnswer
+	var questions []string
+	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
+		answer, questions, err = parsePM(reply)
+		return err
+	})
+	if err != nil {
+		return lp.Core.SkipPM(ctx, p.ID, text.Clip(err.Error(), 300))
 	}
-	return lp.Core.SkipPM(ctx, p.ID, "its reply could not be read")
+	if parseErr != nil {
+		return lp.Core.SkipPM(ctx, p.ID, "its reply could not be read")
+	}
+	if _, err := lp.Core.ApplyPM(ctx, p.ID, answer); err != nil {
+		return err
+	}
+	return lp.askPMQuestions(ctx, p, seat, questions)
 }
 
 // askPMQuestions brings what the PM couldn't settle about the order to the

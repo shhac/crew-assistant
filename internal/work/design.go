@@ -68,20 +68,14 @@ func (lp *Loop) design(ctx context.Context, p core.Project, t core.Task, m mediu
 	}
 	defer cleanup()
 	var answer designAnswer
-	var reply string
-	for attempt := 0; attempt < 2; attempt++ {
-		result, err := lp.runner.Run(ctx, spec)
-		if err != nil {
-			return lp.roleFailed(ctx, t, designer.Name, err)
-		}
-		var learned string
-		reply, learned = splitBlock(result.Text, "learned")
-		lp.recordLearned(ctx, p, t, designer, m, learned)
-		if answer, err = parseDesign(reply); err == nil {
-			break
-		}
-		spec.Prompt = retryPrompt(base, err)
+	reply, learned, _, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
+		answer, err = parseDesign(reply)
+		return err
+	})
+	if err != nil {
+		return lp.roleFailed(ctx, t, designer.Name, err)
 	}
+	lp.recordLearned(ctx, p, t, designer, m, learned)
 	// Input that still cannot be read is passed on as written: the role that
 	// asked reads it either way.
 	if answer.Input == "" && answer.Escalate == nil {

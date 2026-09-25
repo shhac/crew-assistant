@@ -458,22 +458,41 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 		return core.Verdict{}, err
 	}
 	defer cleanupLearnings()
-	var parseErr error
+	var verdict core.Verdict
+	_, learned, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
+		verdict, err = parseVerdict(reply)
+		return err
+	})
+	if err != nil {
+		return core.Verdict{}, err
+	}
+	if parseErr != nil {
+		return core.Verdict{}, parseErr
+	}
+	lp.recordLearned(ctx, p, t, checker, m, learned)
+	return verdict, nil
+}
+
+// askForJSON runs a role and reads its reply with parse, asking once more,
+// with the reason, when the reply can't be read. It gives the reply it
+// settled on, the one parse accepted or else the last, which a caller may
+// still use as written, and that reply's learned block, so what a role
+// learned is recorded once. parseErr is why the last reply couldn't be read;
+// runErr is the role failing to run at all.
+func (lp *Loop) askForJSON(ctx context.Context, spec roles.Spec, parse func(reply string) error) (reply, learned string, parseErr, runErr error) {
+	base := spec.Prompt
 	for attempt := 0; attempt < 2; attempt++ {
 		result, err := lp.runner.Run(ctx, spec)
 		if err != nil {
-			return core.Verdict{}, err
+			return reply, learned, parseErr, err
 		}
-		reply, learned := splitBlock(result.Text, "learned")
-		verdict, err := parseVerdict(reply)
-		if err == nil {
-			lp.recordLearned(ctx, p, t, checker, m, learned)
-			return verdict, nil
+		reply, learned = splitBlock(result.Text, "learned")
+		if parseErr = parse(reply); parseErr == nil {
+			return reply, learned, nil, nil
 		}
-		parseErr = err
-		spec.Prompt = retryPrompt(base, err)
+		spec.Prompt = base + "\n\nYour previous reply could not be used (" + parseErr.Error() + "). Reply with only the JSON object."
 	}
-	return core.Verdict{}, parseErr
+	return reply, learned, parseErr, nil
 }
 
 // decide turns the latest reviews into the next step. Deterministic: revise

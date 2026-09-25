@@ -164,3 +164,28 @@ func TestAResearcherThatFailsResearchesAgainWhateverTheOwnerAnswers(t *testing.T
 		}
 	}
 }
+
+// Only the reply a role's work was taken from teaches it anything: a reply
+// that couldn't be read and was asked for again keeps nothing it learned.
+func TestOnlyTheReplyUsedTeachesTheResearcher(t *testing.T) {
+	learned := func(when string) string {
+		return "\n```learned\n" + `[{"when": "` + when + `", "learning": "Read the tests before the code."}]` + "\n```"
+	}
+	a, _, p := plannedCode(t, 6, "not a plan"+learned("An unreadable reply"), plainPlan+learned("A plan that was used"))
+	ctx := context.Background()
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleResearcher}, Engine: "claude"})
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Repo: p.Directories[0], Researcher: ada.ID, Check: "make check"}); err != nil {
+		t.Fatal(err)
+	}
+	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
+	taskNow(t, a, task.ID)
+	snap, _ := a.Core.Snapshot(ctx)
+	member, _ := snap.Member(ada.ID)
+	var whens []string
+	for _, l := range member.Learnings {
+		whens = append(whens, l.When)
+	}
+	if len(whens) != 1 || whens[0] != "A plan that was used" {
+		t.Fatalf("learned %v", whens)
+	}
+}

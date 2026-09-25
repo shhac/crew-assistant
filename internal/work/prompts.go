@@ -182,12 +182,6 @@ func jsonBody(reply string) string {
 	return reply[start : end+1]
 }
 
-// retryPrompt asks a role once more for its JSON object, saying why the
-// last reply couldn't be used.
-func retryPrompt(base string, err error) string {
-	return base + "\n\nYour previous reply could not be used (" + err.Error() + "). Reply with only the JSON object."
-}
-
 // listed is a role's list as kept: trimmed, without blanks, at most max
 // items of at most 500 characters each.
 func listed(items []string, max int) []string {

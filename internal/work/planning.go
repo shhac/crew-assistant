@@ -42,20 +42,15 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	defer cleanup()
 	var plan core.Plan
 	var dependsOn []string
-	var design, reply string
-	for attempt := 0; attempt < 2; attempt++ {
-		result, err := lp.runner.Run(ctx, spec)
-		if err != nil {
-			return lp.roleFailed(ctx, t, researcher.Name, err)
-		}
-		var learned string
-		reply, learned = splitBlock(result.Text, "learned")
-		lp.recordLearned(ctx, p, t, researcher, m, learned)
-		if plan, dependsOn, design, err = parsePlan(reply, designsFor(t, researcher)); err == nil {
-			break
-		}
-		spec.Prompt = retryPrompt(base, err)
+	var design string
+	reply, learned, _, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
+		plan, dependsOn, design, err = parsePlan(reply, designsFor(t, researcher))
+		return err
+	})
+	if err != nil {
+		return lp.roleFailed(ctx, t, researcher.Name, err)
 	}
+	lp.recordLearned(ctx, p, t, researcher, m, learned)
 	if design != "" {
 		return lp.askDesign(ctx, t, researcher.Name, design, nil)
 	}
