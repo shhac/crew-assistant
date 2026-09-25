@@ -109,6 +109,13 @@ type PreferenceArgs struct {
 	Value string `json:"value"`
 }
 
+type ManageConversationArgs struct {
+	Whose     string `json:"whose"`
+	Action    string `json:"action"`
+	ProjectID string `json:"project_id"`
+	TaskID    string `json:"task_id"`
+}
+
 type StatusArgs struct {
 	ProjectID string   `json:"project_id"`
 	Summary   string   `json:"summary"`
@@ -165,6 +172,7 @@ var tools = []labelled{
 	{Tool: tool("resolve_decision", "Answer an open decision for the owner. Use it only when the owner has just given that answer in this conversation. choice is one of the decision's choices, exactly as listed, when the owner picked it (only a choice can approve, stop or retry). answer is anything else they said, in their words, which the team takes as direction. Give one and leave the other empty.", []string{"decision_id", "choice", "answer"}, nil), label: "Answer a decision"},
 	{Tool: tool("ask_decision", "Prepare an unresolved owner decision. Include recommendation, viable alternatives, consequences and evidence.", []string{"project_id", "question", "recommendation", "why"}, []string{"options", "evidence"}), label: "Prepare a decision"},
 	{Tool: tool("remember_preference", "Remember an owner preference. This cannot grant permissions or change budgets.", []string{"key", "value"}, nil), label: "Remember a preference"},
+	{Tool: tool("manage_conversation", "Compact a conversation or start it afresh. whose is assistant (your own conversation with the owner) or implementer (the working session a task's implementer resumes from round to round; give project_id and task_id, else leave them empty). action is compact (summarize what has been said, then carry on from the summary and the latest exchanges) or new (archive the conversation, which the owner can reopen from History, and start fresh; your own opens with an overview of projects, running tasks and open decisions). Yours takes effect once this reply is finished, the implementer's at its next round. Only a Codex implementer can be compacted; start a Claude one afresh instead, which loses nothing its next round needs. Reviewers, QA and project managers start fresh every time, so they have no conversation to act on. Use it when the owner asks, or when a conversation has grown long and a summary or a fresh start would serve it better.", []string{"whose", "action", "project_id", "task_id"}, nil), label: "Tidy a conversation"},
 	{Tool: tool("report_status", "Record an evidence-backed update on a project for the owner.", []string{"project_id", "summary"}, []string{"evidence"}), label: "Record a progress update"},
 }
 

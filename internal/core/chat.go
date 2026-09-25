@@ -27,6 +27,13 @@ type ChatTurn struct {
 	// daemon queued to deliver the wakes named in WakeIDs.
 	Origin  string   `json:"origin,omitempty"`
 	WakeIDs []string `json:"wake_ids,omitempty"`
+	// Command is the chat command this turn runs instead of a reply, such as
+	// "compact"; Outcome says in a line what it did.
+	Command string `json:"command,omitempty"`
+	Outcome string `json:"outcome,omitempty"`
+	// Conversation is the conversation the turn ran in, once it has started
+	// or been cancelled.
+	Conversation string `json:"conversation,omitempty"`
 	// Revision moves when the owner edits a queued message, so an edit that
 	// lost a race with the daemon starting the turn can be refused.
 	Revision int             `json:"revision"`
@@ -67,8 +74,12 @@ func (s *Service) EnqueueChat(ctx context.Context, id, message string) (ChatTurn
 	if strings.TrimSpace(message) == "" || len(message) > 24000 {
 		return ChatTurn{}, fmt.Errorf("message must contain 1–24000 characters: %w", ErrChatValidation)
 	}
-	out := ChatTurn{ID: id, Message: message, Status: "queued", CreatedAt: s.now().UTC(), Events: []ChatToolEvent{}}
-	err := s.store.update(ctx, func(v *Snapshot) error {
+	command, err := ChatCommand(message)
+	if err != nil {
+		return ChatTurn{}, err
+	}
+	out := ChatTurn{ID: id, Message: message, Command: command, Status: "queued", CreatedAt: s.now().UTC(), Events: []ChatToolEvent{}}
+	err = s.store.update(ctx, func(v *Snapshot) error {
 		pending := 0
 		for _, t := range v.ChatTurns {
 			if t.ID == id {
@@ -92,12 +103,21 @@ func (s *Service) EnqueueChat(ctx context.Context, id, message string) (ChatTurn
 	return out, err
 }
 
+// ChatTurns are the turns of the current conversation and those waiting to
+// start; the turns of an archived conversation stay with it.
 func (s *Service) ChatTurns(ctx context.Context) ([]ChatTurn, error) {
 	v, err := s.store.Snapshot(ctx)
-	if v.ChatTurns == nil {
-		v.ChatTurns = []ChatTurn{}
+	return conversationTurns(&v), err
+}
+
+func conversationTurns(v *Snapshot) []ChatTurn {
+	out := []ChatTurn{}
+	for _, t := range v.ChatTurns {
+		if t.Status == "queued" || t.Conversation == v.ConversationID {
+			out = append(out, t)
+		}
 	}
-	return v.ChatTurns, err
+	return out
 }
 
 // StartNextChat atomically claims the oldest pending turn and appends its user
@@ -125,8 +145,14 @@ func (s *Service) StartNextChat(ctx context.Context) (ChatTurn, error) {
 			}
 			t.Status = "running"
 			t.StartedAt = &now
-			t.UserMessageID = uid()
+			t.Conversation = v.ConversationID
 			v.ChatQueueRevision++
+			if t.Command != "" {
+				// A command is not something said to the model.
+				out = *t
+				return nil
+			}
+			t.UserMessageID = uid()
 			if t.Origin == OriginWake {
 				// The report is written now, so its delivered time is true.
 				t.Message = wakeTurnMessage(v, t.WakeIDs, now)
@@ -156,6 +182,7 @@ func (s *Service) CancelChat(ctx context.Context, id string) (ChatTurn, error) {
 		}
 		now := s.now().UTC()
 		t.Status = "cancelled"
+		t.Conversation = v.ConversationID
 		v.ChatQueueRevision++
 		t.FinishedAt = &now
 		if t.Origin == OriginWake {

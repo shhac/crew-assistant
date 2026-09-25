@@ -196,6 +196,55 @@ describe("the shell", () => {
       vi.useRealTimers();
     }
   });
+  it("keeps an open request while the chat runs a command and browses past conversations", async () => {
+    state.projects = [project];
+    state.tasks = [
+      {
+        id: "t1",
+        project_id: "p1",
+        objective: "Draft the note",
+        criteria: [],
+        status: "writing",
+        stage: "implementing",
+        round: 1,
+        revisions: [],
+        verdicts: [],
+        created_at: "2026-09-21T10:00:00Z",
+      },
+    ];
+    window.history.replaceState(null, "", "/#/projects/p1/requests/t1");
+    render(<App />);
+    const panel = await screen.findByRole("complementary", {
+      name: "Draft the note",
+    });
+    const field = screen.getByLabelText("Message Iris");
+    field.focus();
+    fireEvent.change(field, { target: { value: "/compact" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() =>
+      expect(
+        writes().filter((c) => c.path === "/api/chat/messages"),
+      ).toHaveLength(1),
+    );
+    const sent = writes().find((c) => c.path === "/api/chat/messages")!;
+    expect(JSON.parse(sent.options!.body as string).message).toBe("/compact");
+    expect(document.activeElement).toBe(field);
+    expect(panel.isConnected).toBe(true);
+    // Browsing History takes the composer away and brings it back with the
+    // draft; the request stays open throughout.
+    fireEvent.change(field, { target: { value: "Also mention pric" } });
+    fireEvent.click(screen.getByRole("button", { name: "Past conversations" }));
+    expect(screen.queryByLabelText("Message Iris")).toBeNull();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Back to the chat" }),
+    );
+    expect(screen.getByLabelText("Message Iris")).toHaveProperty(
+      "value",
+      "Also mention pric",
+    );
+    expect(panel.isConnected).toBe(true);
+    expect(window.location.hash).toBe("#/projects/p1/requests/t1");
+  });
   it("widens the chat without losing its draft and gives the work back", async () => {
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
       callback(0);

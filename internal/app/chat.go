@@ -174,6 +174,9 @@ func (a *App) processNextChat(ctx context.Context, standalone bool) (bool, error
 	if err != nil {
 		return false, err
 	}
+	if turn.Command != "" {
+		return true, a.runChatCommand(ctx, turn)
+	}
 	runCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	result, runErr := a.runChatTurn(runCtx, turn)
 	cancel()

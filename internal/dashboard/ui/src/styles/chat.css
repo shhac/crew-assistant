@@ -102,6 +102,91 @@
   white-space: nowrap;
 }
 
+.wake-head .pill {
+  font-family: var(--font-mono);
+}
+
+.chat-summary {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--sunken);
+  font-size: 13px;
+}
+
+.chat-summary summary {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.chat-summary[open] summary {
+  margin-bottom: 6px;
+}
+
+.chat-log[hidden] {
+  display: none;
+}
+
+.chat-history {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 14px 18px;
+  overflow-y: auto;
+}
+
+.chat-history-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-history-item:hover {
+  border-color: var(--line-strong);
+}
+
+.chat-history-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-history-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chat-history-thread h3 {
+  font-size: 14px;
+}
+
 .turn-status {
   display: flex;
   flex-direction: column;

@@ -267,6 +267,12 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 	}
 	defer cleanup()
 	spec.Resume = t.WriterSession
+	switch t.WriterNext {
+	case core.WriterFresh:
+		spec.Resume = nil
+	case core.WriterCompact:
+		spec.Compact = true
+	}
 	result, err := lp.runner.Run(ctx, spec)
 	if err != nil {
 		return lp.roleFailed(ctx, t, writers[0].Name, err)
@@ -327,11 +333,20 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	if r, ok := t.Role(writer); ok {
 		lp.recordLearned(ctx, p, t, r, m, learned)
 	}
+	// The round carried out the request it started with; one made while it
+	// ran, even for the same thing, waits for the next round.
+	applied := t.WriterRequest
+	took := func(t *core.Task) {
+		if t.WriterRequest == applied {
+			t.WriterNext = ""
+		}
+	}
 	n := len(t.Revisions) + 1
 	revision, err := m.snapshot(ctx, t, n)
 	if errors.Is(err, gitrepo.ErrNoChange) && proposed(t) {
 		_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.WriterSession, t.WakeErrors, t.Failures, t.RetryAt = result.Session, wakeErrors, 0, time.Time{}
+			took(t)
 			t.AnswerDirection(seen, 0, "No change needed: "+reply, time.Now().UTC())
 			if t.DirectionPending > 0 {
 				t.ReviseWithDirection()
@@ -350,6 +365,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 		t.Revisions = append(t.Revisions, revision)
 		t.AnswerDirection(seen, n, reply, revision.At)
 		t.WriterSession, t.WakeErrors = result.Session, wakeErrors
+		took(t)
 		t.Failures, t.RetryAt = 0, time.Time{}
 		t.Status, t.Detail = core.TaskReviewing, ""
 		return fmt.Sprintf("%s finished version %d of %s", writer, n, t.Objective), nil

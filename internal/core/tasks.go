@@ -45,7 +45,13 @@ type Task struct {
 	// WriterSession resumes the implementer across rounds. Reviewers always
 	// start fresh, so no earlier judgement anchors the next.
 	WriterSession json.RawMessage `json:"writer_session,omitempty"`
-	Failures      int             `json:"failures,omitempty"`
+	// WriterNext is what to do with that session at the implementer's next
+	// round: WriterCompact or WriterFresh, or empty to resume it as it is.
+	// WriterRequest numbers each request, so a round clears only the one it
+	// carried out and not the same request made again while it ran.
+	WriterNext    string `json:"writer_next,omitempty"`
+	WriterRequest int    `json:"writer_request,omitempty"`
+	Failures      int    `json:"failures,omitempty"`
 	// ResumeStatus is the step to return to when an owner decision about a
 	// failure is answered with a retry.
 	ResumeStatus string    `json:"resume_status,omitempty"`

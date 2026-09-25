@@ -34,6 +34,7 @@ type App struct {
 	chatFailed       atomic.Bool
 	chatWaiters      sync.Map
 	chatInvoker      func(context.Context, engine.Config, engine.Request, engine.ToolExecutor) (engine.Result, error)
+	summarize        smallCompletion // Writes the conversation's summaries.
 	statuses         map[string]core.Integration
 	// drawing is each picture being drawn or that failed, by member id or
 	// drawingAssistant. It is not stored: a restart forgets a drawing it
@@ -49,7 +50,7 @@ type App struct {
 }
 
 func New(s *core.Service, cfg config.Config, path string, demo bool) *App {
-	a := &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
+	a := &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), summarize: engine.Complete, statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
 	a.Work = work.New(s, a.Config, demo)
 	return a
 }

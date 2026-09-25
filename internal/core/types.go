@@ -146,7 +146,11 @@ type PendingOperation struct {
 }
 
 type Snapshot struct {
-	ChatCheckpoint    ChatCheckpoint     `json:"-"`
+	ChatCheckpoint ChatCheckpoint `json:"-"`
+	// ConversationID names the conversation Messages holds; Conversations
+	// are the ones archived by /new and /clear.
+	ConversationID    string             `json:"-"`
+	Conversations     []Conversation     `json:"-"`
 	ChatTurns         []ChatTurn         `json:"-"`
 	ChatHold          *ChatHold          `json:"-"`
 	ChatQueueRevision int                `json:"-"`

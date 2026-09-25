@@ -31,21 +31,12 @@ func registerChatQueue(mux *http.ServeMux, a *app.App) {
 		respond(w, http.StatusAccepted, turn)
 	})
 	mux.HandleFunc("GET /api/chat/turns", func(w http.ResponseWriter, r *http.Request) {
-		turns, err := a.Core.ChatTurns(r.Context())
+		queue, err := a.Core.ChatQueue(r.Context())
 		if err != nil {
 			fail(w, http.StatusInternalServerError, "Could not read the message queue.")
 			return
 		}
-		hold, revision, err := a.Core.ChatQueueState(r.Context())
-		if err != nil {
-			fail(w, http.StatusInternalServerError, "Could not read the message queue.")
-			return
-		}
-		respond(w, http.StatusOK, struct {
-			Turns    []core.ChatTurn `json:"turns"`
-			Hold     *core.ChatHold  `json:"hold,omitempty"`
-			Revision int             `json:"revision"`
-		}{turns, hold, revision})
+		respond(w, http.StatusOK, queue)
 	})
 	mux.HandleFunc("DELETE /api/chat/messages/{id}", func(w http.ResponseWriter, r *http.Request) {
 		turn, err := a.CancelChat(r.Context(), r.PathValue("id"))
@@ -58,6 +49,33 @@ func registerChatQueue(mux *http.ServeMux, a *app.App) {
 			return
 		}
 		respond(w, http.StatusOK, turn)
+	})
+	// Past conversations: those /new and /clear archived, to read and to pick
+	// up again.
+	mux.HandleFunc("GET /api/chat/conversations", func(w http.ResponseWriter, r *http.Request) {
+		list, err := a.Core.Conversations(r.Context())
+		if err != nil {
+			fail(w, http.StatusInternalServerError, "Could not read past conversations.")
+			return
+		}
+		respond(w, http.StatusOK, struct {
+			Conversations []core.ConversationEntry `json:"conversations"`
+		}{list})
+	})
+	mux.HandleFunc("GET /api/chat/conversations/{id}", func(w http.ResponseWriter, r *http.Request) {
+		c, err := a.Core.Conversation(r.Context(), r.PathValue("id"))
+		if err != nil {
+			queueProblem(w, err)
+			return
+		}
+		respond(w, http.StatusOK, c)
+	})
+	mux.HandleFunc("POST /api/chat/conversations/{id}/resume", func(w http.ResponseWriter, r *http.Request) {
+		if err := a.Core.ResumeConversation(r.Context(), r.PathValue("id")); err != nil {
+			queueProblem(w, err)
+			return
+		}
+		respond(w, http.StatusOK, map[string]bool{"resumed": true})
 	})
 	// A suggestion names the reply it follows, so one that arrives after the
 	// conversation moved on is refused rather than shown.

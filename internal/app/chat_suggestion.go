@@ -107,7 +107,8 @@ func generateSuggestion(ctx context.Context, small *smallModels, models []config
 		return "", errors.New("suggestion requested a tool")
 	}
 	suggestion := strings.Trim(strings.TrimSpace(result.Content), "\"“”")
-	if suggestion == "" {
+	// Taking a suggestion and sending it must never run a command.
+	if command, err := core.ChatCommand(suggestion); suggestion == "" || command != "" || err != nil {
 		return "", nil
 	}
 	if utf8.RuneCountInString(suggestion) > 280 || strings.ContainsAny(suggestion, "\r\n") {

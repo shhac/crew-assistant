@@ -5,6 +5,7 @@ import { Avatar } from "./Avatar";
 import { dateLabel, fullDateLabel, Icon } from "./ui";
 import { ChatQueue, type QueueHold } from "./ChatQueue";
 import { ToolActivity } from "./ToolActivity";
+import { ChatHistory } from "./ChatHistory";
 import {
   carriesFiles,
   composeMessage,
@@ -71,6 +72,30 @@ export function wakeSummary(content: string) {
 /** What each wake-up in the message saw happen, and nothing meant for the model. */
 export function wakeHappenings(content: string) {
   return [...content.matchAll(/what happened: (.+)/g)].map((m) => m[1]);
+}
+
+/**
+ * The command a message is, such as "compact", when the whole message is a
+ * slash command; the daemon decides whether it knows it.
+ */
+export function commandIn(text: string | undefined) {
+  // A turn read back without its text is not a command, and must not stop
+  // the chat from rendering.
+  return /^\/([A-Za-z][A-Za-z0-9_-]*)$/
+    .exec((text ?? "").trim())?.[1]
+    .toLowerCase();
+}
+
+/** What a command does, until it says what it did. */
+function commandLabel(command: string) {
+  switch (command) {
+    case "compact":
+      return "Summarize the conversation so far";
+    case "new":
+    case "clear":
+      return "Start a fresh conversation";
+  }
+  return "Command";
 }
 
 /** A message's delivery, in a few words; nothing once all is well. */
@@ -257,6 +282,14 @@ export function ChatPanel({
     revision: number;
   }>({ revision: 0 });
   const [cancelling, setCancelling] = useState<Set<string>>(new Set());
+  const [history, setHistory] = useState(false);
+  // Asks the daemon for its turns at once, as after picking up a past
+  // conversation.
+  const pollNow = useRef<() => void>(() => {});
+  // When each message was accepted, counted, so a poll can tell a turn it
+  // should have listed from one accepted after it asked.
+  const acceptances = useRef(0);
+  const accepted = useRef(new Map<string, number>());
   const turnsRef = useRef(turns);
   turnsRef.current = turns;
   const refreshRef = useRef(refresh);
@@ -282,6 +315,7 @@ export function ChatPanel({
         role: "user",
         content: t.message,
         created_at: t.created_at,
+        command: t.command || commandIn(t.message),
       })),
   ].sort(chronological);
   // The last rendered message in the thread. While it has no reply, its
@@ -369,16 +403,39 @@ export function ChatPanel({
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     let previousSignature = "";
+    let polling = false;
+    let again = false;
     async function poll() {
+      // One request at a time: an answer that overtook a newer one could
+      // bring back turns the newer one had already left behind.
+      if (polling) {
+        again = true;
+        return;
+      }
+      polling = true;
+      clearTimeout(timer);
       try {
+        const asked = acceptances.current;
         const result = await api<{
           turns: ChatTurn[];
           hold: QueueHold | null;
           revision: number;
+          conversation?: string;
         }>("/api/chat/turns");
         if (stopped) return;
         setQueue({ hold: result.hold, revision: result.revision });
         const incoming = result.turns || [];
+        // The daemon lists every turn of the current conversation and every
+        // turn still waiting. A turn it already knew of when asked, and left
+        // out, belongs to a conversation that has been put away, so it goes.
+        // Only one accepted since the question was asked may be missing
+        // because the answer is older than it.
+        const listed = new Set(incoming.map((t) => t.id));
+        const gone = new Set(
+          [...confirmed.current].filter(
+            (id) => !listed.has(id) && (accepted.current.get(id) ?? 0) <= asked,
+          ),
+        );
         incoming.forEach((t) => confirmed.current.add(t.id));
         if (
           uncertainDelivery.current &&
@@ -387,14 +444,18 @@ export function ChatPanel({
           uncertainDelivery.current = null;
           drainOutgoing();
         }
-        const signature = incoming
-          .map(
-            (t) =>
-              `${t.id}:${t.status}:${t.user_message_id}:${t.assistant_message_id}`,
-          )
-          .join("|");
+        const signature =
+          `${result.conversation}|` +
+          incoming
+            .map(
+              (t) =>
+                `${t.id}:${t.status}:${t.user_message_id}:${t.assistant_message_id}`,
+            )
+            .join("|");
         setTurns((current) => {
-          const merged = new Map(current.map((t) => [t.id, t]));
+          const merged = new Map(
+            current.filter((t) => !gone.has(t.id)).map((t) => [t.id, t]),
+          );
           incoming.forEach((t) =>
             merged.set(t.id, latestTurn(merged.get(t.id), t)),
           );
@@ -409,10 +470,15 @@ export function ChatPanel({
         if (!stopped)
           setPollError(`Can't get live updates (${errorText(err)}).`);
       } finally {
-        if (!stopped)
+        polling = false;
+        if (again && !stopped) {
+          again = false;
+          void poll();
+        } else if (!stopped)
           timer = setTimeout(poll, turnsRef.current.some(active) ? 1000 : 3000);
       }
     }
+    pollNow.current = () => void poll();
     void poll();
     return () => {
       stopped = true;
@@ -458,6 +524,7 @@ export function ChatPanel({
         body: JSON.stringify({ id: turn.id, message: turn.message }),
       });
       confirmed.current.add(turn.id);
+      accepted.current.set(turn.id, ++acceptances.current);
       if (uncertainDelivery.current === turn.id)
         uncertainDelivery.current = null;
       setTurns((current) =>
@@ -502,6 +569,14 @@ export function ChatPanel({
     const attached = assetsRef.current;
     // Sending while a file is still being read would leave it behind.
     if ((!submitted && !attached.length) || readingRef.current) return;
+    // A command is the whole message. Nothing is sent, and the attachments
+    // stay, rather than the command going to the model with them.
+    if (commandIn(submitted) && attached.length) {
+      setAssetErrors([
+        `Send ${submitted} on its own. Your attachments stay here for your next message.`,
+      ]);
+      return;
+    }
     const composed = composeMessage(submitted, attached);
     const tooLarge = messageLimitError(composed);
     if (tooLarge) {
@@ -559,6 +634,15 @@ export function ChatPanel({
         <Avatar of={state.assistant} size={20} />
         <h2>{name}</h2>
         <button
+          className="btn btn-quiet btn-icon"
+          aria-label="Past conversations"
+          aria-pressed={history}
+          title="Past conversations"
+          onClick={() => setHistory((shown) => !shown)}
+        >
+          <Icon name="Clock" />
+        </button>
+        <button
           className="btn btn-quiet btn-icon chat-expand"
           aria-label={expanded ? "Back to the work" : "Widen the chat"}
           aria-pressed={expanded}
@@ -576,7 +660,20 @@ export function ChatPanel({
           <Icon name="Close" />
         </button>
       </header>
+      {history && (
+        <ChatHistory
+          name={name}
+          projects={state.projects}
+          onProjectOpen={onProjectOpen}
+          onResumed={async () => {
+            await refreshRef.current();
+            pollNow.current();
+          }}
+          onClose={() => setHistory(false)}
+        />
+      )}
       <div
+        hidden={history}
         className="chat-log"
         ref={scroll}
         role="log"
@@ -616,6 +713,33 @@ export function ChatPanel({
                 onRetry={enqueue}
               />
             );
+            const command = "command" in m ? m.command : undefined;
+            if (command)
+              return (
+                <div key={m.id} className="wake chat-command">
+                  <p className="wake-head">
+                    <span className="pill">/{command}</span>
+                    <span className="wake-line">
+                      {turn?.outcome || commandLabel(command)}
+                      {turn?.origin === "assistant" && ` · asked by ${name}`}
+                    </span>
+                  </p>
+                  {status}
+                </div>
+              );
+            if (m.role === "summary")
+              return (
+                <details key={m.id} className="chat-summary" open>
+                  <summary>Summary of the conversation so far</summary>
+                  <div className="message-body">
+                    <ConversationMarkdown
+                      content={m.content}
+                      projects={state.projects}
+                      onProjectOpen={onProjectOpen}
+                    />
+                  </div>
+                </details>
+              );
             if (wake)
               return (
                 <div key={m.id} className="wake">
@@ -685,163 +809,169 @@ export function ChatPanel({
           </div>
         )}
       </div>
-      <div className="chat-foot">
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-        {pollError && (
-          <p className="muted small" role="status">
-            {pollError} Trying again…
-          </p>
-        )}
-        {turns.some((t) => t.status === "waiting") &&
-          turns.some((t) => t.status === "unconfirmed") && (
-            <p className="queue-hint">
-              The next messages wait until this one is confirmed. Keep this page
-              open.
+      {/* While a past conversation is open, there is nothing to write in:
+          a message or command would go to the current conversation, not the
+          one on screen. The draft and attachments wait for the return. */}
+      {!history && (
+        <div className="chat-foot">
+          {error && (
+            <p className="error" role="alert">
+              {error}
             </p>
           )}
-        <ChatQueue
-          turns={turns.filter((t) => t.status === "queued")}
-          revision={queue.revision}
-          hold={queue.hold}
-          cancelling={cancelling}
-          onCancel={(id) => {
-            const turn = turns.find((t) => t.id === id);
-            if (turn) void cancel(turn);
-          }}
-          onChanged={() => refreshRef.current()}
-        />
-        {assetErrors.length > 0 && (
-          <div className="error" role="alert">
-            {assetErrors.map((text, i) => (
-              <p key={`${i}:${text}`}>{text}</p>
-            ))}
-          </div>
-        )}
-        <form
-          className={`composer${dragging ? " dragging" : ""}`}
-          onSubmit={send}
-          onDragOver={(e) => {
-            if (!carriesFiles(e.dataTransfer)) return;
-            e.preventDefault();
-            setDragging(true);
-          }}
-          onDragLeave={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget as Node | null))
-              setDragging(false);
-          }}
-          onDrop={(e) => {
-            setDragging(false);
-            const files = Array.from(e.dataTransfer?.files || []);
-            // Dropped text falls through to the textarea as usual.
-            if (!files.length) return;
-            e.preventDefault();
-            void addFiles(files);
-          }}
-        >
-          <label className="sr-only" htmlFor="chat-message">
-            Message {name}
-          </label>
-          {(assets.length > 0 || reading > 0) && (
-            <ul className="attachments" aria-label="Attachments">
-              {assets.map((asset) => (
-                <li key={asset.id}>
-                  <span className="attachment-name">{asset.name}</span>
-                  <span className="muted small">{sizeLabel(asset.size)}</span>
-                  <button
-                    type="button"
-                    className="btn btn-quiet btn-icon btn-sm"
-                    aria-label={`Remove attachment ${asset.name}`}
-                    onClick={() =>
-                      setAssets((current) =>
-                        current.filter((a) => a.id !== asset.id),
-                      )
-                    }
-                  >
-                    <Icon name="Close" size={12} />
-                  </button>
-                </li>
-              ))}
-              {reading > 0 && <li className="muted small">Reading files…</li>}
-            </ul>
+          {pollError && (
+            <p className="muted small" role="status">
+              {pollError} Trying again…
+            </p>
           )}
-          <div className="composer-row">
-            <textarea
-              id="chat-message"
-              value={message}
-              onChange={(e) => setDraft(e.target.value)}
-              onPaste={(e) => {
-                // Text always pastes as text. Files on the same clipboard (a
-                // copied file comes with its name as text) are still attached
-                // or refused with a reason, never dropped.
-                const files = Array.from(e.clipboardData.files || []);
-                if (!files.length) return;
-                if (!e.clipboardData.getData("text/plain")) e.preventDefault();
-                void addFiles(files);
-              }}
-              // A suggestion is shown, never committed: the draft stays empty
-              // and Send stays disabled until the owner takes it.
-              placeholder={shownSuggestion || `Message ${name}`}
-              className={shownSuggestion ? "has-suggestion" : undefined}
-              rows={2}
-              maxLength={20000}
-              onKeyDown={(e) => {
-                if (
-                  e.key === "Tab" &&
-                  shownSuggestion &&
-                  !e.shiftKey &&
-                  !e.altKey &&
-                  !e.ctrlKey &&
-                  !e.metaKey
-                ) {
-                  // Accepting makes it an ordinary draft to edit; it is not sent.
-                  e.preventDefault();
-                  setDraft(shownSuggestion);
-                  return;
-                }
-                if (
-                  e.key === "Enter" &&
-                  !e.shiftKey &&
-                  !e.nativeEvent.isComposing &&
-                  e.keyCode !== 229
-                ) {
-                  e.preventDefault();
-                  e.currentTarget.form?.requestSubmit();
-                }
-              }}
-            />
-            <button
-              className="btn btn-primary btn-icon"
-              type="submit"
-              disabled={(!message.trim() && !assets.length) || reading > 0}
-              aria-label="Send"
-            >
-              <Icon name="Send" size={15} />
-            </button>
-          </div>
-          <p className="composer-hint">
-            {shownSuggestion ? (
-              <>
-                <span className="kbd">Tab</span> takes the suggestion
-              </>
-            ) : messages.length > 0 ? null : (
-              <>
-                <span className="kbd">Enter</span> sends ·{" "}
-                <span className="kbd">Shift Enter</span> new line · drop text
-                files to attach
-              </>
+          {turns.some((t) => t.status === "waiting") &&
+            turns.some((t) => t.status === "unconfirmed") && (
+              <p className="queue-hint">
+                The next messages wait until this one is confirmed. Keep this
+                page open.
+              </p>
             )}
-          </p>
-        </form>
-        {suggestionsOff && (
-          <p className="muted small" role="status">
-            {suggestionsOff}
-          </p>
-        )}
-      </div>
+          <ChatQueue
+            turns={turns.filter((t) => t.status === "queued")}
+            revision={queue.revision}
+            hold={queue.hold}
+            cancelling={cancelling}
+            onCancel={(id) => {
+              const turn = turns.find((t) => t.id === id);
+              if (turn) void cancel(turn);
+            }}
+            onChanged={() => refreshRef.current()}
+          />
+          {assetErrors.length > 0 && (
+            <div className="error" role="alert">
+              {assetErrors.map((text, i) => (
+                <p key={`${i}:${text}`}>{text}</p>
+              ))}
+            </div>
+          )}
+          <form
+            className={`composer${dragging ? " dragging" : ""}`}
+            onSubmit={send}
+            onDragOver={(e) => {
+              if (!carriesFiles(e.dataTransfer)) return;
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+                setDragging(false);
+            }}
+            onDrop={(e) => {
+              setDragging(false);
+              const files = Array.from(e.dataTransfer?.files || []);
+              // Dropped text falls through to the textarea as usual.
+              if (!files.length) return;
+              e.preventDefault();
+              void addFiles(files);
+            }}
+          >
+            <label className="sr-only" htmlFor="chat-message">
+              Message {name}
+            </label>
+            {(assets.length > 0 || reading > 0) && (
+              <ul className="attachments" aria-label="Attachments">
+                {assets.map((asset) => (
+                  <li key={asset.id}>
+                    <span className="attachment-name">{asset.name}</span>
+                    <span className="muted small">{sizeLabel(asset.size)}</span>
+                    <button
+                      type="button"
+                      className="btn btn-quiet btn-icon btn-sm"
+                      aria-label={`Remove attachment ${asset.name}`}
+                      onClick={() =>
+                        setAssets((current) =>
+                          current.filter((a) => a.id !== asset.id),
+                        )
+                      }
+                    >
+                      <Icon name="Close" size={12} />
+                    </button>
+                  </li>
+                ))}
+                {reading > 0 && <li className="muted small">Reading files…</li>}
+              </ul>
+            )}
+            <div className="composer-row">
+              <textarea
+                id="chat-message"
+                value={message}
+                onChange={(e) => setDraft(e.target.value)}
+                onPaste={(e) => {
+                  // Text always pastes as text. Files on the same clipboard (a
+                  // copied file comes with its name as text) are still attached
+                  // or refused with a reason, never dropped.
+                  const files = Array.from(e.clipboardData.files || []);
+                  if (!files.length) return;
+                  if (!e.clipboardData.getData("text/plain"))
+                    e.preventDefault();
+                  void addFiles(files);
+                }}
+                // A suggestion is shown, never committed: the draft stays empty
+                // and Send stays disabled until the owner takes it.
+                placeholder={shownSuggestion || `Message ${name}`}
+                className={shownSuggestion ? "has-suggestion" : undefined}
+                rows={2}
+                maxLength={20000}
+                onKeyDown={(e) => {
+                  if (
+                    e.key === "Tab" &&
+                    shownSuggestion &&
+                    !e.shiftKey &&
+                    !e.altKey &&
+                    !e.ctrlKey &&
+                    !e.metaKey
+                  ) {
+                    // Accepting makes it an ordinary draft to edit; it is not sent.
+                    e.preventDefault();
+                    setDraft(shownSuggestion);
+                    return;
+                  }
+                  if (
+                    e.key === "Enter" &&
+                    !e.shiftKey &&
+                    !e.nativeEvent.isComposing &&
+                    e.keyCode !== 229
+                  ) {
+                    e.preventDefault();
+                    e.currentTarget.form?.requestSubmit();
+                  }
+                }}
+              />
+              <button
+                className="btn btn-primary btn-icon"
+                type="submit"
+                disabled={(!message.trim() && !assets.length) || reading > 0}
+                aria-label="Send"
+              >
+                <Icon name="Send" size={15} />
+              </button>
+            </div>
+            <p className="composer-hint">
+              {shownSuggestion ? (
+                <>
+                  <span className="kbd">Tab</span> takes the suggestion
+                </>
+              ) : messages.length > 0 ? null : (
+                <>
+                  <span className="kbd">Enter</span> sends ·{" "}
+                  <span className="kbd">Shift Enter</span> new line · drop text
+                  files to attach
+                </>
+              )}
+            </p>
+          </form>
+          {suggestionsOff && (
+            <p className="muted small" role="status">
+              {suggestionsOff}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

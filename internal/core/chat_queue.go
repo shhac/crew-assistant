@@ -121,8 +121,12 @@ func (s *Service) EditChatMessage(ctx context.Context, id, message string, revis
 	if strings.TrimSpace(message) == "" || len(message) > 24000 {
 		return ChatTurn{}, fmt.Errorf("message must contain 1–24000 characters: %w", ErrChatValidation)
 	}
+	command, err := ChatCommand(message)
+	if err != nil {
+		return ChatTurn{}, err
+	}
 	var out ChatTurn
-	err := s.store.update(ctx, func(v *Snapshot) error {
+	err = s.store.update(ctx, func(v *Snapshot) error {
 		turn, err := queuedTurn(v, id)
 		if err != nil {
 			return err
@@ -134,6 +138,7 @@ func (s *Service) EditChatMessage(ctx context.Context, id, message string, revis
 			return fmt.Errorf("this message changed since you opened it: %w", ErrConflict)
 		}
 		turn.Message = strings.TrimSpace(message)
+		turn.Command = command
 		turn.Revision++
 		out = *turn
 		return nil
@@ -200,10 +205,34 @@ func (s *Service) ReorderChat(ctx context.Context, ids []string, revision int) (
 // reported as absent so the dashboard never shows a block that is not real.
 func (s *Service) ChatQueueState(ctx context.Context) (*ChatHold, int, error) {
 	v, err := s.store.Snapshot(ctx)
-	live := liveHold(&v, s.now().UTC())
+	return shownHold(&v, s.now().UTC()), v.ChatQueueRevision, err
+}
+
+// shownHold is a copy of the hold in force, or nil.
+func shownHold(v *Snapshot, now time.Time) *ChatHold {
+	live := liveHold(v, now)
 	if live == nil {
-		return nil, v.ChatQueueRevision, err
+		return nil
 	}
 	hold := *live
-	return &hold, v.ChatQueueRevision, err
+	return &hold
+}
+
+// ChatQueueView is the queue as the dashboard shows it. Its parts are read
+// together, so the turns are always those of the conversation it names: a
+// reset landing between two separate reads would otherwise label the old
+// conversation's turns with the new one's name.
+type ChatQueueView struct {
+	Turns        []ChatTurn `json:"turns"`
+	Hold         *ChatHold  `json:"hold,omitempty"`
+	Revision     int        `json:"revision"`
+	Conversation string     `json:"conversation"`
+}
+
+func (s *Service) ChatQueue(ctx context.Context) (ChatQueueView, error) {
+	v, err := s.store.Snapshot(ctx)
+	if err != nil {
+		return ChatQueueView{}, err
+	}
+	return ChatQueueView{Turns: conversationTurns(&v), Hold: shownHold(&v, s.now().UTC()), Revision: v.ChatQueueRevision, Conversation: v.ConversationID}, nil
 }

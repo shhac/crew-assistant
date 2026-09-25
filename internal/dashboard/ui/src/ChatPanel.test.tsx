@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import {
   ChatPanel,
+  commandIn,
   SUGGESTION_DELAY,
   wakeHappenings,
   wakeSummary,
@@ -1178,8 +1179,11 @@ describe("chat layout", () => {
     );
     const header = screen.getByRole("heading", { level: 2 }).parentElement!;
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Iris");
-    // Just the name and two controls: no tagline and no context strip.
-    expect(header.children).toHaveLength(3);
+    // Just the name and three controls: no tagline and no context strip.
+    expect(header.children).toHaveLength(4);
+    expect(
+      screen.getByRole("button", { name: "Past conversations" }),
+    ).toBeTruthy();
     const widen = screen.getByRole("button", { name: "Widen the chat" });
     expect(widen.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(widen);
@@ -1380,5 +1384,435 @@ describe("wake-ups", () => {
     expect(log.textContent).not.toContain("check the build");
     expect(log.textContent).not.toContain("Decide what to do");
     expect(log.querySelector("pre")).toBeNull();
+  });
+});
+describe("slash commands and past conversations", () => {
+  const input = () => screen.getByRole("textbox") as HTMLTextAreaElement;
+  const log = () => screen.getByRole("log", { hidden: true });
+  const past = {
+    id: "conv-1",
+    title: "Plan the garden",
+    started_at: "2026-09-16T12:00:00Z",
+    archived_at: "2026-09-16T13:00:00Z",
+  };
+  // A daemon that knows the commands and keeps past conversations.
+  function daemon(suggestion = "") {
+    const turns: ChatTurn[] = [];
+    let conversation = "current";
+    const fetch = vi.fn(async (path: string, options?: RequestInit) => {
+      const body = options?.body ? JSON.parse(options.body as string) : {};
+      if (path === "/api/chat/turns")
+        return result({ turns: turns.map((t) => ({ ...t })), conversation });
+      if (path === "/api/chat/suggestion")
+        return result({ after: body.after, suggestion });
+      if (path === "/api/chat/messages") {
+        const command = /^\/(compact|new|clear)$/.exec(body.message)?.[1];
+        if (body.message.startsWith("/") && !command)
+          return {
+            ok: false,
+            status: 400,
+            json: async () => ({
+              error: `${body.message} isn't a command. Try /compact to summarize the conversation, or /new or /clear to start a fresh one.`,
+            }),
+          };
+        const turn: ChatTurn = {
+          ...body,
+          status: "running",
+          created_at: new Date().toISOString(),
+          revision: 0,
+          events: [],
+          ...(command ? { command } : { user_message_id: `user-${body.id}` }),
+        };
+        turns.push(turn);
+        return result(turn);
+      }
+      if (path === "/api/chat/conversations")
+        return result({ conversations: [{ ...past, messages: 2 }] });
+      if (path === "/api/chat/conversations/conv-1")
+        return result({
+          ...past,
+          messages: [
+            { id: "p1", role: "user", content: "Plan the garden" },
+            {
+              id: "p2",
+              role: "assistant",
+              content: "Here is a planting plan.",
+            },
+          ],
+        });
+      if (path === "/api/chat/conversations/conv-1/resume") {
+        conversation = "conv-1";
+        return result({ resumed: true });
+      }
+      throw new Error(`Unexpected request ${path}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+    return {
+      turns,
+      fetch,
+      replace: (id: string) => {
+        conversation = id;
+        turns.length = 0;
+      },
+      calls: (path: string) => fetch.mock.calls.filter(([p]) => p === path),
+      sent: () =>
+        fetch.mock.calls
+          .filter(([p]) => p === "/api/chat/messages")
+          .map(([, o]) => JSON.parse(o!.body as string).message),
+    };
+  }
+
+  it("recognises a command only as the whole message", () => {
+    expect(commandIn("/compact")).toBe("compact");
+    expect(commandIn("  /NEW\n")).toBe("new");
+    expect(commandIn("/clear")).toBe("clear");
+    expect(commandIn("/new plan for the garden")).toBeUndefined();
+    expect(commandIn("please /compact")).toBeUndefined();
+    expect(commandIn("/usr/bin is where it lives")).toBeUndefined();
+    // A turn read back without its text is simply not a command.
+    expect(commandIn(undefined)).toBeUndefined();
+  });
+
+  it("runs /compact as a command, never as something said, and shows the summary", async () => {
+    const server = daemon();
+    const state = initial();
+    const view = render(panel(state));
+    typeAndSend("/compact");
+    await tick(0);
+    expect(server.sent()).toEqual(["/compact"]);
+    const row = log().querySelector<HTMLElement>(".chat-command")!;
+    expect(within(row).getByText("/compact")).toBeTruthy();
+    expect(
+      within(row).getByText("Summarize the conversation so far"),
+    ).toBeTruthy();
+    expect(within(log()).queryByText("You")).toBeNull();
+    // The daemon finishes it: the summary joins the conversation.
+    Object.assign(server.turns[0], {
+      status: "completed",
+      outcome: "Summarized 8 earlier messages.",
+      assistant_message_id: "summary-1",
+    });
+    state.messages = [
+      {
+        id: "summary-1",
+        role: "summary",
+        content: "The owner is planning a fictional garden.",
+        created_at: new Date(Date.now() + 1000).toISOString(),
+      },
+    ];
+    await tick(3000);
+    view.rerender(panel(state));
+    expect(
+      within(row).getByText("Summarized 8 earlier messages."),
+    ).toBeTruthy();
+    const summary = log().querySelector("details.chat-summary")!;
+    expect(summary.hasAttribute("open")).toBe(true);
+    expect(summary.textContent).toContain("Summary of the conversation so far");
+    expect(summary.textContent).toContain(
+      "The owner is planning a fictional garden.",
+    );
+  });
+
+  it("says a command the assistant asked for was its own", async () => {
+    const server = daemon();
+    server.turns.push(
+      savedTurn({
+        id: "asked",
+        message: "/new",
+        command: "new",
+        origin: "assistant",
+        user_message_id: undefined,
+      }),
+    );
+    render(panel());
+    await tick(0);
+    expect(
+      within(log()).getByText("Start a fresh conversation · asked by Iris"),
+    ).toBeTruthy();
+  });
+
+  it("tells the owner an unknown command isn't one, and gives it back to edit", async () => {
+    const server = daemon();
+    render(panel());
+    typeAndSend("/nwe");
+    await tick(0);
+    expect(server.sent()).toEqual(["/nwe"]);
+    expect(screen.getByText("Not sent")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "/nwe isn't a command. Try /compact",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(input().value).toBe("/nwe");
+  });
+
+  it("opens a fresh conversation with its overview and none of the old turns", async () => {
+    const server = daemon();
+    server.turns.push(
+      savedTurn({ status: "completed", message: "An old topic" }),
+    );
+    const state = initial();
+    state.messages = [
+      { id: "user-1", role: "user", content: "An old topic" },
+      { id: "reply-1", role: "assistant", content: "An old reply" },
+    ];
+    const view = render(panel(state));
+    await tick(0);
+    expect(log().textContent).toContain("An old topic");
+    typeAndSend("/new");
+    await tick(0);
+    expect(server.sent()).toEqual(["/new"]);
+    // The daemon archives the old conversation and opens a fresh one.
+    server.replace("fresh");
+    state.messages = [
+      {
+        id: "overview",
+        role: "assistant",
+        origin: "overview",
+        content: "Fresh start. The previous conversation is saved in History.",
+      },
+    ];
+    view.rerender(panel(state));
+    await tick(3000);
+    expect(log().textContent).toContain("Fresh start.");
+    expect(log().textContent).not.toContain("An old topic");
+    expect(log().textContent).not.toContain("/new");
+  });
+
+  it("drops the old conversation's turns even when a poll straddling the reset misnamed them", async () => {
+    // What the daemon answers each time it is polled, in order.
+    const old = savedTurn({ status: "completed", message: "An old topic" });
+    const answers = [
+      { turns: [old], conversation: "old" },
+      // Read across the reset: the old turn, under the new conversation.
+      { turns: [old], conversation: "fresh" },
+      { turns: [], conversation: "fresh" },
+    ];
+    const fetch = vi.fn(async (path: string) => {
+      if (path === "/api/chat/turns")
+        return result(answers.length > 1 ? answers.shift() : answers[0]);
+      if (path === "/api/chat/suggestion") return result({ suggestion: "" });
+      throw new Error(`Unexpected request ${path}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+    const state = initial();
+    const view = render(panel(state));
+    await tick(0);
+    expect(log().textContent).toContain("An old topic");
+    state.messages = [
+      {
+        id: "overview",
+        role: "assistant",
+        origin: "overview",
+        content: "Fresh start.",
+      },
+    ];
+    view.rerender(panel(state));
+    await tick(3000);
+    await tick(3000);
+    await tick(3000);
+    expect(log().textContent).toContain("Fresh start.");
+    expect(log().textContent).not.toContain("An old topic");
+  });
+
+  it("keeps a message accepted after a poll was sent that the poll's answer predates", async () => {
+    let answer!: (reply: Reply) => void;
+    let polls = 0;
+    const fetch = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === "/api/chat/turns") {
+        polls++;
+        if (polls === 1)
+          return new Promise<Reply>((resolve) => (answer = resolve));
+        return result({ turns: [], conversation: "c" });
+      }
+      if (path === "/api/chat/messages") {
+        const body = JSON.parse(options!.body as string);
+        return result({
+          ...body,
+          status: "queued",
+          created_at: new Date().toISOString(),
+          revision: 0,
+          events: [],
+        });
+      }
+      throw new Error(`Unexpected request ${path}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(panel());
+    await tick(0);
+    typeAndSend("Just sent");
+    await tick(0);
+    // The first poll was asked before the message arrived; it cannot list it.
+    answer(result({ turns: [], conversation: "c" }));
+    await tick(0);
+    const queue = screen.getByRole("region", { name: "Queued messages" });
+    expect(within(queue).getByText("Just sent")).toBeTruthy();
+    // A poll asked afterwards that leaves it out means it has gone.
+    await tick(3000);
+    expect(
+      screen.queryByRole("region", { name: "Queued messages" }),
+    ).toBeNull();
+  });
+
+  it("keeps attachments and sends nothing when a command comes with them", async () => {
+    const server = daemon();
+    render(panel());
+    const form = input().closest("form")!;
+    const files = [new File(["notes"], "notes.txt", { type: "text/plain" })];
+    fireEvent.drop(form, { dataTransfer: { files, types: ["Files"] } });
+    await tick(0);
+    typeAndSend("/clear");
+    await tick(0);
+    expect(server.sent()).toEqual([]);
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Send /clear on its own. Your attachments stay here for your next message.",
+    );
+    const list = screen.getByRole("list", { name: "Attachments" });
+    expect(within(list).getByText("notes.txt")).toBeTruthy();
+    expect(input().value).toBe("/clear");
+    // Without the command the attachment goes as usual.
+    fireEvent.change(input(), { target: { value: "Here are my notes" } });
+    fireEvent.keyDown(input(), { key: "Enter" });
+    await tick(0);
+    expect(server.sent()).toEqual([
+      "Here are my notes\n\nAttached file: notes.txt\n```\nnotes\n```",
+    ]);
+  });
+
+  it("typing a command dismisses a suggestion, and Tab is left alone", async () => {
+    const server = daemon("What should I plant first?");
+    const state = initial();
+    state.messages = [
+      { id: "user-1", role: "user", content: "Plan the garden" },
+      { id: "reply-1", role: "assistant", content: "Here is a plan." },
+    ];
+    render(panel(state));
+    await tick(SUGGESTION_DELAY);
+    expect(input().placeholder).toBe("What should I plant first?");
+    fireEvent.change(input(), { target: { value: "/" } });
+    expect(input().placeholder).toBe("Message Iris");
+    expect(fireEvent.keyDown(input(), { key: "Tab" })).toBe(true);
+    expect(input().value).toBe("/");
+    fireEvent.change(input(), { target: { value: "/compact" } });
+    fireEvent.keyDown(input(), { key: "Enter" });
+    await tick(0);
+    expect(server.sent()).toEqual(["/compact"]);
+    expect(server.calls("/api/chat/suggestion")).toHaveLength(1);
+  });
+
+  it("suggests after a fresh start's overview, but not over a summary", async () => {
+    const server = daemon("What needs me today?");
+    const state = initial();
+    state.messages = [
+      {
+        id: "summary-1",
+        role: "summary",
+        content: "The owner is planning a garden.",
+      },
+    ];
+    const view = render(panel(state));
+    await tick(SUGGESTION_DELAY * 2);
+    expect(server.calls("/api/chat/suggestion")).toHaveLength(0);
+    state.messages = [
+      {
+        id: "overview",
+        role: "assistant",
+        origin: "overview",
+        content: "Fresh start.",
+      },
+    ];
+    view.rerender(panel(state));
+    await tick(SUGGESTION_DELAY);
+    const asked = server.calls("/api/chat/suggestion");
+    expect(asked).toHaveLength(1);
+    expect(JSON.parse(asked[0][1]!.body as string)).toEqual({
+      after: "overview",
+    });
+    expect(input().placeholder).toBe("What needs me today?");
+  });
+
+  it("lists past conversations, opens one, and switches back to continue it", async () => {
+    const server = daemon();
+    const refresh = vi.fn(async () => {});
+    render(panel(initial(), refresh));
+    fireEvent.click(screen.getByRole("button", { name: "Past conversations" }));
+    await tick(0);
+    const history = screen.getByRole("region", { name: "Past conversations" });
+    expect(log().hidden).toBe(true);
+    fireEvent.click(within(history).getByText("Plan the garden"));
+    await tick(0);
+    expect(within(history).getByText("Here is a planting plan.")).toBeTruthy();
+    fireEvent.click(
+      within(history).getByRole("button", {
+        name: "Continue this conversation",
+      }),
+    );
+    await tick(0);
+    expect(server.calls("/api/chat/conversations/conv-1/resume")).toHaveLength(
+      1,
+    );
+    expect(refresh).toHaveBeenCalled();
+    expect(
+      screen.queryByRole("region", { name: "Past conversations" }),
+    ).toBeNull();
+    expect(log().hidden).toBe(false);
+    // Once it is picked up, the composer writes to it.
+    expect(screen.getByRole("textbox")).toBeTruthy();
+  });
+
+  it("offers nothing to write in while a past conversation is open, and keeps the draft for the return", async () => {
+    const server = daemon();
+    render(panel());
+    const form = input().closest("form")!;
+    const files = [new File(["notes"], "notes.txt", { type: "text/plain" })];
+    fireEvent.drop(form, { dataTransfer: { files, types: ["Files"] } });
+    await tick(0);
+    fireEvent.change(input(), { target: { value: "/clear" } });
+    fireEvent.click(screen.getByRole("button", { name: "Past conversations" }));
+    await tick(0);
+    fireEvent.click(screen.getByText("Plan the garden"));
+    await tick(0);
+    // Beneath a past conversation there is no composer to send from:
+    // anything written would go to the current conversation instead.
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Attachments" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "All conversations" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to the chat" }));
+    await tick(0);
+    expect(server.sent()).toEqual([]);
+    expect(input().value).toBe("/clear");
+    const list = screen.getByRole("list", { name: "Attachments" });
+    expect(within(list).getByText("notes.txt")).toBeTruthy();
+  });
+
+  it("says why a conversation can't be picked up yet", async () => {
+    const server = daemon();
+    const original = server.fetch.getMockImplementation()!;
+    server.fetch.mockImplementation(async (path, options) =>
+      path.endsWith("/resume")
+        ? {
+            ok: false,
+            status: 409,
+            json: async () => ({
+              error: "The assistant is replying; switch once it has finished",
+            }),
+          }
+        : original(path, options),
+    );
+    render(panel());
+    fireEvent.click(screen.getByRole("button", { name: "Past conversations" }));
+    await tick(0);
+    fireEvent.click(screen.getByText("Plan the garden"));
+    await tick(0);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue this conversation" }),
+    );
+    await tick(0);
+    expect(screen.getByRole("alert").textContent).toBe(
+      "The assistant is replying; switch once it has finished",
+    );
+    expect(
+      screen.getByRole("region", { name: "Past conversations" }),
+    ).toBeTruthy();
   });
 });

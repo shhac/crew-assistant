@@ -272,7 +272,7 @@ export interface Message {
   id: string;
   role: string;
   content: string;
-  origin?: "wake" | (string & {});
+  origin?: "wake" | "overview" | (string & {});
   created_at?: string;
 }
 export interface ChatToolEvent {
@@ -299,6 +299,38 @@ export interface ChatTurn {
   retry_at?: string;
   revision: number;
   events: ChatToolEvent[];
+  /** The chat command this turn runs instead of a reply, such as "compact". */
+  command?: string;
+  /** What a command did, in a line. */
+  outcome?: string;
+  /** "assistant" for a command the assistant asked for itself. */
+  origin?: string;
+}
+/** A past conversation, archived by /new or /clear. */
+export interface ConversationEntry {
+  id: string;
+  title: string;
+  started_at: string;
+  archived_at: string;
+  messages: number;
+}
+export interface Conversation extends Omit<ConversationEntry, "messages"> {
+  messages: Message[];
+}
+export function listConversations() {
+  return api<{ conversations: ConversationEntry[] }>(
+    "/api/chat/conversations",
+  );
+}
+export function getConversation(id: string) {
+  return api<Conversation>(
+    `/api/chat/conversations/${encodeURIComponent(id)}`,
+  );
+}
+export function resumeConversation(id: string) {
+  return api(`/api/chat/conversations/${encodeURIComponent(id)}/resume`, {
+    method: "POST",
+  });
 }
 export interface Memory {
   id: string;

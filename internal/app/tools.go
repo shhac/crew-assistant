@@ -165,6 +165,12 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 			return nil, err
 		}
 		return a.Core.Remember(ctx, in.Key, in.Value)
+	case "manage_conversation":
+		var in engine.ManageConversationArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		return a.manageConversation(ctx, in)
 	case "report_status":
 		var in engine.StatusArgs
 		if err := args(raw, &in); err != nil {
