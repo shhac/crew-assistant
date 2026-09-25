@@ -20,6 +20,21 @@ func TestEveryAssistantToolHasALabelTheOwnerCanRead(t *testing.T) {
 	}
 }
 
+func TestEveryToolTheAssistantIsOfferedHasAnActionAndNoMore(t *testing.T) {
+	offered := map[string]bool{}
+	for _, tool := range engine.Tools() {
+		offered[tool.Function.Name] = true
+		if toolActions[tool.Function.Name] == nil {
+			t.Errorf("%s is offered to the assistant but does nothing", tool.Function.Name)
+		}
+	}
+	for name := range toolActions {
+		if !offered[name] {
+			t.Errorf("%s acts but is never offered", name)
+		}
+	}
+}
+
 func TestTheAssistantSeesAnOverviewAndReadsDetailOnlyWhenItAsks(t *testing.T) {
 	long := strings.Repeat("x", 5000)
 	var s core.Snapshot
