@@ -141,3 +141,22 @@ func TestEngineSettingsAreChecked(t *testing.T) {
 		}
 	}
 }
+
+// The example in the repository is a config this version reads in full.
+func TestTheExampleConfigIsCurrent(t *testing.T) {
+	path := filepath.Join("..", "..", "config.example.json")
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unknown := UnknownKeys(path); len(unknown) != 0 {
+		t.Fatalf("unknown keys in the example: %v", unknown)
+	}
+	data, _ := os.ReadFile(path)
+	if converted, _ := ConvertLegacyJSON(data); string(converted) != string(data) {
+		t.Fatal("the example is in an earlier layout")
+	}
+	if c.Engines.Claude.UsageFloor.WeekPercent == nil || *c.Engines.Claude.UsageFloor.WeekPercent != DefaultUsageFloor {
+		t.Fatalf("floors %+v", c.Engines.Claude.UsageFloor)
+	}
+}

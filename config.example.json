@@ -1,0 +1,71 @@
+{
+  "//": "crew-assistant's settings. Copy to ~/.config/app.paulie.crew-assistant/config.json, or run crew-assistant init and change it with crew-assistant config set. Keys may be left out; they take the defaults shown here.",
+  "model": {
+    "//": "The assistant's own model. Team members choose theirs on the Team tab.",
+    "engine": "codex",
+    "model": "gpt-6-astra",
+    "effort": "high",
+    "max_tokens": 4096
+  },
+  "engines": {
+    "//": "How to reach each engine, shared by the assistant, team roles, small models and the usage meter.",
+    "codex": {
+      "//": "bin and home are empty for codex on PATH and crew-assistant's own Codex login home.",
+      "bin": "",
+      "home": "",
+      "usage_floor": {
+        "//": "The share of each usage window team roles leave unused, in percent. 0 turns a window's floor off.",
+        "5h_percent": 10,
+        "1w_percent": 10
+      },
+      "on_unknown_usage": "allow"
+    },
+    "claude": {
+      "//": "home is empty for Claude's own ~/.claude login. on_unknown_usage pause holds team roles while usage can't be read.",
+      "bin": "",
+      "home": "",
+      "usage_floor": {
+        "5h_percent": 10,
+        "1w_percent": 10
+      },
+      "on_unknown_usage": "allow"
+    },
+    "openai-compatible": {
+      "//": "For an assistant on an API rather than a CLI subscription. api_key_env names the variable holding the key; empty sends none.",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY"
+    }
+  },
+  "limits": {
+    "max_model_calls_per_day": 100,
+    "max_model_turns": 8
+  },
+  "chat": {
+    "loading_phrases": {
+      "enabled": true
+    }
+  },
+  "assistant": {
+    "name": "Milo",
+    "personality": "Calm, concise and proactive. Bring clear recommendations and evidence; handle the chasing.",
+    "theme": "system"
+  },
+  "dashboard": {
+    "//": "tailscale serve shares the dashboard on your tailnet with the logins in allowed_users.",
+    "addr": "127.0.0.1:8340",
+    "tailscale": "off",
+    "tailscale_port": 8443,
+    "allowed_users": []
+  },
+  "slack": {
+    "bot_token_env": "SLACK_BOT_TOKEN",
+    "app_token_env": "SLACK_APP_TOKEN",
+    "owner_user_id": ""
+  },
+  "linear": {
+    "import_assignments": false,
+    "api_key_env": "LINEAR_API_KEY",
+    "team_ids": []
+  },
+  "connections": []
+}

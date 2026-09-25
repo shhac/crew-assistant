@@ -49,7 +49,16 @@ For your own assistant:
 ./crew-assistant serve --open
 ```
 
-`doctor` checks configuration and logins, and proves for each installed CLI that team roles can run under its sandbox, all without inference. The assistant's engine, model and effort are chosen in **Settings**; the default is `codex / gpt-6-astra / high`. The Codex home defaults to `~/.local/state/app.paulie.crew-assistant/codex`; Claude uses its native `~/.claude` login. Configuration lives in `~/.config/app.paulie.crew-assistant/config.json` and state in `~/.local/state/app.paulie.crew-assistant/`, honouring XDG overrides and explicit `--config` / `--state` flags. Configuration holds credential **environment variable names**, never secret values.
+`doctor` checks configuration and logins, and proves for each installed CLI that team roles can run under its sandbox, all without inference. The assistant's engine, model and effort are chosen in **Settings**; the default is `codex / gpt-6-astra / high`. Each engine has its own section under `engines`: `engines.codex.home` defaults to `~/.local/state/app.paulie.crew-assistant/codex`, and Claude uses its native `~/.claude` login unless `engines.claude.home` says otherwise. Configuration lives in `~/.config/app.paulie.crew-assistant/config.json` and state in `~/.local/state/app.paulie.crew-assistant/`, honouring XDG overrides and explicit `--config` / `--state` flags. Configuration holds credential **environment variable names**, never secret values. [`config.example.json`](config.example.json) shows every setting.
+
+```sh
+./crew-assistant config list                                       # every setting, with what it does
+./crew-assistant config get engines.claude.usage_floor.1w_percent
+./crew-assistant config set engines.claude.usage_floor.1w_percent 2
+./crew-assistant config unset engines.claude.usage_floor.1w_percent  # back to the default
+```
+
+A file from an earlier version still loads, and is rewritten in the current layout when the daemon starts. `doctor` and `serve` name any key that has no effect, and where a renamed one went; `config unset` removes it.
 
 ```sh
 ./crew-assistant chat 'Draft a thank-you note to the launch team'
@@ -83,7 +92,7 @@ Only one daemon can own a state file. `serve --no-dispatch` observes without run
   The team's commits are signed exactly when your own commits in that repository would be: your global, system and repository git config decide, including the key, `gpg.format` and signing program. A project can instead always or never sign, set by you or the assistant with the team. Commits are authored as `crew-assistant`, so a host that checks the signer against the committer's email may show them as unverified.
 - **Wake-ups** let an agent wait instead of checking back: the assistant (`wake_me_when`) and implementers (a `wake` block in their reply) can wait on a task, a branch, a time, or a pull request's checks or reviews. Each has its own note for later, a handle to cancel it, and a timeout. Each is delivered with when it was registered, seen and delivered, so a stale one can be recognised.
 
-Failures resolve at the lowest level that can: a failing role is retried twice with growing waits before you hear about it; a sandbox or login problem comes to you at once. When a subscription is past its threshold (`limits.role_usage`, default 90%), the task waits for the window to reset instead of failing.
+Failures resolve at the lowest level that can: a failing role is retried twice with growing waits before you hear about it; a sandbox or login problem comes to you at once. Team roles leave part of each Codex and Claude usage window unused, 10% of the 5-hour and of the weekly window by default (`engines.<engine>.usage_floor.5h_percent` and `1w_percent`; 0 turns one off). When less than that is left, the task waits for the window to reset instead of failing, and starts again by itself once it has. `engines.<engine>.on_unknown_usage` set to `pause` holds roles while usage can't be read.
 
 ### Roles, sandboxes and trust
 
