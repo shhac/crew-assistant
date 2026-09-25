@@ -150,6 +150,8 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 	shortcuts := started(crew, "demo-shortcuts", "Keyboard shortcuts for the board", core.TaskDesigning, 1, ago(50*time.Minute))
 	shortcuts.Detail = "With Rune for design input"
 	shortcuts.Design = []core.DesignRequest{{ID: "demo-design-shortcuts", From: "Ada", Step: core.TaskResearching, Round: 1, Question: "Should shortcuts be single keys, as on GitHub, or need a modifier so they never fire while typing?", At: ago(8 * time.Minute)}}
+	undo := started(crew, "demo-undo", "Undo a landing from the dashboard", core.TaskResearching, 1, ago(15*time.Minute))
+	undo.Detail = "Reading how landing works"
 	screenshots := queued(crew, "demo-screenshots", "Light and dark screenshots in the README", ago(45*time.Minute))
 	// Screenshots should show search, so they wait for it to land.
 	screenshots.DependsOn = []string{search.ID}
@@ -191,7 +193,7 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 	plan.DecisionID = "demo-approve-plan"
 
 	tasks := []core.Task{
-		signing, grouping, search, shortcuts, screenshots,
+		signing, grouping, search, shortcuts, undo, screenshots,
 		landed("demo-assets", "Composer asset drop and paste", "ce5899e", ago(3*time.Hour)),
 		landed("demo-suggestions", "Next-message suggestions", "482bf96", ago(150*time.Minute)),
 		darkDocs, changelog, searchPage, plan,

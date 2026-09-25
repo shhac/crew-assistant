@@ -18,7 +18,7 @@ func TestADesignHandOffIsRecordedOnceAndGoesBackToWhoeverAsked(t *testing.T) {
 	owner := DecisionInput{Title: "More design input?", Context: "Tabs or a sidebar?", Recommendation: "Answer it", Choices: []string{"Use your judgment", "Stop"}}
 	ask := DesignAsk{From: "Researcher", Question: "Tabs or a sidebar?", Owner: owner}
 	held, err := s.AskDesign(testContext, queued.ID, ask)
-	if err != nil || held.Status != TaskDesigning || held.Stage != StageResearching || !held.WithDesigner || held.Checking != "Dee" {
+	if err != nil || held.Status != TaskDesigning || held.Stage != StageDesigning || !held.WithDesigner || held.Checking != "Dee" {
 		t.Fatalf("with the designer: %s %s %v %q %v", held.Status, held.Stage, held.WithDesigner, held.Checking, err)
 	}
 	if _, err := s.AskDesign(testContext, queued.ID, ask); !errors.Is(err, ErrConflict) {

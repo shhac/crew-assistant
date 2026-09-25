@@ -81,7 +81,7 @@ func TestTheResearcherHandsTheTaskToTheDesignerAndGetsItBack(t *testing.T) {
 	seatDesigner(t, a, p.ID)
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add A"})
 	task = stepUntil(t, a, task.ID, withDesigner)
-	if task.Stage != core.StageResearching || !task.WithDesigner || task.Checking != "Dee" || task.Detail != "With Dee for design input" || task.Plan != nil {
+	if task.Stage != core.StageDesigning || !task.WithDesigner || task.Checking != "Dee" || task.Detail != "With Dee for design input" || task.Plan != nil {
 		t.Fatalf("with the designer: stage %s, with designer %v, checking %q, %q", task.Stage, task.WithDesigner, task.Checking, task.Detail)
 	}
 	task = taskNow(t, a, task.ID)
@@ -138,7 +138,7 @@ func TestTheImplementerHandsTheTaskToTheDesignerAndGetsItBack(t *testing.T) {
 	a, p, task := loopApp(t, runner, "")
 	seatDesigner(t, a, p.ID)
 	held := stepUntil(t, a, task.ID, withDesigner)
-	if held.Stage != core.StageImplementing || !held.WithDesigner || held.Checking != "Dee" || len(held.Revisions) != 0 {
+	if held.Stage != core.StageDesigning || !held.WithDesigner || held.Checking != "Dee" || len(held.Revisions) != 0 {
 		t.Fatalf("with the designer: stage %s %v %q, %d revisions", held.Stage, held.WithDesigner, held.Checking, len(held.Revisions))
 	}
 	task = settle(t, a)
@@ -232,7 +232,7 @@ func TestADesignerThatFailsIsAskedAgainAndTheTaskStaysWhereItWas(t *testing.T) {
 	seatDesigner(t, a, p.ID)
 	task = stepUntil(t, a, task.ID, func(t core.Task) bool { return t.Status == core.TaskWaiting })
 	d := openDecision(t, a, task)
-	if d.Kind != core.DecisionFailure || task.ResumeStatus != core.TaskDesigning || task.Stage != core.StageImplementing {
+	if d.Kind != core.DecisionFailure || task.ResumeStatus != core.TaskDesigning || task.Stage != core.StageDesigning {
 		t.Fatalf("a failed designer reaches the owner: %+v %s %s", d, task.ResumeStatus, task.Stage)
 	}
 	a.Core.ChooseDecision(context.Background(), d.ID, choiceTryAgain)

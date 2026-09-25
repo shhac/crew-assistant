@@ -6,6 +6,7 @@ package core
 const (
 	StageTodo         = "todo"
 	StageResearching  = "researching"
+	StageDesigning    = "designing"
 	StageImplementing = "implementing"
 	StageReviewing    = "reviewing"
 	StageQA           = "qa"
@@ -56,11 +57,7 @@ func stageOf(v *Snapshot, t Task) string {
 	case TaskResearching:
 		return StageResearching
 	case TaskDesigning:
-		// With the designer, a task stays where the role that asked left it.
-		if r := t.OpenDesign(); r != nil {
-			return stageOf(v, Task{Status: r.Step})
-		}
-		return StageImplementing
+		return StageDesigning
 	case TaskWriting:
 		return StageImplementing
 	case TaskReviewing, TaskDeciding:
@@ -170,8 +167,9 @@ func lastCheck(t Task) string {
 
 // waitingStage keeps a task that needs the owner in the column it stopped
 // in: approval is the last step before landing; a question stays with
-// whoever asked it; a failure with the step that failed, the designer's
-// with the step that handed the task over.
+// whoever asked it, a design question with the step that asked for design
+// input, since the answer goes back there; a failure with the step that
+// failed.
 func waitingStage(v *Snapshot, t Task) string {
 	var kind string
 	if d := decision(v, t.DecisionID); d != nil {

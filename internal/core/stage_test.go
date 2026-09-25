@@ -37,6 +37,9 @@ func TestATaskSitsOnTheBoardWhereTheLoopHasGotTo(t *testing.T) {
 		"landed":                     {Task{Status: TaskLanded}, StageDone},
 		"stopped":                    {Task{Status: TaskStopped}, StageStopped},
 		"reviewing with no revision": {Task{Status: TaskReviewing, Roles: team}, StageImplementing},
+		"with the designer":          {Task{Status: TaskDesigning, Roles: team, Design: []DesignRequest{{Step: TaskWriting}}}, StageDesigning},
+		"failed while designing":     {Task{Status: TaskWaiting, DecisionID: "failure", ResumeStatus: TaskDesigning, Roles: team}, StageDesigning},
+		"design question":            {Task{Status: TaskWaiting, DecisionID: "question", Roles: team, Design: []DesignRequest{{Step: TaskResearching, Decision: "question"}}}, StageResearching},
 	} {
 		if got := stageOf(&Snapshot{Decisions: decisions}, tc.task); got != tc.want {
 			t.Errorf("%s: stage %q, want %q", name, got, tc.want)
