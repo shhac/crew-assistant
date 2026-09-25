@@ -2,10 +2,13 @@ package work
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/roles"
+	"github.com/shhac/lib-agent-harness/session"
 )
 
 func plannedCode(t *testing.T, reviews int, plans ...string) (*Loop, *codeRunner, core.Project) {
@@ -129,5 +132,35 @@ func TestOneMemberPlansAndImplementsFromOneSeat(t *testing.T) {
 	}
 	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check", Implementer: ada.ID, Reviewer: ada.ID}); err == nil {
 		t.Fatal("a member reviewing their own work was accepted")
+	}
+}
+
+func TestAPlannerThatFailsPlansAgainWhateverTheOwnerAnswers(t *testing.T) {
+	ctx := context.Background()
+	permanent := &session.CapabilityError{Engine: "claude", Code: session.CapabilitySandboxUnavailable, Phase: session.BeforeLaunch}
+	for _, answer := range []string{choiceTryAgain, "Look at the CLI too"} {
+		a, runner, p := plannedCode(t, 6)
+		runner.fail = []error{permanent}
+		task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
+		task = taskNow(t, a, task.ID)
+		d := openDecision(t, a, task)
+		if d.Kind != core.DecisionFailure || task.ResumeStatus != core.TaskPlanning || task.Stage != core.StagePlanning {
+			t.Fatalf("a failed planner reaches the owner: %+v %s %s", d, task.ResumeStatus, task.Stage)
+		}
+		if answer == choiceTryAgain {
+			a.Core.ChooseDecision(ctx, d.ID, answer)
+		} else {
+			a.Core.AnswerDecision(ctx, d.ID, answer)
+		}
+		task = taskNow(t, a, task.ID)
+		if task.Plan == nil || len(task.Revisions) == 0 {
+			t.Fatalf("%q should plan again, then write: plan %+v, %d revisions", answer, task.Plan, len(task.Revisions))
+		}
+		planned := slices.ContainsFunc(runner.seen, func(spec roles.Spec) bool {
+			return strings.Contains(spec.Prompt, "Plan this task before anything is written") && strings.Contains(spec.Prompt, answer)
+		})
+		if answer != choiceTryAgain && !planned {
+			t.Fatalf("the planner never read %q", answer)
+		}
 	}
 }

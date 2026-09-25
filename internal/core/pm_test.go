@@ -63,6 +63,45 @@ func TestOnlyATeamWithAPMIsAskedToLookAtTheList(t *testing.T) {
 	}
 }
 
+func TestThePMLooksAgainWhenWorkIsPlannedOrFinishes(t *testing.T) {
+	s, _ := fixture(t)
+	p := pmProject(t, s)
+	a, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "a"})
+	due := func() bool {
+		_, project := queuedOrder(t, s, p.ID)
+		return project.PMDue
+	}
+	finish := func() {
+		s.UpdateTask(testContext, a.ID, func(t *Task, _ *Project) (string, error) {
+			t.Status = TaskStopped
+			return "", nil
+		})
+	}
+	s.ApplyPM(testContext, p.ID, PMAnswer{})
+	finish()
+	if !due() {
+		t.Fatal("finished work didn't bring the PM")
+	}
+	s.ApplyPM(testContext, p.ID, PMAnswer{})
+	finish()
+	if due() {
+		t.Fatal("an update to finished work brought the PM again")
+	}
+	planned := plannedProject(t, s)
+	playbook := *planned.Playbook
+	playbook.Roles = append(playbook.Roles, Role{Name: "Pim", Kinds: []string{RolePM}, Engine: "claude"})
+	planned, _ = s.SetPlaybook(testContext, planned.ID, playbook)
+	b, _ := s.QueueTask(testContext, planned.ID, TaskInput{Objective: "b"})
+	s.NextTask(testContext)
+	s.ApplyPM(testContext, planned.ID, PMAnswer{})
+	if _, err := s.RecordPlan(testContext, b.ID, Plan{Summary: "Do b"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, project := queuedOrder(t, s, planned.ID); !project.PMDue {
+		t.Fatal("a new plan didn't bring the PM")
+	}
+}
+
 func TestThePMOrdersTheListAndSetsWhatWaitsForWhat(t *testing.T) {
 	s, _ := fixture(t)
 	p := pmProject(t, s)

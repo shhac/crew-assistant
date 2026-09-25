@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -137,5 +138,68 @@ func TestAPMJoinsTheSeatItsMemberAlreadyHolds(t *testing.T) {
 	ivy, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ivy", Kinds: []string{core.RolePlanner, core.RoleImplementer}, Engine: "claude"})
 	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", Implementer: ivy.ID, Planner: ivy.ID}); err == nil || !strings.Contains(err.Error(), "has no planner") {
 		t.Fatalf("a draft team took a planner: %v", err)
+	}
+}
+
+func TestARolesJSONIsReadFromAFenceProseOrAlone(t *testing.T) {
+	for reply, want := range map[string]string{
+		`{"note": "bare"}`: "bare",
+		"Here you go:\n{\"note\": \"prose\"}\nThanks.":                "prose",
+		"{\"note\": \"early\"}\n```json\n{\"note\": \"fenced\"}\n```": "fenced",
+		"```json\n{\"note\": \"unclosed\"}":                           "unclosed",
+	} {
+		var got struct{ Note string }
+		if err := decodeReply(reply, &got); err != nil || got.Note != want {
+			t.Errorf("%q read as %q, %v", reply, got.Note, err)
+		}
+	}
+	var got struct{ Note string }
+	if err := decodeReply("no json at all", &got); err == nil {
+		t.Error("a reply without JSON was read")
+	}
+}
+
+func TestThePMsAnswerAndWhatItIsTold(t *testing.T) {
+	answer, questions, err := parsePM("```json\n{\"order\": [\"b\", \"a\"], \"depends\": [{\"task\": \" a \", \"on\": [\"b\"]}, {\"task\": \"c\", \"on\": null}], \"note\": \"b first\", \"questions\": [\" \", \"Why c?\"]}\n```")
+	if err != nil || !slices.Equal(answer.Order, []string{"b", "a"}) || !slices.Equal(answer.Depends["a"], []string{"b"}) || answer.Depends["c"] != nil || !slices.Equal(questions, []string{"Why c?"}) {
+		t.Fatalf("answer %+v questions %v: %v", answer, questions, err)
+	}
+	p := core.Project{ID: "p", Title: "Site", OrderedBy: core.OrderedByOwner, PMDirection: "Docs first", Brief: core.Brief{Goal: "Ship"}}
+	snap := core.Snapshot{Tasks: []core.Task{
+		{ID: "a", ProjectID: "p", Status: core.TaskQueued, Objective: "Search", Plan: &core.Plan{Summary: "Add a box", Changes: []string{"search.go"}}},
+		{ID: "b", ProjectID: "p", Status: core.TaskQueued, Objective: "Docs", DependsOn: []string{"a"}},
+		{ID: "x", ProjectID: "other", Status: core.TaskQueued, Objective: "Elsewhere"},
+	}}
+	prompt := pmPrompt(snap, p)
+	for _, want := range []string{"The owner set the current order", "The owner told you: Docs first", "plan: Add a box", "changes: search.go", "waits for: a"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("the PM isn't told %q", want)
+		}
+	}
+	if strings.Contains(prompt, "Elsewhere") {
+		t.Error("the PM is told about another project's work")
+	}
+}
+
+func TestAPMThatLeftOrFailedNeverHoldsUpTheWork(t *testing.T) {
+	runner := &scriptedRunner{reviews: []string{pass, pass}}
+	a, p, _, _ := pmTeam(t, runner)
+	ctx := context.Background()
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft"}); err != nil {
+		t.Fatal(err)
+	}
+	step(t, a)
+	snap, _ := a.Core.Snapshot(ctx)
+	if project, _ := findProject(snap, p.ID); project.PMDue {
+		t.Fatal("a team without a PM still waits for one")
+	}
+
+	runner = &scriptedRunner{reviews: []string{pass, pass}, fail: []error{errors.New("usage limit")}}
+	a, p, _, _ = pmTeam(t, runner)
+	step(t, a)
+	snap, _ = a.Core.Snapshot(ctx)
+	project, _ := findProject(snap, p.ID)
+	if project.PMDue || !slices.ContainsFunc(snap.Activity, func(e core.Activity) bool { return strings.Contains(e.Summary, "usage limit") }) {
+		t.Fatalf("a failed PM turn: due %v", project.PMDue)
 	}
 }

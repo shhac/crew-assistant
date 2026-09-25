@@ -67,10 +67,16 @@ func TestOlderStateWithOneKindIsReadAsSeveral(t *testing.T) {
 	s, _ := fixture(t)
 	p := newProject(t, s)
 	m, _ := s.SaveMember(testContext, "", MemberInput{Name: "Rune", Kinds: []string{RoleReviewer}, Engine: "codex"})
+	// A task under way during the upgrade keeps its team too.
+	s.QueueTask(testContext, p.ID, TaskInput{Objective: "Under way"})
+	running, _, _ := s.NextTask(testContext)
 	s.store.update(testContext, func(v *Snapshot) error {
 		v.Members[0].Kinds, v.Members[0].LegacyKind = nil, RoleReviewer
 		roles := project(v, p.ID).Playbook.Roles
 		roles[0].Kinds, roles[0].LegacyKind = nil, RoleImplementer
+		t := task(v, running.ID)
+		t.Roles[0].Kinds, t.Roles[0].LegacyKind = nil, RoleImplementer
+		t.Playbook.Roles[0].Kinds, t.Playbook.Roles[0].LegacyKind = nil, RoleImplementer
 		return nil
 	})
 	snap, _ := s.Snapshot(testContext)
@@ -79,6 +85,10 @@ func TestOlderStateWithOneKindIsReadAsSeveral(t *testing.T) {
 	}
 	if role := snap.Projects[0].Playbook.Roles[0]; !role.Holds(RoleImplementer) || role.LegacyKind != "" {
 		t.Fatalf("seat %+v", role)
+	}
+	pinned := task(&snap, running.ID)
+	if len(pinned.RolesOf(RoleImplementer)) != 1 || !pinned.Playbook.Roles[0].Holds(RoleImplementer) || pinned.Roles[0].LegacyKind != "" {
+		t.Fatalf("task roles %+v, playbook %+v", pinned.Roles, pinned.Playbook.Roles)
 	}
 }
 
