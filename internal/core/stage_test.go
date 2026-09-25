@@ -105,7 +105,7 @@ func TestTheToDoListIsReorderedOnlyWithinItsProject(t *testing.T) {
 		return task
 	}
 	a, x, b, c := queue(p, "a"), queue(other, "x"), queue(p, "b"), queue(p, "c")
-	if _, err := s.OrderTasks(testContext, p.ID, []string{c.ID, a.ID, b.ID}); err != nil {
+	if _, err := s.OrderTasks(testContext, p.ID, []string{c.ID, a.ID, b.ID}, OrderedByOwner); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ := s.Snapshot(testContext)
@@ -121,13 +121,13 @@ func TestTheToDoListIsReorderedOnlyWithinItsProject(t *testing.T) {
 		t.Fatalf("the loop started %q, not the first on the list", next.Objective)
 	}
 	// c has started, so a list that still names it is out of date.
-	if _, err := s.OrderTasks(testContext, p.ID, []string{c.ID, b.ID, a.ID}); !errors.Is(err, ErrConflict) {
+	if _, err := s.OrderTasks(testContext, p.ID, []string{c.ID, b.ID, a.ID}, OrderedByOwner); !errors.Is(err, ErrConflict) {
 		t.Fatalf("a stale list was accepted: %v", err)
 	}
-	if _, err := s.OrderTasks(testContext, p.ID, []string{b.ID, x.ID}); !errors.Is(err, ErrConflict) {
+	if _, err := s.OrderTasks(testContext, p.ID, []string{b.ID, x.ID}, OrderedByOwner); !errors.Is(err, ErrConflict) {
 		t.Fatalf("another project's task was accepted: %v", err)
 	}
-	if _, err := s.OrderTasks(testContext, p.ID, []string{b.ID, b.ID}); !errors.Is(err, ErrConflict) {
+	if _, err := s.OrderTasks(testContext, p.ID, []string{b.ID, b.ID}, OrderedByOwner); !errors.Is(err, ErrConflict) {
 		t.Fatalf("a repeated task was accepted: %v", err)
 	}
 }

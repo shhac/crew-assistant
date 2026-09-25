@@ -112,7 +112,7 @@ func TestATaskStartsOnlyOnceWhatItDependsOnHasFinished(t *testing.T) {
 		t.Fatal("a dependency in another project was accepted")
 	}
 	// Move Second ahead of First: it still waits.
-	if _, err := s.OrderTasks(testContext, p.ID, []string{second.ID, first.ID}); err != nil {
+	if _, err := s.OrderTasks(testContext, p.ID, []string{second.ID, first.ID}, OrderedByOwner); err != nil {
 		t.Fatal(err)
 	}
 	started, _, _ := s.NextTask(testContext)

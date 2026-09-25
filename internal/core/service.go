@@ -111,7 +111,11 @@ func (s *Service) CreateDecision(ctx context.Context, in DecisionInput) (Decisio
 			return Decision{}, errors.New("decision choices cannot be blank")
 		}
 	}
-	out := Decision{ID: uid(), Kind: DecisionChoice, ProjectID: in.ProjectID, Title: in.Title, Context: in.Context, Recommendation: in.Recommendation, Choices: in.Choices, Status: DecisionOpen, CreatedAt: s.now().UTC()}
+	kind := DecisionChoice
+	if in.Kind != "" {
+		kind = in.Kind
+	}
+	out := Decision{ID: uid(), Kind: kind, ProjectID: in.ProjectID, Title: in.Title, Context: in.Context, Recommendation: in.Recommendation, Choices: in.Choices, Status: DecisionOpen, CreatedAt: s.now().UTC()}
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		if in.ProjectID != "" && project(v, in.ProjectID) == nil {
 			return ErrNotFound

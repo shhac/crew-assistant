@@ -77,7 +77,7 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		if decode(w, r, &in) != nil {
 			return
 		}
-		v, err := a.Core.OrderTasks(r.Context(), r.PathValue("id"), in.TaskIDs)
+		v, err := a.Core.OrderTasks(r.Context(), r.PathValue("id"), in.TaskIDs, core.OrderedByOwner)
 		if err != nil {
 			problem(w, err)
 			return

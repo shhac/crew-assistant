@@ -20,6 +20,7 @@ var kindWords = map[string]string{
 	core.RoleImplementer: "the implementer, who writes the work",
 	core.RoleReviewer:    "a reviewer, who checks the work carefully",
 	core.RoleQA:          "QA, who runs the checks",
+	core.RolePM:          "the PM, who keeps the to-do list in order",
 }
 
 // roleWords says what a member does, in the roles it holds.

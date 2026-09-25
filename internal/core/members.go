@@ -84,7 +84,7 @@ func (s *Service) updateMember(ctx context.Context, id string, fn func(*Member, 
 }
 
 // memberKinds are the roles a member can hold, in the order a team works.
-var memberKinds = []string{RolePlanner, RoleImplementer, RoleReviewer, RoleQA}
+var memberKinds = []string{RolePM, RolePlanner, RoleImplementer, RoleReviewer, RoleQA}
 
 // kinds is what the member is asked to hold, taking an older client's single
 // kind as the list.

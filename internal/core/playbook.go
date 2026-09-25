@@ -34,12 +34,12 @@ type Role struct {
 // Holds reports whether the seat holds a kind of role.
 func (r Role) Holds(kind string) bool { return slices.Contains(r.Kinds, kind) }
 
-// Working is the seat's one kind other than planner: what it does once the
-// work has started, and what a message to it reaches. A seat that only plans
-// has none.
+// Working is the seat's one kind other than planner and PM: what it does
+// once the work has started, and what a message to it reaches. A seat that
+// only plans or keeps the list has none.
 func (r Role) Working() string {
 	for _, kind := range r.Kinds {
-		if kind != RolePlanner {
+		if kind != RolePlanner && kind != RolePM {
 			return kind
 		}
 	}
@@ -56,6 +56,10 @@ const (
 	// what exists, what will change, what is unclear and what it waits on.
 	// It only reads.
 	RolePlanner = "planner"
+	// RolePM keeps the project's to-do list: the order work starts in and
+	// what waits for what. It directs no one; the owner and the assistant
+	// can overrule it.
+	RolePM = "pm"
 )
 
 // Playbook is how a project's work gets done. It is data with a small fixed
@@ -289,16 +293,16 @@ func seatKinds(r Role) error {
 		switch kind {
 		case RoleImplementer, RoleReviewer, RoleQA:
 			working++
-		case RolePlanner:
+		case RolePlanner, RolePM:
 		default:
-			return fmt.Errorf("role %s: kind must be planner, implementer, reviewer or qa", r.Name)
+			return fmt.Errorf("role %s: kind must be planner, pm, implementer, reviewer or qa", r.Name)
 		}
 		if slices.Contains(r.Kinds[:i], kind) {
 			return fmt.Errorf("role %s holds %s twice", r.Name, kind)
 		}
 	}
 	if working > 1 {
-		return fmt.Errorf("role %s can hold only one of implementer, reviewer and QA, alongside planning", r.Name)
+		return fmt.Errorf("role %s can hold only one of implementer, reviewer and QA, alongside planning and PM", r.Name)
 	}
 	return nil
 }

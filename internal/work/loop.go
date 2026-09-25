@@ -112,6 +112,9 @@ func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 	if progressed, err := lp.answerMessage(ctx, snap); progressed || err != nil {
 		return progressed, err
 	}
+	if progressed, err := lp.managePM(ctx, snap); progressed || err != nil {
+		return progressed, err
+	}
 	t, ok, err := lp.Core.NextTask(ctx)
 	if err != nil {
 		return false, err
@@ -228,11 +231,16 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 		spec.Read = append(append([]string(nil), spec.Read...), learned.dir)
 		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + learned.index)
 	}
+	lp.engine(&spec, r, cfg)
+	return spec, learned.cleanup, nil
+}
+
+// engine points a spec at the role's CLI and the login it uses.
+func (lp *Loop) engine(spec *roles.Spec, r core.Role, cfg config.Config) {
 	spec.Binary, spec.Home = cfg.Model.EngineBinary(r.Engine)
 	if r.Engine == "codex" {
 		spec.RuntimeHome = filepath.Join(lp.Core.StateDirectory(), "roles", "codex")
 	}
-	return spec, learned.cleanup, nil
 }
 
 // write runs the implementer for this round and records what it produced.

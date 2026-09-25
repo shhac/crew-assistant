@@ -32,9 +32,26 @@ type Project struct {
 	SourceDescription string    `json:"source_description,omitempty"`
 	// Landed is the project's most recently delivered code change. Other work
 	// in the project catches up with it before it is delivered.
-	Landed    *Landing  `json:"landed,omitempty"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Landed *Landing `json:"landed,omitempty"`
+	// OrderedBy says who last set the to-do order: the owner, the assistant
+	// or the team's PM. The owner's or the assistant's order stands over the
+	// PM's until new work arrives.
+	OrderedBy string    `json:"ordered_by,omitempty"`
+	OrderedAt time.Time `json:"ordered_at,omitempty"`
+	// PMDue asks the team's PM to look at the to-do list again, after
+	// something that changes it: work queued, planned or finished.
+	PMDue bool `json:"pm_due,omitempty"`
+	// PMDirection is what the owner told the PM, for its next look.
+	PMDirection string    `json:"pm_direction,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
+
+// Who set a project's to-do order.
+const (
+	OrderedByOwner     = "owner"
+	OrderedByAssistant = "assistant"
+	OrderedByPM        = "pm"
+)
 
 // Landing is one delivered code change: the commit and the branch it went to.
 type Landing struct {
@@ -184,4 +201,7 @@ type DecisionInput struct {
 	Context        string   `json:"context"`
 	Recommendation string   `json:"recommendation"`
 	Choices        []string `json:"choices"`
+	// Kind marks a decision the daemon opens for a role, such as the PM's
+	// questions; the owner and the assistant open ordinary choices.
+	Kind string `json:"-"`
 }

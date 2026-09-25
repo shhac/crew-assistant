@@ -145,6 +145,9 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 			outcome = PlanWrites
 			record(v, now, t.ProjectID, "task.planned", fmt.Sprintf("Planned %s", t.Objective))
 		}
+		if p := project(v, t.ProjectID); p != nil {
+			p.listChanged()
+		}
 		derive(v, t)
 		out = *t
 		return nil

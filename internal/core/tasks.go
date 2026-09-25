@@ -226,6 +226,7 @@ func (s *Service) QueueTask(ctx context.Context, projectID string, in TaskInput)
 		}
 		out.DependsOn = deps
 		v.Tasks = append(v.Tasks, out)
+		p.listChanged()
 		record(v, now, projectID, "task.queued", out.Objective)
 		return nil
 	})
@@ -281,39 +282,54 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 // exactly the project's queued tasks, so one that started or arrived since
 // the owner or assistant looked is never silently left out. Other projects'
 // tasks keep their places.
-func (s *Service) OrderTasks(ctx context.Context, projectID string, ids []string) ([]Task, error) {
+func (s *Service) OrderTasks(ctx context.Context, projectID string, ids []string, by string) ([]Task, error) {
 	var out []Task
 	err := s.store.update(ctx, func(v *Snapshot) error {
-		if project(v, projectID) == nil {
+		p := project(v, projectID)
+		if p == nil {
 			return ErrNotFound
 		}
-		var slots []int
-		queued := map[string]Task{}
-		for i, t := range v.Tasks {
-			if t.ProjectID == projectID && t.Status == TaskQueued {
-				slots = append(slots, i)
-				queued[t.ID] = t
-			}
+		ordered, err := reorder(v, projectID, ids)
+		if err != nil {
+			return err
 		}
-		changed := fmt.Errorf("the to-do list changed; try again: %w", ErrConflict)
-		if len(ids) != len(slots) {
-			return changed
-		}
-		for _, id := range ids {
-			t, ok := queued[id]
-			if !ok {
-				return changed
-			}
-			delete(queued, id)
-			out = append(out, t)
-		}
-		for i, slot := range slots {
-			v.Tasks[slot] = out[i]
-		}
-		record(v, s.now().UTC(), projectID, "task.reordered", "To-do list reordered")
+		out = ordered
+		now := s.now().UTC()
+		p.OrderedBy, p.OrderedAt = by, now
+		record(v, now, projectID, "task.reordered", "To-do list reordered")
 		return nil
 	})
 	return out, err
+}
+
+// reorder puts a project's queued tasks in the order of ids, which must be
+// exactly those tasks, keeping the slots they held among other projects'.
+func reorder(v *Snapshot, projectID string, ids []string) ([]Task, error) {
+	var slots []int
+	queued := map[string]Task{}
+	for i, t := range v.Tasks {
+		if t.ProjectID == projectID && t.Status == TaskQueued {
+			slots = append(slots, i)
+			queued[t.ID] = t
+		}
+	}
+	changed := fmt.Errorf("the to-do list changed; try again: %w", ErrConflict)
+	if len(ids) != len(slots) {
+		return nil, changed
+	}
+	var out []Task
+	for _, id := range ids {
+		t, ok := queued[id]
+		if !ok {
+			return nil, changed
+		}
+		delete(queued, id)
+		out = append(out, t)
+	}
+	for i, slot := range slots {
+		v.Tasks[slot] = out[i]
+	}
+	return out, nil
 }
 
 // UpdateTask applies one loop transition atomically. The loop decides what
@@ -329,6 +345,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Pro
 		if p == nil {
 			return ErrNotFound
 		}
+		wasFinished := t.Finished()
 		activity, err := fn(t, p)
 		if err != nil {
 			return err
@@ -337,6 +354,9 @@ func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Pro
 		if t.Finished() {
 			cancelTaskWakes(v, t.ID)
 			closeMessages(t, t.UpdatedAt)
+			if !wasFinished {
+				p.listChanged()
+			}
 		}
 		// A delivered task may still land later and resume its writer, so it
 		// keeps what its roles were told; one stopped or landed never runs again.

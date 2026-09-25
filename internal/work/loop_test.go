@@ -31,6 +31,9 @@ type scriptedRunner struct {
 	// plans answer planner turns in order; after them, a plan with nothing
 	// unclear and nothing to wait for.
 	plans []string
+	// pm answers the PM's looks at the to-do list in order; after them, an
+	// answer that changes nothing.
+	pm []string
 }
 
 const plainPlan = `{"summary": "Do the task as asked.", "exists": [], "changes": ["the change"], "out_of_scope": [], "questions": [], "depends_on": []}`
@@ -50,6 +53,13 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 		reply := plainPlan
 		if len(r.plans) > 0 {
 			reply, r.plans = r.plans[0], r.plans[1:]
+		}
+		return roles.Result{Text: reply}, nil
+	}
+	if !spec.Write && strings.Contains(spec.Prompt, "You keep the to-do list") {
+		reply := `{"order": [], "depends": [], "note": "", "questions": []}`
+		if len(r.pm) > 0 {
+			reply, r.pm = r.pm[0], r.pm[1:]
 		}
 		return roles.Result{Text: reply}, nil
 	}

@@ -65,6 +65,12 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 			d.Answer = answer
 			record(v, now, d.ProjectID, "decision.resolved", d.Title+": "+answer)
 		}
+		// The owner's answer to the PM goes to its next look at the list.
+		if d.Kind == DecisionPMQuestion && d.Status == DecisionResolved {
+			if p := project(v, d.ProjectID); p != nil {
+				p.PMDirection, p.PMDue = d.Answer, true
+			}
+		}
 		out = *d
 		return nil
 	})
