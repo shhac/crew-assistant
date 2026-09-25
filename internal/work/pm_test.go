@@ -203,3 +203,29 @@ func TestAPMThatLeftOrFailedNeverHoldsUpTheWork(t *testing.T) {
 		t.Fatalf("a failed PM turn: due %v", project.PMDue)
 	}
 }
+
+func TestTheAssistantCanAskThePMAndItChangesNothing(t *testing.T) {
+	runner := &scriptedRunner{reviews: []string{pass, pass}}
+	a, p, first, second := pmTeam(t, runner)
+	ctx := context.Background()
+	answer, err := a.AskPM(ctx, p.ID, "Why is the second note waiting?")
+	if err != nil || answer == "" {
+		t.Fatalf("answer %q, %v", answer, err)
+	}
+	asked := runner.seen[len(runner.seen)-1]
+	if asked.Write || !strings.Contains(asked.Prompt, "The owner's assistant asks you") || !strings.Contains(asked.Prompt, first.ID) || !strings.Contains(asked.Prompt, second.ID) {
+		t.Fatalf("the PM was asked %q", asked.Prompt)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	project, _ := findProject(snap, p.ID)
+	if project.OrderedBy != "" || !slices.ContainsFunc(snap.Activity, func(e core.Activity) bool { return e.Kind == "pm.asked" }) {
+		t.Fatalf("asking changed the list or went unrecorded: %+v", project)
+	}
+	if _, err := a.AskPM(ctx, p.ID, " "); err == nil {
+		t.Fatal("an empty question was put to the PM")
+	}
+	a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft"})
+	if _, err := a.AskPM(ctx, p.ID, "Anything?"); err == nil || !strings.Contains(err.Error(), "has no PM") {
+		t.Fatalf("a project without a PM: %v", err)
+	}
+}

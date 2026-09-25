@@ -34,6 +34,7 @@ const labels: Record<string, string> = {
   "task.message_answered": "Reply",
   "task.message_failed": "No reply",
   "task.ordered": "Order",
+  "pm.asked": "PM asked",
   "task.planned": "Planned",
   "task.queued": "Asked",
   "task.reordered": "To do",

@@ -20,7 +20,7 @@ func TestEveryAssistantToolHasALabelTheOwnerCanRead(t *testing.T) {
 	}
 }
 
-func TestTheAssistantSeesWhatItCanActOnAndOnlyTheOutcomeOfWhatIsDone(t *testing.T) {
+func TestTheAssistantSeesAnOverviewAndReadsDetailOnlyWhenItAsks(t *testing.T) {
 	long := strings.Repeat("x", 5000)
 	var s core.Snapshot
 	for i := 0; i < 40; i++ {
@@ -32,16 +32,23 @@ func TestTheAssistantSeesWhatItCanActOnAndOnlyTheOutcomeOfWhatIsDone(t *testing.
 		s.Tasks = append(s.Tasks, task)
 		s.Decisions = append(s.Decisions, core.Decision{ID: fmt.Sprint("old", i), Status: "resolved", Context: long})
 	}
-	s.Tasks = append(s.Tasks, core.Task{ID: "live", Status: core.TaskReviewing, Revisions: []core.Revision{{N: 1, Summary: "first"}, {N: 2, Summary: "second"}, {N: 3, Summary: "third"}}, Verdicts: []core.Verdict{{Revision: 2, Summary: "old"}, {Revision: 3, Summary: "current"}}})
+	s.Tasks = append(s.Tasks, core.Task{ID: "live", Status: core.TaskReviewing, Stage: core.StageReviewing, Round: 3, Checking: "Rune", Criteria: []string{long}, Plan: &core.Plan{Summary: long}, Revisions: []core.Revision{{N: 1, Summary: "first"}, {N: 2, Summary: "second"}, {N: 3, Summary: "third"}}, Verdicts: []core.Verdict{{Revision: 2, Summary: "old"}, {Revision: 3, Summary: "current"}}, Messages: []core.TeamMessage{{Text: long}}})
+	s.Projects = append(s.Projects, core.Project{ID: "p", Playbook: &core.Playbook{Roles: []core.Role{{Name: "Ada", Kinds: []string{core.RoleImplementer}, Instructions: long}}}})
 	s.Decisions = append(s.Decisions, core.Decision{ID: "now", Status: "open", Context: long})
 	view := assistantView(s)
 	raw, _ := json.Marshal(view)
-	if len(raw) > 64<<10 {
+	if len(raw) > 16<<10 {
 		t.Fatalf("the assistant's view is %d bytes", len(raw))
 	}
 	live := view.Tasks[len(view.Tasks)-1]
-	if len(live.Revisions) != 2 || len(live.Verdicts) != 1 || live.Verdicts[0].Summary != "current" {
-		t.Fatalf("the live task lost what the assistant acts on: %+v", live)
+	if live.Stage != core.StageReviewing || live.Round != 3 || live.Checking != "Rune" {
+		t.Fatalf("the live task lost where it stands: %+v", live)
+	}
+	if len(live.Revisions)+len(live.Verdicts)+len(live.Messages)+len(live.Criteria) != 0 || live.Plan != nil {
+		t.Fatalf("how the live task is being built reached the overview: %+v", live)
+	}
+	if view.Projects[0].Playbook.Roles[0].Instructions != "" || s.Projects[0].Playbook.Roles[0].Instructions != long {
+		t.Fatal("the team's instructions reached the overview, or the state was changed")
 	}
 	last := view.Decisions[len(view.Decisions)-1]
 	if last.ID != "now" || last.Context != long {

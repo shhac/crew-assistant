@@ -8,6 +8,7 @@ describe("activity presentation", () => {
     expect(activityLabel("task.landed")).toBe("Landed");
     expect(activityLabel("task.planned")).toBe("Planned");
     expect(activityLabel("task.ordered")).toBe("Order");
+    expect(activityLabel("pm.asked")).toBe("PM asked");
     expect(activityLabel("memory.corrected")).toBe("Memory");
     expect(activityLabel("some.future_kind")).toBe("Update");
     expect(activityLabel("some.future_kind")).not.toContain("future");

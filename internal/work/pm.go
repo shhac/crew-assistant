@@ -98,26 +98,76 @@ Decide the order the queued tasks start in, and what each unfinished task has to
 	if p.PMDirection != "" {
 		fmt.Fprintf(&b, "\nThe owner told you: %s\n", p.PMDirection)
 	}
+	pmTasks(&b, snap, p)
+	b.WriteString(`
+Reply with only this JSON object:
+{"order": ["every queued task id, in the order they should start"], "depends": [{"task": "id", "on": ["ids it must wait for; the full list, replacing what it has"]}], "note": "one line on what you changed and why", "questions": ["only what the owner must decide"]}`)
+	return b.String()
+}
+
+// pmTasks is the list as the PM keeps it: every unfinished task, queued ones
+// in their current order, with its plan and what it waits for.
+func pmTasks(b *strings.Builder, snap core.Snapshot, p core.Project) {
 	b.WriteString("\nUnfinished tasks, queued ones in their current order:\n")
 	for _, t := range snap.Tasks {
 		if t.ProjectID != p.ID || t.Finished() {
 			continue
 		}
-		fmt.Fprintf(&b, "- %s (%s): %s\n", t.ID, t.Status, text.Clip(t.Objective, 300))
+		fmt.Fprintf(b, "- %s (%s): %s\n", t.ID, t.Status, text.Clip(t.Objective, 300))
 		if t.Plan != nil {
-			fmt.Fprintf(&b, "  plan: %s\n", text.Clip(t.Plan.Summary, 400))
+			fmt.Fprintf(b, "  plan: %s\n", text.Clip(t.Plan.Summary, 400))
 			if len(t.Plan.Changes) > 0 {
-				fmt.Fprintf(&b, "  changes: %s\n", text.Clip(strings.Join(t.Plan.Changes, "; "), 400))
+				fmt.Fprintf(b, "  changes: %s\n", text.Clip(strings.Join(t.Plan.Changes, "; "), 400))
 			}
 		}
 		if len(t.DependsOn) > 0 {
-			fmt.Fprintf(&b, "  waits for: %s\n", strings.Join(t.DependsOn, ", "))
+			fmt.Fprintf(b, "  waits for: %s\n", strings.Join(t.DependsOn, ", "))
 		}
 	}
-	b.WriteString(`
-Reply with only this JSON object:
-{"order": ["every queued task id, in the order they should start"], "depends": [{"task": "id", "on": ["ids it must wait for; the full list, replacing what it has"]}], "note": "one line on what you changed and why", "questions": ["only what the owner must decide"]}`)
-	return b.String()
+}
+
+// AskPM puts the assistant's question to a project's PM and gives its
+// answer. The PM answers from what it keeps, the list with each task's plan
+// and what waits for what, so the assistant needn't carry any of it; asked
+// this way, it changes nothing.
+func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (string, error) {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return "", errors.New("ask the PM something")
+	}
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return "", err
+	}
+	p, ok := findProject(snap, projectID)
+	if !ok {
+		return "", core.ErrNotFound
+	}
+	seat, ok := p.PMSeat()
+	if !ok {
+		return "", fmt.Errorf("%s has no PM; read_task looks at a task directly: %w", p.Title, core.ErrConflict)
+	}
+	if wait, _ := lp.usageWait(ctx, seat); !wait.IsZero() {
+		return "", fmt.Errorf("%s is holding back for its usage allowance until %s: %w", seat.Name, wait.Format("15:04"), core.ErrConflict)
+	}
+	dir := filepath.Join(lp.Core.StateDirectory(), "roles", "pm-work")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "You keep the to-do list for the project %s. Goal: %s\n", p.Title, p.Brief.Goal)
+	pmTasks(&b, snap, p)
+	fmt.Fprintf(&b, "\nThe owner's assistant asks you:\n\n%s\n\nAnswer in a few plain sentences from what you know of the list. You change nothing by answering; say what you would change, if anything, and why.", question)
+	result, err := lp.runner.Run(ctx, lp.baseSpec(seat, dir, b.String()))
+	if err != nil {
+		return "", err
+	}
+	answer := text.Clip(strings.TrimSpace(result.Text), 4000)
+	if answer == "" {
+		return "", fmt.Errorf("%s gave no answer", seat.Name)
+	}
+	_ = lp.Core.RecordActivity(ctx, p.ID, "pm.asked", fmt.Sprintf("The assistant asked %s: %s. %s", seat.Name, text.Clip(question, 200), text.Clip(answer, 300)))
+	return answer, nil
 }
 
 // parsePM reads the PM's JSON answer, tolerating a fenced block or prose.

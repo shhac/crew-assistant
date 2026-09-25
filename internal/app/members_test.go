@@ -32,7 +32,7 @@ func TestTheAssistantCanStaffATeamAndRecordALearning(t *testing.T) {
 	}
 }
 
-func TestTheAssistantQueuesWorkThatWaitsAndSeesItsPlan(t *testing.T) {
+func TestTheAssistantQueuesWorkThatWaitsAndReadsItsPlanOnlyWhenItAsks(t *testing.T) {
 	a := testApp(t)
 	ctx := context.Background()
 	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Notes", Brief: core.BriefInput{Goal: "Notes", Criteria: []string{"Short"}}, Template: "draft"})
@@ -59,11 +59,15 @@ func TestTheAssistantQueuesWorkThatWaitsAndSeesItsPlan(t *testing.T) {
 	snap, _ := a.Core.Snapshot(ctx)
 	view := assistantView(snap)
 	for _, task := range view.Tasks {
-		if task.ID == first.ID && (len(task.Plan.Summary) > 620 || len(task.Plan.Changes) != 5) {
-			t.Fatalf("the assistant should see the gist of a plan: %d %d", len(task.Plan.Summary), len(task.Plan.Changes))
+		if task.ID == first.ID && task.Plan != nil {
+			t.Fatal("a plan is the team's; the overview shouldn't carry it")
 		}
 		if task.ID == second.ID && (len(task.WaitsFor) != 1 || task.WaitsFor[0] != "First") {
 			t.Fatalf("the assistant should see what a task waits for: %v", task.WaitsFor)
 		}
+	}
+	raw, _ := json.Marshal(map[string]string{"project_id": p.ID, "task_id": first.ID})
+	if out, err := a.Execute(ctx, "read_task", raw); err != nil || out.(core.Task).Plan == nil {
+		t.Fatalf("read_task should bring the plan: %v", err)
 	}
 }

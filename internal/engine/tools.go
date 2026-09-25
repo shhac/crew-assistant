@@ -80,6 +80,10 @@ type QueueTaskArgs struct {
 	Criteria  []string `json:"criteria"`
 	DependsOn []string `json:"depends_on"`
 }
+type AskPMArgs struct {
+	ProjectID string `json:"project_id"`
+	Question  string `json:"question"`
+}
 type ReadTaskArgs struct {
 	ProjectID string `json:"project_id"`
 	TaskID    string `json:"task_id"`
@@ -162,7 +166,8 @@ type labelled struct {
 var tools = []labelled{
 	{Tool: tool("list_connections", "List available optional resources and approved credential profiles. Availability does not make an account relevant to a project. Credentials are never exposed.", nil, nil), label: "Check available connections"},
 	{Tool: tool("query_connection", "Read through an optional integration and approved profile only when relevant to the owner request or established project context. Do not query a work account for a personal project unless the owner explicitly links it or asks. This does not grant writes, deployment, production-data access, or purchases. Slack messages require an existing C/G/D channel ID; URLs and user targets are unavailable. Use an empty profile for the Notion CLI default; other integrations require an explicitly configured profile alias. Use empty strings for other fields not required by the operation.", []string{"connection_id", "profile", "operation", "query", "resource_id"}, nil), label: "Read connected information"},
-	{Tool: tool("read_state", "Read current projects with their briefs and teams, unfinished tasks with their latest drafts and reviews, the most recently finished tasks by what was asked and how they ended, decisions, preferences and recent activity.", nil, nil), label: "Check project context"},
+	{Tool: tool("read_state", "Read the overview: projects with their briefs and teams, every unfinished task's stage and what it waits on, the most recently finished tasks by how they ended, decisions, preferences and recent activity. How a task is being built and checked isn't in it; read_task or ask_pm for that when it matters.", nil, nil), label: "Check project context"},
+	{Tool: tool("ask_pm", "Ask a project's PM about its work: what is next, why something waits, how the requests fit together, what it would change. The PM keeps the to-do list with each request's plan and what waits for what, so ask it rather than reading every request yourself. It answers in plain words and changes nothing; use order_tasks to overrule its order. A project without a PM says so.", []string{"project_id", "question"}, nil), label: "Ask the project's PM"},
 	{Tool: tool("read_task", "Read one task in full: its criteria, plan, recent drafts and reviews, messages with the team and what it waits for. Use it when a finished task's details matter, or an unfinished one's go beyond what read_state shows.", []string{"project_id", "task_id"}, nil), label: "Look at a task"},
 	{Tool: tool("create_project", "Start tracking a project of any kind — writing, email, research, code — in local state. A brief (goal, audience, constraints, criteria) says what it is for; leave fields empty when unknown. template \"draft\" gives it a writer and a reviewer for written work; empty sets no team yet. Directories are optional existing absolute paths; linking them grants nothing. No Linear issue, external tracker, or connection is required.", []string{"title", "goal", "audience", "constraints", "template"}, []string{"criteria"}), label: "Add a project"},
 	{Tool: tool("update_brief", "Replace a project's brief with a new version: its goal, audience, constraints and criteria. Work already done is re-checked against the new version before delivery.", []string{"project_id", "goal", "audience", "constraints"}, []string{"criteria"}), label: "Update the project brief"},

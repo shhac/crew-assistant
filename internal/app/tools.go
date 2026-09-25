@@ -114,6 +114,16 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 			a.Work.Nudge()
 		}
 		return queued, err
+	case "ask_pm":
+		var in engine.AskPMArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		answer, err := a.Work.AskPM(ctx, in.ProjectID, in.Question)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"answer": answer}, nil
 	case "read_task":
 		var in engine.ReadTaskArgs
 		if err := args(raw, &in); err != nil {

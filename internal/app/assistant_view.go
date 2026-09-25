@@ -12,67 +12,29 @@ import (
 // reads any other with read_task.
 const shownFinished = 12
 
-// assistantView is the state the assistant reads each turn: everything it can
-// act on, and only the outcome of what is finished. Full revision and review
-// history stays on the project pages, and read_task brings one task's; carrying
-// it into every turn crowded out the conversation itself, and in time no
-// longer fitted at all.
+// assistantView is the state the assistant reads each turn: an overview.
+// The assistant keeps the owner's projects moving; how each request is being
+// built and checked is the team's business. So a turn carries every request's
+// stage and what it waits on, open decisions in full, since they are what the
+// team brought up, and only the outcome of finished work. read_task and ask_pm
+// bring detail when it is wanted.
 func assistantView(s core.Snapshot) core.Snapshot {
 	recent := recentlyFinished(s.Tasks, shownFinished)
 	tasks := make([]core.Task, 0, len(s.Tasks))
 	for _, t := range s.Tasks {
-		if t.Finished() {
-			if recent[t.ID] {
-				tasks = append(tasks, finishedBrief(t))
-			}
-			continue
+		switch {
+		case !t.Finished():
+			tasks = append(tasks, taskOverview(t))
+		case recent[t.ID]:
+			tasks = append(tasks, finishedBrief(t))
 		}
-		t.WriterSession, t.Playbook, t.Roles = nil, nil, nil
-		if t.Plan != nil {
-			t.Plan = clippedPlan(*t.Plan)
-		}
-		if n := len(t.Revisions); n > 2 {
-			t.Revisions = t.Revisions[n-2:]
-		}
-		revisions := make([]core.Revision, len(t.Revisions))
-		for i, r := range t.Revisions {
-			r.Summary = text.Clip(r.Summary, 500)
-			if len(r.Files) > 20 {
-				r.Files = r.Files[:20]
-			}
-			revisions[i] = r
-		}
-		t.Revisions = revisions
-		var verdicts []core.Verdict
-		if len(revisions) > 0 {
-			latest := revisions[len(revisions)-1].N
-			for _, v := range t.Verdicts {
-				if v.Revision != latest {
-					continue
-				}
-				v.Summary = text.Clip(v.Summary, 400)
-				findings := make([]core.Finding, len(v.Findings))
-				for i, f := range v.Findings {
-					f.Note = text.Clip(f.Note, 300)
-					findings[i] = f
-				}
-				v.Findings = findings
-				verdicts = append(verdicts, v)
-			}
-		}
-		t.Verdicts = verdicts
-		if n := len(t.Messages); n > 5 {
-			t.Messages = t.Messages[n-5:]
-		}
-		messages := make([]core.TeamMessage, len(t.Messages))
-		for i, m := range t.Messages {
-			m.Text, m.Reply = text.Clip(m.Text, 300), text.Clip(m.Reply, 300)
-			messages[i] = m
-		}
-		t.Messages = messages
-		tasks = append(tasks, t)
 	}
 	s.Tasks = tasks
+	projects := make([]core.Project, len(s.Projects))
+	for i, p := range s.Projects {
+		projects[i] = projectOverview(p)
+	}
+	s.Projects = projects
 
 	var open, closed []core.Decision
 	for _, d := range s.Decisions {
@@ -129,6 +91,28 @@ func recentlyFinished(tasks []core.Task, n int) map[string]bool {
 	return out
 }
 
+// taskOverview is an unfinished task as the assistant sees it each turn:
+// where it is and what it waits on, not how it is being built.
+func taskOverview(t core.Task) core.Task {
+	return core.Task{ID: t.ID, ProjectID: t.ProjectID, Objective: text.Clip(t.Objective, 300), Status: t.Status, Stage: t.Stage, Checking: t.Checking, Answered: t.Answered, WaitsFor: t.WaitsFor, DependsOn: t.DependsOn, Detail: text.Clip(t.Detail, 200), Round: t.Round, MaxRounds: t.MaxRounds, DecisionID: t.DecisionID, DirectionPending: t.DirectionPending, RetryAt: t.RetryAt, Proposal: t.Proposal, Branch: t.Branch, CreatedAt: t.CreatedAt, StartedAt: t.StartedAt, UpdatedAt: t.UpdatedAt}
+}
+
+// projectOverview is a project without its team's standing instructions,
+// which are for the team.
+func projectOverview(p core.Project) core.Project {
+	if p.Playbook == nil {
+		return p
+	}
+	playbook := *p.Playbook
+	playbook.Roles = make([]core.Role, len(p.Playbook.Roles))
+	for i, r := range p.Playbook.Roles {
+		r.Instructions, r.Learnings = "", nil
+		playbook.Roles[i] = r
+	}
+	p.Playbook = &playbook
+	return p
+}
+
 // finishedBrief is a finished task as the assistant sees it each turn: what
 // was asked, how it ended and where it went.
 func finishedBrief(t core.Task) core.Task {
@@ -152,19 +136,4 @@ func taskDetail(t core.Task) core.Task {
 		t.Messages = t.Messages[n-10:]
 	}
 	return t
-}
-
-// clippedPlan is a plan as the assistant reads it each turn: the gist, not
-// every detail.
-func clippedPlan(p core.Plan) *core.Plan {
-	list := func(items []string) []string {
-		var out []string
-		for _, item := range items[:min(len(items), 5)] {
-			out = append(out, text.Clip(item, 200))
-		}
-		return out
-	}
-	p.Summary = text.Clip(p.Summary, 600)
-	p.Exists, p.Changes, p.OutOfScope, p.Questions = list(p.Exists), list(p.Changes), list(p.OutOfScope), list(p.Questions)
-	return &p
 }
