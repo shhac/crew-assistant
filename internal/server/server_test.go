@@ -13,6 +13,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/app"
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 )
 
 // ownerServer is a dashboard over a fresh store, called as the owner.
@@ -245,5 +246,26 @@ func TestAConfigInTheEarlierLayoutStillSaves(t *testing.T) {
 	}
 	if !reflect.DeepEqual(a.Config(), before) {
 		t.Fatal("a refused config changed the saved one")
+	}
+}
+
+// While the daemon finishes its work before stopping, work that would start
+// a model is refused as unavailable, in words the owner can act on.
+func TestAStoppingDaemonRefusesNewModelWork(t *testing.T) {
+	a, call := ownerApp(t)
+	stopped, stopTaking := context.WithCancel(context.Background())
+	stopTaking()
+	if err := a.Run(lifecycle.Stop{Graceful: stopped, Force: context.Background()}, true); err != nil {
+		t.Fatal(err)
+	}
+	w := call("POST", "/api/setup/interview", `{"message":"Hello"}`)
+	if w.Code != 503 || !strings.Contains(w.Body.String(), "Crew-assistant is stopping") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := call("POST", "/api/chat/suggestion", `{"after":"reply"}`); w.Code != 503 {
+		t.Fatal("suggestion", w.Code, w.Body.String())
+	}
+	if w := call("GET", "/api/state", ""); !strings.Contains(w.Body.String(), `"stopping":true`) {
+		t.Fatal("the dashboard isn't told", w.Body.String())
 	}
 }

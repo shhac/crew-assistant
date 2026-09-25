@@ -10,9 +10,9 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
-	"github.com/shhac/crew-assistant/internal/lifecycle"
 	linearapi "github.com/shhac/crew-assistant/internal/integrations/linear"
 	slackapi "github.com/shhac/crew-assistant/internal/integrations/slack"
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 )
 
 // Run owns deterministic supervision. noDispatch is fixed at process boot;
@@ -22,20 +22,18 @@ import (
 // message, a wake. Work taken runs on stop.Force, so when Graceful ends Run
 // returns once that work is done, and when Force ends it is cut short.
 func (a *App) Run(stop lifecycle.Stop, noDispatch bool) (runErr error) {
-	// Run's own failure stops everything it started, as a forced stop would.
-	graceful, endGraceful := context.WithCancel(stop.Graceful)
-	force, endForce := context.WithCancel(stop.Force)
-	stop = lifecycle.Stop{Graceful: graceful, Force: force}
+	// Run returns nil only once Graceful has ended; its own failure stops
+	// everything it started, as a forced stop would.
+	stop, cancel := stop.WithCancel()
 	var listeners sync.WaitGroup
 	a.setStop(stop)
 	defer func() {
-		endGraceful()
 		if runErr != nil {
-			endForce()
+			cancel()
 		}
 		listeners.Wait()
 		a.closeDrawings()
-		endForce()
+		cancel()
 	}()
 	if a.Demo {
 		<-stop.Graceful.Done()
@@ -119,13 +117,14 @@ func (a *App) Run(stop lifecycle.Stop, noDispatch bool) (runErr error) {
 // the owner is told where the answer will be.
 func (a *App) answerSlack(ctx context.Context, m slackapi.Message) (string, error) {
 	result, err := a.Chat(ctx, m.Text)
-	if err != nil && !errors.Is(err, ErrStopping) {
+	queued := errors.Is(err, ErrStopping)
+	if err != nil && !queued {
 		return "", err
 	}
-	if e := a.Core.CompleteEvent(ctx, "slack:"+m.ID); e != nil {
-		return "", e
+	if err := a.Core.CompleteEvent(ctx, "slack:"+m.ID); err != nil {
+		return "", err
 	}
-	if err != nil {
+	if queued {
 		return "I'm stopping for now. Your message is queued, and I'll answer it in the dashboard when I'm running again.", nil
 	}
 	return result.Message, nil

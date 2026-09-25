@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
-	"github.com/shhac/crew-assistant/internal/lifecycle"
 	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 )
 
 func waitTurn(t *testing.T, a *App, id, status string) core.ChatTurn {

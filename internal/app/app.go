@@ -48,12 +48,13 @@ type App struct {
 	Work *work.Loop
 	// Painter draws avatars; with none, as in demo mode, nothing is drawn.
 	Painter  avatars.Painter
-	paint    sync.Mutex      // One drawing at a time.
-	life     context.Context // The daemon's run; drawings stop with it.
+	paint    sync.Mutex // One drawing at a time.
 	drawings sync.WaitGroup
-	// drawingsClosed refuses new drawings once the run waits for them.
+	// drawingsClosed refuses new drawings once the run waits for them. It is
+	// set under mu, which orders a drawing's Add before that Wait.
 	drawingsClosed bool
-	stop           lifecycle.Stop
+	// stop is the daemon's run: until one starts, a stop that never comes.
+	stop lifecycle.Stop
 	// chatClosed is set once the chat queue takes no more turns, so a
 	// message queued after it hears so rather than waiting for an answer.
 	chatClosed atomic.Bool
@@ -72,7 +73,7 @@ type Options struct {
 }
 
 func New(s *core.Service, cfg config.Config, path string, opts Options) *App {
-	a := &App{Diagnostics: opts.Diagnostics, connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: opts.Demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), summarize: engine.Complete, statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
+	a := &App{Diagnostics: opts.Diagnostics, connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: opts.Demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), summarize: engine.Complete, stop: lifecycle.Now(context.Background()), statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
 	a.Work = work.New(s, a.Config, opts.Demo)
 	a.Work.Diagnostics = opts.Diagnostics
 	if opts.DrawWithCodex && !opts.Demo {

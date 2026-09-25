@@ -88,3 +88,16 @@ func TestASecondStopEndsTheStepInProgress(t *testing.T) {
 	stopNow()
 	waitFor(t, done, "the loop kept waiting for a turn it was told to end")
 }
+
+// The wake watcher looks no more once stopping.
+func TestTheWakeWatcherStopsWithTheFirstStop(t *testing.T) {
+	a := testLoop(t)
+	graceful, stopTaking := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.RunWakes(lifecycle.Stop{Graceful: graceful, Force: context.Background()})
+	}()
+	stopTaking()
+	waitFor(t, done, "the wake watcher kept watching after the stop")
+}

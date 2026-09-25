@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -16,13 +17,11 @@ var (
 	errStoppingQueued  = fmt.Errorf("%w; your message is queued and will be answered when it runs again", ErrStopping)
 )
 
-// setStop is the run the app belongs to. Drawings stop with the first
-// signal: a picture is not worth holding up a stop for.
+// setStop is the run the app belongs to.
 func (a *App) setStop(stop lifecycle.Stop) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stop = stop
-	a.life = stop.Graceful
 }
 
 // Stopping says whether the daemon has been asked to stop, so it takes no
@@ -30,7 +29,15 @@ func (a *App) setStop(stop lifecycle.Stop) {
 func (a *App) Stopping() bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.stop.Graceful != nil && a.stop.Stopping()
+	return a.stop.Stopping()
+}
+
+// lifetime is how long a drawing may run: until the first signal, since a
+// picture is not worth holding up a stop for.
+func (a *App) lifetime() context.Context {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.stop.Graceful
 }
 
 // refuseWhileStopping is the check at the start of work somebody asks for.

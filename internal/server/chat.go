@@ -90,7 +90,7 @@ func registerChatQueue(mux *http.ServeMux, a *app.App) {
 		switch {
 		case err == nil:
 			respond(w, http.StatusOK, map[string]string{"after": in.After, "suggestion": suggestion})
-		case errors.Is(err, core.ErrConflict):
+		case errors.Is(err, core.ErrConflict), errors.Is(err, app.ErrStopping):
 			problem(w, err)
 		case errors.Is(err, app.ErrSuggestionUnavailable):
 			fail(w, http.StatusServiceUnavailable, err.Error())

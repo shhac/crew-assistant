@@ -133,7 +133,7 @@ func (a *App) drawingOf(key string) drawing {
 func (a *App) markDrawing(key string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.drawingsClosed || (a.stop.Graceful != nil && a.stop.Stopping()) {
+	if a.drawingsClosed || a.stop.Stopping() {
 		return errStoppingRefused
 	}
 	if a.drawing[key].busy {
@@ -224,13 +224,4 @@ func (a *App) closeDrawings() {
 	a.drawingsClosed = true
 	a.mu.Unlock()
 	a.drawings.Wait()
-}
-
-func (a *App) lifetime() context.Context {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if a.life == nil {
-		return context.Background()
-	}
-	return a.life
 }

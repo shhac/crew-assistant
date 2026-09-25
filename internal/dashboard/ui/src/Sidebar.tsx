@@ -13,6 +13,25 @@ const dotTone = {
 
 const shownProjects = 8;
 
+// daemonStatus is what the sidebar says about the daemon, most pressing
+// first: unreachable, stopping, paused, then running.
+function daemonStatus(state: State, offline: boolean) {
+  if (offline) return { label: "Offline", color: "var(--block)", hint: "" };
+  if (state.stopping)
+    return {
+      label: "Stopping",
+      color: "var(--needs)",
+      hint: "Finishing the steps already running, then crew-assistant stops. Nothing new starts.",
+    };
+  if (state.paused)
+    return {
+      label: "Paused",
+      color: "var(--needs)",
+      hint: "Nothing new starts. Steps already running finish.",
+    };
+  return { label: "Running", color: "var(--done)", hint: "" };
+}
+
 export function Sidebar({
   state,
   route,
@@ -35,6 +54,7 @@ export function Sidebar({
   onPause: () => void;
 }) {
   const projects = state.projects.filter((p) => p.status !== "completed");
+  const status = daemonStatus(state, offline);
   const current = (page: Route["page"]) =>
     route.page === page ||
     (page === "projects" && route.page === "project") ||
@@ -144,35 +164,10 @@ export function Sidebar({
       )}
       <div className="nav-status">
         <p className="nav-status-line">
-          <span
-            className="dot"
-            style={{
-              color: offline
-                ? "var(--block)"
-                : state.stopping || state.paused
-                  ? "var(--needs)"
-                  : "var(--done)",
-            }}
-          />
-          {offline
-            ? "Offline"
-            : state.stopping
-              ? "Stopping"
-              : state.paused
-                ? "Paused"
-                : "Running"}
+          <span className="dot" style={{ color: status.color }} />
+          {status.label}
         </p>
-        {state.stopping && !offline && (
-          <p className="hint">
-            Finishing the steps already running, then crew-assistant stops.
-            Nothing new starts.
-          </p>
-        )}
-        {state.paused && !state.stopping && !offline && (
-          <p className="hint">
-            Nothing new starts. Steps already running finish.
-          </p>
-        )}
+        {status.hint && <p className="hint">{status.hint}</p>}
         <button
           type="button"
           className="btn btn-sm"

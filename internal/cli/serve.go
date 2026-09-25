@@ -81,11 +81,8 @@ func registerServe(root *cobra.Command, o *options) {
 // serve runs the daemon until stop. The dashboard stays up while the work in
 // progress finishes, so the owner can watch it finish.
 func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sampleDir string, open, noDispatch bool) error {
-	graceful, endGraceful := context.WithCancel(stop.Graceful)
-	defer endGraceful()
-	force, endForce := context.WithCancel(stop.Force)
-	defer endForce()
-	stop = lifecycle.Stop{Graceful: graceful, Force: force}
+	stop, cancel := stop.WithCancel()
+	defer cancel()
 	if err := os.MkdirAll(filepath.Dir(o.statePath), 0700); err != nil {
 		return err
 	}
@@ -184,13 +181,11 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 	// A failure of the loop or the listener stops everything at once. Every
 	// exit ends request and integration contexts before closing their shared
 	// store.
-	asked := stop.Stopping()
-	endGraceful()
-	if !asked {
-		endForce()
+	if !stop.Stopping() {
+		cancel()
 	}
-	loopErr := waitForRun(done, stop.Force)
-	endForce()
+	loopErr := stop.Await(done)
+	cancel()
 	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelShutdown()
 	shutdownErr := httpServer.Shutdown(shutdown)
@@ -200,22 +195,6 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 	return errors.Join(serveErr, shutdownErr, loopErr)
 }
 
-// waitForRun waits for the work in progress: all of it after a stop, and
-// only briefly once the stop is forced, so a wedged step can't hold up an
-// exit the owner asked to force.
-func waitForRun(done <-chan struct{}, force context.Context) error {
-	select {
-	case <-done:
-		return nil
-	case <-force.Done():
-	}
-	select {
-	case <-done:
-		return nil
-	case <-time.After(lifecycle.ForceDrain):
-		return fmt.Errorf("the work in progress did not stop within %s", lifecycle.ForceDrain)
-	}
-}
 func registerDashboard(root *cobra.Command, o *options) {
 	d := &cobra.Command{Use: "dashboard", Short: "Open the running dashboard"}
 	var printOnly bool

@@ -71,3 +71,43 @@ func TestTerminationDrainsLikeAnInterrupt(t *testing.T) {
 		t.Fatalf("signals %v", Signals)
 	}
 }
+
+func TestCancellingADerivedStopEndsBothStagesButNotTheParent(t *testing.T) {
+	parent := Now(context.Background())
+	child, cancel := parent.WithCancel()
+	cancel()
+	if !ended(child.Graceful) || !ended(child.Force) || parent.Graceful.Err() != nil {
+		t.Fatal("cancel should end the child's stages and only those")
+	}
+}
+
+// Await waits for all the work while only new work is stopped, and only
+// briefly once the stop is forced.
+func TestAwaitWaitsForTheWorkUnlessForced(t *testing.T) {
+	ForceDrain = 20 * time.Millisecond
+	t.Cleanup(func() { ForceDrain = 5 * time.Second })
+	done := make(chan struct{})
+	close(done)
+	if err := Now(context.Background()).Await(done); err != nil {
+		t.Fatal(err)
+	}
+	force, stopNow := context.WithCancel(context.Background())
+	stop := Stop{Graceful: force, Force: force}
+	wedged := make(chan struct{})
+	returned := make(chan error, 1)
+	go func() { returned <- stop.Await(wedged) }()
+	select {
+	case <-returned:
+		t.Fatal("stopped waiting before the stop was forced")
+	case <-time.After(50 * time.Millisecond):
+	}
+	stopNow()
+	select {
+	case err := <-returned:
+		if err == nil {
+			t.Fatal("a wedged step was reported as finished")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("a forced stop waited on a wedged step")
+	}
+}

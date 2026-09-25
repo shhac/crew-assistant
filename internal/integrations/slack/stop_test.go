@@ -2,6 +2,8 @@ package slack
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -86,5 +88,63 @@ func TestAStopAnswersWhatWasClaimedAndClaimsNothingMore(t *testing.T) {
 	}
 	if handlerCtx.Err() != nil {
 		t.Fatal("answers ran on a context the stop ended")
+	}
+}
+
+func quietTransport(events chan socketmode.Event, reply func(context.Context, Message, string) error) transport {
+	return transport{
+		events: events,
+		listen: func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() },
+		ack:    func(context.Context, string) {},
+		reply:  reply,
+	}
+}
+
+func returnsSoon(t *testing.T, done <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run didn't return")
+		return nil
+	}
+}
+
+// A second stop ends an answer in progress, and Run returns.
+func TestASecondStopEndsTheAnswerInProgress(t *testing.T) {
+	c := &Client{cfg: Config{OwnerUserID: "owner-one"}, inbox: &claims{}}
+	events := make(chan socketmode.Event)
+	started := make(chan struct{})
+	handler := func(ctx context.Context, m Message) (string, error) {
+		close(started)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	graceful, stopTaking := context.WithCancel(context.Background())
+	force, stopNow := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- c.run(lifecycle.Stop{Graceful: graceful, Force: force}, handler, quietTransport(events, func(ctx context.Context, _ Message, _ string) error { return ctx.Err() }))
+	}()
+	events <- ownerEvent("first")
+	<-started
+	stopTaking()
+	stopNow()
+	returnsSoon(t, done)
+}
+
+// A reply that can't be delivered ends Run with an error that says so.
+func TestAFailedReplyEndsRun(t *testing.T) {
+	c := &Client{cfg: Config{OwnerUserID: "owner-one"}, inbox: &claims{}}
+	events := make(chan socketmode.Event, 1)
+	handler := func(context.Context, Message) (string, error) { return "answer", nil }
+	done := make(chan error, 1)
+	go func() {
+		done <- c.run(lifecycle.Now(context.Background()), handler, quietTransport(events, func(context.Context, Message, string) error { return errors.New("offline") }))
+	}()
+	events <- ownerEvent("first")
+	if err := returnsSoon(t, done); err == nil || !strings.Contains(err.Error(), "uncertain") {
+		t.Fatalf("err %v", err)
 	}
 }

@@ -171,3 +171,12 @@ func TestAStopBeforeTheQueueStartsStillAnswersWaiters(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Once the run waits for its drawings, none starts, even before a stop.
+func TestNoDrawingStartsOnceTheRunWaitsForThem(t *testing.T) {
+	a := testApp(t)
+	a.closeDrawings()
+	if err := a.markDrawing("assistant"); !errors.Is(err, ErrStopping) {
+		t.Fatalf("drawing: %v", err)
+	}
+}

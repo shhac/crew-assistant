@@ -104,22 +104,34 @@ func (c *Client) run(stop lifecycle.Stop, handler Handler, t transport) error {
 	}
 	listening, stopListening := context.WithCancel(stop.Graceful)
 	defer stopListening()
-	listened := make(chan error, 1)
-	go func() { listened <- t.listen(listening) }()
 	queue := make(chan Message, 64)
-	answered := make(chan error, 1)
-	go func() { answered <- answer(stop.Force, queue, handler, t.reply) }()
-
-	listenerDone, answererDone, err := c.intake(stop, listening, queue, t, listened, answered)
+	listener := start(func() error { return t.listen(listening) })
+	answerer := start(func() error { return answer(stop.Force, queue, handler, t.reply) })
+	err := c.intake(stop, listening, queue, t, listener, answerer)
 	stopListening()
 	close(queue)
-	if !answererDone {
-		err = errors.Join(err, <-answered)
+	<-answerer.done
+	<-listener.done
+	if err != nil {
+		return err
 	}
-	if !listenerDone {
-		<-listened
-	}
-	return err
+	return answerer.err
+}
+
+// finished is a goroutine's error, readable once done is closed, by as many
+// waiters as there are.
+type finished struct {
+	done chan struct{}
+	err  error
+}
+
+func start(fn func() error) *finished {
+	f := &finished{done: make(chan struct{})}
+	go func() {
+		defer close(f.done)
+		f.err = fn()
+	}()
+	return f
 }
 
 // answer replies to each claimed message in turn, until the queue closes.
@@ -140,27 +152,26 @@ func answer(ctx context.Context, queue <-chan Message, handler Handler, reply fu
 }
 
 // intake claims the owner's messages and queues them for answering, until
-// the stop, a failed reply or the socket ending. It says which of the
-// listener and the answerer it has already heard finish.
-func (c *Client) intake(stop lifecycle.Stop, listening context.Context, queue chan<- Message, t transport, listened, answered <-chan error) (listenerDone, answererDone bool, err error) {
+// the stop, a failed reply or the socket ending.
+func (c *Client) intake(stop lifecycle.Stop, listening context.Context, queue chan<- Message, t transport, listener, answerer *finished) error {
 	for {
 		select {
 		case <-stop.Graceful.Done():
-			return false, false, nil
-		case err := <-answered:
-			return false, true, err
-		case err := <-listened:
-			if err != nil && !stop.Stopping() {
-				return true, false, errors.New("Slack Socket Mode stopped; check connectivity and app credentials")
+			return nil
+		case <-answerer.done:
+			return nil
+		case <-listener.done:
+			if listener.err != nil && !stop.Stopping() {
+				return errors.New("Slack Socket Mode stopped; check connectivity and app credentials")
 			}
-			return true, false, nil
+			return nil
 		case event := <-t.events:
 			// Both cases may be ready at once, and a select picks either.
 			if stop.Stopping() {
-				return false, false, nil
+				return nil
 			}
 			if event.Type == socketmode.EventTypeInvalidAuth {
-				return false, false, errors.New("Slack rejected app credentials")
+				return errors.New("Slack rejected app credentials")
 			}
 			msg, allowed := c.ownerMessage(event)
 			if !allowed {
@@ -176,7 +187,7 @@ func (c *Client) intake(stop lifecycle.Stop, listening context.Context, queue ch
 			}
 			fresh, err := c.inbox.Claim(stop.Force, msg.ID)
 			if err != nil {
-				return false, false, errors.New("cannot persist Slack event receipt")
+				return errors.New("cannot persist Slack event receipt")
 			}
 			if event.Request != nil {
 				t.ack(listening, event.Request.EnvelopeID)

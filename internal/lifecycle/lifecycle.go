@@ -7,6 +7,7 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"syscall"
 	"time"
@@ -37,33 +38,64 @@ var Signals = []os.Signal{os.Interrupt, syscall.SIGTERM}
 // so a wedged step can't hold up the exit it was asked to force.
 var ForceDrain = 5 * time.Second
 
+// WithCancel is a Stop that ends with s, or sooner when cancel is called,
+// which ends both stages at once: what a part of the daemon that fails on its
+// own does to everything it started.
+func (s Stop) WithCancel() (Stop, context.CancelFunc) {
+	graceful, endGraceful := context.WithCancel(s.Graceful)
+	force, endForce := context.WithCancel(s.Force)
+	return Stop{Graceful: graceful, Force: force}, func() {
+		endGraceful()
+		endForce()
+	}
+}
+
+// Await waits for done: as long as it takes while only new work is
+// stopped, and at most ForceDrain once Force ends, so a wedged step can't
+// hold up an exit the owner asked to force.
+func (s Stop) Await(done <-chan struct{}) error {
+	select {
+	case <-done:
+		return nil
+	case <-s.Force.Done():
+	}
+	select {
+	case <-done:
+		return nil
+	case <-time.After(ForceDrain):
+		return fmt.Errorf("the work in progress did not stop within %s", ForceDrain)
+	}
+}
+
 // Watch turns signals into a Stop: the first ends Graceful, the second
 // Force; ctx ending ends both. say tells the owner what each one did.
 // cancelAll ends both, for a daemon stopping for its own reasons.
 func Watch(ctx context.Context, signals <-chan os.Signal, say func(string)) (stop Stop, cancelAll func()) {
 	graceful, endGraceful := context.WithCancel(ctx)
-	force, endForce := context.WithCancel(ctx)
+	stop, cancelAll = Stop{Graceful: graceful, Force: ctx}.WithCancel()
 	go func() {
-		select {
-		case <-ctx.Done():
-		case <-force.Done():
+		defer cancelAll()
+		defer endGraceful()
+		if !signalled(stop.Force, signals) {
 			return
-		case <-signals:
-			say("Stopping: finishing the work in progress; nothing new starts. Press Ctrl-C again to stop now.")
-			endGraceful()
-			select {
-			case <-ctx.Done():
-			case <-force.Done():
-				return
-			case <-signals:
-				say("Stopping now: cancelling the work in progress.")
-			}
 		}
+		say("Stopping: finishing the work in progress; nothing new starts. Press Ctrl-C again to stop now.")
 		endGraceful()
-		endForce()
+		if !signalled(stop.Force, signals) {
+			return
+		}
+		say("Stopping now: cancelling the work in progress.")
 	}()
-	return Stop{Graceful: graceful, Force: force}, func() {
-		endGraceful()
-		endForce()
+	return stop, cancelAll
+}
+
+// signalled waits for the next signal, and says whether one came before
+// the daemon stopped for another reason.
+func signalled(force context.Context, signals <-chan os.Signal) bool {
+	select {
+	case <-force.Done():
+		return false
+	case <-signals:
+		return true
 	}
 }
