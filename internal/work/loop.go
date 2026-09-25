@@ -112,6 +112,9 @@ func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 	if progressed, err := lp.managePM(ctx, snap); progressed || err != nil {
 		return progressed, err
 	}
+	if err := lp.releaseUsageHolds(ctx, snap); err != nil {
+		return false, err
+	}
 	t, ok, err := lp.Core.NextTask(ctx)
 	if err != nil {
 		return false, err

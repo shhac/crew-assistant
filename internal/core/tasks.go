@@ -79,7 +79,11 @@ type Task struct {
 	// failure is answered with a retry.
 	ResumeStatus string    `json:"resume_status,omitempty"`
 	RetryAt      time.Time `json:"retry_at,omitempty"`
-	DecisionID   string    `json:"decision_id,omitempty"`
+	// HeldFor is the engine whose usage limit set RetryAt, when that is why
+	// the task waits; the loop looks again sooner than RetryAt, since the
+	// limit can be raised and usage can fall.
+	HeldFor    string `json:"held_for,omitempty"`
+	DecisionID string `json:"decision_id,omitempty"`
 	// Base, From and Branch record the commit a code task started from, the
 	// owner's branch it was on, and the branch its revisions are committed to.
 	Base        string `json:"base,omitempty"`

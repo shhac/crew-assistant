@@ -25,7 +25,7 @@ func (lp *Loop) roleFailed(ctx context.Context, t core.Task, role string, cause 
 		if permanent || t.Failures > roleRetries {
 			return "", nil
 		}
-		t.RetryAt = time.Now().Add(time.Duration(t.Failures*t.Failures) * time.Minute)
+		t.RetryAt, t.HeldFor = time.Now().Add(time.Duration(t.Failures*t.Failures)*time.Minute), ""
 		t.Detail = fmt.Sprintf("%s hit a problem; trying again shortly", role)
 		return "", nil
 	})

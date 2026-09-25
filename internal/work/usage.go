@@ -3,6 +3,7 @@ package work
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -19,10 +20,34 @@ func (lp *Loop) holdForUsage(ctx context.Context, t core.Task, r core.Role) (boo
 		return false, nil
 	}
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		t.RetryAt, t.Detail = wait, detail
+		t.RetryAt, t.Detail, t.HeldFor = wait, detail, r.Engine
 		return "", nil
 	})
 	return true, err
+}
+
+// releaseUsageHolds lets work go that waits on a usage limit which no longer
+// holds it: the owner raised the limit, or the engine's usage fell. Usage is
+// read through the shared meter, so looking costs no more than a minute's
+// cached reading.
+func (lp *Loop) releaseUsageHolds(ctx context.Context, snap core.Snapshot) error {
+	now := time.Now()
+	for _, t := range snap.Tasks {
+		engine := heldFor(t)
+		if engine == "" || !t.RetryAt.After(now) || t.Finished() {
+			continue
+		}
+		if wait, _ := lp.usageWait(ctx, core.Role{Engine: engine}); !wait.IsZero() {
+			continue
+		}
+		if _, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+			t.RetryAt, t.HeldFor, t.Detail = time.Time{}, "", ""
+			return "", nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UsageWait is when an engine may be used again, if the owner's usage limit
@@ -54,6 +79,20 @@ func (lp *Loop) usageWait(ctx context.Context, r core.Role) (time.Time, string) 
 		return now.Add(5 * time.Minute), "Waiting until " + engineName(r.Engine) + " usage can be checked"
 	}
 	return time.Time{}, ""
+}
+
+// heldFor is the engine whose usage limit holds a task. A hold made before
+// holds were marked is known by what it says.
+func heldFor(t core.Task) string {
+	if t.HeldFor != "" {
+		return t.HeldFor
+	}
+	for _, engine := range []string{"claude", "codex"} {
+		if strings.HasPrefix(t.Detail, "Waiting for "+engineName(engine)+" usage to reset") {
+			return engine
+		}
+	}
+	return ""
 }
 
 func engineName(engine string) string {

@@ -400,6 +400,54 @@ func TestNearlyUsedSubscriptionHoldsTheRoleWithoutFailing(t *testing.T) {
 	}
 }
 
+// Work held by a usage limit goes again as soon as the limit no longer holds
+// it, such as the owner raising it, without waiting for the usage to reset;
+// a failure's own backoff is never cut short.
+func TestRaisingAUsageLimitLetsHeldWorkGoAtOnce(t *testing.T) {
+	runner := &scriptedRunner{reviews: []string{pass}}
+	a, _, _ := loopApp(t, runner, "")
+	used := 95.0
+	resets := time.Now().Add(48 * time.Hour)
+	observation := session.Observation{Quality: session.Measured, ObservedAt: time.Now()}
+	a.meter = &quota.Meter{Inspect: func(_ context.Context, o session.Options) (session.Inspection, error) {
+		if o.Engine != session.Codex {
+			return session.Inspection{}, nil
+		}
+		return session.Inspection{Quota: session.QuotaSnapshot{Observation: observation, Complete: true, Windows: []session.QuotaWindow{{Observation: observation, ID: "codex/primary", Scope: "codex", UsedPercent: &used, ResetsAt: &resets}}}}, nil
+	}}
+	task := settle(t, a)
+	if task.HeldFor != "codex" || !task.RetryAt.After(time.Now()) {
+		t.Fatalf("the reviewer should be held for Codex: %+v", task)
+	}
+	if task = settle(t, a); task.HeldFor != "codex" {
+		t.Fatal("work was let go while the limit still held it")
+	}
+	raised := a.Config()
+	raised.Limits.RoleUsage.CodexMaxUsedPercent = 98
+	a.Config = func() config.Config { return raised }
+	if task = settle(t, a); task.Status != core.TaskWaiting || task.HeldFor != "" || len(task.Verdicts) == 0 {
+		t.Fatalf("raising the limit should let the reviewer go now: %+v", task)
+	}
+
+	// A hold made before holds were marked is let go the same way.
+	a.Core.UpdateTask(context.Background(), task.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		t.Status, t.RetryAt, t.Detail = core.TaskReviewing, resets, "Waiting for Codex usage to reset (codex primary is 95.0% consumed)"
+		return "", nil
+	})
+	if task = settle(t, a); task.RetryAt.After(time.Now()) {
+		t.Fatalf("an older hold wasn't let go: %+v", task)
+	}
+
+	// A failure's backoff isn't a usage hold.
+	a.Core.UpdateTask(context.Background(), task.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		t.Status, t.RetryAt = core.TaskReviewing, time.Now().Add(time.Hour)
+		return "", nil
+	})
+	if task = settle(t, a); !task.RetryAt.After(time.Now()) {
+		t.Fatal("a failure's backoff was cut short")
+	}
+}
+
 func TestStoppingATaskSticksEvenMidTurn(t *testing.T) {
 	runner := &scriptedRunner{reviews: []string{pass}}
 	var a *Loop
