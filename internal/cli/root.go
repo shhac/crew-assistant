@@ -30,6 +30,9 @@ type options struct {
 	diagnostics           *diagnostics.Logger
 	configPath, statePath string
 	globals               *libcli.Globals
+	// version is the running build, said on startup so a log shows which
+	// daemon it came from.
+	version string
 }
 
 func Run(version string) { libcli.Run(NewRoot(version)) }
@@ -39,7 +42,7 @@ func NewRoot(version string) *cobra.Command {
 		paths.Config = "config.json"
 		paths.State = "state.db"
 	}
-	o := &options{configPath: paths.Config, statePath: paths.State, globals: &libcli.Globals{}}
+	o := &options{configPath: paths.Config, statePath: paths.State, globals: &libcli.Globals{}, version: version}
 	root := libcli.NewRoot(libcli.Options{Use: "crew-assistant", Short: "A personal assistant that coordinates agents and brings clear decisions", Version: version, Globals: o.globals, DefaultFormat: output.FormatNDJSON})
 	pathErr := err
 	before := root.PersistentPreRunE

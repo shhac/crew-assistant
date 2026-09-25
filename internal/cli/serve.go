@@ -157,7 +157,13 @@ func serve(ctx context.Context, o *options, cfg config.Config, demo bool, sample
 		a.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "supervision_loop"}, err)
 		loopErrors <- err
 	}()
-	_ = o.emit(map[string]any{"url": url, "state": o.statePath, "demo": demo, "login": "crew-assistant --state " + o.statePath + " dashboard open"})
+	_ = o.emit(struct {
+		Version string `json:"version"`
+		URL     string `json:"url"`
+		State   string `json:"state"`
+		Demo    bool   `json:"demo"`
+		Login   string `json:"login"`
+	}{o.version, url, o.statePath, demo, "crew-assistant --state " + o.statePath + " dashboard open"})
 	if open {
 		if err := openDashboard(o, false); err != nil {
 			fmt.Fprintln(os.Stderr, "Dashboard open:", err)
