@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/roles"
 	"github.com/shhac/lib-agent-harness/session"
 )
 
@@ -35,7 +36,7 @@ func TestTheChatsSessionHasOnlyTheAssistantsToolsInFoldersOfItsOwn(t *testing.T)
 		}
 	}
 	host := o.Restriction.Tools
-	if len(host.Tools) != len(engine.Tools()) || host.Bridge.Args[0] != ToolBridge || !filepath.IsAbs(host.Bridge.Path) {
+	if len(host.Tools) != len(engine.Tools()) || host.Bridge.Args[0] != roles.ToolBridge || !filepath.IsAbs(host.Bridge.Path) {
 		t.Fatalf("tools %d, bridge %+v", len(host.Tools), host.Bridge)
 	}
 	if o.Instructions.Mode != session.Append || o.Instructions.Text != "Be brief." || o.Model != "gpt" {

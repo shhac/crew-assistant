@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -128,5 +129,35 @@ func TestAFailedCompactionStopsTheTurnFromStarting(t *testing.T) {
 				t.Fatalf("got %q", s.calls)
 			}
 		})
+	}
+}
+
+// A turn with tools serves them from a folder of its own outside the work,
+// through this binary as the bridge, and the folder goes with the turn; a
+// turn without tools hosts none. Web is the spec's to ask for.
+func TestATurnsToolsAreHostedForThatTurnOnly(t *testing.T) {
+	var seen session.Options
+	s := &fakeSession{}
+	n := Native{open: func(_ context.Context, o session.Options, _ json.RawMessage) (conversation, bool, error) {
+		seen = o
+		return s, false, nil
+	}}
+	spec := Spec{Engine: "claude", WorkDir: t.TempDir(), Prompt: "Plan it", Web: true, Tools: []session.ToolDefinition{{Name: "list_tasks"}}, Handler: session.ToolHandlerFunc(func(context.Context, session.ToolCall) (session.ToolResult, error) {
+		return session.ToolResult{}, nil
+	})}
+	if _, err := n.Run(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	host := seen.Sandbox.Tools
+	if host == nil || !seen.Sandbox.Web || host.Server != "crew" || host.Bridge.Args[0] != ToolBridge || strings.HasPrefix(host.Dir, spec.WorkDir) {
+		t.Fatalf("sandbox %+v, host %+v", seen.Sandbox, host)
+	}
+	if _, err := os.Stat(host.Dir); !os.IsNotExist(err) {
+		t.Fatal("the turn's tool folder outlived it")
+	}
+	spec.Tools, spec.Web = nil, false
+	n.Run(context.Background(), spec)
+	if seen.Sandbox.Tools != nil || seen.Sandbox.Web {
+		t.Fatalf("a turn without tools got %+v", seen.Sandbox)
 	}
 }

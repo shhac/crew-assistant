@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/shhac/lib-agent-harness/session"
 )
@@ -36,6 +38,29 @@ type Spec struct {
 	// Compact has a resumed session compact its context before the turn.
 	// Only Codex can; a fresh session has nothing to compact.
 	Compact bool
+	// Web lets the role search and fetch the web. What it runs in its shell
+	// still reaches no network.
+	Web bool
+	// Tools are what the role may call on the daemon while it works, such as
+	// looking up the project's other tasks, answered by Handler.
+	Tools   []session.ToolDefinition
+	Handler session.ToolHandler
+}
+
+// ToolBridge is the argument a model's CLI starts this binary with to reach
+// the daemon's tools, for the assistant and the team alike.
+const ToolBridge = "tool-bridge"
+
+// Bridge is this binary as the tool bridge.
+func Bridge() (session.Bridge, error) {
+	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err != nil {
+		return session.Bridge{}, fmt.Errorf("finding this program to reach its tools: %w", err)
+	}
+	return session.Bridge{Path: exe, Args: []string{ToolBridge}}, nil
 }
 
 type Result struct {
@@ -93,7 +118,16 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 	if opener == nil {
 		opener = open
 	}
-	s, resumed, err := opener(ctx, options(spec), spec.Resume)
+	o := options(spec)
+	if len(spec.Tools) > 0 {
+		host, cleanup, err := toolHost(spec)
+		if err != nil {
+			return Result{}, err
+		}
+		defer cleanup()
+		o.Sandbox.Tools = host
+	}
+	s, resumed, err := opener(ctx, o, spec.Resume)
 	if err != nil {
 		return Result{}, err
 	}
@@ -142,7 +176,7 @@ func options(spec Spec) session.Options {
 		WorkDir:     spec.WorkDir,
 		Model:       spec.Model,
 		Effort:      spec.Effort,
-		Sandbox:     &session.Sandbox{Write: spec.Write, Read: spec.Read},
+		Sandbox:     &session.Sandbox{Write: spec.Write, Read: spec.Read, Web: spec.Web},
 		Env:         spec.Env,
 	}
 	if spec.Engine != string(session.Codex) {
@@ -152,6 +186,21 @@ func options(spec Spec) session.Options {
 		o.Instructions = session.Instructions{Mode: session.Append, Text: spec.Instructions}
 	}
 	return o
+}
+
+// toolHost serves a turn's tools from a folder of its own, since turns run
+// side by side and the folder holds the channel's lease; it is removed once
+// the turn is over.
+func toolHost(spec Spec) (*session.ToolHost, func(), error) {
+	bridge, err := Bridge()
+	if err != nil {
+		return nil, nil, err
+	}
+	dir, err := os.MkdirTemp("", "crew-role-tools-")
+	if err != nil {
+		return nil, nil, err
+	}
+	return &session.ToolHost{Server: "crew", Tools: spec.Tools, Handler: spec.Handler, Dir: dir, Bridge: bridge, MaxResultBytes: 128 << 10}, func() { os.RemoveAll(dir) }, nil
 }
 
 // open resumes the recorded session when it can and otherwise starts a fresh

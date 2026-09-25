@@ -79,6 +79,7 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 	}
 	// Like its look at the list, the PM reads only what its prompt carries.
 	spec := lp.baseSpec(seat, dir, pmLandingPrompt(snap, p, t, r))
+	lp.withTools(&spec, lp.projectTools(p.ID, seat.Member))
 	var decided core.LandDecision
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
 		decided, err = parsePMLanding(reply)

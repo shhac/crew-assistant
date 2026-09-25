@@ -50,6 +50,7 @@ func (lp *Loop) pmTurn(ctx context.Context, snap core.Snapshot, p core.Project, 
 	base := pmPrompt(snap, p)
 	// The PM reads only what its prompt carries: no repository, no writing.
 	spec := lp.baseSpec(seat, dir, base)
+	lp.withTools(&spec, lp.projectTools(p.ID, seat.Member))
 	var answer core.PMAnswer
 	var questions []string
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
@@ -171,7 +172,9 @@ func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (string, 
 	fmt.Fprintf(&b, "You keep the to-do list for the project %s. Goal: %s\n", p.Title, p.Brief.Goal)
 	pmTasks(&b, snap, p)
 	fmt.Fprintf(&b, "\nThe owner's assistant asks you:\n\n%s\n\nAnswer in a few plain sentences from what you know of the list. You change nothing by answering; say what you would change, if anything, and why.", question)
-	result, err := lp.runner.Run(ctx, lp.baseSpec(seat, dir, b.String()))
+	spec := lp.baseSpec(seat, dir, b.String())
+	lp.withTools(&spec, lp.projectTools(p.ID, seat.Member))
+	result, err := lp.runner.Run(ctx, spec)
 	if err != nil {
 		return "", err
 	}

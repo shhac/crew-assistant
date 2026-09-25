@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/roles"
 	"github.com/shhac/lib-agent-harness/session"
 )
 
@@ -40,12 +41,9 @@ func harnessChatOpener(life context.Context) chatOpener {
 // after the CLI's, its tools as the whole tool surface, and folders of its own
 // under the state directory, apart from the teams' sessions.
 func chatSessionOptions(spec chatSpec) (session.Options, error) {
-	exe, err := os.Executable()
-	if err == nil {
-		exe, err = filepath.EvalSymlinks(exe)
-	}
+	bridge, err := roles.Bridge()
 	if err != nil {
-		return session.Options{}, fmt.Errorf("finding this program to reach its tools: %w", err)
+		return session.Options{}, err
 	}
 	root := filepath.Join(spec.StateDir, "chat")
 	tools, runtime, work := filepath.Join(root, "tools"), filepath.Join(root, "runtime", spec.Config.Engine), filepath.Join(root, "work")
@@ -75,7 +73,7 @@ func chatSessionOptions(spec chatSpec) (session.Options, error) {
 			Tools:   defs,
 			Handler: handler,
 			Dir:     tools,
-			Bridge:  session.Bridge{Path: exe, Args: []string{ToolBridge}},
+			Bridge:  bridge,
 			// read_state and read_task answer with whole records.
 			MaxResultBytes: 256 << 10,
 		}},

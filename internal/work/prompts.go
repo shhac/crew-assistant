@@ -268,7 +268,7 @@ func researcherPrompt(p core.Project, t core.Task, others []core.Task) string {
 		b.WriteString("\nThe current directory is where this task's draft will be written.\n")
 	}
 	b.WriteString(`
-Plan this task before anything is written. Read what you need to, and change nothing. Work out:
+Plan this task before anything is written. Read what you need to, and change nothing. You may search the web for what the work in front of you can't tell you, such as a library's current behaviour; say in the plan which pages you relied on. Work out:
 - what already exists that the task can use or that it describes as missing, naming files and functions;
 - what will change, briefly;
 - what is out of scope, so the implementer does not drift;

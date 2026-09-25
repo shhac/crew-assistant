@@ -236,7 +236,41 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 		spec.Read = append(append([]string(nil), spec.Read...), learned.dir)
 		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + learned.index)
 	}
+	kind := turnKind(t, r)
+	lp.withTools(&spec, lp.toolsFor(t, kind, r.Member))
+	// Research is the one step that looks outward; nothing its shell runs
+	// reaches the network either way.
+	spec.Web = kind == core.RoleResearcher
 	return spec, learned.cleanup, nil
+}
+
+// turnKind is the role a seat plays in this turn of t, which a seat holding
+// several roles plays one at a time.
+func turnKind(t core.Task, r core.Role) string {
+	switch t.Status {
+	case core.TaskResearching:
+		return core.RoleResearcher
+	case core.TaskDesigning:
+		return core.RoleDesigner
+	case core.TaskWriting:
+		return core.RoleImplementer
+	case core.TaskReviewing, core.TaskDeciding:
+		if r.Holds(core.RoleQA) {
+			return core.RoleQA
+		}
+		return core.RoleReviewer
+	}
+	if len(r.Kinds) > 0 {
+		return r.Kinds[0]
+	}
+	return core.RoleImplementer
+}
+
+// withTools lets a role look up its project's tasks while it works, and
+// link its own task as its role may.
+func (lp *Loop) withTools(spec *roles.Spec, tools roleTools) {
+	spec.Tools, spec.Handler = tools.Definitions(), tools.Handler()
+	spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + tools.guide())
 }
 
 // baseSpec is a read-only turn for a role: its engine, the login that

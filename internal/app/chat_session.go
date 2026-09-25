@@ -16,9 +16,6 @@ import (
 	"github.com/shhac/lib-agent-harness/session"
 )
 
-// ToolBridge is the argument the assistant's model session starts this binary
-// with, so the CLI reaches the daemon's tools through it.
-const ToolBridge = "tool-bridge"
 
 // chatSessionIdle is how long a session no turn has used stays open.
 const chatSessionIdle = 30 * time.Minute
