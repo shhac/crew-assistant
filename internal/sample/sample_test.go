@@ -29,7 +29,7 @@ func TestTheSampleShowsWorkAtEveryStageAndNeverTouchesRealState(t *testing.T) {
 	for _, task := range snap.Tasks {
 		stages[task.Stage] = true
 	}
-	for _, want := range []string{core.StageTodo, core.StageImplementing, core.StageReviewing, core.StageQA, core.StageReady, core.StageDone} {
+	for _, want := range []string{core.StageTodo, core.StagePlanning, core.StageImplementing, core.StageReviewing, core.StageQA, core.StageReady, core.StageDone} {
 		if !stages[want] {
 			t.Errorf("no sample task is at %s", want)
 		}

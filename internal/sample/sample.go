@@ -68,9 +68,10 @@ var (
 		{Name: "Reviewer", Kinds: []string{core.RoleReviewer}, Engine: "codex"},
 		{Name: "QA", Kinds: []string{core.RoleQA}, Engine: "claude"},
 	}
-	// The crew-assistant project is staffed by two of the owner's members.
+	// The crew-assistant project is staffed by two of the owner's members;
+	// Ada plans each task and then implements it, from one seat.
 	crewTeam = []core.Role{
-		{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude", Model: "opus", Member: "demo-ada"},
+		{Name: "Ada", Kinds: []string{core.RoleImplementer, core.RolePlanner}, Engine: "claude", Model: "opus", Member: "demo-ada"},
 		{Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "codex", Member: "demo-rune"},
 		{Name: "QA", Kinds: []string{core.RoleQA}, Engine: "claude"},
 	}
@@ -136,6 +137,18 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 
 	search := started(crew, "demo-search", "Search across projects", core.TaskWriting, 1, ago(25*time.Minute))
 	search.Detail = "Writing the first draft"
+	search.Plan = &core.Plan{
+		Summary:    "Add one search box that finds projects and requests by title, reusing the list the sidebar already builds.",
+		Exists:     []string{"The sidebar already lists every open project (Sidebar.tsx).", "Each project's requests are in the state the dashboard already loads; no new endpoint is needed."},
+		Changes:    []string{"A search box at the top of Projects that filters as you type.", "Results link to the project or the request."},
+		OutOfScope: []string{"Searching inside drafts or chat history."},
+		Role:       "Ada", At: ago(24 * time.Minute),
+	}
+	shortcuts := started(crew, "demo-shortcuts", "Keyboard shortcuts for the board", core.TaskPlanning, 1, ago(50*time.Minute))
+	shortcuts.Detail = ""
+	screenshots := queued(crew, "demo-screenshots", "Light and dark screenshots in the README", ago(45*time.Minute))
+	// Screenshots should show search, so they wait for it to land.
+	screenshots.DependsOn = []string{search.ID}
 
 	landed := func(id, objective, commit string, at time.Time) core.Task {
 		t := started(crew, id, objective, core.TaskLanded, 1, at.Add(-2*time.Hour))
@@ -174,9 +187,7 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 	plan.DecisionID = "demo-approve-plan"
 
 	tasks := []core.Task{
-		signing, grouping, search,
-		queued(crew, "demo-shortcuts", "Keyboard shortcuts for the board", ago(50*time.Minute)),
-		queued(crew, "demo-screenshots", "Light and dark screenshots in the README", ago(45*time.Minute)),
+		signing, grouping, search, shortcuts, screenshots,
 		landed("demo-assets", "Composer asset drop and paste", "ce5899e", ago(3*time.Hour)),
 		landed("demo-suggestions", "Next-message suggestions", "482bf96", ago(150*time.Minute)),
 		darkDocs, changelog, searchPage, plan,
@@ -201,7 +212,7 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 			{ID: "demo-m4", Role: "assistant", Content: "`make check` passed. It's in your inbox, ready to land on main.", CreatedAt: ago(4 * time.Minute)},
 		},
 		Members: []core.Member{
-			{ID: "demo-ada", Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude", Model: "opus", Instructions: "Prefer small, reviewable commits.", CreatedAt: ago(20 * 24 * time.Hour),
+			{ID: "demo-ada", Name: "Ada", Kinds: []string{core.RolePlanner, core.RoleImplementer}, Engine: "claude", Model: "opus", Instructions: "Prefer small, reviewable commits.", CreatedAt: ago(20 * 24 * time.Hour),
 				Avatar: config.Avatar{Look: "Short violet bob, determined bright eyes, small round glasses, on yellow.", Background: "#1d1b2e", Accent: "#c3b1e1", Marks: []config.Mark{{D: "M64 22 L100 104 H80 L72 84 H56 L48 104 H28 Z", Color: "#c3b1e1"}, {D: "M60 70 H68 L64 58 Z", Color: "#1d1b2e"}}},
 				Learnings: []core.Learning{
 					{ID: "demo-l1", When: "Finishing a change", Text: "Run the whole test suite before finishing, not only the package you changed. A change in one package often breaks a test in another that imports it.", Source: core.LearnedByOwner, ProjectID: crew.ID, At: ago(9 * 24 * time.Hour)},
