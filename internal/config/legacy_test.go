@@ -127,3 +127,22 @@ func TestDefaultsAndAllowAreNotWrittenDown(t *testing.T) {
 		t.Fatalf("a current file changed: %v", untouched)
 	}
 }
+
+// A file not yet rewritten says where its old sections went, not that they
+// do nothing: they are still read.
+func TestAnUnconvertedFileReportsItsOldKeysAsMoved(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	old := `{"model":{"engine":"claude","claude_home":"/synthetic/claude"},"limits":{"role_usage":{"claude_max_used_percent":98}},"chat":{"loading_phrases":{"model":"x"}}}`
+	if err := os.WriteFile(path, []byte(old), 0600); err != nil {
+		t.Fatal(err)
+	}
+	unknown := UnknownKeys(path)
+	if len(unknown) != 3 {
+		t.Fatalf("unknown %+v", unknown)
+	}
+	for _, k := range unknown {
+		if !k.Renamed {
+			t.Errorf("%s reported as having no effect: %s", k.Path, k)
+		}
+	}
+}

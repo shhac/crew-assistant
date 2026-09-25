@@ -12,17 +12,15 @@ import (
 // carried out from this table; the usage limits change meaning as well as
 // place, so convertRoleUsage does those.
 var renamedKeys = map[string]string{
-	"model.codex_bin":                           "engines.codex.bin",
-	"model.codex_home":                          "engines.codex.home",
-	"model.claude_bin":                          "engines.claude.bin",
-	"model.claude_home":                         "engines.claude.home",
-	"model.base_url":                            "engines.openai-compatible.base_url",
-	"model.api_key_env":                         "engines.openai-compatible.api_key_env",
-	"limits.role_usage.codex_max_used_percent":  "engines.codex.usage_floor",
-	"limits.role_usage.claude_max_used_percent": "engines.claude.usage_floor",
-	"limits.role_usage.on_unavailable":          "engines.<engine>.on_unknown_usage",
-	"chat.loading_phrases.model":                "",
-	"chat.loading_phrases.effort":               "",
+	"model.codex_bin":             "engines.codex.bin",
+	"model.codex_home":            "engines.codex.home",
+	"model.claude_bin":            "engines.claude.bin",
+	"model.claude_home":           "engines.claude.home",
+	"model.base_url":              "engines.openai-compatible.base_url",
+	"model.api_key_env":           "engines.openai-compatible.api_key_env",
+	"limits.role_usage":           "engines.<engine>.usage_floor and on_unknown_usage",
+	"chat.loading_phrases.model":  "",
+	"chat.loading_phrases.effort": "",
 }
 
 // RenamedKey is where an earlier layout's key went, if it is one: "" when it
@@ -68,7 +66,7 @@ func defaultAPIEngine(doc map[string]any) bool {
 func moveRenamedKeys(doc map[string]any) bool {
 	changed := false
 	for from, to := range renamedKeys {
-		if strings.HasPrefix(from, "limits.role_usage.") {
+		if from == "limits.role_usage" {
 			continue
 		}
 		value, ok := removePath(doc, from)
