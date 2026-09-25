@@ -7,6 +7,7 @@ describe("activity presentation", () => {
     expect(activityLabel("decision.opened")).toBe("Asked you");
     expect(activityLabel("task.landed")).toBe("Landed");
     expect(activityLabel("task.planned")).toBe("Planned");
+    expect(activityLabel("task.ordered")).toBe("Order");
     expect(activityLabel("memory.corrected")).toBe("Memory");
     expect(activityLabel("some.future_kind")).toBe("Update");
     expect(activityLabel("some.future_kind")).not.toContain("future");
@@ -98,6 +99,8 @@ describe("activity presentation", () => {
     expect(isRoutineActivity("decision.opened")).toBe(false);
     expect(isRoutineActivity("task.landed")).toBe(false);
     expect(isRoutineActivity("assistant.update")).toBe(false);
+    // The PM's order is shown like a decision, not as a step of work.
+    expect(isRoutineActivity("task.ordered")).toBe(false);
     expect(isRoutineActivity(undefined)).toBe(false);
   });
 

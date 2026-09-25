@@ -272,6 +272,9 @@ describe("the board", () => {
     expect(other.badge).toBe("Decision");
     expect(other.answering).toBe("offered");
     expect(decisionKind(undefined).step(task({}))).toBe("Waiting for you");
+    // The PM's questions are ordinary choices, badged as the PM's.
+    const pm = decisionKind(decision("pm-question"));
+    expect(pm).toMatchObject({ ...other, badge: "Question from the PM" });
   });
   it("says who set the to-do order, or that the PM is looking at it", () => {
     const pia = { name: "Pia", kinds: ["pm"], engine: "claude" };

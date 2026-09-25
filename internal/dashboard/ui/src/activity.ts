@@ -33,6 +33,7 @@ const labels: Record<string, string> = {
   "task.message": "Message",
   "task.message_answered": "Reply",
   "task.message_failed": "No reply",
+  "task.ordered": "Order",
   "task.planned": "Planned",
   "task.queued": "Asked",
   "task.reordered": "To do",

@@ -178,6 +178,7 @@ const decisionKinds: Record<string, DecisionKindWords> = {
     answering: "through-choice",
     ...askForAnswer,
   },
+  "pm-question": { ...otherDecision, badge: "Question from the PM" },
   failure: {
     badge: "Stuck",
     step: () => "Stuck until you decide",

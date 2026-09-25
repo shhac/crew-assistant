@@ -289,7 +289,13 @@ export interface RevisionFile {
   size: number;
 }
 export type DecisionKind =
-  "choice" | "delivery" | "update" | "question" | "escalation" | "failure";
+  | "choice"
+  | "delivery"
+  | "update"
+  | "question"
+  | "escalation"
+  | "failure"
+  | "pm-question";
 export interface Decision {
   answer?: string;
   disposition?: "choice" | "custom" | "dismissed";
