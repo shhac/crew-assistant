@@ -87,6 +87,9 @@ func (e *Engine) completeWithTools(ctx context.Context, messages []Message, tool
 		usage.InputTokens += u.InputTokens
 		usage.OutputTokens += u.OutputTokens
 		usage.TotalTokens += u.TotalTokens
+		if u.ContextWindow > 0 {
+			usage.ContextWindow = u.ContextWindow
+		}
 		if attempt == 0 {
 			usage.Known = u.Known
 		} else {

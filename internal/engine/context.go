@@ -202,6 +202,10 @@ func mergeContextUsage(total *Usage, next Usage, first bool) {
 	total.InputTokens += next.InputTokens
 	total.OutputTokens += next.OutputTokens
 	total.TotalTokens += next.TotalTokens
+	// A window is stated, not counted: the latest statement stands.
+	if next.ContextWindow > 0 {
+		total.ContextWindow = next.ContextWindow
+	}
 	if first {
 		total.Known = next.Known
 	} else {

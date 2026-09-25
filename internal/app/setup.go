@@ -135,12 +135,12 @@ func (a *App) InterviewIdentity(ctx context.Context, message string) (IdentitySe
 	messages := []engine.Message{{Role: "system", Content: identityInstructions}, {Role: "system", Content: "Current configured identity: " + string(current)}}
 	messages = append(messages, state.Messages...)
 	messages = append(messages, engine.Message{Role: "user", Content: message})
-	reply, err := setupReply(ctx, a.assistantConfig(cfg), cfg, messages)
+	reply, err := setupReply(ctx, a.assistantConfig(ctx, cfg), cfg, messages)
 	if errors.Is(err, errUnusableProposal) {
 		// A drawing is easy to get slightly wrong; say what was wrong once
 		// rather than making the owner ask again.
 		messages = append(messages, engine.Message{Role: "user", Content: "That proposal could not be used: " + err.Error() + ". Call propose_identity again, fixing only that."})
-		reply, err = setupReply(ctx, a.assistantConfig(cfg), cfg, messages)
+		reply, err = setupReply(ctx, a.assistantConfig(ctx, cfg), cfg, messages)
 	}
 	if err != nil {
 		return state, err

@@ -48,7 +48,7 @@ func (a *App) runChatCommand(ctx context.Context, turn core.ChatTurn) error {
 // batch fails, the summary already saved is what the assistant now goes on
 // from, so it is shown, and the outcome says compaction stopped part way.
 func (a *App) compactNow(ctx context.Context, turnID string) (summary, outcome string, err error) {
-	cfg := a.assistantConfig(a.Config())
+	cfg := a.assistantConfig(ctx, a.Config())
 	cfg.OnRetry = func(ctx context.Context, event engine.RetryEvent) error {
 		return a.chatRetryStatus(ctx, turnID, event)
 	}
