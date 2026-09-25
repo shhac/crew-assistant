@@ -51,6 +51,13 @@ func (m gitMedium) behind(ctx context.Context, t core.Task) (*line, error) {
 	if err != nil || contains {
 		return nil, err
 	}
+	if !l.Foreign && t.Base != "" {
+		joined, err := m.repo.Contains(ctx, l.Commit, t.Base)
+		if err != nil {
+			return nil, err
+		}
+		l.Diverged = !joined
+	}
 	return l, nil
 }
 
@@ -64,7 +71,12 @@ func onto(t core.Task, l line) core.Task {
 }
 
 func (m gitMedium) cleanMerge(ctx context.Context, t core.Task, l line) (core.Task, string, error) {
-	commit, err := m.repo.MergeClean(ctx, tipOf(t), l.Commit, fmt.Sprintf("catch up with %s: %s", l.Name, text.Clip(t.Objective, 60)))
+	message := fmt.Sprintf("catch up with %s: %s", l.Name, text.Clip(t.Objective, 60))
+	merge := func() (string, error) { return m.repo.MergeClean(ctx, tipOf(t), l.Commit, message) }
+	if l.Diverged {
+		merge = func() (string, error) { return m.repo.ReplayClean(ctx, t.Base, tipOf(t), l.Commit, message) }
+	}
+	commit, err := merge()
 	if err != nil || commit == "" {
 		return t, "", err
 	}
@@ -75,6 +87,10 @@ func (m gitMedium) conflictMerge(ctx context.Context, t core.Task, l line) (core
 	if err := m.repo.Reset(ctx, t.Branch, tipOf(t)); err != nil {
 		return t, nil, err
 	}
+	if l.Diverged {
+		conflicts, err := m.repo.Replay(ctx, t.Branch, t.Base, tipOf(t), l.Commit)
+		return onto(t, l), conflicts, err
+	}
 	conflicts, err := m.repo.Merge(ctx, l.Commit)
 	return onto(t, l), conflicts, err
 }
@@ -83,7 +99,7 @@ func (m gitMedium) alreadyLanded(ctx context.Context, t core.Task, r core.Revisi
 	if r.Ref == "" {
 		return false, nil
 	}
-	return m.way.alreadyLanded(ctx, m, r)
+	return m.way.alreadyLanded(ctx, m, t, r)
 }
 
 func (m gitMedium) files(ctx context.Context, t core.Task, ref string) ([]string, error) {

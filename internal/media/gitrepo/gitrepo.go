@@ -256,6 +256,80 @@ func (r Repo) MergeClean(ctx context.Context, tip, commit, message string) (stri
 	return strings.TrimSpace(out), err
 }
 
+// ReplayClean takes a task's own change, what tip holds beyond base, onto
+// onto, as one commit, without the history in between. base is where the task
+// last joined its target: when the target has since been rewritten, anything
+// it dropped stays dropped, rather than coming back with a merge. It returns
+// "" when the change does not apply cleanly.
+func (r Repo) ReplayClean(ctx context.Context, base, tip, onto, message string) (string, error) {
+	tree, err := run(ctx, r.Workspace(), "merge-tree", "--write-tree", "--no-messages", "--merge-base="+base, onto, tip)
+	var status *gitError
+	if errors.As(err, &status) && status.code == 1 {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Fields(tree)
+	if len(lines) == 0 {
+		return "", errors.New("git merge-tree wrote no tree")
+	}
+	out, err := r.commit(ctx, "commit-tree", lines[0], "-p", onto, "-m", message)
+	return strings.TrimSpace(out), err
+}
+
+// Replay puts the checked-out task branch at onto and applies the task's own
+// change, base..tip, on top without committing, leaving the files that
+// conflict for the implementer to resolve. The next snapshot records it.
+func (r Repo) Replay(ctx context.Context, branch, base, tip, onto string) ([]string, error) {
+	tree, err := run(ctx, r.Workspace(), "rev-parse", tip+"^{tree}")
+	if err != nil {
+		return nil, err
+	}
+	// The change as one commit on base, only so it can be picked onto onto.
+	change, err := run(ctx, r.Workspace(), "commit-tree", strings.TrimSpace(tree), "-p", base, "-m", "the task's change")
+	if err != nil {
+		return nil, err
+	}
+	if err = r.Reset(ctx, branch, onto); err != nil {
+		return nil, err
+	}
+	marker, err := r.replayPath(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err = os.WriteFile(marker, nil, 0o600); err != nil {
+		return nil, err
+	}
+	_, pickErr := run(ctx, r.Workspace(), "cherry-pick", "--no-commit", strings.TrimSpace(change))
+	out, err := run(ctx, r.Workspace(), "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	conflicts := strings.Fields(out)
+	if pickErr != nil && len(conflicts) == 0 {
+		return nil, pickErr
+	}
+	return conflicts, nil
+}
+
+// replayMarker, in the git directory, says a replay's conflicts are in the
+// working tree, so a snapshot refuses unresolved markers as it does for a
+// merge. A cherry-pick without a commit leaves git no state of its own.
+const replayMarker = "crew-replaying"
+
+func (r Repo) replayPath(ctx context.Context) (string, error) {
+	out, err := run(ctx, r.Workspace(), "rev-parse", "--git-path", replayMarker)
+	if err != nil {
+		return "", err
+	}
+	path := strings.TrimSpace(out)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(r.Workspace(), path)
+	}
+	return path, nil
+}
+
 // ChangedFiles lists what differs between two commits.
 func (r Repo) ChangedFiles(ctx context.Context, from, to string) ([]string, error) {
 	out, err := run(ctx, r.Workspace(), "diff", "--no-ext-diff", "--no-textconv", "--name-only", from+".."+to)
@@ -287,8 +361,15 @@ func (r Repo) Snapshot(ctx context.Context, base, previous, message string) (str
 	}
 	_, mergeErr := run(ctx, r.Workspace(), "rev-parse", "--quiet", "--verify", "MERGE_HEAD")
 	merging := mergeErr == nil
-	if merging {
-		// Completing a merge: refuse to record conflicts nobody resolved.
+	replayed, err := r.replayPath(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	_, statErr := os.Stat(replayed)
+	replaying := statErr == nil
+	if merging || replaying {
+		// Completing a merge or a replay: refuse to record conflicts nobody
+		// resolved.
 		check, _ := run(ctx, r.Workspace(), "diff", "--cached", "--check")
 		var left []string
 		for _, line := range strings.Split(check, "\n") {
@@ -302,8 +383,13 @@ func (r Repo) Snapshot(ctx context.Context, base, previous, message string) (str
 	}
 	// A merge is recorded even when it changes no files: the task must then
 	// contain what it merged, or it would try to catch up forever.
-	if _, err := run(ctx, r.Workspace(), "diff", "--cached", "--quiet"); err != nil || merging {
-		if _, err = r.commit(ctx, "commit", "--quiet", "--no-verify", "-m", message); err != nil {
+	if _, err := run(ctx, r.Workspace(), "diff", "--cached", "--quiet"); err != nil || merging || replaying {
+		if _, err = r.commit(ctx, "commit", "--quiet", "--no-verify", "--allow-empty", "-m", message); err != nil {
+			return "", nil, err
+		}
+	}
+	if replaying {
+		if err := os.Remove(replayed); err != nil {
 			return "", nil, err
 		}
 	}
@@ -335,6 +421,9 @@ func (r Repo) Reset(ctx context.Context, branch, commit string) error {
 	// A merge a failed round left in progress must not carry into the next.
 	if _, err := run(ctx, r.Workspace(), "reset", "--quiet", "--hard"); err != nil {
 		return err
+	}
+	if marker, err := r.replayPath(ctx); err == nil {
+		os.Remove(marker)
 	}
 	args := []string{"clean", "-ffdxq", "-e", "/" + cacheDir + "/"}
 	for _, rel := range r.prepare {

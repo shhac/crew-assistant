@@ -104,6 +104,61 @@ func (r Repo) PushFastForward(ctx context.Context, taskBranch, commit, target st
 	if err = validBranch(ctx, r.source, target); err != nil {
 		return err
 	}
+	return r.pushTo(ctx, commit, target)
+}
+
+// PushSquashed lands what a task branch holds as one new commit on target:
+// the approved commit's tree, on top of target's last fetched tip, with
+// message. The task's drafts stay on its own branch, so the owner's history
+// reads one commit per change. The branch must already hold everything on
+// target, so that the one commit is exactly the change; one that is behind
+// is refused as a moved target, to catch up first. It returns the commit
+// landed, which is target's tip itself when the change is already there.
+func (r Repo) PushSquashed(ctx context.Context, taskBranch, commit, target, message string) (string, error) {
+	tip, err := run(ctx, r.Workspace(), "rev-parse", "refs/heads/"+taskBranch)
+	if err != nil || strings.TrimSpace(tip) != commit {
+		return "", errors.New("the task branch is not at the approved revision")
+	}
+	if err = validBranch(ctx, r.source, target); err != nil {
+		return "", err
+	}
+	onto, err := run(ctx, r.Workspace(), "rev-parse", "--verify", "refs/remotes/source/"+target)
+	if err != nil {
+		return "", fmt.Errorf("%s has not been fetched: %w", target, err)
+	}
+	onto = strings.TrimSpace(onto)
+	caughtUp, err := r.Contains(ctx, commit, onto)
+	if err != nil {
+		return "", err
+	}
+	if !caughtUp {
+		return "", ErrTargetMoved
+	}
+	trees, err := run(ctx, r.Workspace(), "rev-parse", commit+"^{tree}", onto+"^{tree}")
+	if err != nil {
+		return "", err
+	}
+	tree := strings.Fields(trees)
+	if len(tree) == 2 && tree[0] == tree[1] {
+		return onto, nil
+	}
+	squash, err := r.commit(ctx, "commit-tree", tree[0], "-p", onto, "-m", message)
+	if err != nil {
+		return "", err
+	}
+	squash = strings.TrimSpace(squash)
+	return squash, r.pushTo(ctx, squash, target)
+}
+
+// Mentions reports whether any commit in ref's history has marker in its
+// message, such as the trailer a squashed landing leaves.
+func (r Repo) Mentions(ctx context.Context, ref, marker string) (bool, error) {
+	out, err := run(ctx, r.Workspace(), "log", "--fixed-strings", "--grep="+marker, "--format=%H", "-n", "1", ref)
+	return strings.TrimSpace(out) != "", err
+}
+
+// pushTo pushes commit to target in the owner's repository, never forced.
+func (r Repo) pushTo(ctx context.Context, commit, target string) error {
 	out, err := run(ctx, r.Workspace(), "push", "--porcelain", "--no-verify", "--receive-pack="+receivePack, r.source, commit+":refs/heads/"+target)
 	if err == nil {
 		return nil

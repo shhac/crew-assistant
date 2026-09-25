@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/integrations/github"
@@ -20,7 +21,7 @@ type landWay interface {
 	// line is what a task must include before it lands, or nil.
 	line(ctx context.Context, m gitMedium, t core.Task) (*line, error)
 	deliver(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (string, error)
-	alreadyLanded(ctx context.Context, m gitMedium, r core.Revision) (bool, error)
+	alreadyLanded(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (bool, error)
 	// note tells the owner what approving will do.
 	note(m gitMedium, t core.Task) string
 }
@@ -64,7 +65,7 @@ func (branchWay) deliver(ctx context.Context, m gitMedium, t core.Task, r core.R
 	return m.repo.Deliver(ctx, t.Branch, r.Ref, m.branchName(t))
 }
 
-func (branchWay) alreadyLanded(context.Context, gitMedium, core.Revision) (bool, error) {
+func (branchWay) alreadyLanded(context.Context, gitMedium, core.Task, core.Revision) (bool, error) {
 	return false, nil
 }
 
@@ -97,17 +98,51 @@ func (pushWay) line(ctx context.Context, m gitMedium, t core.Task) (*line, error
 	return &line{Commit: tip, Name: target, What: what}, nil
 }
 
+// deliver lands the change as one commit, so the target's history reads one
+// commit per change rather than every draft the team made on the way.
 func (pushWay) deliver(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (string, error) {
 	target := m.playbook.Land.Target
-	return target, m.repo.PushFastForward(ctx, t.Branch, r.Ref, target)
+	_, err := m.repo.PushSquashed(ctx, t.Branch, r.Ref, target, landingMessage(t, r))
+	return target, err
 }
 
-func (pushWay) alreadyLanded(ctx context.Context, m gitMedium, r core.Revision) (bool, error) {
+// alreadyLanded finds the change on the target either as the revision itself,
+// put there by hand, or as the one commit a landing made of it.
+func (pushWay) alreadyLanded(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (bool, error) {
 	tip, err := m.repo.Fetch(ctx, m.playbook.Land.Target)
 	if err != nil {
 		return false, err
 	}
-	return m.repo.Contains(ctx, tip, r.Ref)
+	if there, err := m.repo.Contains(ctx, tip, r.Ref); err != nil || there {
+		return there, err
+	}
+	return m.repo.Mentions(ctx, tip, landedTrailer(t, r))
+}
+
+// landedTrailer marks the commit a landing made, so a landing retried after
+// a crash, or a later change built on this one, can find it.
+func landedTrailer(t core.Task, r core.Revision) string {
+	return fmt.Sprintf("Crew-Task: %s revision %d", t.ID, r.N)
+}
+
+// landingMessage words the one commit a change lands as: what was asked,
+// with its first clause as the subject.
+func landingMessage(t core.Task, r core.Revision) string {
+	objective := strings.TrimSpace(t.Objective)
+	subject, rest := objective, ""
+	if head, tail, ok := strings.Cut(objective, ": "); ok && len(head) >= 10 && len(head) <= 72 {
+		subject, rest = head, strings.TrimSpace(tail)
+	}
+	subject = text.Clip(subject, 72)
+	drafts := "1 reviewed draft"
+	if r.N > 1 {
+		drafts = fmt.Sprintf("%d reviewed drafts", r.N)
+	}
+	body := "Landed by crew-assistant from " + drafts + "."
+	if rest != "" {
+		body = rest + "\n\n" + body
+	}
+	return subject + "\n\n" + body + "\n\n" + landedTrailer(t, r)
 }
 
 func (pushWay) note(m gitMedium, _ core.Task) string {
@@ -150,7 +185,7 @@ func (prWay) deliver(context.Context, gitMedium, core.Task, core.Revision) (stri
 	return "", errors.New("a change landing by pull request is merged by GitHub, not delivered")
 }
 
-func (prWay) alreadyLanded(context.Context, gitMedium, core.Revision) (bool, error) {
+func (prWay) alreadyLanded(context.Context, gitMedium, core.Task, core.Revision) (bool, error) {
 	return false, nil
 }
 

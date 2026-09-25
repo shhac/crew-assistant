@@ -75,6 +75,10 @@ type line struct {
 	// Foreign marks commits from outside the team. Merging them in is never a
 	// clean catch-up that keeps an approval or carries reviews over.
 	Foreign bool
+	// Diverged marks a target that no longer holds where the task last joined
+	// it: its history was rewritten. Catching up then replays only the task's
+	// own change onto it, so nothing the target dropped comes back.
+	Diverged bool
 }
 
 func (lp *Loop) mediumFor(ctx context.Context, p core.Project, playbook *core.Playbook) (medium, error) {

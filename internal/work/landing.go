@@ -223,7 +223,11 @@ func (lp *Loop) recordCatchUp(ctx context.Context, moved core.Task, c catcher, c
 		prev := t.Revisions[len(t.Revisions)-1]
 		n := prev.N + 1
 		now := time.Now().UTC()
-		revision := core.Revision{N: n, BriefVersion: p.Brief.Version, Files: files, Ref: commit, Summary: "Merged in without conflicts: " + l.What + ".", At: now}
+		summary := "Merged in without conflicts: " + l.What + "."
+		if l.Diverged {
+			summary = "Replayed onto " + l.Name + " without conflicts, after its history was rewritten: " + l.What + "."
+		}
+		revision := core.Revision{N: n, BriefVersion: p.Brief.Version, Files: files, Ref: commit, Summary: summary, At: now}
 		// Someone else's commits are new work: nothing carries over from them.
 		if !l.Foreign {
 			t.Base, t.From = moved.Base, moved.From

@@ -374,7 +374,7 @@ func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
 		t.Fatal(err)
 	}
 	first = current(first.ID)
-	if first.Status != core.TaskLanded || ownerGit(t, source, "rev-parse", "main") != first.Revisions[len(first.Revisions)-1].Ref {
+	if first.Status != core.TaskLanded || !landedAsOne(t, source, filepath.Join(p.ScratchDirectory, "clone"), "main", first) {
 		t.Fatalf("the first change did not land on main: %+v", first)
 	}
 	caughtUp := first.Revisions[len(first.Revisions)-1]
@@ -408,14 +408,22 @@ func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
 	if second.Status != core.TaskLanded {
 		t.Fatalf("the second change did not land: %+v", second)
 	}
-	// Nothing was lost, and the first landed before the second.
+	// Nothing was lost: the owner's commits are still there, and each change
+	// is one commit on main, the first landed before the second.
 	head := ownerGit(t, source, "rev-parse", "main")
-	for name, commit := range map[string]string{"owner work": ownerWork, "owner wip": ownerWip, "first": first.Revisions[len(first.Revisions)-1].Ref, "second's approved draft": second.Revisions[second.Approved-1].Ref} {
+	for name, commit := range map[string]string{"owner work": ownerWork, "owner wip": ownerWip} {
 		cmd := exec.Command("git", "merge-base", "--is-ancestor", commit, head)
 		cmd.Dir = source
 		if cmd.Run() != nil {
 			t.Errorf("main lost %s", name)
 		}
+	}
+	landed := ownerGit(t, source, "log", "--format=%s", "main")
+	if !landedAsOne(t, source, filepath.Join(p.ScratchDirectory, "clone"), "main", second) || !(strings.Index(landed, "Add B") >= 0 && strings.Index(landed, "Add B") < strings.Index(landed, "Add A")) {
+		t.Errorf("each change should be one commit on main, A before B:\n%s", landed)
+	}
+	if drafts := ownerGit(t, source, "log", "--format=%s", "--grep=^draft ", "main"); drafts != "" {
+		t.Errorf("drafts reached main:\n%s", drafts)
 	}
 	if ownerGit(t, source, "rev-parse", "--abbrev-ref", "HEAD") != "main" || ownerGit(t, source, "status", "--porcelain") != "" {
 		t.Fatal("the owner's checkout was left on another branch or dirty")
@@ -546,7 +554,7 @@ func TestNoApprovalStepAndAlreadyLanded(t *testing.T) {
 			t.Fatalf("asked the owner although they said not to: %+v", d)
 		}
 	}
-	if first.Status != core.TaskLanded || ownerGit(t, source, "rev-parse", "main") != first.Revisions[0].Ref {
+	if first.Status != core.TaskLanded || !landedAsOne(t, source, filepath.Join(p.ScratchDirectory, "clone"), "main", first) {
 		t.Fatalf("did not land unasked: %+v", first)
 	}
 
@@ -566,5 +574,75 @@ func TestNoApprovalStepAndAlreadyLanded(t *testing.T) {
 	second, _ = findTask(snap, p.ID, second.ID)
 	if second.Status != core.TaskLanded || !strings.Contains(second.Detail, "already there") {
 		t.Fatalf("a change already on main was not recorded as landed: %s %s", second.Status, second.Detail)
+	}
+}
+
+// landedAsOne reports whether target's tip is the task's one landed commit:
+// the approved revision's exact tree, worded from the task and marked with
+// its trailer, on top of what target held before, with none of the task's
+// drafts in target's history.
+func landedAsOne(t *testing.T, source, clone, target string, task core.Task) bool {
+	t.Helper()
+	r := task.Revisions[len(task.Revisions)-1]
+	message := ownerGit(t, source, "log", "-1", "--format=%B", target)
+	sameTree := ownerGit(t, source, "rev-parse", target+"^{tree}") == ownerGit(t, clone, "rev-parse", r.Ref+"^{tree}")
+	oneParent := len(strings.Fields(ownerGit(t, source, "log", "-1", "--format=%P", target))) == 1
+	draftsKept := exec.Command("git", "-C", source, "merge-base", "--is-ancestor", r.Ref, target).Run() == nil
+	return sameTree && oneParent && !draftsKept && strings.HasPrefix(message, task.Objective) && strings.Contains(message, landedTrailer(task, r))
+}
+
+// When the owner rewrites main while a change waits, landing replays only the
+// change's own work onto the rewritten main: what they dropped stays dropped,
+// nothing on main is lost, and the change is one commit.
+func TestARewrittenMainKeepsWhatTheOwnerDropped(t *testing.T) {
+	source := ownerRepo(t)
+	os.WriteFile(filepath.Join(source, "dropped.go"), []byte("package main // dropped later\n"), 0600)
+	ownerGit(t, source, "add", "dropped.go")
+	ownerGit(t, source, "commit", "-q", "-m", "a commit the owner will drop")
+	reviews := make([]string, 12)
+	for i := range reviews {
+		reviews[i] = pass
+	}
+	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: reviews}}
+	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
+	a.runner = runner
+	ctx := context.Background()
+	p := codeProject(t, a, source)
+	if _, err := a.SetLanding(ctx, p.ID, core.LandPolicy{Via: core.LandPush, Target: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A: a feature"})
+	current := func() core.Task {
+		t.Helper()
+		settle(t, a)
+		snap, _ := a.Core.Snapshot(ctx)
+		found, _ := findTask(snap, p.ID, task.ID)
+		return found
+	}
+	task = current()
+	// The owner drops their last commit from main and commits something else.
+	ownerGit(t, source, "reset", "-q", "--hard", "HEAD~1")
+	os.WriteFile(filepath.Join(source, "owner.go"), []byte("package main\n"), 0600)
+	ownerGit(t, source, "add", "owner.go")
+	ownerGit(t, source, "commit", "-q", "-m", "owner work")
+	ownerWork := ownerGit(t, source, "rev-parse", "main")
+	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove); err != nil {
+		t.Fatal(err)
+	}
+	task = current()
+	if task.Status != core.TaskLanded {
+		t.Fatalf("the change did not land: %s %s", task.Status, task.Detail)
+	}
+	if last := task.Revisions[len(task.Revisions)-1]; !strings.HasPrefix(last.Summary, "Replayed onto main") || last.CleanMergeOf != task.Approved {
+		t.Fatalf("catching up after the rewrite should have replayed cleanly, keeping the approval: %+v", last)
+	}
+	if !landedAsOne(t, source, filepath.Join(p.ScratchDirectory, "clone"), "main", task) || ownerGit(t, source, "rev-parse", "main^") != ownerWork {
+		t.Fatal("the change should be one commit on the rewritten main")
+	}
+	if _, err := os.Stat(filepath.Join(source, "dropped.go")); !os.IsNotExist(err) {
+		t.Fatal("landing brought back what the owner dropped")
+	}
+	if strings.Contains(ownerGit(t, source, "log", "--format=%s", "main"), "a commit the owner will drop") {
+		t.Fatal("the dropped commit came back into main's history")
 	}
 }
