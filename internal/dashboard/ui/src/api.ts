@@ -42,7 +42,7 @@ export interface BriefInput {
 }
 export interface Role {
   name: string;
-  /** At most one of implementer, reviewer and QA, and perhaps planner. */
+  /** At most one of implementer, reviewer and QA, and perhaps planner and PM. */
   kinds: (MemberKind | (string & {}))[];
   engine: string;
   model?: string;
@@ -51,7 +51,7 @@ export interface Role {
   /** The member this role was copied from, if any. */
   member?: string;
 }
-export type MemberKind = "planner" | "implementer" | "reviewer" | "qa";
+export type MemberKind = "planner" | "implementer" | "reviewer" | "qa" | "pm";
 export interface Learning {
   id: string;
   /** The situation it applies to, like a skill's description. */
@@ -150,6 +150,8 @@ export interface TeamInput {
   qa_member?: string;
   /** "" keeps the template's planner, "none" leaves planning out. */
   planner_member?: string;
+  /** The member who keeps the to-do list in order, or "" for no PM. */
+  pm_member?: string;
   max_rounds: string;
   deliver_to: string;
   repo?: string;

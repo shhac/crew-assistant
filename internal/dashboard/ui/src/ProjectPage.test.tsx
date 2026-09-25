@@ -617,6 +617,29 @@ describe("a request", () => {
     );
     expect(screen.getByRole("button", { name: "Send to Ada" })).toBeTruthy();
   });
+  it("leaves out a seat that only keeps the to-do list, and names one that also works by its work", () => {
+    const pia = { name: "Pia", kinds: ["pm"], engine: "claude" };
+    const rune = { name: "Rune", kinds: ["reviewer", "pm"], engine: "codex" };
+    const [implementer, , qa] = codeTeam().roles;
+    show(
+      project(),
+      {
+        tasks: [
+          started({
+            status: "writing",
+            stage: "implementing",
+            roles: [implementer, rune, qa, pia],
+          }),
+        ],
+      },
+      { request: "t1" },
+    );
+    expect(
+      within(screen.getByLabelText("To"))
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Implementer", "Rune (reviewer)", "QA"]);
+  });
   it("shows the plan with only the parts it has, and who planned it", () => {
     show(
       project(),
@@ -897,6 +920,7 @@ describe("the project's tabs", () => {
           reviewer_member: "",
           qa_member: "",
           planner_member: "",
+          pm_member: "",
           max_rounds: "3",
           deliver_to: "",
           repo: "/work/service",
@@ -1083,6 +1107,108 @@ describe("the project's tabs", () => {
       expect(who).toHaveProperty("value", "");
       fireEvent.change(who, { target: { value: "m4" } });
       expect(await saved()).toMatchObject({ planner_member: "m4" });
+    });
+  });
+  describe("a team's PM", () => {
+    const crewWithPM = [
+      member("m1", "Ada Lovelace", "implementer", "pm"),
+      member("m2", "Rune", "reviewer"),
+      member("m4", "Pia", "pm"),
+    ];
+    const pia: Role = {
+      name: "Pia",
+      kinds: ["pm"],
+      engine: "claude",
+      member: "m4",
+    };
+    const edit = (p: Project, members = crewWithPM) => {
+      show(p, { members }, { tab: "team" });
+      fireEvent.click(
+        within(screen.getByRole("region", { name: "Team" })).getByRole(
+          "button",
+          { name: "Edit" },
+        ),
+      );
+      return screen.queryByRole("group", { name: "PM" });
+    };
+    const chooser = (p: Project) => {
+      const slot = edit(p);
+      if (!slot) throw new Error("No PM to choose");
+      return within(slot).getByLabelText("Who");
+    };
+    const saved = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save team" }));
+      await waitFor(() => expect(refresh).toHaveBeenCalled());
+      return writes()[0].body;
+    };
+    it("lists the PM's seat with the kinds it holds", () => {
+      const ada: Role = {
+        name: "Ada",
+        kinds: ["implementer", "pm"],
+        engine: "claude",
+        member: "m1",
+      };
+      const [, reviewer, qa] = codeTeam().roles;
+      show(
+        project({
+          playbook: { ...codeTeam(), roles: [ada, reviewer, qa, pia] },
+        }),
+        { members: crewWithPM },
+        { tab: "team" },
+      );
+      const rows = [
+        ...screen
+          .getByRole("region", { name: "Team" })
+          .querySelectorAll(".fact-row"),
+      ]
+        .slice(0, 4)
+        .map((r) => r.textContent);
+      expect(rows).toEqual([
+        "AdaImplementer and PM · Claude",
+        "ReviewerCodex",
+        "QACodex",
+        "PiaPM · Claude",
+      ]);
+    });
+    it("chooses a PM from the members who hold it, or none", async () => {
+      const who = chooser(project());
+      expect(who).toHaveProperty("value", "");
+      expect(
+        within(who)
+          .getAllByRole("option")
+          .map((o) => o.textContent),
+      ).toEqual(["No PM", "Ada Lovelace", "Pia"]);
+      expect(screen.getAllByLabelText("Engine")).toHaveLength(2);
+      fireEvent.change(who, { target: { value: "m4" } });
+      expect(await saved()).toMatchObject({ pm_member: "m4" });
+    });
+    it("keeps the PM when the team is saved again, for writing too", async () => {
+      const who = chooser(
+        project({
+          playbook: { ...writingTeam, roles: [...writingTeam.roles, pia] },
+        }),
+      );
+      expect(who).toHaveProperty("value", "m4");
+      expect(await saved()).toMatchObject({
+        template: "draft",
+        pm_member: "m4",
+      });
+      cleanup();
+      calls = [];
+      refresh.mockClear();
+      fireEvent.change(
+        chooser(
+          project({
+            playbook: { ...codeTeam(), roles: [...codeTeam().roles, pia] },
+          }),
+        ),
+        { target: { value: "" } },
+      );
+      expect(await saved()).toMatchObject({ pm_member: "" });
+    });
+    it("offers no PM while no member holds it", async () => {
+      expect(edit(project(), crew)).toBeNull();
+      expect(await saved()).toMatchObject({ pm_member: "" });
     });
   });
   it("offers no QA for a writing team and no choice where there are no members", async () => {

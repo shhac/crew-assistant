@@ -95,6 +95,13 @@ describe("the kinds of role a seat holds", () => {
     );
     expect(kindsLabel([])).toBe("");
   });
+  it("names the PM last, beside the work", () => {
+    expect(kindsLabel(["pm"])).toBe("PM");
+    expect(kindsLabel(["pm", "reviewer"])).toBe("Reviewer and PM");
+    expect(kindsLabel(["pm", "implementer", "planner"])).toBe(
+      "Planner, implementer and PM",
+    );
+  });
   it("tells the work a seat does from the planning it may also do", () => {
     const both: Role = {
       name: "Ada",
@@ -107,14 +114,21 @@ describe("the kinds of role a seat holds", () => {
     expect(holds({}, "planner")).toBe(false);
     expect(workingKind(both)).toBe("implementer");
     expect(workingKind(plans)).toBe("");
+    const keeps: Role = { name: "Pia", kinds: ["pm"], engine: "claude" };
+    expect(workingKind(keeps)).toBe("");
+    expect(workingKind({ ...keeps, kinds: ["pm", "planner"] })).toBe("");
+    expect(workingKind({ ...keeps, kinds: ["pm", "qa"] })).toBe("qa");
   });
   it("refuses what the server refuses", () => {
     expect(kindsProblem(["planner"])).toBe("");
     expect(kindsProblem(["planner", "qa"])).toBe("");
     expect(kindsProblem([])).toBe("Pick at least one role.");
+    expect(kindsProblem(["pm"])).toBe("");
+    expect(kindsProblem(["planner", "implementer", "pm"])).toBe("");
     expect(kindsProblem(["implementer", "reviewer"])).toBe(
-      "Pick one of implementer, reviewer and QA, plus planning if you like.",
+      "Pick one of implementer, reviewer and QA, plus planner and PM if you like.",
     );
+    expect(kindsProblem(["pm", "reviewer", "qa"])).not.toBe("");
   });
   it("finds the planner at work while a request plans", () => {
     const seats: Role[] = [

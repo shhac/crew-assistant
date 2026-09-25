@@ -214,6 +214,7 @@ function TeamEditor({
     implementer: chosenMember(playbook?.roles, "implementer", members),
     reviewer: chosenMember(playbook?.roles, "reviewer", members),
     qa: chosenMember(playbook?.roles, "qa", members),
+    pm: chosenMember(playbook?.roles, "pm", members),
   }));
   const choose = (kind: MemberKind) => (id: string) =>
     setWho((current) => ({ ...current, [kind]: id }));
@@ -232,6 +233,7 @@ function TeamEditor({
         reviewer_member: who.reviewer,
         qa_member: code ? who.qa : "",
         planner_member: code ? who.planner : "",
+        pm_member: who.pm,
         max_rounds: rounds,
         ...(code
           ? {
@@ -309,6 +311,14 @@ function TeamEditor({
               onWho={choose("qa")}
             />
           )}
+          <TeamSlot
+            kind="pm"
+            label="PM"
+            members={members}
+            who={who.pm}
+            onWho={choose("pm")}
+            empty="No PM"
+          />
           <label htmlFor="team-rounds">
             Rounds before asking you
             <input
@@ -450,7 +460,8 @@ function TeamEditor({
 /**
  * One place on the team: who fills it, and the engine it runs on. A member
  * brings its own engine, so the engine is asked only of the template's role.
- * A place the team can do without offers leaving it out, as `none`.
+ * A place the team can do without offers leaving it out, as `none`; one the
+ * template doesn't have says what having no one there means, as `empty`.
  */
 function TeamSlot({
   kind,
@@ -460,6 +471,7 @@ function TeamSlot({
   onWho,
   engine,
   none,
+  empty,
 }: {
   kind: MemberKind;
   label: string;
@@ -468,6 +480,7 @@ function TeamSlot({
   onWho: (id: string) => void;
   engine?: { id: string; value: string; onChange: (value: string) => void };
   none?: string;
+  empty?: string;
 }) {
   const options = members.filter((m) => holds(m, kind));
   if (!options.length && !engine && !none) return null;
@@ -483,7 +496,7 @@ function TeamSlot({
             value={who}
             onChange={(e) => onWho(e.target.value)}
           >
-            <option value="">Template default</option>
+            <option value="">{empty ?? "Template default"}</option>
             {none && <option value={noPlanning}>{none}</option>}
             {options.map((m) => (
               <option key={m.id} value={m.id}>

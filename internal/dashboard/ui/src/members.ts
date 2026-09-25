@@ -7,12 +7,16 @@ export const engines = [
 export const engineLabel = (id: string) =>
   engines.find((e) => e.id === id)?.label ?? id;
 
-/** In the order a team works; `word` is how a kind reads mid-sentence. */
+/**
+ * In the order a team works, then the PM who keeps its list; `word` is how a
+ * kind reads mid-sentence.
+ */
 export const memberKinds: { id: MemberKind; label: string; word: string }[] = [
   { id: "planner", label: "Planner", word: "planner" },
   { id: "implementer", label: "Implementer", word: "implementer" },
   { id: "reviewer", label: "Reviewer", word: "reviewer" },
   { id: "qa", label: "QA", word: "QA" },
+  { id: "pm", label: "PM", word: "PM" },
 ];
 export const kindLabel = (kind: string) =>
   memberKinds.find((k) => k.id === kind)?.label ?? kind;
@@ -23,9 +27,15 @@ export const kindWord = (kind: string) =>
 export const holds = (who: { kinds?: readonly string[] }, kind: string) =>
   !!who.kinds?.includes(kind);
 
-/** What a seat does once the work has started; "" for one that only plans. */
+/** Kinds held alongside a seat's work, rather than being it. */
+const besideWork = new Set(["planner", "pm"]);
+
+/**
+ * What a seat does once the work has started; "" for one that only plans or
+ * keeps the list.
+ */
 export const workingKind = (role: Role) =>
-  role.kinds.find((k) => k !== "planner") ?? "";
+  role.kinds.find((k) => !besideWork.has(k)) ?? "";
 
 /** "Planner and implementer": the kinds held, in the order a team works. */
 export function kindsLabel(kinds: readonly string[]) {
@@ -43,12 +53,12 @@ export function kindsLabel(kinds: readonly string[]) {
 /**
  * Why a member can't hold these kinds, as the server would refuse them:
  * verdicts and messages name the seat, so it does one kind of work, and
- * planning sits alongside.
+ * planning and keeping the list sit alongside.
  */
 export function kindsProblem(kinds: readonly string[]) {
   if (!kinds.length) return "Pick at least one role.";
-  if (kinds.filter((k) => k !== "planner").length > 1)
-    return "Pick one of implementer, reviewer and QA, plus planning if you like.";
+  if (kinds.filter((k) => !besideWork.has(k)).length > 1)
+    return "Pick one of implementer, reviewer and QA, plus planner and PM if you like.";
   return "";
 }
 

@@ -974,6 +974,32 @@ describe("the team", () => {
       instructions: "Check the tests first.",
     });
   });
+  it("adds a member who keeps the to-do list beside its work", async () => {
+    window.history.replaceState(null, "", "/#/team");
+    respond = (path) => ({
+      body: path === "/api/members" ? { ...ada(), learnings: [] } : state,
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "New member" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Pia" },
+    });
+    const roles = screen.getByRole("group", { name: "Roles" });
+    expect(
+      within(roles)
+        .getAllByRole("checkbox")
+        .map((c) => c.closest("label")?.textContent),
+    ).toEqual(["Planner", "Implementer", "Reviewer", "QA", "PM"]);
+    fireEvent.click(within(roles).getByLabelText("PM"));
+    expect(within(roles).queryByText(/^Pick/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/team/m1"));
+    const create = writes().find((c) => c.path === "/api/members")!;
+    expect(JSON.parse(String(create.options?.body)).kinds).toEqual([
+      "implementer",
+      "pm",
+    ]);
+  });
   it("refuses a member with no role, or with more than one kind of work", async () => {
     window.history.replaceState(null, "", "/#/team");
     render(<App />);
@@ -986,7 +1012,7 @@ describe("the team", () => {
     fireEvent.click(within(roles).getByLabelText("Reviewer"));
     expect(
       within(roles).getByText(
-        "Pick one of implementer, reviewer and QA, plus planning if you like.",
+        "Pick one of implementer, reviewer and QA, plus planner and PM if you like.",
       ),
     ).toBeTruthy();
     expect(add).toHaveProperty("disabled", true);
