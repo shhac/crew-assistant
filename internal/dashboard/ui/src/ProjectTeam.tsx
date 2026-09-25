@@ -3,7 +3,7 @@ import { FileSystemPicker } from "./FileSystemPicker";
 import { Folders } from "./ProjectFolders";
 import { memberHref } from "./router";
 import { isCode } from "./stages";
-import { engineLabel, engines, holds, memberOf } from "./members";
+import { engineLabel, engines, holds, kindsLabel, memberOf } from "./members";
 import { Avatar } from "./Avatar";
 import { ErrorNotice, useAction } from "./ui";
 import {
@@ -82,7 +82,7 @@ function TeamView({
           <dt>
             <RoleName role={role} members={members} />
           </dt>
-          <dd>{engineLabel(role.engine)}</dd>
+          <dd>{seatSummary(role)}</dd>
         </div>
       ))}
       {code && (
@@ -127,6 +127,15 @@ function TeamView({
   );
 }
 
+/** "Planner and implementer · Claude", leaving out kinds the name says. */
+function seatSummary(role: Role) {
+  const kinds = kindsLabel(role.kinds);
+  const named = kinds.toLowerCase() === role.name.toLowerCase();
+  return [named ? "" : kinds, engineLabel(role.engine)]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 /**
  * A role by the name it was given when the team was chosen. Verdicts are
  * recorded against that name, so a member renamed since keeps its old one
@@ -159,7 +168,18 @@ function chosenMember(
   return members.some((m) => m.id === id && holds(m, kind)) ? (id ?? "") : "";
 }
 
-type SlotKind = Exclude<MemberKind, "planner">;
+/** Sent as the planner to leave planning out of a code team. */
+const noPlanning = "none";
+
+/**
+ * Who plans for a code team: the member in the seat that plans, the
+ * template's planner, or no one.
+ */
+function chosenPlanner(playbook: Playbook | undefined, members: Member[]) {
+  if (playbook?.template !== "code") return "";
+  if (!playbook.roles.some((r) => holds(r, "planner"))) return noPlanning;
+  return chosenMember(playbook.roles, "planner", members);
+}
 
 function TeamEditor({
   project,
@@ -189,12 +209,13 @@ function TeamEditor({
   const [reviewer, setReviewer] = useState(
     firstEngine(playbook?.roles, "reviewer", "codex"),
   );
-  const [who, setWho] = useState<Record<SlotKind, string>>(() => ({
+  const [who, setWho] = useState<Record<MemberKind, string>>(() => ({
+    planner: chosenPlanner(playbook, members),
     implementer: chosenMember(playbook?.roles, "implementer", members),
     reviewer: chosenMember(playbook?.roles, "reviewer", members),
     qa: chosenMember(playbook?.roles, "qa", members),
   }));
-  const choose = (kind: SlotKind) => (id: string) =>
+  const choose = (kind: MemberKind) => (id: string) =>
     setWho((current) => ({ ...current, [kind]: id }));
   const [rounds, setRounds] = useState(String(playbook?.max_rounds ?? 3));
   const [deliverTo, setDeliverTo] = useState(playbook?.deliver_to ?? "");
@@ -210,6 +231,7 @@ function TeamEditor({
         implementer_member: who.implementer,
         reviewer_member: who.reviewer,
         qa_member: code ? who.qa : "",
+        planner_member: code ? who.planner : "",
         max_rounds: rounds,
         ...(code
           ? {
@@ -248,6 +270,16 @@ function TeamEditor({
           </label>
         )}
         <div className="form-row">
+          {code && (
+            <TeamSlot
+              kind="planner"
+              label="Planner"
+              members={members}
+              who={who.planner}
+              onWho={choose("planner")}
+              none="No planning"
+            />
+          )}
           <TeamSlot
             kind="implementer"
             label={code ? "Implementer" : "Writer"}
@@ -418,6 +450,7 @@ function TeamEditor({
 /**
  * One place on the team: who fills it, and the engine it runs on. A member
  * brings its own engine, so the engine is asked only of the template's role.
+ * A place the team can do without offers leaving it out, as `none`.
  */
 function TeamSlot({
   kind,
@@ -426,6 +459,7 @@ function TeamSlot({
   who,
   onWho,
   engine,
+  none,
 }: {
   kind: MemberKind;
   label: string;
@@ -433,13 +467,14 @@ function TeamSlot({
   who: string;
   onWho: (id: string) => void;
   engine?: { id: string; value: string; onChange: (value: string) => void };
+  none?: string;
 }) {
   const options = members.filter((m) => holds(m, kind));
-  if (!options.length && !engine) return null;
+  if (!options.length && !engine && !none) return null;
   return (
     <fieldset className="team-slot">
       <legend>{label}</legend>
-      {options.length > 0 && (
+      {(options.length > 0 || none) && (
         <label htmlFor={`team-${kind}-member`}>
           Who
           <select
@@ -449,6 +484,7 @@ function TeamSlot({
             onChange={(e) => onWho(e.target.value)}
           >
             <option value="">Template default</option>
+            {none && <option value={noPlanning}>{none}</option>}
             {options.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}

@@ -17,6 +17,7 @@ import {
   type Member,
   type Playbook,
   type Project,
+  type Role,
   type State,
   type Task,
 } from "./api";
@@ -895,6 +896,7 @@ describe("the project's tabs", () => {
           implementer_member: "",
           reviewer_member: "",
           qa_member: "",
+          planner_member: "",
           max_rounds: "3",
           deliver_to: "",
           repo: "/work/service",
@@ -998,6 +1000,91 @@ describe("the project's tabs", () => {
       qa_member: "m3",
     });
   });
+  describe("a code team's planner", () => {
+    const planners = [
+      member("m1", "Ada Lovelace", "implementer", "planner"),
+      member("m2", "Rune", "reviewer"),
+      member("m4", "Pia", "planner"),
+    ];
+    const seats = (...roles: Role[]) =>
+      project({ playbook: { ...codeTeam(), roles } });
+    const ada: Role = {
+      name: "Ada",
+      kinds: ["implementer", "planner"],
+      engine: "claude",
+      member: "m1",
+    };
+    const planner: Role = {
+      name: "Planner",
+      kinds: ["planner"],
+      engine: "claude",
+    };
+    const [, reviewer, qa] = codeTeam().roles;
+    const edit = (p: Project) => {
+      show(p, { members: planners }, { tab: "team" });
+      fireEvent.click(
+        within(screen.getByRole("region", { name: "Team" })).getByRole(
+          "button",
+          { name: "Edit" },
+        ),
+      );
+      const row = screen.getByRole("group", { name: "Planner" });
+      return within(row).getByLabelText("Who");
+    };
+    const saved = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save team" }));
+      await waitFor(() => expect(refresh).toHaveBeenCalled());
+      return writes()[0].body;
+    };
+    it("lists each seat with the kinds it holds", () => {
+      show(
+        seats(planner, ada, reviewer, qa),
+        { members: planners },
+        { tab: "team" },
+      );
+      const team = screen.getByRole("region", { name: "Team" });
+      const rows = [...team.querySelectorAll(".fact-row")]
+        .slice(0, 4)
+        .map((r) => r.textContent);
+      expect(rows).toEqual([
+        "PlannerClaude",
+        "AdaPlanner and implementer · Claude",
+        "ReviewerCodex",
+        "QACodex",
+      ]);
+    });
+    it("keeps a member who plans from their own seat when saved again", async () => {
+      const who = edit(seats(ada, reviewer, qa));
+      expect(who).toHaveProperty("value", "m1");
+      expect(
+        within(who)
+          .getAllByRole("option")
+          .map((o) => o.textContent),
+      ).toEqual(["Template default", "No planning", "Ada Lovelace", "Pia"]);
+      expect(await saved()).toMatchObject({
+        implementer_member: "m1",
+        planner_member: "m1",
+      });
+    });
+    it("keeps a team without planning that way, and can bring the template's back", async () => {
+      const who = edit(seats(codeTeam().roles[0], reviewer, qa));
+      expect(who).toHaveProperty("value", "none");
+      expect(await saved()).toMatchObject({ planner_member: "none" });
+      cleanup();
+      calls = [];
+      refresh.mockClear();
+      fireEvent.change(edit(seats(codeTeam().roles[0], reviewer, qa)), {
+        target: { value: "" },
+      });
+      expect(await saved()).toMatchObject({ planner_member: "" });
+    });
+    it("fills the template's planner with a member", async () => {
+      const who = edit(seats(planner, codeTeam().roles[0], reviewer, qa));
+      expect(who).toHaveProperty("value", "");
+      fireEvent.change(who, { target: { value: "m4" } });
+      expect(await saved()).toMatchObject({ planner_member: "m4" });
+    });
+  });
   it("offers no QA for a writing team and no choice where there are no members", async () => {
     show(
       project({ playbook: writingTeam }),
@@ -1018,7 +1105,9 @@ describe("the project's tabs", () => {
       implementer_member: "",
       reviewer_member: "",
       qa_member: "",
+      planner_member: "",
     });
+    expect(within(team).queryByRole("group", { name: "Planner" })).toBeNull();
     cleanup();
     show(project(), {}, { tab: "team" });
     fireEvent.click(
@@ -1026,7 +1115,8 @@ describe("the project's tabs", () => {
         name: "Edit",
       }),
     );
-    expect(screen.queryByLabelText("Who")).toBeNull();
+    // Only planning can be left out, so only it offers a choice.
+    expect(screen.getAllByLabelText("Who")).toHaveLength(1);
     expect(screen.queryByRole("group", { name: "QA" })).toBeNull();
     expect(screen.getAllByLabelText("Engine")).toHaveLength(2);
   });
