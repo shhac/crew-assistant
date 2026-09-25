@@ -60,6 +60,7 @@ func TestChatModelUsesConfiguredNameAndPersistsToolEffects(t *testing.T) {
 	if err := a.UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
+	startTestQueue(t, a)
 	result, err := a.Chat(context.Background(), "Set up the export project")
 	if err != nil {
 		t.Fatal(err)

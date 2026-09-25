@@ -61,9 +61,8 @@ func (a *App) CancelChat(ctx context.Context, id string) (core.ChatTurn, error) 
 	return turn, err
 }
 
-// Chat retains the synchronous integration API. With the daemon running it waits
-// for a durable queue turn; cancellation stops waiting, never an accepted job.
-// Standalone callers drain the same queue under the same conversation lock.
+// Chat queues a message and waits for the chat queue to answer it.
+// Cancellation stops waiting, never an accepted message.
 func (a *App) Chat(ctx context.Context, message string) (engine.Result, error) {
 	id := chatID()
 	result := make(chan chatOutcome, 1)
@@ -71,28 +70,6 @@ func (a *App) Chat(ctx context.Context, message string) (engine.Result, error) {
 	defer a.chatWaiters.Delete(id)
 	if _, err := a.EnqueueChat(ctx, id, message); err != nil {
 		return engine.Result{}, err
-	}
-	if !a.chatRunning.Load() {
-		for {
-			if err := ctx.Err(); err != nil {
-				return engine.Result{}, err
-			}
-			if a.chatRunning.Load() {
-				break
-			}
-			_, err := a.processNextChat(ctx, true)
-			if err != nil && !errors.Is(err, core.ErrNotFound) {
-				return engine.Result{}, err
-			}
-			select {
-			case out := <-result:
-				return out.result, out.err
-			default:
-			}
-			if errors.Is(err, core.ErrNotFound) || errors.Is(err, core.ErrConflict) {
-				break
-			}
-		}
 	}
 	select {
 	case <-ctx.Done():
@@ -102,9 +79,9 @@ func (a *App) Chat(ctx context.Context, message string) (engine.Result, error) {
 	}
 }
 
-// RunChatQueue owns inference independently of dashboard HTTP connections. The
-// single conversation lock is shared with synchronous callers, including during
-// recovery, so startup cannot mark a live in-process turn interrupted.
+// RunChatQueue owns inference independently of dashboard HTTP connections. It
+// holds the conversation lock while recovering, so startup cannot mark a live
+// in-process turn interrupted.
 func (a *App) RunChatQueue(ctx context.Context) (queueErr error) {
 	owned := false
 	defer func() {
@@ -143,7 +120,7 @@ func (a *App) RunChatQueue(ctx context.Context) (queueErr error) {
 			return nil
 		}
 		a.closeIdleChat(time.Now())
-		worked, err := a.processNextChat(ctx, false)
+		worked, err := a.processNextChat(ctx)
 		if err != nil && !errors.Is(err, core.ErrNotFound) {
 			return err
 		}
@@ -159,17 +136,13 @@ func (a *App) RunChatQueue(ctx context.Context) (queueErr error) {
 	}
 }
 
-func (a *App) processNextChat(ctx context.Context, standalone bool) (bool, error) {
+func (a *App) processNextChat(ctx context.Context) (bool, error) {
 	select {
 	case a.chat <- struct{}{}:
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
 	defer func() { <-a.chat }()
-	// A daemon may have acquired ownership while a standalone caller waited.
-	if standalone && a.chatRunning.Load() {
-		return false, core.ErrNotFound
-	}
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
