@@ -493,7 +493,7 @@ describe("the board", () => {
     show(project({ playbook: undefined }));
     expect(
       screen.getByRole("link", { name: "Choose a team" }).getAttribute("href"),
-    ).toBe("#/projects/p1/team");
+    ).toBe("#/projects/p1/config");
     expect(screen.queryByRole("link", { name: "Landing" })).toBeNull();
   });
   describe("its landed requests", () => {
@@ -1127,10 +1127,31 @@ describe("the project's tabs", () => {
       },
     ]);
   });
-  it("sets up a code team on one of the project's folders", async () => {
+  const editTeam = () => {
+    const settings = screen.getByRole("region", { name: "Team settings" });
+    fireEvent.click(within(settings).getByRole("button", { name: "Edit" }));
+    return screen.getByRole("form", { name: "Team settings" });
+  };
+  it("sends the owner to Config to choose a team", () => {
     show(project({ playbook: undefined }), {}, { tab: "team" });
-    fireEvent.click(screen.getByRole("button", { name: "Choose a team" }));
-    const team = screen.getByRole("form", { name: "Team" });
+    const team = screen.getByRole("region", { name: "Team" });
+    expect(within(team).queryByRole("button")).toBeNull();
+    expect(
+      within(team)
+        .getByRole("link", { name: "Choose a team in Config" })
+        .getAttribute("href"),
+    ).toBe("#/projects/p1/config");
+  });
+  it("sets up a code team on one of the project's folders, on the Config tab", async () => {
+    show(project({ playbook: undefined }), {}, { tab: "config" });
+    const settings = screen.getByRole("region", { name: "Team settings" });
+    expect(
+      within(settings).getByText("No team yet, so nothing can be asked for."),
+    ).toBeTruthy();
+    fireEvent.click(
+      within(settings).getByRole("button", { name: "Choose a team" }),
+    );
+    const team = screen.getByRole("form", { name: "Team settings" });
     expect(within(team).queryByLabelText("Repository")).toBeNull();
     fireEvent.change(within(team).getByLabelText("Kind of work"), {
       target: { value: "code" },
@@ -1179,10 +1200,9 @@ describe("the project's tabs", () => {
         playbook: { ...codeTeam(), prepare: ["vendor"], sign: "always" },
       }),
       {},
-      { tab: "team" },
+      { tab: "config" },
     );
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    const team = screen.getByRole("form", { name: "Team" });
+    const team = editTeam();
     fireEvent.change(within(team).getByLabelText("Rounds before asking you"), {
       target: { value: "5" },
     });
@@ -1197,10 +1217,11 @@ describe("the project's tabs", () => {
       sign: "always",
     });
   });
-  it("describes a code team by its roles and its check, leaving where it works to Config", () => {
+  it("describes a code team by its roles, leaving how it works to Config", () => {
     show(project(), {}, { tab: "team" });
     const team = screen.getByRole("region", { name: "Team" });
-    expect(within(team).getByText("make check")).toBeTruthy();
+    expect(within(team).queryByText("make check")).toBeNull();
+    expect(within(team).queryByRole("button", { name: "Edit" })).toBeNull();
     expect(
       within(team)
         .getAllByRole("listitem")
@@ -1218,6 +1239,14 @@ describe("the project's tabs", () => {
       within(team).queryByText("Signed as your git config says"),
     ).toBeNull();
     expect(screen.queryByRole("region", { name: "Folders" })).toBeNull();
+    cleanup();
+    show(project(), {}, { tab: "config" });
+    const settings = screen.getByRole("region", { name: "Team settings" });
+    expect(within(settings).getByText("Code")).toBeTruthy();
+    expect(within(settings).getByText("make check")).toBeTruthy();
+    expect(
+      within(settings).getByText("Up to 3, then it asks you"),
+    ).toBeTruthy();
   });
   const member = (
     id: string,
@@ -1255,13 +1284,35 @@ describe("the project's tabs", () => {
   it("shows a member by the name its role was given, with its face and page", () => {
     show(staffed(), { members: crew }, { tab: "team" });
     const team = screen.getByRole("region", { name: "Team" });
-    const ada = within(team).getByRole("link", { name: "Ada" });
+    const ada = within(seat("Implementer")).getByRole("link", { name: "Ada" });
     expect(ada.getAttribute("href")).toBe("#/team/m1");
     expect(ada.querySelector("img")?.getAttribute("width")).toBe("20");
     expect(seat("Implementer").querySelector(".seat-who")?.textContent).toBe(
       "Ada",
     );
     expect(within(team).queryByRole("link", { name: "Reviewer" })).toBeNull();
+  });
+  it("lists each member on the team with every role they hold in it", () => {
+    const ada: Role = {
+      name: "Ada",
+      kinds: ["implementer", "researcher"],
+      engine: "claude",
+      member: "m1",
+    };
+    const [, reviewer, qa] = codeTeam().roles;
+    show(
+      project({ playbook: { ...codeTeam(), roles: [ada, reviewer, qa] } }),
+      { members: crew },
+      { tab: "team" },
+    );
+    const roles = screen.getByRole("definition");
+    expect(roles.textContent).toBe("Researcher and implementer");
+    const list = roles.closest("dl")!;
+    expect(within(list).getByRole("link", { name: "Ada" })).toBeTruthy();
+    expect(within(list).queryByText("Reviewer")).toBeNull();
+    cleanup();
+    show(project(), { members: crew }, { tab: "team" });
+    expect(screen.queryByText("Members on this team")).toBeNull();
   });
   const seat = (name: string) =>
     within(screen.getByRole("list", { name: "Roles" }))
@@ -1406,10 +1457,11 @@ describe("the project's tabs", () => {
           playbook: { ...codeTeam(), roles: [...codeTeam().roles, pia] },
         }),
         { members: crewWithPM },
-        { tab: "team" },
+        { tab: "config" },
       );
-      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-      fireEvent.click(screen.getByRole("button", { name: "Save team" }));
+      fireEvent.click(
+        within(editTeam()).getByRole("button", { name: "Save team" }),
+      );
       await waitFor(() => expect(refresh).toHaveBeenCalled());
       expect(writes()[0].body).toMatchObject({
         pm_member: "m4",
@@ -1471,10 +1523,11 @@ describe("the project's tabs", () => {
           playbook: { ...codeTeam(), roles: [...codeTeam().roles, dee] },
         }),
         { members: withDesigners },
-        { tab: "team" },
+        { tab: "config" },
       );
-      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-      fireEvent.click(screen.getByRole("button", { name: "Save team" }));
+      fireEvent.click(
+        within(editTeam()).getByRole("button", { name: "Save team" }),
+      );
       await waitFor(() => expect(refresh).toHaveBeenCalled());
       expect(writes()[0].body).toMatchObject({ designer_member: "m5" });
     });
@@ -1529,8 +1582,11 @@ describe("the project's tabs", () => {
     expect(
       within(implementer).getByRole("button", { name: "Unassign Implementer" }),
     ).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save team" }));
+    cleanup();
+    show(staffed(), { members: changed }, { tab: "config" });
+    fireEvent.click(
+      within(editTeam()).getByRole("button", { name: "Save team" }),
+    );
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(writes()[0].body).toMatchObject({ implementer_member: "m1" });
   });
@@ -1554,8 +1610,13 @@ describe("the project's tabs", () => {
     );
     expect(seat("Writer")).toBeTruthy();
     expect(seat("QA")).toBeUndefined();
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    const team = screen.getByRole("form", { name: "Team" });
+    cleanup();
+    show(
+      project({ playbook: writingTeam }),
+      { members: crew },
+      { tab: "config" },
+    );
+    const team = editTeam();
     expect(within(team).getByRole("group", { name: "Writer" })).toBeTruthy();
     expect(within(team).queryByRole("group", { name: "QA" })).toBeNull();
     expect(
@@ -1571,8 +1632,8 @@ describe("the project's tabs", () => {
       pm_member: "",
     });
     cleanup();
-    show(staffed(), { members: crew }, { tab: "team" });
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    show(staffed(), { members: crew }, { tab: "config" });
+    editTeam();
     expect(screen.queryByRole("group", { name: "Implementer" })).toBeNull();
     expect(screen.getAllByLabelText("Engine")).toHaveLength(1);
   });

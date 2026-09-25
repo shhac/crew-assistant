@@ -97,7 +97,13 @@ export function ProjectPage({
       {tab === "team" && (
         <TeamTab project={project} members={state.members} refresh={refresh} />
       )}
-      {tab === "config" && <ConfigTab project={project} refresh={refresh} />}
+      {tab === "config" && (
+        <ConfigTab
+          project={project}
+          members={state.members}
+          refresh={refresh}
+        />
+      )}
       {tab === "activity" && <ActivityTab project={project} state={state} />}
       {route.request && (
         <RequestPanel

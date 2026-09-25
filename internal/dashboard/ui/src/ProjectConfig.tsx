@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from "react";
 import { Folders } from "./ProjectFolders";
 import { LandingSettings } from "./ProjectLanding";
+import { TeamSettings } from "./TeamSettings";
 import { isCode } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
-import { setWorkspace, type Playbook, type Project } from "./api";
+import { setWorkspace, type Member, type Playbook, type Project } from "./api";
 
 const signing: Record<string, string> = {
   "": "Signed as your git config says",
@@ -11,18 +12,21 @@ const signing: Record<string, string> = {
   never: "Never signed",
 };
 
-/** Where a project's work happens and how it lands. */
+/** How a project's team works, where its work happens and how it lands. */
 export function ConfigTab({
   project,
+  members,
   refresh,
 }: {
   project: Project;
+  members: Member[];
   refresh: () => Promise<void>;
 }) {
   const playbook = project.playbook;
   const code = playbook && isCode(playbook);
   return (
     <div className="tab-stack">
+      <TeamSettings project={project} members={members} refresh={refresh} />
       {code && (
         <>
           <LandingSettings

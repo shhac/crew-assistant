@@ -379,7 +379,7 @@ function AskForm({
     return (
       <p className="ask-blocked card">
         Needs a team first.{" "}
-        <a href={projectHref(project.id, "team")}>Choose a team</a>
+        <a href={projectHref(project.id, "config")}>Choose a team</a>
       </p>
     );
   async function ask(e: FormEvent) {

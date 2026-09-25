@@ -248,7 +248,11 @@ it("adds an existing folder without requiring an outcome or starting coordinatio
 it("keeps attached-directory edits until explicit save", async () => {
   const refresh = vi.fn(async () => {});
   render(
-    <ConfigTab project={trackedProject(["/home/work"])} refresh={refresh} />,
+    <ConfigTab
+      project={trackedProject(["/home/work"])}
+      members={[]}
+      refresh={refresh}
+    />,
   );
   const folders = screen.getByRole("region", { name: "Folders" });
   expect(folders.textContent).toContain("/home/work");
@@ -271,7 +275,11 @@ it("adds picked folders to the project only when saved, and cancel discards edit
   respond = (url) => listing(url.searchParams.get("path") || "/home/work");
   const refresh = vi.fn(async () => {});
   render(
-    <ConfigTab project={trackedProject(["/home/work"])} refresh={refresh} />,
+    <ConfigTab
+      project={trackedProject(["/home/work"])}
+      members={[]}
+      refresh={refresh}
+    />,
   );
   const folders = screen.getByRole("region", { name: "Folders" });
   fireEvent.click(within(folders).getByRole("button", { name: "Edit" }));
@@ -305,7 +313,9 @@ it("adds picked folders to the project only when saved, and cancel discards edit
   ]);
 });
 it("offers to add folders to a project that has none", () => {
-  render(<ConfigTab project={trackedProject([])} refresh={vi.fn()} />);
+  render(
+    <ConfigTab project={trackedProject([])} members={[]} refresh={vi.fn()} />,
+  );
   const folders = screen.getByRole("region", { name: "Folders" });
   expect(within(folders).getByText("No folders.")).toBeTruthy();
   fireEvent.click(within(folders).getByRole("button", { name: "Add folders" }));
