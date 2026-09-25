@@ -937,7 +937,21 @@ describe("the team", () => {
   it("creates a member and opens it", async () => {
     window.history.replaceState(null, "", "/#/team");
     respond = (path) => ({
-      body: path === "/api/members" ? { ...ada(), learnings: [] } : state,
+      body:
+        path === "/api/members"
+          ? { ...ada(), learnings: [] }
+          : path === "/api/models?profile=assistant&engine=codex"
+            ? {
+                available: true,
+                engine: "codex",
+                detail: "Reported by Codex",
+                default: { model: "gpt-6", effort: "" },
+                models: [
+                  { id: "gpt-6", name: "GPT-6", efforts: [] },
+                  { id: "gpt-6-mini", name: "GPT-6 mini", efforts: [] },
+                ],
+              }
+            : state,
     });
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "New member" }));
@@ -955,11 +969,15 @@ describe("the team", () => {
     fireEvent.change(screen.getByLabelText("Engine"), {
       target: { value: "codex" },
     });
+    await screen.findByRole("option", { name: "GPT-6 (recommended)" });
     fireEvent.change(screen.getByLabelText(/^Model/), {
       target: { value: "gpt-6" },
     });
     fireEvent.change(screen.getByLabelText(/^Instructions/), {
       target: { value: "Check the tests first." },
+    });
+    fireEvent.change(screen.getByLabelText(/^Description/), {
+      target: { value: "A tall woman with silver hair." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add member" }));
     await waitFor(() => expect(window.location.hash).toBe("#/team/m1"));
@@ -972,6 +990,7 @@ describe("the team", () => {
       model: "gpt-6",
       effort: "",
       instructions: "Check the tests first.",
+      description: "A tall woman with silver hair.",
     });
   });
   it("adds a member who keeps the to-do list beside its work", async () => {
@@ -1276,12 +1295,18 @@ describe("the team", () => {
     ).toBeTruthy();
   });
   it("edits a member in place", async () => {
-    state.members = [ada()];
+    state.members = [{ ...ada(), description: "Quiet and exact." }];
     window.history.replaceState(null, "", "/#/team/m1");
     render(<App />);
+    expect(await screen.findByText("Quiet and exact.")).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     expect(screen.getByLabelText("Name")).toHaveProperty("value", "Ada");
+    expect(screen.getByLabelText(/^Model/).tagName).toBe("SELECT");
     expect(screen.getByLabelText(/^Model/)).toHaveProperty("value", "opus");
+    expect(screen.getByLabelText(/^Description/)).toHaveProperty(
+      "value",
+      "Quiet and exact.",
+    );
     fireEvent.change(screen.getByLabelText(/^Reasoning effort/), {
       target: { value: "high" },
     });
@@ -1297,6 +1322,7 @@ describe("the team", () => {
       engine: "claude",
       model: "opus",
       effort: "high",
+      description: "Quiet and exact.",
     });
   });
 });

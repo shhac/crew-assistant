@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { engines, kindsProblem, memberKinds } from "./members";
+import { modelLabel, useModelCatalog } from "./modelCatalog";
 import { ErrorNotice, useAction } from "./ui";
 import { saveMember, type Member, type MemberKind } from "./api";
 
@@ -27,6 +28,15 @@ export function MemberForm({
   const [model, setModel] = useState(member?.model ?? "");
   const [effort, setEffort] = useState(member?.effort ?? "");
   const [instructions, setInstructions] = useState(member?.instructions ?? "");
+  const [description, setDescription] = useState(member?.description ?? "");
+  const models = useModelCatalog(engine);
+  const listed = models.options.some((option) => option.id === model);
+  // Another engine's models don't run here; going back to the saved engine
+  // brings back the saved model.
+  const chooseEngine = (next: string) => {
+    setEngine(next);
+    setModel(next === member?.engine ? (member.model ?? "") : "");
+  };
   const { busy, error, run } = useAction();
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -39,6 +49,7 @@ export function MemberForm({
         model: model.trim(),
         effort: effort.trim(),
         instructions: instructions.trim(),
+        description: description.trim(),
       });
       await onSaved(saved);
     });
@@ -91,7 +102,7 @@ export function MemberForm({
             id="member-engine"
             className="field"
             value={engine}
-            onChange={(e) => setEngine(e.target.value)}
+            onChange={(e) => chooseEngine(e.target.value)}
           >
             {engines.map((option) => (
               <option key={option.id} value={option.id}>
@@ -102,16 +113,32 @@ export function MemberForm({
         </label>
         <label htmlFor="member-model">
           Model
-          <input
+          <select
             id="member-model"
             className="field"
             value={model}
-            maxLength={80}
             onChange={(e) => setModel(e.target.value)}
-          />
-          <span className="hint">
-            Optional. Empty uses the engine's default.
+            disabled={models.loading}
+          >
+            <option value="">The engine's default</option>
+            {model && !listed && <option value={model}>{model} (saved)</option>}
+            {models.options.map((option) => (
+              <option key={option.id} value={option.id}>
+                {modelLabel(option, models.catalog)}
+              </option>
+            ))}
+          </select>
+          <span className="hint" role="status">
+            {models.loading
+              ? "Finding models…"
+              : models.error || models.catalog?.detail}
           </span>
+          {models.catalog?.available && model && !listed && (
+            <span className="hint">
+              The saved model isn't in this list. It stays until you pick
+              another.
+            </span>
+          )}
         </label>
         <label htmlFor="member-effort">
           Reasoning effort
@@ -126,6 +153,31 @@ export function MemberForm({
           <span className="hint">Optional.</span>
         </label>
       </div>
+      <div className="actions">
+        <button
+          className="btn btn-sm"
+          type="button"
+          disabled={models.loading}
+          onClick={models.refresh}
+        >
+          Refresh the list of models
+        </button>
+      </div>
+      <label htmlFor="member-description">
+        Description
+        <textarea
+          id="member-description"
+          className="field"
+          rows={3}
+          value={description}
+          maxLength={1000}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+        <span className="hint">
+          Optional. Who they are, in your words; every picture of them is drawn
+          from it.
+        </span>
+      </label>
       <label htmlFor="member-instructions">
         Instructions
         <textarea

@@ -81,6 +81,44 @@ func TestCodexDrawsAMemberInTheBackground(t *testing.T) {
 	}
 }
 
+func TestAMembersDescriptionIsDrawnWithTheirLook(t *testing.T) {
+	a := testApp(t)
+	painter := &fakePainter{}
+	a.Painter = painter
+	ctx := context.Background()
+	plain, err := a.CreateMember(ctx, core.MemberInput{Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "codex", Instructions: "Read twice."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.drawings.Wait()
+	ofRune, ofAda := "Rune, "+roleWords([]string{core.RoleReviewer}), "Ada, "+roleWords([]string{core.RoleImplementer})
+	if want := ofRune + " on a small software team. How they work: Read twice. Design their look yourself to suit them."; painter.seen[0] != want {
+		t.Fatalf("an empty description changed the prompt:\n got %q\nwant %q", painter.seen[0], want)
+	}
+	described, err := a.CreateMember(ctx, core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude", Description: "A tall woman in her sixties with silver hair."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.drawings.Wait()
+	if err := a.DrawMember(ctx, described.ID, "Violet bob, round glasses"); err != nil {
+		t.Fatal(err)
+	}
+	a.drawings.Wait()
+	if err := a.DrawMember(ctx, plain.ID, "Green cap"); err != nil {
+		t.Fatal(err)
+	}
+	a.drawings.Wait()
+	for i, want := range []string{
+		ofAda + " on a small software team. Who they are: A tall woman in her sixties with silver hair. Design their look yourself to suit them.",
+		ofAda + " on a small software team. Who they are: A tall woman in her sixties with silver hair. Their look: Violet bob, round glasses",
+		ofRune + " on a small software team. How they work: Read twice. Their look: Green cap",
+	} {
+		if painter.seen[i+1] != want {
+			t.Fatalf("drawing %d:\n got %q\nwant %q", i+1, painter.seen[i+1], want)
+		}
+	}
+}
+
 func TestADrawingThatFailsSaysSoAndOneAtATimeIsDrawn(t *testing.T) {
 	a := testApp(t)
 	painter := &fakePainter{fail: errors.New("no image tool"), block: make(chan struct{})}

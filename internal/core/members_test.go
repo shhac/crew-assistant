@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -196,5 +197,70 @@ func TestAMemberStaysIfAnyTeamWouldBeLeftBroken(t *testing.T) {
 		if p.Playbook.Roles[0].Member != ada.ID {
 			t.Fatalf("%s's team changed though nothing was deleted: %+v", p.ID, p.Playbook.Roles)
 		}
+	}
+}
+
+func TestAMemberKeepsItsDescriptionAcrossRestarts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewService(st, config.Default())
+	ada, err := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kinds: []string{RoleImplementer}, Engine: "claude", Description: "  A patient engineer who likes tidy diffs.  "})
+	if err != nil || ada.Description != "A patient engineer who likes tidy diffs." {
+		t.Fatalf("member %+v %v", ada, err)
+	}
+	if _, err := s.SaveMember(testContext, "", MemberInput{Name: "Rune", Kinds: []string{RoleReviewer}, Engine: "codex", Description: strings.Repeat("x", 1001)}); err == nil {
+		t.Fatal("accepted a description over 1000 characters")
+	}
+	ada, err = s.SaveMember(testContext, ada.ID, MemberInput{Name: "Ada", Kinds: []string{RoleImplementer}, Engine: "claude", Description: "Quiet, exact, fond of tests."})
+	if err != nil || ada.Description != "Quiet, exact, fond of tests." {
+		t.Fatalf("edited %+v %v", ada, err)
+	}
+	st.Close()
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s = NewService(st, config.Default())
+	snap, _ := s.Snapshot(testContext)
+	if snap.Members[0].Description != "Quiet, exact, fond of tests." {
+		t.Fatalf("the description was lost on restart: %+v", snap.Members[0])
+	}
+	ada, err = s.SaveMember(testContext, ada.ID, MemberInput{Name: "Ada", Kinds: []string{RoleImplementer}, Engine: "claude"})
+	if err != nil || ada.Description != "" {
+		t.Fatalf("cleared %+v %v", ada, err)
+	}
+}
+
+func TestAMemberSavedBeforeDescriptionsLoadsUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	avatar, _ := json.Marshal(config.Avatar{Shape: "orb", Background: "#101820", Accent: "#ffffff", Image: "img1", Look: "Round glasses"})
+	payload := `{"schema":2,"snapshot":{"members":[{"id":"m1","name":"Ada","kinds":["implementer","reviewer"],"engine":"codex","model":"gpt-6","effort":"high","instructions":"Small commits.","avatar":` + string(avatar) + `,"learnings":[{"id":"l1","text":"Run the linter first.","at":"2026-09-20T10:00:00Z"}],"created_at":"2026-09-01T09:00:00Z"}]}}`
+	if _, err = st.db.Exec("UPDATE state SET payload=? WHERE id=1", payload); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	snap, err := NewService(st, config.Default()).Snapshot(testContext)
+	if err != nil || len(snap.Members) != 1 {
+		t.Fatalf("members %+v %v", snap.Members, err)
+	}
+	m := snap.Members[0]
+	if m.ID != "m1" || m.Name != "Ada" || !reflect.DeepEqual(m.Kinds, []string{RoleImplementer, RoleReviewer}) || m.Engine != "codex" || m.Model != "gpt-6" || m.Effort != "high" || m.Instructions != "Small commits." || m.Description != "" {
+		t.Fatalf("an older member changed on load: %+v", m)
+	}
+	if m.Avatar.Image != "img1" || m.Avatar.Look != "Round glasses" || len(m.Learnings) != 1 || m.Learnings[0].Text != "Run the linter first." || m.CreatedAt.IsZero() {
+		t.Fatalf("an older member lost its picture, learnings or age: %+v", m)
 	}
 }

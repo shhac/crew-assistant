@@ -26,6 +26,7 @@ type Member struct {
 	Model        string        `json:"model,omitempty"`
 	Effort       string        `json:"effort,omitempty"`
 	Instructions string        `json:"instructions,omitempty"`
+	Description  string        `json:"description,omitempty"`
 	Avatar       config.Avatar `json:"avatar"`
 	// AvatarSVG is filled in when the state is read, and the drawing status
 	// by the app, which does the drawing; neither is stored.
@@ -45,8 +46,13 @@ type MemberInput struct {
 	Model        string         `json:"model"`
 	Effort       string         `json:"effort"`
 	Instructions string         `json:"instructions"`
+	Description  string         `json:"description"`
 	Avatar       *config.Avatar `json:"avatar,omitempty"`
 }
+
+// MaxMemberDescription is the most characters a member's description holds:
+// who they are, in the owner's words, drawn into every picture of them.
+const MaxMemberDescription = 1000
 
 // Member finds a member by id.
 func (v Snapshot) Member(id string) (Member, bool) {
@@ -129,6 +135,9 @@ func (in MemberInput) validate(v *Snapshot, id string) error {
 	if len(in.Instructions) > 4000 {
 		return errors.New("instructions must be at most 4000 characters")
 	}
+	if len([]rune(strings.TrimSpace(in.Description))) > MaxMemberDescription {
+		return fmt.Errorf("a description must be at most %d characters", MaxMemberDescription)
+	}
 	if in.Avatar != nil {
 		if err := in.Avatar.Normalized().Validate(); err != nil {
 			return fmt.Errorf("avatar: %w", err)
@@ -156,6 +165,7 @@ func (s *Service) SaveMember(ctx context.Context, id string, in MemberInput) (Me
 		}
 		m.Name, m.Kinds, m.Engine = strings.TrimSpace(in.Name), in.kinds(), in.Engine
 		m.Model, m.Effort, m.Instructions = strings.TrimSpace(in.Model), strings.TrimSpace(in.Effort), strings.TrimSpace(in.Instructions)
+		m.Description = strings.TrimSpace(in.Description)
 		// A drawn picture is changed only by drawing again.
 		if in.Avatar != nil {
 			next := in.Avatar.Normalized()

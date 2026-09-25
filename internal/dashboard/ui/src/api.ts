@@ -79,6 +79,7 @@ export interface Member extends Drawable {
   model?: string;
   effort?: string;
   instructions?: string;
+  description?: string;
   learnings: Learning[];
   created_at?: string;
 }
@@ -89,6 +90,7 @@ export interface MemberInput {
   model: string;
   effort: string;
   instructions: string;
+  description: string;
 }
 export interface Playbook {
   template: string;

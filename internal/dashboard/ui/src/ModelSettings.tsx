@@ -1,22 +1,5 @@
-import { useEffect, useState } from "react";
-import { api, section, type Config } from "./api";
-
-export type ModelOption = {
-  id: string;
-  name: string;
-  description?: string;
-  default_effort: string;
-  efforts: { id: string; description?: string }[];
-  is_default: boolean;
-};
-export type Catalog = {
-  available: boolean;
-  detail: string;
-  engine: string;
-  models: ModelOption[];
-  current: { model: string; effort: string };
-  default: { model: string; effort: string };
-};
+import { section, type Config } from "./api";
+import { modelLabel, useModelCatalog, type ModelOption } from "./modelCatalog";
 
 const group = "model";
 
@@ -34,44 +17,9 @@ export function ModelSettings({
   const codex = value("engine") === "codex";
   const claude = value("engine") === "claude";
   const localCLI = codex || claude;
-  const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    if (!localCLI) {
-      setCatalog(null);
-      return;
-    }
-    let active = true;
-    const controller = new AbortController();
-    setLoading(true);
-    setError("");
-    setCatalog(null);
-    api<Catalog>(`/api/models?profile=assistant&engine=${value("engine")}`, {
-      signal: controller.signal,
-    })
-      .then((data) => {
-        if (active) setCatalog(data);
-      })
-      .catch(() => {
-        if (active)
-          setError(
-            "Couldn't load the list of models. Your choice hasn't changed.",
-          );
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [codex, claude, revision]);
-  const options =
-    catalog?.available && catalog.engine === value("engine")
-      ? catalog.models
-      : [];
+  const { catalog, options, error, loading, refresh } = useModelCatalog(
+    localCLI ? value("engine") : "",
+  );
   const selected = options.find((option) => option.id === value("model"));
   const efforts = selected?.efforts || [];
   const chooseModel = (id: string) => {
@@ -123,12 +71,7 @@ export function ModelSettings({
               )}
               {options.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {option.name}
-                  {option.id === catalog?.default.model
-                    ? " (recommended)"
-                    : option.is_default
-                      ? ` (${value("engine") === "claude" ? "Claude" : "Codex"} default)`
-                      : ""}
+                  {modelLabel(option, catalog)}
                 </option>
               ))}
             </select>
@@ -187,7 +130,7 @@ export function ModelSettings({
               className="btn btn-sm"
               type="button"
               disabled={loading}
-              onClick={() => setRevision(revision + 1)}
+              onClick={refresh}
             >
               Refresh the list
             </button>

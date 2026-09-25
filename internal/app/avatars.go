@@ -168,6 +168,9 @@ func (a *App) DrawMember(ctx context.Context, id, look string) error {
 	if m.Instructions != "" {
 		character += " How they work: " + text.Clip(m.Instructions, 200)
 	}
+	if m.Description != "" {
+		character += " Who they are: " + text.Clip(m.Description, core.MaxMemberDescription)
+	}
 	character += " " + lookOrChoose(look)
 	return a.startDrawing(ctx, m.ID, character, func(ctx context.Context, image string) error {
 		return a.Core.SetMemberPicture(ctx, m.ID, image, look)

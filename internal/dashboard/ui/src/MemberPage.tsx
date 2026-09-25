@@ -83,6 +83,7 @@ function MemberHead({
       <div className="member-head-text">
         <h1>{member.name}</h1>
         <p className="soft">{memberSummary(member)}</p>
+        {member.description && <p>{member.description}</p>}
       </div>
       <div className="actions">
         {mode === "view" && !member.drawing && (
