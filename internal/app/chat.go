@@ -132,10 +132,14 @@ func (a *App) RunChatQueue(ctx context.Context) (queueErr error) {
 	defer a.chatRunning.Store(false)
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
+	// The model session lives with the queue; its conversation stays saved in
+	// the CLI and is resumed next time.
+	defer a.closeChat()
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
+		a.closeIdleChat(time.Now())
 		worked, err := a.processNextChat(ctx, false)
 		if err != nil && !errors.Is(err, core.ErrNotFound) {
 			return err
@@ -230,6 +234,11 @@ func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Resul
 			return err
 		}
 		return a.Core.SetChatModelStatus(ctx, turn.ID, "Earlier context summarized; continuing with saved progress.", time.Time{})
+	}
+	// On a model session the CLI keeps the conversation and compacts it
+	// itself; the turn-by-turn way below sends everything each time.
+	if result, err := a.runSessionTurn(ctx, turn, ec, ec.OnTool); !errors.Is(err, errNoChatSession) {
+		return result, err
 	}
 	if err := a.compactChatHistory(ctx, turn.UserMessageID, ec); err != nil {
 		return engine.Result{}, err

@@ -34,8 +34,10 @@ type App struct {
 	chatFailed       atomic.Bool
 	chatWaiters      sync.Map
 	chatInvoker      func(context.Context, engine.Config, engine.Request, engine.ToolExecutor) (engine.Result, error)
-	summarize        smallCompletion // Writes the conversation's summaries.
-	statuses         map[string]core.Integration
+	// sessions holds the model session the assistant's conversation runs on.
+	sessions  chatSessions
+	summarize smallCompletion // Writes the conversation's summaries.
+	statuses  map[string]core.Integration
 	// drawing is each picture being drawn or that failed, by member id or
 	// drawingAssistant. It is not stored: a restart forgets a drawing it
 	// could not finish.

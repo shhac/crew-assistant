@@ -20,10 +20,16 @@ const compactKeep = 4
 func (a *App) runChatCommand(ctx context.Context, turn core.ChatTurn) error {
 	summary, outcome := "", "Started a fresh conversation. The last one is in History."
 	var runErr error
-	if turn.Command == core.CommandCompact {
+	switch turn.Command {
+	case core.CommandCompact:
 		runCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 		summary, outcome, runErr = a.compactNow(runCtx, turn.ID)
+		if runErr == nil {
+			runErr = a.compactSession(runCtx)
+		}
 		cancel()
+	default:
+		a.closeChat()
 	}
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
