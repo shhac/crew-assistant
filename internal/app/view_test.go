@@ -35,6 +35,9 @@ func TestTheAssistantSeesAnOverviewAndReadsDetailOnlyWhenItAsks(t *testing.T) {
 	s.Tasks = append(s.Tasks, core.Task{ID: "live", Status: core.TaskReviewing, Stage: core.StageReviewing, Round: 3, Checking: "Rune", Criteria: []string{long}, Plan: &core.Plan{Summary: long}, Revisions: []core.Revision{{N: 1, Summary: "first"}, {N: 2, Summary: "second"}, {N: 3, Summary: "third"}}, Verdicts: []core.Verdict{{Revision: 2, Summary: "old"}, {Revision: 3, Summary: "current"}}, Messages: []core.TeamMessage{{Text: long}}})
 	s.Projects = append(s.Projects, core.Project{ID: "p", Playbook: &core.Playbook{Roles: []core.Role{{Name: "Ada", Kinds: []string{core.RoleImplementer}, Instructions: long}}}})
 	s.Decisions = append(s.Decisions, core.Decision{ID: "now", Status: "open", Context: long})
+	for i := 0; i < 40; i++ {
+		s.Activity = append(s.Activity, core.Activity{ID: fmt.Sprint("a", i), Summary: "newest first"})
+	}
 	view := assistantView(s)
 	raw, _ := json.Marshal(view)
 	if len(raw) > 16<<10 {
@@ -53,6 +56,9 @@ func TestTheAssistantSeesAnOverviewAndReadsDetailOnlyWhenItAsks(t *testing.T) {
 	last := view.Decisions[len(view.Decisions)-1]
 	if last.ID != "now" || last.Context != long {
 		t.Fatal("an open decision was cut")
+	}
+	if len(view.Activity) != 30 || view.Activity[0].ID != "a0" {
+		t.Fatalf("the assistant should see the newest activity: %d from %s", len(view.Activity), view.Activity[0].ID)
 	}
 	if len(s.Tasks[0].Revisions) != 5 {
 		t.Fatal("the view changed the state it was made from")

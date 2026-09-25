@@ -50,9 +50,8 @@ func assistantView(s core.Snapshot) core.Snapshot {
 	}
 	s.Decisions = append(closed, open...)
 
-	if len(s.Activity) > 30 {
-		s.Activity = s.Activity[len(s.Activity)-30:]
-	}
+	// The snapshot lists activity newest first.
+	s.Activity = s.Activity[:min(len(s.Activity), 30)]
 	var wakes []core.Wake
 	for _, w := range s.Wakes {
 		if w.Status == core.WakeWaiting || w.Status == core.WakeFired {
