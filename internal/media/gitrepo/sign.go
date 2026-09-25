@@ -21,9 +21,13 @@ const (
 )
 
 // commit runs a git command that writes a commit (commit or commit-tree),
-// signed or not as the project says.
+// made as the owner and signed or not as the project says.
 func (r Repo) commit(ctx context.Context, command string, args ...string) (string, error) {
 	sign, config, err := r.signing(ctx)
+	if err != nil {
+		return "", err
+	}
+	identity, err := r.identity(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -31,7 +35,7 @@ func (r Repo) commit(ctx context.Context, command string, args ...string) (strin
 	if sign {
 		flag = "-S"
 	}
-	env := gitEnvironment()
+	env := append(gitEnvironment(), identity...)
 	if len(config) > 0 {
 		env = append(env, "GIT_CONFIG_COUNT="+strconv.Itoa(len(config)))
 		for i, kv := range config {
@@ -65,37 +69,36 @@ func (r Repo) signing(ctx context.Context) (bool, [][2]string, error) {
 	if !sign {
 		return false, nil, nil
 	}
-	out, err := ownerConfig(ctx, r.source, "-z", "--get-regexp", `^(user\.(signingkey|name|email)|gpg\..*)$`)
+	out, err := ownerConfig(ctx, r.source, "-z", "--get-regexp", `^(user\.signingkey|gpg\..*)$`)
 	if err != nil {
 		return false, nil, err
 	}
 	var config [][2]string
-	identity := map[string]string{}
 	for _, entry := range strings.Split(out, "\x00") {
-		key, value, _ := strings.Cut(entry, "\n")
-		switch key {
-		case "":
-		case "user.name", "user.email":
-			identity[key] = value
-		default:
+		if key, value, _ := strings.Cut(entry, "\n"); key != "" {
 			config = append(config, [2]string{key, value})
 		}
-	}
-	// Without a signing key git signs as the committer, which in the clone is
-	// the daemon; the owner's key is the one their own commits would use.
-	if !hasKey(config, "user.signingkey") && identity["user.email"] != "" {
-		config = append(config, [2]string{"user.signingkey", strings.TrimSpace(identity["user.name"] + " <" + identity["user.email"] + ">")})
 	}
 	return true, config, nil
 }
 
-func hasKey(config [][2]string, key string) bool {
-	for _, kv := range config {
-		if kv[0] == key {
-			return true
+// identity makes the daemon's commits as the owner's own commits in the
+// source repository are made: the name and email their configuration gives
+// for that folder, including any it sets for the folders it sits in. Without
+// either, the clone's crew-assistant identity stands. Without a signing key,
+// git signs as this committer too.
+func (r Repo) identity(ctx context.Context) ([]string, error) {
+	var env []string
+	for _, field := range [][3]string{{"user.name", "GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"}, {"user.email", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"}} {
+		out, err := ownerConfig(ctx, r.source, "--get", field[0])
+		if err != nil {
+			return nil, err
+		}
+		if value := strings.TrimSpace(out); value != "" {
+			env = append(env, field[1]+"="+value, field[2]+"="+value)
 		}
 	}
-	return false
+	return env, nil
 }
 
 // ownerConfig reads git config for dir as the owner's own git would, where

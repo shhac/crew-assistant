@@ -590,6 +590,42 @@ func signed(t *testing.T, r Repo, commit string) bool {
 	return strings.Contains(git(t, r.Workspace(), "cat-file", "commit", commit), "\ngpgsig ")
 }
 
+func TestCommitsAreMadeAsTheOwnerIsForTheirFolder(t *testing.T) {
+	source := ownerRepo(t)
+	home := t.TempDir()
+	personal := filepath.Join(home, "personal")
+	write(t, personal, "[user]\n\tname = Owner\n\temail = owner@personal.test\n")
+	folder, err := filepath.EvalSymlinks(filepath.Dir(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	global := filepath.Join(home, "gitconfig")
+	// A work identity everywhere, and a personal one for the folders the
+	// source sits in, as an includeIf for a directory gives it.
+	write(t, global, "[user]\n\tname = Owner at Work\n\temail = owner@work.test\n[includeIf \"gitdir:"+folder+"/\"]\n\tpath = "+personal+"\n")
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	r, err := Open(ctx, t.TempDir(), source, nil, SignNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, _ := r.Begin(ctx, "crew-task/a", "")
+	write(t, filepath.Join(r.Workspace(), "a.go"), "package main\n")
+	a, _, err := r.Snapshot(ctx, base, base, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if who := git(t, r.Workspace(), "log", "-1", "--format=%an <%ae> %cn <%ce>", a); who != "Owner <owner@personal.test> Owner <owner@personal.test>" {
+		t.Fatalf("committed as %s", who)
+	}
+
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	write(t, filepath.Join(r.Workspace(), "a.go"), "package main // 2\n")
+	b, _, _ := r.Snapshot(ctx, base, a, "b")
+	if who := git(t, r.Workspace(), "log", "-1", "--format=%ae", b); who != authorKey {
+		t.Fatalf("without an identity of the owner's, committed as %s", who)
+	}
+}
+
 func TestCommitsAreSignedAsTheOwnersGitConfigSaysUnlessTheProjectDecides(t *testing.T) {
 	source := ownerRepo(t)
 	program, calls := fakeSigner(t)
