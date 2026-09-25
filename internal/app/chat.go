@@ -134,6 +134,9 @@ func (a *App) RunChatQueue(ctx context.Context) (queueErr error) {
 	defer tick.Stop()
 	// The model session lives with the queue; its conversation stays saved in
 	// the CLI and is resumed next time.
+	if a.sessions.open == nil && !a.Demo {
+		a.sessions.open = harnessChatOpener(ctx)
+	}
 	defer a.closeChat()
 	for {
 		if ctx.Err() != nil {

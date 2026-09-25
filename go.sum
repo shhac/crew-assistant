@@ -28,6 +28,8 @@ github.com/shhac/lib-agent-harness v0.3.4 h1:mwWEGkis8CjcVfFMdS4TkkRKm+mI07hYKQS
 github.com/shhac/lib-agent-harness v0.3.4/go.mod h1:T1HWREtCnXLMzr68WCEifmSFNrSNZp9TRd8JRrjfjek=
 github.com/shhac/lib-agent-harness v0.3.5 h1:goE4AN6o4pnlVL1prnLjqlUW3DecpgAwPpLDLiQ5aLs=
 github.com/shhac/lib-agent-harness v0.3.5/go.mod h1:T1HWREtCnXLMzr68WCEifmSFNrSNZp9TRd8JRrjfjek=
+github.com/shhac/lib-agent-harness v0.4.0 h1:kfHwMEVFd36jfndXrFRC3cnvBjS230MbBak33be2BEM=
+github.com/shhac/lib-agent-harness v0.4.0/go.mod h1:T1HWREtCnXLMzr68WCEifmSFNrSNZp9TRd8JRrjfjek=
 github.com/shhac/lib-agent-mcp v0.23.1 h1:7VSbZcLPtOUUeef95Wanv7hL0rZAPxerqfwoF8vcSQ0=
 github.com/shhac/lib-agent-mcp v0.23.1/go.mod h1:kJfGbLYVhEvntawEHFDf0+u7bbL4tr4jx+uupVUqpGg=
 github.com/shhac/lib-agent-output v0.12.0 h1:Xlfvjew68PGwc3oMPp58AHfiSsHaaY/gULe11Cc0Ft8=
