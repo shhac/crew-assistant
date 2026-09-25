@@ -12,7 +12,6 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
-	"github.com/shhac/lib-agent-harness/completion"
 )
 
 var ErrChatQueueUnavailable = errors.New("the chat has stopped; restart crew-assistant to pick up waiting messages")
@@ -242,11 +241,13 @@ func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Resul
 	go a.startChatLoading(ctx, turn.ID, turn.Message, history)
 	req := engine.Request{Message: turn.Message, History: history, Context: raw}
 	result, err := a.chatOnce(ctx, ec, req)
+	a.recordWindow(ctx, ec, result.Usage)
 	// A model can turn out to have a smaller window than the turn was sized
-	// for, such as one just chosen in Settings. Its reply says so; the turn is
-	// sized to it and tried once more, compacting what it must.
-	if a.learnWindow(ctx, ec, result.Usage) && providerContextLimit(err) {
-		ec.MaxContextBytes = contextBudget(result.Usage.ContextWindow, ec.MaxOutputTokens)
+	// for, such as one just chosen in Settings. Its refusal says so; the turn
+	// is sized to it and tried once more, compacting what it must, but only if
+	// nothing it did yet would be done twice.
+	if budget := smallerBudget(ec, result.Usage.ContextWindow); budget > 0 && len(result.Actions) == 0 && providerContextLimit(err) {
+		ec.MaxContextBytes = budget
 		return a.chatOnce(ctx, ec, req)
 	}
 	return result, err
@@ -263,13 +264,6 @@ func (a *App) chatOnce(ctx context.Context, ec engine.Config, req engine.Request
 	return e.Chat(ctx, req)
 }
 
-// providerContextLimit reports a request the model refused as too long, as
-// opposed to one the daemon never sent.
-func providerContextLimit(err error) bool {
-	var failure *completion.RequestError
-	return errors.As(err, &failure) && failure.Kind == completion.ErrorContextLimit && failure.Phase != completion.PhasePreflight
-}
-
 // assistantConfig is the assistant's own model, as configured, with each
 // request counted against the daily allowance and sized to the model's window.
 func (a *App) assistantConfig(ctx context.Context, cfg config.Config) engine.Config {
@@ -281,28 +275,4 @@ func (a *App) assistantConfig(ctx context.Context, cfg config.Config) engine.Con
 		ec.MaxContextBytes = contextBudget(snap.ModelWindow(ec.Engine, ec.Model), ec.MaxOutputTokens)
 	}
 	return ec
-}
-
-// contextBudget is how many bytes a request to a model may carry: its stated
-// window, less room for the reply and the CLI's own framing, at three bytes a
-// token, which undercounts prose and JSON alike. Until the model has stated a
-// window, the engine's default stands.
-func contextBudget(window, maxOutput int) int {
-	if window <= 0 {
-		return 0
-	}
-	return max(window-maxOutput-8192, 8192) * 3
-}
-
-// learnWindow keeps the window a reply stated for the model that gave it, and
-// reports whether it would have sized the request smaller than it was.
-func (a *App) learnWindow(ctx context.Context, ec engine.Config, usage engine.Usage) bool {
-	if usage.ContextWindow <= 0 {
-		return false
-	}
-	if err := a.Core.RecordModelWindow(context.WithoutCancel(ctx), ec.Engine, ec.Model, usage.ContextWindow); err != nil {
-		return false
-	}
-	budget := contextBudget(usage.ContextWindow, ec.MaxOutputTokens)
-	return ec.MaxContextBytes == 0 || budget < ec.MaxContextBytes
 }

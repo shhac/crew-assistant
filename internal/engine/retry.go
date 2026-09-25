@@ -84,17 +84,7 @@ func (e *Engine) completeWithTools(ctx context.Context, messages []Message, tool
 			return Message{}, usage, err
 		}
 		m, u, err := e.completeAttemptWithTools(callCtx, messages, tools)
-		usage.InputTokens += u.InputTokens
-		usage.OutputTokens += u.OutputTokens
-		usage.TotalTokens += u.TotalTokens
-		if u.ContextWindow > 0 {
-			usage.ContextWindow = u.ContextWindow
-		}
-		if attempt == 0 {
-			usage.Known = u.Known
-		} else {
-			usage.Known = usage.Known && u.Known
-		}
+		mergeContextUsage(&usage, u, attempt == 0)
 		if err == nil {
 			if attempt > 0 {
 				if hookErr := e.retryEvent(ctx, RetryEvent{Status: "recovered", Attempt: attempt, MaxRetries: policy.MaxRetries, Kind: lastKind}); hookErr != nil {

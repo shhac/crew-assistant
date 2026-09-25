@@ -55,6 +55,11 @@ type Config struct {
 type Message = completion.Message
 type ToolCall = completion.ToolCall
 type Usage = completion.Usage
+
+// DefaultContextBytes is how much a request may carry when nothing says
+// what its model can take.
+const DefaultContextBytes = 128 * 1024
+
 type Request struct {
 	Message string
 	// History is trusted server-owned dialogue, never raw client-supplied roles.
@@ -129,7 +134,7 @@ func New(cfg Config, executor ToolExecutor) (*Engine, error) {
 		cfg.MaxOutputTokens = 4096
 	}
 	if cfg.MaxContextBytes == 0 {
-		cfg.MaxContextBytes = 128 * 1024
+		cfg.MaxContextBytes = DefaultContextBytes
 	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 90 * time.Second

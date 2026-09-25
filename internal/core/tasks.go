@@ -129,7 +129,8 @@ const (
 )
 
 func (t Task) Active() bool {
-	return t.Status == TaskResearching || t.Status == TaskDesigning || t.Status == TaskWriting || t.Status == TaskReviewing || t.Status == TaskDeciding || t.Status == TaskLanding
+	_, ok := progress[t.Status]
+	return ok
 }
 
 // Finished reports a task that will do nothing more on its own.
@@ -245,100 +246,6 @@ func (s *Service) QueueTask(ctx context.Context, projectID string, in TaskInput)
 		return nil
 	})
 	return out, err
-}
-
-// NextTask returns the task the loop should work on: the one already under
-// way, or else the oldest queued task, which it starts. Phase one works on one
-// task at a time.
-func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
-	var out Task
-	found := false
-	err := s.store.update(ctx, func(v *Snapshot) error {
-		if t, ok := furthestAlong(v.Tasks, s.now()); ok {
-			out, found = t, true
-			return nil
-		}
-		for i := range v.Tasks {
-			t := &v.Tasks[i]
-			if t.Status != TaskQueued || len(waitsFor(v, *t)) > 0 {
-				continue
-			}
-			p := project(v, t.ProjectID)
-			if p == nil || p.Playbook == nil {
-				continue
-			}
-			now := s.now().UTC()
-			pinned := *p.Playbook
-			pinned.Roles = append([]Role(nil), p.Playbook.Roles...)
-			pinned.Prepare = append([]string(nil), p.Playbook.Prepare...)
-			t.Playbook = &pinned
-			t.Roles = withLearnings(v, p.Playbook.Roles)
-			t.MaxRounds = p.Playbook.MaxRounds
-			t.Round = 1
-			t.Status = TaskWriting
-			if _, researches := t.Researcher(); researches && t.Plan == nil {
-				t.Status = TaskResearching
-			}
-			t.Detail = ""
-			t.UpdatedAt = now
-			if t.StartedAt.IsZero() {
-				t.StartedAt = now
-			}
-			out, found = *t, true
-			record(v, now, t.ProjectID, "task.started", t.Objective)
-			return nil
-		}
-		return nil
-	})
-	return out, found, err
-}
-
-// progress ranks how far along an active task is, from working out what it
-// needs to landing it.
-var progress = map[string]int{TaskResearching: 0, TaskDesigning: 1, TaskWriting: 2, TaskReviewing: 3, TaskDeciding: 4, TaskLanding: 5}
-
-// furthestAlong is the active task to carry on with: of those not waiting to
-// retry, the one furthest along, then the one with more drafts done, then the
-// one started longest ago. Finishing started work first keeps the time each
-// task spends between leaving the to-do list and landing as short as it can
-// be. Only when every active task is waiting to retry is one of them given.
-func furthestAlong(tasks []Task, now time.Time) (Task, bool) {
-	var best, waiting Task
-	found, anyWaiting := false, false
-	for _, t := range tasks {
-		switch {
-		case !t.Active():
-		case t.RetryAt.After(now):
-			if !anyWaiting {
-				waiting, anyWaiting = t, true
-			}
-		case !found || ahead(t, best):
-			best, found = t, true
-		}
-	}
-	if found {
-		return best, true
-	}
-	return waiting, anyWaiting
-}
-
-func ahead(a, b Task) bool {
-	if progress[a.Status] != progress[b.Status] {
-		return progress[a.Status] > progress[b.Status]
-	}
-	if len(a.Revisions) != len(b.Revisions) {
-		return len(a.Revisions) > len(b.Revisions)
-	}
-	return a.started().Before(b.started())
-}
-
-// started is when the task left the to-do list; tasks started before that
-// was recorded count from when they were asked for.
-func (t Task) started() time.Time {
-	if !t.StartedAt.IsZero() {
-		return t.StartedAt
-	}
-	return t.CreatedAt
 }
 
 // OrderTasks sets the order a project's queued tasks start in. ids must be

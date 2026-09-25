@@ -19,45 +19,53 @@ func TestATurnIsSizedToTheWindowItsModelStated(t *testing.T) {
 	if contextBudget(10000, 4096) != 8192*3 {
 		t.Fatal("a tiny window should still leave room to say something")
 	}
+	unsized := engine.Config{MaxOutputTokens: 4096}
+	if smallerBudget(unsized, 200000) != 0 {
+		t.Fatal("a window larger than the default is not smaller than the request was")
+	}
+	if smallerBudget(unsized, 30000) != contextBudget(30000, 4096) {
+		t.Fatal("a window smaller than the default should size the request")
+	}
 	a := testApp(t)
 	ctx := context.Background()
-	ec := engine.Config{Engine: "claude", Model: "opus", MaxOutputTokens: 4096}
-	if !a.learnWindow(ctx, ec, engine.Usage{ContextWindow: 200000}) {
-		t.Fatal("a first stated window should size the next request")
-	}
+	a.recordWindow(ctx, engine.Config{Engine: "claude", Model: "opus"}, engine.Usage{ContextWindow: 200000})
+	a.recordWindow(ctx, engine.Config{Engine: "claude", Model: "opus"}, engine.Usage{})
 	snap, _ := a.Core.Snapshot(ctx)
 	if snap.ModelWindow("claude", "opus") != 200000 {
 		t.Fatalf("windows %v", snap.ModelWindows)
-	}
-	ec.MaxContextBytes = contextBudget(200000, 4096)
-	if a.learnWindow(ctx, ec, engine.Usage{ContextWindow: 200000}) || a.learnWindow(ctx, ec, engine.Usage{}) {
-		t.Fatal("an unchanged or unstated window reported a smaller budget")
 	}
 }
 
 func TestATurnTooLongForANewlyChosenModelIsSizedToItAndTriedOnce(t *testing.T) {
 	a := testApp(t)
-	var budgets []int
 	refused := &completion.RequestError{Kind: completion.ErrorContextLimit, Phase: completion.PhaseResponse}
-	a.chatInvoker = func(_ context.Context, cfg engine.Config, _ engine.Request, _ engine.ToolExecutor) (engine.Result, error) {
-		budgets = append(budgets, cfg.MaxContextBytes)
-		if len(budgets) == 1 {
-			return engine.Result{Usage: engine.Usage{ContextWindow: 30000}}, refused
+	run := func(replies ...engine.Result) (engine.Result, error, []int) {
+		var budgets []int
+		a.chatInvoker = func(_ context.Context, cfg engine.Config, _ engine.Request, _ engine.ToolExecutor) (engine.Result, error) {
+			budgets = append(budgets, cfg.MaxContextBytes)
+			reply := replies[min(len(budgets), len(replies))-1]
+			if reply.Message == "" {
+				return reply, refused
+			}
+			return reply, nil
 		}
-		return engine.Result{Message: "Fits now"}, nil
+		result, err := a.runChatTurn(context.Background(), core.ChatTurn{ID: "t", Message: "Hello"})
+		return result, err, budgets
 	}
-	result, err := a.runChatTurn(context.Background(), core.ChatTurn{ID: "t", Message: "Hello"})
-	if err != nil || result.Message != "Fits now" || len(budgets) != 2 || budgets[1] != contextBudget(30000, a.Config().Model.MaxTokens) {
+	small := engine.Usage{ContextWindow: 30000}
+	if result, err, budgets := run(engine.Result{Usage: small}, engine.Result{Message: "Fits now"}); err != nil || result.Message != "Fits now" || len(budgets) != 2 || budgets[1] != contextBudget(30000, a.Config().Model.MaxTokens) {
 		t.Fatalf("result %+v, %v, budgets %v", result, err, budgets)
 	}
-
-	// A refusal that states nothing new isn't tried again.
-	budgets = nil
-	a.chatInvoker = func(_ context.Context, cfg engine.Config, _ engine.Request, _ engine.ToolExecutor) (engine.Result, error) {
-		budgets = append(budgets, cfg.MaxContextBytes)
-		return engine.Result{}, refused
+	for name, first := range map[string]engine.Result{
+		"a refusal stating nothing":                      {},
+		"a refusal stating a larger window":              {Usage: engine.Usage{ContextWindow: 1000000}},
+		"a refusal after the turn already did something": {Usage: small, Actions: []engine.Action{{Name: "queue_task", Success: true}}},
+	} {
+		if _, err, budgets := run(first, engine.Result{Message: "Again"}); err == nil || len(budgets) != 1 {
+			t.Errorf("%s was tried %d times: %v", name, len(budgets), err)
+		}
 	}
-	if _, err := a.runChatTurn(context.Background(), core.ChatTurn{ID: "u", Message: "Hello"}); err == nil || len(budgets) != 1 {
-		t.Fatalf("tried %d times: %v", len(budgets), err)
+	if _, err, budgets := run(engine.Result{Message: "Fine", Usage: small}); err != nil || len(budgets) != 1 {
+		t.Fatalf("a reply that fitted was tried %d times: %v", len(budgets), err)
 	}
 }
