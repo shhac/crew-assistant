@@ -189,7 +189,10 @@ func TestTheChatRunsTurnByTurnWithoutASession(t *testing.T) {
 	if got := runTurn(t, a, "Hello"); got.Message != "Stateless" || !called || len(o.chats) != 0 {
 		t.Fatalf("result %+v", got)
 	}
+	// The last turn's loading caption may still be reading the config.
+	a.mu.Lock()
 	a.cfg.Model.Engine = "openai-compatible"
+	a.mu.Unlock()
 	a.sessions.open = o.open
 	if got := runTurn(t, a, "Hello"); got.Message != "Stateless" || len(o.chats) != 0 {
 		t.Fatal("an HTTP engine opened a session")
