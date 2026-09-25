@@ -43,7 +43,8 @@ function prompt(role: Role | undefined, code: boolean) {
 
 /**
  * How a seat is offered in "To": by its name, and by the role a message
- * reaches when the seat also plans, since planning isn't what it answers.
+ * reaches when the seat also researches or designs, since that isn't what it
+ * answers.
  */
 function recipient(role: Role, code: boolean) {
   if (role.kinds.length < 2) return role.name;

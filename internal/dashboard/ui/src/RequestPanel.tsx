@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { DecisionCard } from "./DecisionCard";
 import { Drafts } from "./Drafts";
-import { RequestPlan } from "./RequestPlan";
+import { RequestDesign, RequestPlan } from "./RequestPlan";
 import { TeamThread } from "./TeamThread";
 import {
   decisionFor,
@@ -135,6 +135,12 @@ export function RequestPanel({
             refresh={refresh}
           />
           {task.plan && <RequestPlan plan={task.plan} />}
+          {!!task.design?.length && (
+            <RequestDesign
+              design={task.design}
+              designer={task.with_designer ? task.checking : undefined}
+            />
+          )}
           <Drafts
             project={project}
             task={task}

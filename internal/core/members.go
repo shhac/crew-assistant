@@ -12,9 +12,9 @@ import (
 )
 
 // Member is someone the owner keeps on their team across projects: a named
-// planner, implementer, reviewer or QA, or several of them, with an avatar
-// and what it has learned. A project's team copies a member into a role;
-// learnings travel with the member into every task it starts.
+// researcher, designer, implementer, reviewer, QA or PM, or several of them,
+// with an avatar and what it has learned. A project's team copies a member
+// into a role; learnings travel with the member into every task it starts.
 type Member struct {
 	ID    string   `json:"id"`
 	Name  string   `json:"name"`
@@ -260,6 +260,80 @@ func foldLegacyKinds(v *Snapshot) {
 		seats(v.Tasks[i].Roles)
 		if v.Tasks[i].Playbook != nil {
 			seats(v.Tasks[i].Playbook.Roles)
+		}
+	}
+}
+
+// What older state called the researcher: its kind of role, the template's
+// seat for it and a task's status while it worked.
+const (
+	legacyPlanner     = "planner"
+	legacyPlannerSeat = "Planner"
+	legacyPlanning    = "planning"
+)
+
+// foldPlanner reads the planner of older state as the researcher, for
+// members, every seat on a team, and tasks under way, so each keeps its
+// settings, assignments, learnings and place in the loop. The template's seat
+// takes its new name; a member's seat keeps the member's.
+func foldPlanner(v *Snapshot) {
+	kinds := func(held []string) []string {
+		if !slices.Contains(held, legacyPlanner) {
+			return held
+		}
+		var out []string
+		for _, kind := range held {
+			if kind == legacyPlanner {
+				kind = RoleResearcher
+			}
+			if !slices.Contains(out, kind) {
+				out = append(out, kind)
+			}
+		}
+		return out
+	}
+	// seats returns what the template's planner seat is now called, if the
+	// team had one.
+	seats := func(roles []Role) (renamed string) {
+		for i := range roles {
+			r := &roles[i]
+			planned := slices.Contains(r.Kinds, legacyPlanner)
+			r.Kinds = kinds(r.Kinds)
+			if planned && r.Member == "" && r.Name == legacyPlannerSeat {
+				r.Name = Playbook{Roles: roles}.FreeName(i, "Researcher")
+				renamed = r.Name
+			}
+		}
+		return renamed
+	}
+	for i := range v.Members {
+		v.Members[i].Kinds = kinds(v.Members[i].Kinds)
+	}
+	for i := range v.Projects {
+		if v.Projects[i].Playbook != nil {
+			seats(v.Projects[i].Playbook.Roles)
+		}
+	}
+	status := func(s *string) {
+		if *s == legacyPlanning {
+			*s = TaskResearching
+		}
+	}
+	for i := range v.Tasks {
+		t := &v.Tasks[i]
+		if renamed := seats(t.Roles); renamed != "" && t.Plan != nil && t.Plan.Role == legacyPlannerSeat {
+			t.Plan.Role = renamed
+		}
+		if t.Playbook != nil {
+			seats(t.Playbook.Roles)
+		}
+		status(&t.Status)
+		status(&t.ResumeStatus)
+	}
+	for i := range v.Wakes {
+		if w := &v.Wakes[i]; w.On == WakeOnTask {
+			status(&w.Match)
+			status(&w.Baseline)
 		}
 	}
 }

@@ -124,29 +124,31 @@ describe("the board", () => {
       ]),
     ).toEqual(["a", "b", "d", "c"]);
   });
-  it("shows planning when the team plans, or while a request still does", () => {
+  it("shows research when the team researches, or while a request still is", () => {
     const planned = (): Playbook => ({
       ...code(),
       roles: [
-        { name: "Planner", kinds: ["planner"], engine: "claude" },
+        { name: "Researcher", kinds: ["researcher"], engine: "claude" },
         ...code().roles,
       ],
     });
     expect(boardColumns(project(planned()), []).map((c) => c.label)).toEqual([
       "To do",
-      "Planning",
+      "Researching",
       "Implementing",
       "Reviewing",
       "QA",
       "Ready to land",
     ]);
     const has = (tasks: Task[]) =>
-      boardColumns(project(code()), tasks).some((c) => c.stage === "planning");
+      boardColumns(project(code()), tasks).some(
+        (c) => c.stage === "researching",
+      );
     expect(has([])).toBe(false);
     expect(has([task({ status: "queued", roles: planned().roles })])).toBe(
       true,
     );
-    expect(has([task({ status: "waiting", stage: "planning" })])).toBe(true);
+    expect(has([task({ status: "waiting", stage: "researching" })])).toBe(true);
     expect(
       has([task({ status: "landed", stage: "done", roles: planned().roles })]),
     ).toBe(false);
@@ -343,17 +345,41 @@ describe("the board", () => {
     expect(isOpenMessage(message("working"))).toBe(true);
     expect(isOpenMessage(message("answered"))).toBe(false);
   });
-  it("names the planner while a request plans", () => {
+  it("names the designer while a request is with it, and keeps it at work", () => {
+    const dee = { name: "Dee", kinds: ["designer"], engine: "claude" };
+    const withDee = task({
+      status: "designing",
+      stage: "researching",
+      checking: "Dee",
+      with_designer: true,
+    });
+    expect(requestStep(withDee)).toBe("With Dee for design input");
     expect(
       requestStep(
-        task({ status: "planning", stage: "planning", checking: "Ada" }),
+        task({ status: "designing", stage: "implementing", roles: [dee] }),
       ),
-    ).toBe("Ada planning");
-    expect(requestStep(task({ status: "planning", stage: "planning" }))).toBe(
-      "Planning",
-    );
-    expect(requestTone(task({ status: "planning" }))).toBe("work");
-    expect(underWay(task({ status: "planning" }))).toBe(true);
+    ).toBe("With Dee for design input");
+    expect(requestTone(withDee)).toBe("work");
+    expect(underWay(withDee)).toBe(true);
+    expect(projectGroup([withDee])).toBe("working");
+    // No column of its own: it stays where whoever asked left it.
+    expect(
+      boardColumns(project(code()), [withDee]).some(
+        (c) => (c.stage as string) === "designing",
+      ),
+    ).toBe(false);
+  });
+  it("names the researcher while a request is researched", () => {
+    expect(
+      requestStep(
+        task({ status: "researching", stage: "researching", checking: "Ada" }),
+      ),
+    ).toBe("Ada researching");
+    expect(
+      requestStep(task({ status: "researching", stage: "researching" })),
+    ).toBe("Researching");
+    expect(requestTone(task({ status: "researching" }))).toBe("work");
+    expect(underWay(task({ status: "researching" }))).toBe(true);
   });
   it("ignores a hold whose time was never recorded", () => {
     expect(
@@ -377,7 +403,7 @@ describe("projects", () => {
       projectGroup([task({ status: "queued" }), task({ status: "reviewing" })]),
     ).toBe("working");
     expect(projectGroup([task({ status: "awaiting" })])).toBe("waiting");
-    expect(projectGroup([task({ status: "planning" })])).toBe("working");
+    expect(projectGroup([task({ status: "researching" })])).toBe("working");
     expect(projectGroup([task({ status: "landed" })])).toBe("quiet");
     expect(
       leadRequest([

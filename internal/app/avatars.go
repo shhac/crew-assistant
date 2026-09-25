@@ -16,7 +16,8 @@ import (
 )
 
 var kindWords = map[string]string{
-	core.RolePlanner:     "the planner, who works out what each task needs",
+	core.RoleResearcher:  "the researcher, who works out what each task needs",
+	core.RoleDesigner:    "the designer, who gives design input when asked",
 	core.RoleImplementer: "the implementer, who writes the work",
 	core.RoleReviewer:    "a reviewer, who checks the work carefully",
 	core.RoleQA:          "QA, who runs the checks",

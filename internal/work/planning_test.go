@@ -36,32 +36,32 @@ func TestATaskIsPlannedReadOnlyAndEveryoneWorksFromThePlan(t *testing.T) {
 	a, runner, p := plannedCode(t, 6, `{"summary": "Add Feature beside main.", "exists": ["main.go has main"], "changes": ["add feature.go"], "out_of_scope": ["the CLI"], "questions": [], "depends_on": []}`)
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add A"})
 	task = taskNow(t, a, task.ID)
-	if task.Plan == nil || task.Plan.Summary != "Add Feature beside main." || task.Plan.Role != "Planner" || task.Round != 1 {
+	if task.Plan == nil || task.Plan.Summary != "Add Feature beside main." || task.Plan.Role != "Researcher" || task.Round != 1 {
 		t.Fatalf("plan %+v round %d", task.Plan, task.Round)
 	}
-	var planner, writer, reviewer bool
+	var researcher, writer, reviewer bool
 	for _, spec := range runner.seen {
 		switch {
 		case strings.Contains(spec.Prompt, "Plan this task before anything is written"):
-			planner = !spec.Write
+			researcher = !spec.Write
 		case spec.Write && !strings.Contains(spec.Prompt, "Run exactly this"):
-			writer = strings.Contains(spec.Prompt, "The plan Planner worked out") && strings.Contains(spec.Prompt, "- the CLI")
+			writer = strings.Contains(spec.Prompt, "The plan Researcher worked out") && strings.Contains(spec.Prompt, "- the CLI")
 		case strings.Contains(spec.Prompt, "Do not modify anything"):
 			reviewer = strings.Contains(spec.Prompt, "Add Feature beside main.") && strings.Contains(spec.Prompt, "goes beyond it")
 		}
 	}
-	if !planner || !writer || !reviewer {
-		t.Fatalf("read-only planner %v, writer with the plan %v, reviewer with the plan %v", planner, writer, reviewer)
+	if !researcher || !writer || !reviewer {
+		t.Fatalf("read-only researcher %v, writer with the plan %v, reviewer with the plan %v", researcher, writer, reviewer)
 	}
 }
 
-func TestThePlannersQuestionsComeBeforeAnyCode(t *testing.T) {
+func TestTheResearchersQuestionsComeBeforeAnyCode(t *testing.T) {
 	a, runner, p := plannedCode(t, 6, `{"summary": "Unclear.", "questions": ["Which colour?"]}`)
 	ctx := context.Background()
 	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Paint it"})
 	task = taskNow(t, a, task.ID)
 	d := openDecision(t, a, task)
-	if d.Kind != core.DecisionQuestion || !strings.Contains(d.Title, "Planner has questions") || !strings.Contains(d.Context, "1. Which colour?") || task.Stage != core.StagePlanning || len(task.Revisions) != 0 {
+	if d.Kind != core.DecisionQuestion || !strings.Contains(d.Title, "Researcher has questions") || !strings.Contains(d.Context, "1. Which colour?") || task.Stage != core.StageResearching || len(task.Revisions) != 0 {
 		t.Fatalf("decision %+v task %s %s", d, task.Status, task.Stage)
 	}
 	if runner.edits != 0 {
@@ -74,7 +74,7 @@ func TestThePlannersQuestionsComeBeforeAnyCode(t *testing.T) {
 	}
 }
 
-func TestATaskThatDependsOnUnlandedWorkWaitsAndPlansAgain(t *testing.T) {
+func TestATaskThatDependsOnUnlandedWorkWaitsAndIsResearchedAgain(t *testing.T) {
 	a, runner, p := plannedCode(t, 12)
 	ctx := context.Background()
 	first, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
@@ -90,7 +90,7 @@ func TestATaskThatDependsOnUnlandedWorkWaitsAndPlansAgain(t *testing.T) {
 	}
 	second = taskNow(t, a, second.ID)
 	if second.Plan == nil || second.Plan.Summary != "Do the task as asked." || second.Status != core.TaskWaiting {
-		t.Fatalf("once A landed, B should plan again and go on: %s %+v", second.Status, second.Plan)
+		t.Fatalf("once A landed, B should be researched again and go on: %s %+v", second.Status, second.Plan)
 	}
 }
 
@@ -103,14 +103,14 @@ func TestAPlanThatCannotBeReadIsKeptAsWritten(t *testing.T) {
 	}
 }
 
-func TestOneMemberPlansAndImplementsFromOneSeat(t *testing.T) {
+func TestOneMemberResearchesAndImplementsFromOneSeat(t *testing.T) {
 	a := testLoop(t)
 	ctx := context.Background()
 	source := ownerRepo(t)
 	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{source}, Brief: core.BriefInput{Goal: "x"}})
-	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RolePlanner, core.RoleImplementer}, Engine: "claude"})
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleResearcher, core.RoleImplementer}, Engine: "claude"})
 	rn, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "codex"})
-	project, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check", Implementer: ada.ID, Planner: ada.ID})
+	project, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check", Implementer: ada.ID, Researcher: ada.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,16 +118,16 @@ func TestOneMemberPlansAndImplementsFromOneSeat(t *testing.T) {
 	for _, r := range project.Playbook.Roles {
 		names = append(names, r.Name+":"+strings.Join(r.Kinds, "+"))
 	}
-	if strings.Join(names, " ") != "Ada:implementer+planner Reviewer:reviewer QA:qa" {
+	if strings.Join(names, " ") != "Ada:implementer+researcher Reviewer:reviewer QA:qa" {
 		t.Fatalf("seats %v", names)
 	}
-	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check", Planner: rn.ID}); err == nil || !strings.Contains(err.Error(), "doesn't hold the planner role") {
-		t.Fatalf("a member without the planner role planned: %v", err)
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check", Researcher: rn.ID}); err == nil || !strings.Contains(err.Error(), "doesn't hold the researcher role") {
+		t.Fatalf("a member without the researcher role researched: %v", err)
 	}
-	none, _ := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check", Planner: NoPlanner})
+	none, _ := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check", Researcher: NoResearcher})
 	for _, r := range none.Playbook.Roles {
-		if r.Holds(core.RolePlanner) {
-			t.Fatal("none should leave planning out")
+		if r.Holds(core.RoleResearcher) {
+			t.Fatal("none should leave research out")
 		}
 	}
 	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check", Implementer: ada.ID, Reviewer: ada.ID}); err == nil {
@@ -135,7 +135,7 @@ func TestOneMemberPlansAndImplementsFromOneSeat(t *testing.T) {
 	}
 }
 
-func TestAPlannerThatFailsPlansAgainWhateverTheOwnerAnswers(t *testing.T) {
+func TestAResearcherThatFailsResearchesAgainWhateverTheOwnerAnswers(t *testing.T) {
 	ctx := context.Background()
 	permanent := &session.CapabilityError{Engine: "claude", Code: session.CapabilitySandboxUnavailable, Phase: session.BeforeLaunch}
 	for _, answer := range []string{choiceTryAgain, "Look at the CLI too"} {
@@ -144,8 +144,8 @@ func TestAPlannerThatFailsPlansAgainWhateverTheOwnerAnswers(t *testing.T) {
 		task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
 		task = taskNow(t, a, task.ID)
 		d := openDecision(t, a, task)
-		if d.Kind != core.DecisionFailure || task.ResumeStatus != core.TaskPlanning || task.Stage != core.StagePlanning {
-			t.Fatalf("a failed planner reaches the owner: %+v %s %s", d, task.ResumeStatus, task.Stage)
+		if d.Kind != core.DecisionFailure || task.ResumeStatus != core.TaskResearching || task.Stage != core.StageResearching {
+			t.Fatalf("a failed researcher reaches the owner: %+v %s %s", d, task.ResumeStatus, task.Stage)
 		}
 		if answer == choiceTryAgain {
 			a.Core.ChooseDecision(ctx, d.ID, answer)
@@ -154,13 +154,13 @@ func TestAPlannerThatFailsPlansAgainWhateverTheOwnerAnswers(t *testing.T) {
 		}
 		task = taskNow(t, a, task.ID)
 		if task.Plan == nil || len(task.Revisions) == 0 {
-			t.Fatalf("%q should plan again, then write: plan %+v, %d revisions", answer, task.Plan, len(task.Revisions))
+			t.Fatalf("%q should research again, then write: plan %+v, %d revisions", answer, task.Plan, len(task.Revisions))
 		}
 		planned := slices.ContainsFunc(runner.seen, func(spec roles.Spec) bool {
 			return strings.Contains(spec.Prompt, "Plan this task before anything is written") && strings.Contains(spec.Prompt, answer)
 		})
 		if answer != choiceTryAgain && !planned {
-			t.Fatalf("the planner never read %q", answer)
+			t.Fatalf("the researcher never read %q", answer)
 		}
 	}
 }

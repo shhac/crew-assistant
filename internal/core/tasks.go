@@ -22,9 +22,13 @@ type Task struct {
 	// rest of the record; see stage.go.
 	Stage string `json:"stage,omitempty"`
 	// Checking names who is at work in a stage someone else leads: the
-	// checker while the task is checked, the planner while it is planned.
-	// Derived with Stage.
+	// checker while the task is checked, the researcher while it is
+	// researched, the designer while it is with the designer. Derived with
+	// Stage.
 	Checking string `json:"checking,omitempty"`
+	// WithDesigner is a task handed to the designer for design input, which
+	// stays in the stage of the role that handed it over. Derived with Stage.
+	WithDesigner bool `json:"with_designer,omitempty"`
 	// Answered is a task waiting on a decision the owner has already made:
 	// the loop takes the answer at its next step, so it no longer needs
 	// the owner. Derived with Stage.
@@ -49,10 +53,13 @@ type Task struct {
 	// the team, with their replies.
 	Messages  []TeamMessage `json:"messages,omitempty"`
 	Revisions []Revision    `json:"revisions"`
-	// Plan is what the planner worked out before anything was written. It is
-	// kept on the task, so everyone who works on it reads the same plan
+	// Plan is what the researcher worked out before anything was written. It
+	// is kept on the task, so everyone who works on it reads the same plan
 	// rather than inheriting a conversation.
 	Plan *Plan `json:"plan,omitempty"`
+	// Design is each time the researcher or the implementer handed the task
+	// to the designer, with the input it gave; see design.go.
+	Design []DesignRequest `json:"design,omitempty"`
 	// DependsOn names tasks in the same project that must have landed before
 	// this one starts. Without stacking, a task never builds on work that has
 	// not landed.
@@ -100,9 +107,13 @@ type Task struct {
 const (
 	TaskQueued  = "queued"
 	TaskWriting = "writing"
-	// TaskPlanning is the planner working out what the task needs, before
-	// anything is written.
-	TaskPlanning  = "planning"
+	// TaskResearching is the researcher working out what the task needs,
+	// before anything is written. Older state calls it planning.
+	TaskResearching = "researching"
+	// TaskDesigning is the designer giving the design input the researcher
+	// or the implementer asked for; the task then goes back to whichever
+	// asked.
+	TaskDesigning = "designing"
 	TaskReviewing = "reviewing"
 	TaskDeciding  = "deciding"
 	TaskWaiting   = "waiting"
@@ -116,7 +127,7 @@ const (
 )
 
 func (t Task) Active() bool {
-	return t.Status == TaskPlanning || t.Status == TaskWriting || t.Status == TaskReviewing || t.Status == TaskDeciding || t.Status == TaskLanding
+	return t.Status == TaskResearching || t.Status == TaskDesigning || t.Status == TaskWriting || t.Status == TaskReviewing || t.Status == TaskDeciding || t.Status == TaskLanding
 }
 
 // Finished reports a task that will do nothing more on its own.
@@ -265,8 +276,8 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 			t.MaxRounds = p.Playbook.MaxRounds
 			t.Round = 1
 			t.Status = TaskWriting
-			if _, plans := t.Planner(); plans && t.Plan == nil {
-				t.Status = TaskPlanning
+			if _, researches := t.Researcher(); researches && t.Plan == nil {
+				t.Status = TaskResearching
 			}
 			t.Detail = ""
 			t.UpdatedAt = now
@@ -379,23 +390,35 @@ func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Pro
 // OpenTaskDecision puts a choice about a task in front of the owner and holds
 // the task until it is answered.
 func (s *Service) OpenTaskDecision(ctx context.Context, taskID, kind string, in DecisionInput) (Decision, error) {
-	if !required(in.Title, in.Context, in.Recommendation) || len(in.Choices) < 2 {
-		return Decision{}, errors.New("decision requires title, context, recommendation and at least two choices")
+	if err := in.validTaskDecision(); err != nil {
+		return Decision{}, err
 	}
-	now := s.now().UTC()
-	out := Decision{ID: uid(), Kind: kind, TaskID: taskID, Title: in.Title, Context: in.Context, Recommendation: in.Recommendation, Choices: in.Choices, Status: DecisionOpen, CreatedAt: now}
+	var out Decision
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		t := task(v, taskID)
 		if t == nil {
 			return ErrNotFound
 		}
-		out.ProjectID = t.ProjectID
-		t.Status = TaskWaiting
-		t.DecisionID = out.ID
-		t.UpdatedAt = now
-		v.Decisions = append(v.Decisions, out)
-		record(v, now, t.ProjectID, "decision.opened", in.Title)
+		out = openTaskDecision(v, t, kind, in, s.now().UTC())
 		return nil
 	})
 	return out, err
+}
+
+func (in DecisionInput) validTaskDecision() error {
+	if !required(in.Title, in.Context, in.Recommendation) || len(in.Choices) < 2 {
+		return errors.New("decision requires title, context, recommendation and at least two choices")
+	}
+	return nil
+}
+
+// openTaskDecision holds a task for a decision, within a change.
+func openTaskDecision(v *Snapshot, t *Task, kind string, in DecisionInput, now time.Time) Decision {
+	d := Decision{ID: uid(), Kind: kind, TaskID: t.ID, ProjectID: t.ProjectID, Title: in.Title, Context: in.Context, Recommendation: in.Recommendation, Choices: in.Choices, Status: DecisionOpen, CreatedAt: now}
+	t.Status = TaskWaiting
+	t.DecisionID = d.ID
+	t.UpdatedAt = now
+	v.Decisions = append(v.Decisions, d)
+	record(v, now, t.ProjectID, "decision.opened", in.Title)
+	return d
 }

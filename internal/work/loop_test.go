@@ -28,15 +28,23 @@ type scriptedRunner struct {
 	onWriter func(dir string)
 	// writerText replaces the writer's reply when set.
 	writerText string
-	// plans answer planner turns in order; after them, a plan with nothing
+	// writerReplies replace the writer's reply, one turn each, before
+	// writerText does.
+	writerReplies []string
+	// plans answer researcher turns in order; after them, a plan with nothing
 	// unclear and nothing to wait for.
 	plans []string
+	// designs answer designer turns in order; after them, plain design input.
+	designs []string
 	// pm answers the PM's looks at the to-do list in order; after them, an
 	// answer that changes nothing.
 	pm []string
 }
 
-const plainPlan = `{"summary": "Do the task as asked.", "exists": [], "changes": ["the change"], "out_of_scope": [], "questions": [], "depends_on": []}`
+const (
+	plainPlan   = `{"summary": "Do the task as asked.", "exists": [], "changes": ["the change"], "out_of_scope": [], "questions": [], "depends_on": []}`
+	plainDesign = `{"input": "Keep it plain.", "escalate": null}`
+)
 
 func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, error) {
 	r.mu.Lock()
@@ -53,6 +61,13 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 		reply := plainPlan
 		if len(r.plans) > 0 {
 			reply, r.plans = r.plans[0], r.plans[1:]
+		}
+		return roles.Result{Text: reply}, nil
+	}
+	if !spec.Write && strings.Contains(spec.Prompt, "asks for your design input") {
+		reply := plainDesign
+		if len(r.designs) > 0 {
+			reply, r.designs = r.designs[0], r.designs[1:]
 		}
 		return roles.Result{Text: reply}, nil
 	}
@@ -75,6 +90,9 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 		text := "Wrote the note."
 		if r.writerText != "" {
 			text = r.writerText
+		}
+		if len(r.writerReplies) > 0 {
+			text, r.writerReplies = r.writerReplies[0], r.writerReplies[1:]
 		}
 		return roles.Result{Text: text, Session: []byte(`{"engine":"claude","id":"writer"}`)}, nil
 	}

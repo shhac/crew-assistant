@@ -69,11 +69,12 @@ var (
 		{Name: "QA", Kinds: []string{core.RoleQA}, Engine: "claude"},
 	}
 	// The crew-assistant project is staffed by two of the owner's members;
-	// Ada plans each task and then implements it, from one seat, and Rune
-	// reviews and keeps the to-do list in order.
+	// Ada researches each task and then implements it, from one seat, and
+	// Rune reviews, gives design input when Ada asks, and keeps the to-do
+	// list in order.
 	crewTeam = []core.Role{
-		{Name: "Ada", Kinds: []string{core.RoleImplementer, core.RolePlanner}, Engine: "claude", Model: "opus", Member: "demo-ada"},
-		{Name: "Rune", Kinds: []string{core.RoleReviewer, core.RolePM}, Engine: "codex", Member: "demo-rune"},
+		{Name: "Ada", Kinds: []string{core.RoleImplementer, core.RoleResearcher}, Engine: "claude", Model: "opus", Member: "demo-ada"},
+		{Name: "Rune", Kinds: []string{core.RoleReviewer, core.RoleDesigner, core.RolePM}, Engine: "codex", Member: "demo-rune"},
 		{Name: "QA", Kinds: []string{core.RoleQA}, Engine: "claude"},
 	}
 	writingTeam = []core.Role{
@@ -145,8 +146,10 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 		OutOfScope: []string{"Searching inside drafts or chat history."},
 		Role:       "Ada", At: ago(24 * time.Minute),
 	}
-	shortcuts := started(crew, "demo-shortcuts", "Keyboard shortcuts for the board", core.TaskPlanning, 1, ago(50*time.Minute))
-	shortcuts.Detail = ""
+	// Ada, researching shortcuts, handed the task to Rune for design input.
+	shortcuts := started(crew, "demo-shortcuts", "Keyboard shortcuts for the board", core.TaskDesigning, 1, ago(50*time.Minute))
+	shortcuts.Detail = "With Rune for design input"
+	shortcuts.Design = []core.DesignRequest{{ID: "demo-design-shortcuts", From: "Ada", Step: core.TaskResearching, Round: 1, Question: "Should shortcuts be single keys, as on GitHub, or need a modifier so they never fire while typing?", At: ago(8 * time.Minute)}}
 	screenshots := queued(crew, "demo-screenshots", "Light and dark screenshots in the README", ago(45*time.Minute))
 	// Screenshots should show search, so they wait for it to land.
 	screenshots.DependsOn = []string{search.ID}
@@ -213,13 +216,13 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 			{ID: "demo-m4", Role: "assistant", Content: "`make check` passed. It's in your inbox, ready to land on main.", CreatedAt: ago(4 * time.Minute)},
 		},
 		Members: []core.Member{
-			{ID: "demo-ada", Name: "Ada", Kinds: []string{core.RolePlanner, core.RoleImplementer}, Engine: "claude", Model: "opus", Instructions: "Prefer small, reviewable commits.", CreatedAt: ago(20 * 24 * time.Hour),
+			{ID: "demo-ada", Name: "Ada", Kinds: []string{core.RoleResearcher, core.RoleImplementer}, Engine: "claude", Model: "opus", Instructions: "Prefer small, reviewable commits.", CreatedAt: ago(20 * 24 * time.Hour),
 				Avatar: config.Avatar{Look: "Short violet bob, determined bright eyes, small round glasses, on yellow.", Background: "#1d1b2e", Accent: "#c3b1e1", Marks: []config.Mark{{D: "M64 22 L100 104 H80 L72 84 H56 L48 104 H28 Z", Color: "#c3b1e1"}, {D: "M60 70 H68 L64 58 Z", Color: "#1d1b2e"}}},
 				Learnings: []core.Learning{
 					{ID: "demo-l1", When: "Finishing a change", Text: "Run the whole test suite before finishing, not only the package you changed. A change in one package often breaks a test in another that imports it.", Source: core.LearnedByOwner, ProjectID: crew.ID, At: ago(9 * 24 * time.Hour)},
 					{ID: "demo-l2", When: "Writing text people will read", Text: "Keep copy plain and specific. Say what happens, in sentence case, and cut any line the layout already makes obvious; filler gets rewritten.", Source: core.LearnedByMember, ProjectID: crew.ID, At: ago(2 * 24 * time.Hour)},
 				}},
-			{ID: "demo-rune", Name: "Rune", Kinds: []string{core.RoleReviewer, core.RolePM}, Engine: "codex", Instructions: "Read the tests before the code.", CreatedAt: ago(20 * 24 * time.Hour),
+			{ID: "demo-rune", Name: "Rune", Kinds: []string{core.RoleReviewer, core.RoleDesigner, core.RolePM}, Engine: "codex", Instructions: "Read the tests before the code.", CreatedAt: ago(20 * 24 * time.Hour),
 				Avatar: config.Avatar{Look: "Messy sky-blue hair with a cowlick, calm thoughtful eyes, a pencil behind one ear, on deep teal.", Background: "#10202b", Accent: "#8ecae6", Marks: []config.Mark{{D: "M40 30 H80 A22 22 0 0 1 80 74 H52 L88 104", Color: "#8ecae6", StrokeWidth: 12}, {D: "M40 30 V104", Color: "#8ecae6", StrokeWidth: 12}}},
 				Learnings: []core.Learning{
 					{ID: "demo-l3", When: "Reviewing error handling", Text: "Ask for a test of the failure path, not only the happy one: for example, what a save does when the disk is full.", Source: core.LearnedByMember, ProjectID: crew.ID, At: ago(5 * 24 * time.Hour)},

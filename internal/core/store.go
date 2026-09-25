@@ -154,6 +154,7 @@ func readState(ctx context.Context, conn *sql.Conn) (Snapshot, error) {
 		d.Snapshot.ModelCalls = map[string]int{}
 	}
 	foldLegacyKinds(&d.Snapshot)
+	foldPlanner(&d.Snapshot)
 	deriveStages(&d.Snapshot)
 	headLegacyLearnings(&d.Snapshot)
 	return d.Snapshot, nil

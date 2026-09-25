@@ -10,11 +10,12 @@ import (
 	"github.com/shhac/crew-assistant/internal/text"
 )
 
-// planTask has the team's planner work out what a task needs before anything
-// is written. The planner only reads, starts afresh every time, and leaves
-// its plan on the task, where the implementer and the reviewers read it.
-func (lp *Loop) planTask(ctx context.Context, p core.Project, t core.Task, m medium) error {
-	planner, ok := t.Planner()
+// researchTask has the team's researcher work out what a task needs before
+// anything is written. The researcher only reads, starts afresh every time,
+// and leaves its plan on the task, where the implementer and the reviewers
+// read it. It may hand the task to the designer first, for design input.
+func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m medium) error {
+	researcher, ok := t.Researcher()
 	if !ok {
 		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
 	}
@@ -22,7 +23,7 @@ func (lp *Loop) planTask(ctx context.Context, p core.Project, t core.Task, m med
 	if t.Plan != nil {
 		return lp.askPlanQuestions(ctx, t)
 	}
-	if held, err := lp.holdForUsage(ctx, t, planner); held || err != nil {
+	if held, err := lp.holdForUsage(ctx, t, researcher); held || err != nil {
 		return err
 	}
 	t, err := lp.prepareWorkspace(ctx, t, m)
@@ -33,45 +34,48 @@ func (lp *Loop) planTask(ctx context.Context, p core.Project, t core.Task, m med
 	if err != nil {
 		return err
 	}
-	base := plannerPrompt(p, t, otherWork(snap, t)) + learnedGuide(planner, true)
-	spec, cleanup, err := lp.roleSpec(t, planner, m.workspace(), false, m, base)
+	base := researcherPrompt(p, t, otherWork(snap, t)) + learnedGuide(researcher, true)
+	spec, cleanup, err := lp.roleSpec(t, researcher, m.workspace(), false, m, base)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
 	defer cleanup()
 	var plan core.Plan
 	var dependsOn []string
-	var reply string
+	var design, reply string
 	for attempt := 0; attempt < 2; attempt++ {
 		result, err := lp.runner.Run(ctx, spec)
 		if err != nil {
-			return lp.roleFailed(ctx, t, planner.Name, err)
+			return lp.roleFailed(ctx, t, researcher.Name, err)
 		}
 		var learned string
 		reply, learned = splitBlock(result.Text, "learned")
-		lp.recordLearned(ctx, p, t, planner, m, learned)
-		if plan, dependsOn, err = parsePlan(reply); err == nil {
+		lp.recordLearned(ctx, p, t, researcher, m, learned)
+		if plan, dependsOn, design, err = parsePlan(reply, designsFor(t, researcher)); err == nil {
 			break
 		}
 		spec.Prompt = retryPrompt(base, err)
+	}
+	if design != "" {
+		return lp.askDesign(ctx, t, researcher.Name, design, nil)
 	}
 	// A plan that still cannot be read is kept as written rather than stopping
 	// the work: the implementer reads it either way.
 	if plan.Summary == "" {
 		plan, dependsOn = core.Plan{Summary: text.Clip(strings.TrimSpace(reply), 3000)}, nil
 	}
-	plan.Role = planner.Name
+	plan.Role = researcher.Name
 	planned, err := lp.Core.RecordPlan(ctx, t.ID, plan, dependsOn)
 	if errors.Is(err, core.ErrConflict) {
 		return nil
 	}
-	if err != nil || planned.Status != core.TaskPlanning {
+	if err != nil || planned.Status != core.TaskResearching {
 		return err
 	}
 	return lp.askPlanQuestions(ctx, planned)
 }
 
-// askPlanQuestions brings the planner's questions to the owner before
+// askPlanQuestions brings the researcher's questions to the owner before
 // anything is written.
 func (lp *Loop) askPlanQuestions(ctx context.Context, t core.Task) error {
 	if t.Plan == nil || len(t.Plan.Questions) == 0 {
@@ -98,9 +102,11 @@ func otherWork(snap core.Snapshot, t core.Task) []core.Task {
 	return out
 }
 
-// parsePlan reads the planner's JSON answer, tolerating a fenced block or
-// surrounding prose, and bounds what it keeps.
-func parsePlan(reply string) (core.Plan, []string, error) {
+// parsePlan reads the researcher's JSON answer, tolerating a fenced block or
+// surrounding prose, and bounds what it keeps. Where the researcher can ask
+// for design input, a reply that asks needs no plan yet: the researcher plans
+// once the input is back.
+func parsePlan(reply string, designs bool) (core.Plan, []string, string, error) {
 	var in struct {
 		Summary    string   `json:"summary"`
 		Exists     []string `json:"exists"`
@@ -108,12 +114,17 @@ func parsePlan(reply string) (core.Plan, []string, error) {
 		OutOfScope []string `json:"out_of_scope"`
 		Questions  []string `json:"questions"`
 		DependsOn  []string `json:"depends_on"`
+		Design     string   `json:"design"`
 	}
 	if err := decodeReply(reply, &in); err != nil {
-		return core.Plan{}, nil, errors.New("the plan was not valid JSON")
+		return core.Plan{}, nil, "", errors.New("the plan was not valid JSON")
 	}
-	if strings.TrimSpace(in.Summary) == "" {
-		return core.Plan{}, nil, errors.New("the plan had no summary")
+	var design string
+	if designs {
+		design = strings.TrimSpace(in.Design)
+	}
+	if strings.TrimSpace(in.Summary) == "" && design == "" {
+		return core.Plan{}, nil, "", errors.New("the plan had no summary")
 	}
 	list := func(items []string) []string { return listed(items, 20) }
 	return core.Plan{
@@ -122,5 +133,5 @@ func parsePlan(reply string) (core.Plan, []string, error) {
 		Changes:    list(in.Changes),
 		OutOfScope: list(in.OutOfScope),
 		Questions:  list(in.Questions),
-	}, list(in.DependsOn), nil
+	}, list(in.DependsOn), design, nil
 }

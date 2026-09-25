@@ -42,7 +42,10 @@ export interface BriefInput {
 }
 export interface Role {
   name: string;
-  /** At most one of implementer, reviewer and QA, and perhaps planner and PM. */
+  /**
+   * At most one of implementer, reviewer and QA, and perhaps researcher,
+   * designer and PM.
+   */
   kinds: (MemberKind | (string & {}))[];
   engine: string;
   model?: string;
@@ -51,7 +54,8 @@ export interface Role {
   /** The member this role was copied from, if any. */
   member?: string;
 }
-export type MemberKind = "planner" | "implementer" | "reviewer" | "qa" | "pm";
+export type MemberKind =
+  "researcher" | "designer" | "implementer" | "reviewer" | "qa" | "pm";
 export interface Learning {
   id: string;
   /** The situation it applies to, like a skill's description. */
@@ -155,8 +159,10 @@ export interface TeamInput {
   implementer_member?: string;
   reviewer_member?: string;
   qa_member?: string;
-  /** "" keeps the template's planner, "none" leaves planning out. */
-  planner_member?: string;
+  /** "" keeps the template's researcher, "none" leaves research out. */
+  researcher_member?: string;
+  /** The member who gives design input when asked, or "" for none. */
+  designer_member?: string;
   /** The member who keeps the to-do list in order, or "" for no PM. */
   pm_member?: string;
   max_rounds: string;
@@ -179,7 +185,8 @@ export interface TaskInput {
 }
 export type TaskStatus =
   | "queued"
-  | "planning"
+  | "researching"
+  | "designing"
   | "writing"
   | "reviewing"
   | "deciding"
@@ -191,7 +198,7 @@ export type TaskStatus =
   | "stopped";
 export type Stage =
   | "todo"
-  | "planning"
+  | "researching"
   | "implementing"
   | "reviewing"
   | "qa"
@@ -237,16 +244,31 @@ export interface TeamMessage {
   at?: string;
   answered_at?: string;
 }
-/** What the planner worked out before anything was written. */
+/** What the researcher worked out before anything was written. */
 export interface Plan {
   summary: string;
   exists?: string[];
   changes?: string[];
   out_of_scope?: string[];
   questions?: string[];
-  /** The seat that planned it. */
+  /** The seat that researched it. */
   role: string;
   at: string;
+}
+/** One hand-off to the designer, and the input that came back. */
+export interface DesignRequest {
+  id: string;
+  /** The seat that asked, and the step it asked from. */
+  from: string;
+  step: "researching" | "writing" | (string & {});
+  round: number;
+  question: string;
+  designer?: string;
+  input?: string;
+  /** The owner's decision it went to instead, past the limit or escalated. */
+  decision?: string;
+  at?: string;
+  answered_at?: string;
 }
 export interface Proposal {
   branch: string;
@@ -260,8 +282,13 @@ export interface Task {
   criteria: string[] | null;
   status: TaskStatus;
   stage: Stage;
-  /** The checker at work while it is checked, or the planner while it plans. */
+  /**
+   * The checker at work while it is checked, the researcher while it
+   * researches, or the designer while it gives design input.
+   */
   checking?: string;
+  /** With the designer for design input, in the stage of whoever asked. */
+  with_designer?: boolean;
   /** Waiting on a decision the owner has already made; it resumes next. */
   answered?: boolean;
   detail?: string;
@@ -273,6 +300,7 @@ export interface Task {
   direction_pending?: number;
   messages?: TeamMessage[];
   plan?: Plan;
+  design?: DesignRequest[];
   /** Ids of the tasks that must land before this one starts. */
   depends_on?: string[];
   /** The objectives of unfinished dependencies, while it is queued. */

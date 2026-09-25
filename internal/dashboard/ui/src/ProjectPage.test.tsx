@@ -189,11 +189,11 @@ describe("the board", () => {
     expect(within(column("QA")).queryAllByRole("link")).toHaveLength(0);
     expect(screen.getByText("1 needs you")).toBeTruthy();
   });
-  it("shows a request being planned in its own column, with its planner", () => {
-    const planner: Member = {
+  it("shows a request being researched in its own column, with its researcher", () => {
+    const researcher: Member = {
       id: "m1",
       name: "Ada",
-      kinds: ["planner", "implementer"],
+      kinds: ["researcher", "implementer"],
       engine: "claude",
       avatar: { image: "a".repeat(32) },
       learnings: [],
@@ -201,19 +201,19 @@ describe("the board", () => {
     const roles = [
       {
         name: "Ada",
-        kinds: ["implementer", "planner"],
+        kinds: ["implementer", "researcher"],
         engine: "claude",
         member: "m1",
       },
       ...codeTeam().roles.slice(1),
     ];
     show(project({ playbook: { ...codeTeam(), roles } }), {
-      members: [planner],
+      members: [researcher],
       tasks: [
         started({
           roles,
-          status: "planning",
-          stage: "planning",
+          status: "researching",
+          stage: "researching",
           checking: "Ada",
         }),
       ],
@@ -222,12 +222,77 @@ describe("the board", () => {
       .getAllByRole("listitem")
       .filter((c) => c.classList.contains("board-column"))
       .map((c) => c.getAttribute("aria-label"));
-    expect(columns.slice(0, 3)).toEqual(["To do", "Planning", "Implementing"]);
-    const planning = screen.getByRole("listitem", { name: "Planning" });
-    expect(within(planning).getByText("Ada planning")).toBeTruthy();
-    expect(planning.querySelector("img")?.getAttribute("src")).toBe(
+    expect(columns.slice(0, 3)).toEqual([
+      "To do",
+      "Researching",
+      "Implementing",
+    ]);
+    const researching = screen.getByRole("listitem", { name: "Researching" });
+    expect(within(researching).getByText("Ada researching")).toBeTruthy();
+    expect(researching.querySelector("img")?.getAttribute("src")).toBe(
       `/api/avatars/${"a".repeat(32)}/small`,
     );
+  });
+  it("shows a request with the designer in the column of whoever asked, and what came back", () => {
+    const dee: Member = {
+      id: "m5",
+      name: "Dee",
+      kinds: ["designer"],
+      engine: "claude",
+      avatar: { image: "d".repeat(32) },
+      learnings: [],
+    };
+    const roles = [
+      ...codeTeam().roles,
+      { name: "Dee", kinds: ["designer"], engine: "claude", member: "m5" },
+    ];
+    const withDee = started({
+      roles,
+      status: "designing",
+      stage: "implementing",
+      checking: "Dee",
+      with_designer: true,
+      design: [
+        {
+          id: "d1",
+          from: "Implementer",
+          step: "writing",
+          round: 1,
+          question: "Tabs or a sidebar?",
+          designer: "Dee",
+          input: "A sidebar; tabs hide work.",
+          answered_at: new Date().toISOString(),
+        },
+        {
+          id: "d2",
+          from: "Implementer",
+          step: "writing",
+          round: 1,
+          question: "What colour for the badge?",
+        },
+      ],
+    });
+    show(project({ playbook: { ...codeTeam(), roles } }), {
+      members: [dee],
+      tasks: [withDee],
+    });
+    const implementing = screen.getByRole("listitem", { name: "Implementing" });
+    expect(
+      within(implementing).getByText("With Dee for design input"),
+    ).toBeTruthy();
+    expect(implementing.querySelector("img")?.getAttribute("src")).toBe(
+      `/api/avatars/${"d".repeat(32)}/small`,
+    );
+    cleanup();
+    show(
+      project({ playbook: { ...codeTeam(), roles } }),
+      { members: [dee], tasks: [withDee] },
+      { request: "t1" },
+    );
+    const design = screen.getByRole("region", { name: "Design input" });
+    expect(within(design).getByText("A sidebar; tabs hide work.")).toBeTruthy();
+    expect(within(design).getByText("Dee answered")).toBeTruthy();
+    expect(within(design).getByText("With Dee")).toBeTruthy();
   });
   it("says what a queued request waits for in place of its place in line", () => {
     show(project(), {
@@ -241,7 +306,7 @@ describe("the board", () => {
     expect(
       [...todo.querySelectorAll(".reorder > span")].map((s) => s.textContent),
     ).toEqual(["Waits for “Cache the lookups”", "#2", "Waits for “X”, “Y”"]);
-    expect(screen.queryByRole("listitem", { name: "Planning" })).toBeNull();
+    expect(screen.queryByRole("listitem", { name: "Researching" })).toBeNull();
     cleanup();
     show(project(), { tasks: [task({ waits_for: ["Cache the index"] })] });
     expect(screen.getByText("Waits for “Cache the index”")).toBeTruthy();
@@ -725,17 +790,21 @@ describe("a request", () => {
     );
     expect(screen.getByRole("button", { name: "Send to Rune" })).toBeTruthy();
   });
-  it("leaves out a seat that only plans, and names a seat that also plans by its work", () => {
-    const planner = { name: "Planner", kinds: ["planner"], engine: "claude" };
+  it("leaves out a seat that only researches, and names a seat that also researches by its work", () => {
+    const researcher = {
+      name: "Researcher",
+      kinds: ["researcher"],
+      engine: "claude",
+    };
     show(
       project(),
       {
         tasks: [
           started({
-            status: "planning",
-            stage: "planning",
-            checking: "Planner",
-            roles: [planner, ...codeTeam().roles],
+            status: "researching",
+            stage: "researching",
+            checking: "Researcher",
+            roles: [researcher, ...codeTeam().roles],
           }),
         ],
       },
@@ -750,7 +819,7 @@ describe("a request", () => {
     cleanup();
     const ada = {
       name: "Ada",
-      kinds: ["implementer", "planner"],
+      kinds: ["implementer", "researcher"],
       engine: "claude",
     };
     show(
@@ -795,7 +864,7 @@ describe("a request", () => {
         .map((o) => o.textContent),
     ).toEqual(["Implementer", "Rune (reviewer)", "QA"]);
   });
-  it("shows the plan with only the parts it has, and who planned it", () => {
+  it("shows the plan with only the parts it has, and who researched it", () => {
     show(
       project(),
       {
@@ -807,7 +876,7 @@ describe("a request", () => {
               summary: "Wrap the lookup in a cache.",
               exists: ["A lookup in store.go"],
               changes: ["Add a cache in front of it"],
-              role: "Planner",
+              role: "Researcher",
               at: new Date(Date.now() - 5 * 60000).toISOString(),
             },
           }),
@@ -822,7 +891,7 @@ describe("a request", () => {
     expect(within(plan).queryByText("Out of scope")).toBeNull();
     expect(within(plan).queryByRole("button")).toBeNull();
     expect(
-      within(plan).getByText("Planned by Planner · 5 min ago"),
+      within(plan).getByText("Researched by Researcher · 5 min ago"),
     ).toBeTruthy();
   });
   it("folds a long plan to its summary until asked", () => {
@@ -1065,7 +1134,8 @@ describe("the project's tabs", () => {
           implementer_member: "",
           reviewer_member: "",
           qa_member: "",
-          planner_member: "",
+          researcher_member: "",
+          designer_member: "",
           pm_member: "",
           max_rounds: "3",
           deliver_to: "",
@@ -1110,7 +1180,14 @@ describe("the project's tabs", () => {
       within(team)
         .getAllByRole("listitem")
         .map((li) => li.querySelector(".seat-role")?.textContent),
-    ).toEqual(["Planner", "Implementer", "Reviewer", "QA", "PM"]);
+    ).toEqual([
+      "Researcher",
+      "Designer",
+      "Implementer",
+      "Reviewer",
+      "QA",
+      "PM",
+    ]);
     expect(within(team).queryByText("/work/service")).toBeNull();
     expect(
       within(team).queryByText("Signed as your git config says"),
@@ -1195,66 +1272,66 @@ describe("the project's tabs", () => {
       },
     ]);
   };
-  describe("a code team's planner", () => {
-    const planners = [
-      member("m1", "Ada Lovelace", "implementer", "planner"),
+  describe("a code team's researcher", () => {
+    const researchers = [
+      member("m1", "Ada Lovelace", "implementer", "researcher"),
       member("m2", "Rune", "reviewer"),
-      member("m4", "Pia", "planner"),
+      member("m4", "Pia", "researcher"),
     ];
     const seats = (...roles: Role[]) =>
       project({ playbook: { ...codeTeam(), roles } });
     const ada: Role = {
       name: "Ada",
-      kinds: ["implementer", "planner"],
+      kinds: ["implementer", "researcher"],
       engine: "claude",
       member: "m1",
     };
-    const planner: Role = {
-      name: "Planner",
-      kinds: ["planner"],
+    const researcher: Role = {
+      name: "Researcher",
+      kinds: ["researcher"],
       engine: "claude",
     };
     const [, reviewer, qa] = codeTeam().roles;
     const chooser = (p: Project) => {
-      show(p, { members: planners }, { tab: "team" });
-      return within(seat("Planner")).getByLabelText("Assign Planner");
+      show(p, { members: researchers }, { tab: "team" });
+      return within(seat("Researcher")).getByLabelText("Assign Researcher");
     };
     it("shows a seat that holds several roles in each of them", () => {
-      show(seats(ada, reviewer, qa), { members: planners }, { tab: "team" });
-      for (const role of ["Planner", "Implementer"]) {
+      show(seats(ada, reviewer, qa), { members: researchers }, { tab: "team" });
+      for (const role of ["Researcher", "Implementer"]) {
         expect(
           within(seat(role)).getByRole("link", { name: "Ada" }),
         ).toBeTruthy();
         expect(
-          within(seat(role)).getByText("· Planner and implementer · Claude"),
+          within(seat(role)).getByText("· Researcher and implementer · Claude"),
         ).toBeTruthy();
       }
     });
-    it("offers the template's planner, no planning, or a member who plans", async () => {
+    it("offers the template's researcher, no research, or a member who researches", async () => {
       const who = chooser(seats(ada, reviewer, qa));
       expect(who).toHaveProperty("value", "m1");
       expect(
         within(who)
           .getAllByRole("option")
           .map((o) => o.textContent),
-      ).toEqual(["Template default", "No planning", "Ada Lovelace", "Pia"]);
+      ).toEqual(["Template default", "No research", "Ada Lovelace", "Pia"]);
       fireEvent.change(who, { target: { value: "m4" } });
-      await seatWrite("planner", "m4");
+      await seatWrite("researcher", "m4");
     });
-    it("shows a team without planning that way, and can bring the template's back", async () => {
+    it("shows a team without research that way, and can bring the template's back", async () => {
       const who = chooser(seats(codeTeam().roles[0], reviewer, qa));
       expect(who).toHaveProperty("value", "none");
-      expect(seat("Planner").querySelector(".seat-who")?.textContent).toBe(
-        "No planning",
+      expect(seat("Researcher").querySelector(".seat-who")?.textContent).toBe(
+        "No research",
       );
       fireEvent.change(who, { target: { value: "" } });
-      await seatWrite("planner", "");
+      await seatWrite("researcher", "");
     });
-    it("leaves planning out of a team that has the template's planner", async () => {
-      const who = chooser(seats(planner, codeTeam().roles[0], reviewer, qa));
+    it("leaves research out of a team that has the template's researcher", async () => {
+      const who = chooser(seats(researcher, codeTeam().roles[0], reviewer, qa));
       expect(who).toHaveProperty("value", "");
       fireEvent.change(who, { target: { value: "none" } });
-      await seatWrite("planner", "none");
+      await seatWrite("researcher", "none");
     });
   });
   describe("a team's PM", () => {
@@ -1298,7 +1375,7 @@ describe("the project's tabs", () => {
       );
       await seatWrite("pm", "");
     });
-    it("keeps the PM and the planner when the team is saved again", async () => {
+    it("keeps the PM and the researcher when the team is saved again", async () => {
       show(
         project({
           playbook: { ...codeTeam(), roles: [...codeTeam().roles, pia] },
@@ -1311,12 +1388,70 @@ describe("the project's tabs", () => {
       await waitFor(() => expect(refresh).toHaveBeenCalled());
       expect(writes()[0].body).toMatchObject({
         pm_member: "m4",
-        planner_member: "none",
+        researcher_member: "none",
       });
     });
     it("offers no one while no member holds it", () => {
       show(project(), { members: crew }, { tab: "team" });
       expect(within(seat("PM")).getByText("No one to assign")).toBeTruthy();
+    });
+  });
+  describe("a team's designer", () => {
+    const withDesigners = [
+      member("m1", "Ada Lovelace", "implementer", "designer"),
+      member("m2", "Rune", "reviewer"),
+      member("m5", "Dee", "designer"),
+    ];
+    const dee: Role = {
+      name: "Dee",
+      kinds: ["designer"],
+      engine: "claude",
+      member: "m5",
+    };
+    it("seats a designer from the members who hold it, on a code team", async () => {
+      show(project(), { members: withDesigners }, { tab: "team" });
+      expect(seat("Designer").querySelector(".seat-who")?.textContent).toBe(
+        "No designer",
+      );
+      const who = within(seat("Designer")).getByLabelText("Assign Designer");
+      expect(
+        within(who)
+          .getAllByRole("option")
+          .map((o) => o.textContent),
+      ).toEqual(["No designer", "Ada Lovelace", "Dee"]);
+      fireEvent.change(who, { target: { value: "m5" } });
+      await seatWrite("designer", "m5");
+    });
+    it("unassigns the designer, for writing too", async () => {
+      show(
+        project({
+          playbook: { ...writingTeam, roles: [...writingTeam.roles, dee] },
+        }),
+        { members: withDesigners },
+        { tab: "team" },
+      );
+      expect(
+        within(seat("Designer")).getByRole("link", { name: "Dee" }),
+      ).toBeTruthy();
+      fireEvent.click(
+        within(seat("Designer")).getByRole("button", {
+          name: "Unassign Designer",
+        }),
+      );
+      await seatWrite("designer", "");
+    });
+    it("keeps the designer when the team is saved again", async () => {
+      show(
+        project({
+          playbook: { ...codeTeam(), roles: [...codeTeam().roles, dee] },
+        }),
+        { members: withDesigners },
+        { tab: "team" },
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      fireEvent.click(screen.getByRole("button", { name: "Save team" }));
+      await waitFor(() => expect(refresh).toHaveBeenCalled());
+      expect(writes()[0].body).toMatchObject({ designer_member: "m5" });
     });
   });
   it("assigns a member to one role, sending nothing about the others", async () => {
@@ -1398,14 +1533,16 @@ describe("the project's tabs", () => {
     const team = screen.getByRole("form", { name: "Team" });
     expect(within(team).getByRole("group", { name: "Writer" })).toBeTruthy();
     expect(within(team).queryByRole("group", { name: "QA" })).toBeNull();
-    expect(within(team).queryByRole("group", { name: "Planner" })).toBeNull();
+    expect(
+      within(team).queryByRole("group", { name: "Researcher" }),
+    ).toBeNull();
     fireEvent.click(within(team).getByRole("button", { name: "Save team" }));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(writes()[0].body).toMatchObject({
       implementer_member: "",
       reviewer_member: "",
       qa_member: "",
-      planner_member: "",
+      researcher_member: "",
       pm_member: "",
     });
     cleanup();

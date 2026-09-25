@@ -5,7 +5,7 @@ package core
 // so a board can never disagree with what the loop is doing.
 const (
 	StageTodo         = "todo"
-	StagePlanning     = "planning"
+	StageResearching  = "researching"
 	StageImplementing = "implementing"
 	StageReviewing    = "reviewing"
 	StageQA           = "qa"
@@ -21,13 +21,19 @@ func deriveStages(v *Snapshot) {
 }
 
 func derive(v *Snapshot, t *Task) {
-	t.Stage, t.Checking, t.Answered, t.WaitsFor = stageOf(v, *t), "", false, nil
+	t.Stage, t.Checking, t.WithDesigner, t.Answered, t.WaitsFor = stageOf(v, *t), "", false, false, nil
 	if t.Status == TaskQueued {
 		t.WaitsFor = waitsFor(v, *t)
 	}
-	if t.Status == TaskPlanning {
-		if planner, ok := t.Planner(); ok {
-			t.Checking = planner.Name
+	if t.Status == TaskResearching {
+		if researcher, ok := t.Researcher(); ok {
+			t.Checking = researcher.Name
+		}
+	}
+	if t.Status == TaskDesigning {
+		t.WithDesigner = true
+		if designer, ok := t.Designer(); ok {
+			t.Checking = designer.Name
 		}
 	}
 	if t.Status == TaskWaiting {
@@ -46,8 +52,14 @@ func stageOf(v *Snapshot, t Task) string {
 	switch t.Status {
 	case TaskQueued:
 		return StageTodo
-	case TaskPlanning:
-		return StagePlanning
+	case TaskResearching:
+		return StageResearching
+	case TaskDesigning:
+		// With the designer, a task stays where the role that asked left it.
+		if r := t.OpenDesign(); r != nil {
+			return stageOf(v, Task{Status: r.Step})
+		}
+		return StageImplementing
 	case TaskWriting:
 		return StageImplementing
 	case TaskReviewing, TaskDeciding:
@@ -75,14 +87,14 @@ func (t Task) RolesOf(kind string) []Role {
 	return out
 }
 
-// Planner is the seat that plans the task before anything is written, if
-// its team has one.
-func (t Task) Planner() (Role, bool) {
-	planners := t.RolesOf(RolePlanner)
-	if len(planners) == 0 {
+// Researcher is the seat that researches the task before anything is
+// written, if its team has one.
+func (t Task) Researcher() (Role, bool) {
+	researchers := t.RolesOf(RoleResearcher)
+	if len(researchers) == 0 {
 		return Role{}, false
 	}
-	return planners[0], true
+	return researchers[0], true
 }
 
 // Role is the task's team member with this name.
@@ -157,7 +169,8 @@ func lastCheck(t Task) string {
 
 // waitingStage keeps a task that needs the owner in the column it stopped
 // in: approval is the last step before landing; a question stays with
-// whoever asked it; a failure with the step that failed.
+// whoever asked it; a failure with the step that failed, the designer's
+// with the step that handed the task over.
 func waitingStage(v *Snapshot, t Task) string {
 	var kind string
 	if d := decision(v, t.DecisionID); d != nil {
@@ -174,9 +187,13 @@ func waitingStage(v *Snapshot, t Task) string {
 		resumed.Status = t.ResumeStatus
 		return stageOf(v, resumed)
 	case DecisionQuestion:
-		// Before anything is written, only the planner asks.
+		// A design question stays with the step that asked for design input.
+		if r := t.DesignDecision(t.DecisionID); r != nil {
+			return stageOf(v, Task{Status: r.Step})
+		}
+		// Otherwise, before anything is written, only the researcher asks.
 		if len(t.Revisions) == 0 {
-			return StagePlanning
+			return StageResearching
 		}
 		latest := t.Revisions[len(t.Revisions)-1].N
 		for _, verdict := range t.Verdicts {

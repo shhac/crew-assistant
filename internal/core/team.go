@@ -134,13 +134,17 @@ func (s *Service) SendTeamMessage(ctx context.Context, projectID, taskID, to, fr
 
 // sideWork says what a seat without a working role does instead.
 func sideWork(r Role) string {
-	if r.Holds(RolePM) && r.Holds(RolePlanner) {
-		return "plans and keeps the to-do list"
+	var does []string
+	if r.Holds(RoleResearcher) {
+		does = append(does, "researches, before the work starts")
+	}
+	if r.Holds(RoleDesigner) {
+		does = append(does, "gives design input when the team asks for it")
 	}
 	if r.Holds(RolePM) {
-		return "keeps the to-do list"
+		does = append(does, "keeps the to-do list")
 	}
-	return "plans, before the work starts"
+	return strings.Join(does, " and ")
 }
 
 // addressee finds a team member by name, or by kind when only one member has
@@ -195,6 +199,13 @@ func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
 	case open != nil:
 		open.Status, open.Disposition, open.Answer, open.ResolvedAt = DecisionResolved, DispositionCustom, m.Text, &now
 		record(v, now, open.ProjectID, "decision.resolved", open.Title+": "+m.Text)
+		// A design question goes back, in the same round, to the step that
+		// asked it.
+		if r := t.DesignDecision(open.ID); r != nil {
+			r.AnsweredAt = now
+			t.Status, t.DecisionID, t.Detail = r.Step, "", "Going on with your note"
+			break
+		}
 		t.ReviseWithDirection()
 	case t.Status == TaskAwaiting:
 		t.ReviseWithDirection()

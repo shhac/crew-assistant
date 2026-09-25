@@ -26,7 +26,8 @@ export const needsYou = (task: Task) =>
   task.status === "waiting" && !task.answered;
 
 const active = (task: Task) =>
-  task.status === "planning" ||
+  task.status === "researching" ||
+  task.status === "designing" ||
   task.status === "writing" ||
   task.status === "reviewing" ||
   task.status === "deciding" ||
@@ -77,14 +78,19 @@ const hasColumn = (
       (t.stage === stage || !!t.roles?.some((r) => holds(r, kind))),
   );
 
-/** The board's columns; planning and QA show only for teams that have them. */
+/**
+ * The board's columns; research and QA show only for teams that have them.
+ * A request with the designer stays in the column of whoever asked.
+ */
 export function boardColumns(project: Project, tasks: Task[]): Column[] {
   const code = isCode(project.playbook);
-  const planning = hasColumn(project, tasks, "planner", "planning");
+  const research = hasColumn(project, tasks, "researcher", "researching");
   const qa = hasColumn(project, tasks, "qa", "qa");
   return [
     { stage: "todo", label: "To do" },
-    ...(planning ? [{ stage: "planning" as const, label: "Planning" }] : []),
+    ...(research
+      ? [{ stage: "researching" as const, label: "Researching" }]
+      : []),
     { stage: "implementing", label: code ? "Implementing" : "Writing" },
     { stage: "reviewing", label: "Reviewing" },
     ...(qa ? [{ stage: "qa" as const, label: "QA" }] : []),
@@ -231,8 +237,10 @@ export function requestStep(task: Task, decision?: Decision): string {
   switch (task.status) {
     case "queued":
       return "Waiting to start";
-    case "planning":
-      return task.checking ? `${task.checking} planning` : "Planning";
+    case "researching":
+      return task.checking ? `${task.checking} researching` : "Researching";
+    case "designing":
+      return `With ${task.checking || roleName(task, "designer", "the designer")} for design input`;
     case "writing":
       return `${round}${roleName(task, "implementer", code ? "Implementer" : "Writer")} working`;
     case "reviewing":
@@ -296,7 +304,8 @@ export function projectGroup(own: Task[]): ProjectGroup {
 const groupOrder: Record<Task["status"], number> = {
   waiting: 0,
   landing: 1,
-  planning: 1,
+  researching: 1,
+  designing: 1,
   writing: 1,
   reviewing: 1,
   deciding: 1,

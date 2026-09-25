@@ -377,7 +377,7 @@ func TestChangingOneSeatOrTheWorkspaceKeepsEveryOtherRoleAsItIs(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := core.Templates["code"]
-	if got := kept("assigning the reviewer"); seatOf(got, core.RoleReviewer).Member != rn.ID || !reflect.DeepEqual(seatOf(got, core.RoleQA), code.Roles[3]) || !reflect.DeepEqual(seatOf(got, core.RolePlanner), code.Roles[0]) {
+	if got := kept("assigning the reviewer"); seatOf(got, core.RoleReviewer).Member != rn.ID || !reflect.DeepEqual(seatOf(got, core.RoleQA), code.Roles[3]) || !reflect.DeepEqual(seatOf(got, core.RoleResearcher), code.Roles[0]) {
 		t.Fatalf("roles %+v", got.Roles)
 	}
 	if _, err = a.SetWorkspace(ctx, p.ID, Workspace{Repo: notes, BranchPrefix: " paul/ ", Prepare: []string{"ui/node_modules"}, Sign: core.SignNever}); err != nil {
@@ -405,7 +405,7 @@ func TestChangingOneSeatOrTheWorkspaceKeepsEveryOtherRoleAsItIs(t *testing.T) {
 	for name, bad := range map[string]func() error{
 		"a reviewer as implementer": func() error { _, err := a.SetSeat(ctx, p.ID, core.RoleImplementer, rn.ID); return err },
 		"a member who is gone":      func() error { _, err := a.SetSeat(ctx, p.ID, core.RoleReviewer, "gone"); return err },
-		"leaving out the reviewer":  func() error { _, err := a.SetSeat(ctx, p.ID, core.RoleReviewer, NoPlanner); return err },
+		"leaving out the reviewer":  func() error { _, err := a.SetSeat(ctx, p.ID, core.RoleReviewer, NoResearcher); return err },
 		"an unlinked repository": func() error {
 			_, err := a.SetWorkspace(ctx, p.ID, Workspace{Repo: t.TempDir(), BranchPrefix: "paul/"})
 			return err
@@ -453,11 +453,11 @@ func TestASeatHoldsEachRoleItsMemberIsGiven(t *testing.T) {
 	a := testLoop(t)
 	ctx := context.Background()
 	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{t.TempDir()}, Brief: core.BriefInput{Goal: "Faster"}})
-	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RolePlanner, core.RoleImplementer, core.RolePM}, Engine: "claude"})
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleResearcher, core.RoleImplementer, core.RolePM}, Engine: "claude"})
 	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []string{core.RoleImplementer, core.RolePlanner, core.RolePM} {
+	for _, kind := range []string{core.RoleImplementer, core.RoleResearcher, core.RolePM} {
 		if _, err := a.SetSeat(ctx, p.ID, kind, ada.ID); err != nil {
 			t.Fatal(kind, err)
 		}
@@ -471,36 +471,36 @@ func TestASeatHoldsEachRoleItsMemberIsGiven(t *testing.T) {
 		}
 		return out
 	}
-	if got := names(); !slices.Equal(got, []string{"Ada:implementer+planner+pm", "Reviewer:reviewer", "QA:qa"}) {
+	if got := names(); !slices.Equal(got, []string{"Ada:implementer+researcher+pm", "Reviewer:reviewer", "QA:qa"}) {
 		t.Fatalf("Ada should be one seat holding all three: %v", got)
 	}
-	if _, err := a.SetSeat(ctx, p.ID, core.RolePlanner, ""); err != nil {
+	if _, err := a.SetSeat(ctx, p.ID, core.RoleResearcher, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.SetSeat(ctx, p.ID, core.RolePM, ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := names(); !slices.Equal(got, []string{"Ada:implementer", "Planner:planner", "Reviewer:reviewer", "QA:qa"}) {
-		t.Fatalf("the template's planner should be back and no one keeps the list: %v", got)
+	if got := names(); !slices.Equal(got, []string{"Ada:implementer", "Researcher:researcher", "Reviewer:reviewer", "QA:qa"}) {
+		t.Fatalf("the template's researcher should be back and no one keeps the list: %v", got)
 	}
-	if _, err := a.SetSeat(ctx, p.ID, core.RolePlanner, NoPlanner); err != nil {
+	if _, err := a.SetSeat(ctx, p.ID, core.RoleResearcher, NoResearcher); err != nil {
 		t.Fatal(err)
 	}
 	if got := names(); !slices.Equal(got, []string{"Ada:implementer", "Reviewer:reviewer", "QA:qa"}) {
-		t.Fatalf("planning should be left out: %v", got)
+		t.Fatalf("research should be left out: %v", got)
 	}
-	if _, err := a.SetSeat(ctx, p.ID, core.RolePlanner, ""); err != nil {
+	if _, err := a.SetSeat(ctx, p.ID, core.RoleResearcher, ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := names(); !slices.Contains(got, "Planner:planner") {
-		t.Fatalf("the template's planner should be back: %v", got)
+	if got := names(); !slices.Contains(got, "Researcher:researcher") {
+		t.Fatalf("the template's researcher should be back: %v", got)
 	}
 	writing, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Notes", Brief: core.BriefInput{Goal: "Notes"}})
 	if _, err := a.SetTeam(ctx, writing.ID, TeamChoice{Template: "draft"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.SetSeat(ctx, writing.ID, core.RolePlanner, ada.ID); err == nil {
-		t.Fatal("a writing team was given a planner")
+	if _, err := a.SetSeat(ctx, writing.ID, core.RoleResearcher, ada.ID); err == nil {
+		t.Fatal("a writing team was given a researcher")
 	}
 }
 
@@ -510,9 +510,9 @@ func TestASeatHoldsEachRoleItsMemberIsGiven(t *testing.T) {
 func TestASeatsInstructionsDoNotDependOnTheOrderItsRolesWereGiven(t *testing.T) {
 	a := testLoop(t)
 	ctx := context.Background()
-	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RolePlanner, core.RoleImplementer}, Engine: "claude", Instructions: "Small commits."})
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleResearcher, core.RoleImplementer}, Engine: "claude", Instructions: "Small commits."})
 	code := core.Templates["code"]
-	planning, implementing := code.Roles[0].Instructions, code.Roles[1].Instructions
+	researching, implementing := code.Roles[0].Instructions, code.Roles[1].Instructions
 	instructions := func(order ...string) string {
 		t.Helper()
 		p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: strings.Join(order, " then "), Directories: []string{t.TempDir()}, Brief: core.BriefInput{Goal: "Faster"}})
@@ -528,25 +528,25 @@ func TestASeatsInstructionsDoNotDependOnTheOrderItsRolesWereGiven(t *testing.T) 
 		}
 		return seatOf(*project.Playbook, core.RoleImplementer).Instructions
 	}
-	want := planning + "\n\n" + implementing + "\n\nSmall commits."
-	for _, order := range [][]string{{core.RolePlanner, core.RoleImplementer}, {core.RoleImplementer, core.RolePlanner}} {
+	want := researching + "\n\n" + implementing + "\n\nSmall commits."
+	for _, order := range [][]string{{core.RoleResearcher, core.RoleImplementer}, {core.RoleImplementer, core.RoleResearcher}} {
 		if got := instructions(order...); got != want {
 			t.Errorf("%v: %q", order, got)
 		}
 	}
 	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Chosen whole", Directories: []string{t.TempDir()}, Brief: core.BriefInput{Goal: "Faster"}})
-	project, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check", Implementer: ada.ID, Planner: ada.ID})
+	project, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check", Implementer: ada.ID, Researcher: ada.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := seatOf(*project.Playbook, core.RoleImplementer).Instructions; got != want {
 		t.Errorf("chosen whole: %q", got)
 	}
-	if project, err = a.SetSeat(ctx, p.ID, core.RolePlanner, ""); err != nil {
+	if project, err = a.SetSeat(ctx, p.ID, core.RoleResearcher, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := seatOf(*project.Playbook, core.RoleImplementer).Instructions; got != implementing+"\n\nSmall commits." {
-		t.Errorf("after giving back planning: %q", got)
+		t.Errorf("after giving back research: %q", got)
 	}
 }
 
@@ -608,20 +608,20 @@ func TestAMemberWhoseKindsChangedKeepsTheRoleTheTeamGaveIt(t *testing.T) {
 func TestACombinedSeatFromBeforeGivesBackARoleCleanly(t *testing.T) {
 	a := testLoop(t)
 	ctx := context.Background()
-	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RolePlanner, core.RoleImplementer}, Engine: "claude", Instructions: "Small commits."})
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleResearcher, core.RoleImplementer}, Engine: "claude", Instructions: "Small commits."})
 	code := core.Templates["code"]
-	planning, implementing := code.Roles[0].Instructions, code.Roles[1].Instructions
+	researching, implementing := code.Roles[0].Instructions, code.Roles[1].Instructions
 	for kind, want := range map[string]core.Role{
-		core.RoleImplementer: {Name: "Ada", Kinds: []string{core.RolePlanner}, Instructions: planning + "\n\nSmall commits."},
-		core.RolePlanner:     {Name: "Ada", Kinds: []string{core.RoleImplementer}, Instructions: implementing + "\n\nSmall commits."},
+		core.RoleImplementer: {Name: "Ada", Kinds: []string{core.RoleResearcher}, Instructions: researching + "\n\nSmall commits."},
+		core.RoleResearcher:  {Name: "Ada", Kinds: []string{core.RoleImplementer}, Instructions: implementing + "\n\nSmall commits."},
 	} {
 		p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Gives back " + kind, Brief: core.BriefInput{Goal: "Faster"}})
 		team := code
 		team.Repo, team.Check = "/work/service", "make check"
-		// What SetTeam made of {Implementer: Ada, Planner: Ada}: the
-		// implementer's seat, with the planner's kind added to it.
+		// What SetTeam made of {Implementer: Ada, Researcher: Ada}: the
+		// implementer's seat, with the researcher's kind added to it.
 		team.Roles = []core.Role{
-			{Name: "Ada", Kinds: []string{core.RoleImplementer, core.RolePlanner}, Engine: "claude", Member: ada.ID, Instructions: implementing + "\n\nSmall commits."},
+			{Name: "Ada", Kinds: []string{core.RoleImplementer, core.RoleResearcher}, Engine: "claude", Member: ada.ID, Instructions: implementing + "\n\nSmall commits."},
 			code.Roles[2],
 			code.Roles[3],
 		}

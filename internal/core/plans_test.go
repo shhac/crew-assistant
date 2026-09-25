@@ -2,16 +2,17 @@ package core
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// plannedProject is a writing project whose team plans each task first.
+// plannedProject is a writing project whose team researches each task first.
 func plannedProject(t *testing.T, s *Service) Project {
 	t.Helper()
 	p := newProject(t, s)
 	playbook := *p.Playbook
-	playbook.Roles = append([]Role{{Name: "Planner", Kinds: []string{RolePlanner}, Engine: "claude"}}, playbook.Roles...)
+	playbook.Roles = append([]Role{{Name: "Researcher", Kinds: []string{RoleResearcher}, Engine: "claude"}}, playbook.Roles...)
 	p, err := s.SetPlaybook(testContext, p.ID, playbook)
 	if err != nil {
 		t.Fatal(err)
@@ -21,15 +22,17 @@ func plannedProject(t *testing.T, s *Service) Project {
 
 func TestAMemberAndASeatHoldSeveralRolesButNeverReviewTheirOwnWork(t *testing.T) {
 	s, _ := fixture(t)
-	ada, err := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kinds: []string{RolePlanner, RoleImplementer}, Engine: "claude"})
-	if err != nil || !ada.Holds(RolePlanner) || !ada.Holds(RoleImplementer) {
+	ada, err := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kinds: []string{RoleResearcher, RoleImplementer}, Engine: "claude"})
+	if err != nil || !ada.Holds(RoleResearcher) || !ada.Holds(RoleImplementer) {
 		t.Fatalf("member %+v %v", ada, err)
 	}
 	if old, err := s.SaveMember(testContext, "", MemberInput{Name: "Old", Kind: RoleReviewer, Engine: "codex"}); err != nil || !old.Holds(RoleReviewer) {
 		t.Fatalf("an older client's single kind: %+v %v", old, err)
 	}
 	for _, in := range []MemberInput{
-		{Name: "Planner", Kinds: []string{RoleReviewer}, Engine: "codex"},
+		{Name: "Researcher", Kinds: []string{RoleReviewer}, Engine: "codex"},
+		{Name: "designer", Kinds: []string{RoleReviewer}, Engine: "codex"},
+		{Name: "Zed", Kinds: []string{"planner"}, Engine: "codex"},
 		{Name: "Zed", Kinds: []string{}, Engine: "codex"},
 		{Name: "Zed", Kinds: []string{RoleQA, RoleQA}, Engine: "codex"},
 		{Name: "Zed", Kinds: []string{"manager"}, Engine: "codex"},
@@ -42,10 +45,13 @@ func TestAMemberAndASeatHoldSeveralRolesButNeverReviewTheirOwnWork(t *testing.T)
 	base.Repo, base.Deliver = "/repo", "owner"
 	base.Check = "make check"
 	for kinds, ok := range map[string]bool{
-		"planner implementer":  true,
-		"planner reviewer":     true,
-		"implementer reviewer": false,
-		"reviewer qa":          false,
+		"researcher implementer":          true,
+		"researcher reviewer":             true,
+		"designer implementer":            true,
+		"researcher designer reviewer pm": true,
+		"implementer reviewer":            false,
+		"reviewer qa":                     false,
+		"planner reviewer":                false,
 	} {
 		p := base
 		p.Roles = []Role{
@@ -92,19 +98,79 @@ func TestOlderStateWithOneKindIsReadAsSeveral(t *testing.T) {
 	}
 }
 
-func TestAMessageReachesASeatsWorkingRoleAndNeverAPlannerAlone(t *testing.T) {
-	team := []Role{{Name: "Ada", Kinds: []string{RolePlanner, RoleImplementer}}, {Name: "Plan", Kinds: []string{RolePlanner}}, {Name: "Rune", Kinds: []string{RoleReviewer}}}
+func TestOlderPlannerStateIsReadAsTheResearcher(t *testing.T) {
+	s, _ := fixture(t)
+	p := plannedProject(t, s)
+	s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kinds: []string{RoleResearcher, RoleImplementer}, Engine: "claude", Model: "opus", Instructions: "Small commits."})
+	s.QueueTask(testContext, p.ID, TaskInput{Objective: "Under way"})
+	running, _, _ := s.NextTask(testContext)
+	// Rewrite the state as a build from before the rename left it: planner
+	// kinds, the template's Planner seat, and a task mid-plan that had
+	// failed once.
+	legacy := func(roles []Role) {
+		for i := range roles {
+			if roles[i].Holds(RoleResearcher) {
+				roles[i].Kinds[slices.Index(roles[i].Kinds, RoleResearcher)] = "planner"
+				if roles[i].Member == "" {
+					roles[i].Name = "Planner"
+				}
+			}
+		}
+	}
+	s.store.update(testContext, func(v *Snapshot) error {
+		v.Members[0].Kinds = []string{"planner", RoleImplementer}
+		v.Members[0].Learnings = []Learning{{ID: "l1", When: "Reading a repository", Text: "Start with its README.", Source: LearnedByOwner}}
+		legacy(project(v, p.ID).Playbook.Roles)
+		t := task(v, running.ID)
+		legacy(t.Roles)
+		legacy(t.Playbook.Roles)
+		t.Status, t.ResumeStatus, t.Plan = "planning", "planning", &Plan{Summary: "Half done", Role: "Planner"}
+		// A wake waiting for the task to move on from planning.
+		v.Wakes = append(v.Wakes, Wake{ID: "w", TaskID: t.ID, On: WakeOnTask, Baseline: "planning", Status: WakeWaiting})
+		return nil
+	})
+	snap, _ := s.Snapshot(testContext)
+	m := snap.Members[0]
+	if !slices.Equal(m.Kinds, []string{RoleResearcher, RoleImplementer}) || m.Model != "opus" || m.Instructions != "Small commits." || len(m.Learnings) != 1 {
+		t.Fatalf("member %+v", m)
+	}
+	seat := snap.Projects[0].Playbook.Roles[0]
+	if seat.Name != "Researcher" || !slices.Equal(seat.Kinds, []string{RoleResearcher}) {
+		t.Fatalf("seat %+v", seat)
+	}
+	pinned := task(&snap, running.ID)
+	if r, ok := pinned.Researcher(); !ok || r.Name != "Researcher" || pinned.Playbook.Roles[0].Name != "Researcher" || pinned.Plan.Role != "Researcher" {
+		t.Fatalf("task team %+v, plan %+v", pinned.Roles, pinned.Plan)
+	}
+	if pinned.Status != TaskResearching || pinned.ResumeStatus != TaskResearching || pinned.Stage != StageResearching || !pinned.Active() {
+		t.Fatalf("task %s resume %s stage %s", pinned.Status, pinned.ResumeStatus, pinned.Stage)
+	}
+	if w := snap.Wakes[0]; w.Baseline != TaskResearching || w.Status != WakeWaiting {
+		t.Fatalf("wake %+v", w)
+	}
+	// Read again, nothing changes: the migration is done once.
+	again, _ := s.Snapshot(testContext)
+	if again.Projects[0].Playbook.Roles[0].Name != "Researcher" || task(&again, running.ID).Status != TaskResearching {
+		t.Fatal("reading twice changed the team")
+	}
+	if err := snap.Projects[0].Playbook.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAMessageReachesASeatsWorkingRoleAndNeverAResearcherAlone(t *testing.T) {
+	team := []Role{{Name: "Ada", Kinds: []string{RoleResearcher, RoleImplementer}}, {Name: "Plan", Kinds: []string{RoleResearcher}}, {Name: "Rune", Kinds: []string{RoleReviewer}}}
 	if r, err := addressee(team, "implementer"); err != nil || r.Name != "Ada" || r.Working() != RoleImplementer {
 		t.Fatalf("by kind: %+v %v", r, err)
 	}
 	if r, _ := addressee(team, "Plan"); r.Working() != "" {
-		t.Fatal("a seat that only plans has no working role")
+		t.Fatal("a seat that only researches has no working role")
 	}
 	s, _ := fixture(t)
 	p := plannedProject(t, s)
 	task, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "A draft"})
-	if _, err := s.SendTeamMessage(testContext, p.ID, task.ID, "Planner", FromOwner, "Hello"); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "only plans") {
-		t.Fatalf("a message to the planner: %v", err)
+	if _, err := s.SendTeamMessage(testContext, p.ID, task.ID, "Researcher", FromOwner, "Hello"); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "only researches") {
+		t.Fatalf("a message to the researcher: %v", err)
 	}
 	withPM := pmProject(t, s)
 	task, _ = s.QueueTask(testContext, withPM.ID, TaskInput{Objective: "Another draft"})
@@ -131,8 +197,8 @@ func TestATaskStartsOnlyOnceWhatItDependsOnHasFinished(t *testing.T) {
 		t.Fatal(err)
 	}
 	started, _, _ := s.NextTask(testContext)
-	if started.ID != first.ID || started.Status != TaskPlanning {
-		t.Fatalf("the first task that can start should plan first: %+v", started)
+	if started.ID != first.ID || started.Status != TaskResearching {
+		t.Fatalf("the first task that can start should be researched first: %+v", started)
 	}
 	snap, _ := s.Snapshot(testContext)
 	waiting, _ := findSnapshotTask(snap, second.ID)
@@ -161,18 +227,18 @@ func TestAPlanMovesTheTaskOnAndNeverMakesALoop(t *testing.T) {
 	}
 	// A cannot wait for B, which waits for A: that dependency is dropped.
 	planned, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", Questions: []string{"Which colour?"}}, []string{b.ID})
-	if err != nil || len(planned.DependsOn) != 0 || planned.Status != TaskPlanning || planned.Plan == nil {
-		t.Fatalf("questions keep the task in planning with its plan: %+v %v", planned, err)
+	if err != nil || len(planned.DependsOn) != 0 || planned.Status != TaskResearching || planned.Plan == nil {
+		t.Fatalf("questions keep the task in research with its plan: %+v %v", planned, err)
 	}
 	s.UpdateTask(testContext, a.ID, func(t *Task, _ *Project) (string, error) {
-		t.Status, t.Plan = TaskPlanning, nil
+		t.Status, t.Plan = TaskResearching, nil
 		return "", nil
 	})
 	if written, _ := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A"}, nil); written.Status != TaskWriting || written.Plan.Role != "" || written.Plan.At.IsZero() {
 		t.Fatalf("a clear plan starts the writer: %+v", written)
 	}
 	if _, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "again"}, nil); !errors.Is(err, ErrConflict) {
-		t.Fatalf("a task no longer planning took a plan: %v", err)
+		t.Fatalf("a task no longer researching took a plan: %v", err)
 	}
 	c, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "C"})
 	s.UpdateTask(testContext, a.ID, func(t *Task, _ *Project) (string, error) {
@@ -187,25 +253,25 @@ func TestAPlanMovesTheTaskOnAndNeverMakesALoop(t *testing.T) {
 		t.Base, t.Branch = "abc", "crew-task/c"
 		return "", nil
 	})
-	// One impossible id among the planner's doesn't lose the rest.
+	// One impossible id among the researcher's doesn't lose the rest.
 	back, _ := s.RecordPlan(testContext, c.ID, Plan{Summary: "C builds on A"}, []string{"not-a-task", c.ID, a.ID})
 	if back.Status != TaskQueued || back.Plan != nil || back.Base != "" || back.Branch != "" || len(back.WaitsFor) != 1 {
 		t.Fatalf("a task that waits goes back to the queue to plan again later: %+v", back)
 	}
 }
 
-func TestPlanningStagesAndTheFirstRound(t *testing.T) {
+func TestResearchStagesAndTheFirstRound(t *testing.T) {
 	task := Task{Round: 1}
 	task.NextRound()
 	if task.Round != 1 {
 		t.Fatal("a round went up before anything was written")
 	}
 	v := &Snapshot{Decisions: []Decision{{ID: "q", Kind: DecisionQuestion, Status: DecisionOpen}}, Tasks: []Task{
-		{Status: TaskPlanning, Roles: []Role{{Name: "Ada", Kinds: []string{RolePlanner, RoleImplementer}}}},
+		{Status: TaskResearching, Roles: []Role{{Name: "Ada", Kinds: []string{RoleResearcher, RoleImplementer}}}},
 		{Status: TaskWaiting, DecisionID: "q"},
 	}}
 	deriveStages(v)
-	if v.Tasks[0].Stage != StagePlanning || v.Tasks[0].Checking != "Ada" || v.Tasks[1].Stage != StagePlanning {
+	if v.Tasks[0].Stage != StageResearching || v.Tasks[0].Checking != "Ada" || v.Tasks[1].Stage != StageResearching {
 		t.Fatalf("stages %s %q %s", v.Tasks[0].Stage, v.Tasks[0].Checking, v.Tasks[1].Stage)
 	}
 	var d Decision

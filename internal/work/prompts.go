@@ -41,6 +41,7 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string) string {
 	var b strings.Builder
 	b.WriteString(briefText(p, t))
 	b.WriteString(planText(t))
+	b.WriteString(designText(t))
 	last := len(t.Revisions)
 	switch {
 	case caughtUp != "":
@@ -73,6 +74,11 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string) string {
 		}
 		if len(p.Brief.Criteria) > 0 && t.Revisions[last-1].BriefVersion != p.Brief.Version {
 			b.WriteString("\nThe brief has changed since that draft. Make sure the revision meets the brief above.\n")
+		}
+	}
+	if writers := t.RolesOf(core.RoleImplementer); len(writers) == 1 {
+		if guide := designGuide(t, writers[0], core.TaskWriting, "ask before you change anything: reply with only a ```design block holding your question. Whatever you change in a turn that asks is set aside."); guide != "" {
+			b.WriteString("\n" + strings.TrimSpace(guide) + "\n")
 		}
 	}
 	if code {
@@ -125,6 +131,7 @@ Use "question" only if the check cannot run at all for a reason the implementer 
 		var b strings.Builder
 		b.WriteString(briefText(p, t))
 		b.WriteString(planText(t))
+		b.WriteString(designText(t))
 		fmt.Fprintf(&b, "\nThis repository holds a proposed change for this task: the commits between %s and HEAD (run `git diff %s..HEAD` and read whatever else you need). %s Do not modify anything.\n", t.Base, t.Base, repoInstructions)
 		if playbook != nil && playbook.Check != "" {
 			fmt.Fprintf(&b, "QA runs `%s` separately, so you need not run it or report on it.\n", playbook.Check)
@@ -144,6 +151,7 @@ func reviewerPrompt(p core.Project, t core.Task, r core.Revision) string {
 	var b strings.Builder
 	b.WriteString(briefText(p, t))
 	b.WriteString(planText(t))
+	b.WriteString(designText(t))
 	fmt.Fprintf(&b, "\nThe current directory holds draft %d: %s.\nRead every file. Do not modify anything.\n", r.N, strings.Join(r.Files, ", "))
 	b.WriteString(`
 Judge the draft strictly against the goal, audience, constraints and every criterion above. Use:
@@ -231,7 +239,7 @@ func parseVerdict(text string) (core.Verdict, error) {
 	return core.Verdict{Outcome: v.Outcome, Summary: strings.TrimSpace(v.Summary), Findings: v.Findings, Question: strings.TrimSpace(v.Question)}, nil
 }
 
-// planText is the plan a planner left on the task, as the implementer and
+// planText is the plan a researcher left on the task, as the implementer and
 // the reviewers read it.
 func planText(t core.Task) string {
 	if t.Plan == nil {
@@ -254,11 +262,12 @@ func planText(t core.Task) string {
 	return b.String()
 }
 
-// plannerPrompt asks the planner to work out what a task needs before
+// researcherPrompt asks the researcher to work out what a task needs before
 // anything is written: it reads, and changes nothing.
-func plannerPrompt(p core.Project, t core.Task, others []core.Task) string {
+func researcherPrompt(p core.Project, t core.Task, others []core.Task) string {
 	var b strings.Builder
 	b.WriteString(briefText(p, t))
+	b.WriteString(designText(t))
 	if isCode(p, t) {
 		b.WriteString("\nYou are in a clone of the repository, on the branch this task will be written on. " + repoInstructions + "\n")
 	} else {
@@ -278,8 +287,17 @@ Plan this task before anything is written. Read what you need to, and change not
 			fmt.Fprintf(&b, "- %s (%s): %s\n", other.ID, other.Status, text.Clip(other.Objective, 200))
 		}
 	}
-	b.WriteString(`
-Reply with only this JSON object:
-{"summary": "the plan in a few sentences", "exists": ["..."], "changes": ["..."], "out_of_scope": ["..."], "questions": ["only what the owner must answer"], "depends_on": ["ids of tasks above this one must wait for"]}`)
+	researcher, _ := t.Researcher()
+	if guide := designGuide(t, researcher, core.TaskResearching, "ask with the design reply below instead of a plan, and plan once the answer is back."); guide != "" {
+		b.WriteString("\n" + strings.TrimSpace(guide) + "\n")
+	}
+	const plan = `{"summary": "the plan in a few sentences", "exists": ["..."], "changes": ["..."], "out_of_scope": ["..."], "questions": ["only what the owner must answer"], "depends_on": ["ids of tasks above this one must wait for"]}`
+	// The reply can ask for design input only while the hand-off is offered,
+	// so the contract a role follows never contradicts the guide above it.
+	if designsFor(t, researcher) && t.DesignsAt(core.TaskResearching) < core.DesignLimit {
+		b.WriteString("\nReply with only one of these JSON objects: the plan,\n" + plan + "\nor, to ask for design input first,\n" + `{"design": "your question for the designer"}`)
+		return b.String()
+	}
+	b.WriteString("\nReply with only this JSON object:\n" + plan)
 	return b.String()
 }

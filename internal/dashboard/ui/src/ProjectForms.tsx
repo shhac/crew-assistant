@@ -15,7 +15,7 @@ const kinds: { kind: Kind; label: string; hint: string }[] = [
   {
     kind: "code",
     label: "Code",
-    hint: "A planner works out each request, an implementer changes a private copy of the repository, a reviewer reads the change, and QA runs your check. Changes land as a new local branch until you choose otherwise.",
+    hint: "A researcher works out each request, an implementer changes a private copy of the repository, a reviewer reads the change, and QA runs your check. Changes land as a new local branch until you choose otherwise.",
   },
   {
     kind: "tracking",

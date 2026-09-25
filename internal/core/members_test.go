@@ -139,28 +139,30 @@ func TestARoleGivenBackNeverTakesAnotherRolesName(t *testing.T) {
 func TestDeletingAMemberInASeatOfSeveralRolesGivesBackEach(t *testing.T) {
 	s, _ := fixture(t)
 	p := newProject(t, s)
-	ada, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kinds: []string{RolePlanner, RoleImplementer}, Engine: "codex"})
+	ada, _ := s.SaveMember(testContext, "", MemberInput{Name: "Ada", Kinds: []string{RoleResearcher, RoleImplementer}, Engine: "codex"})
 	pam, _ := s.SaveMember(testContext, "", MemberInput{Name: "Pam", Kinds: []string{RolePM}, Engine: "claude"})
+	dee, _ := s.SaveMember(testContext, "", MemberInput{Name: "Dee", Kinds: []string{RoleDesigner}, Engine: "claude"})
 	code := Templates["code"]
 	team := code
 	team.Repo, team.Check = "/work/service", "make check"
 	team.Roles = []Role{
-		{Name: "Ada", Kinds: []string{RolePlanner, RoleImplementer}, Engine: "codex", Member: ada.ID},
+		{Name: "Ada", Kinds: []string{RoleResearcher, RoleImplementer}, Engine: "codex", Member: ada.ID},
 		code.Roles[2],
 		code.Roles[3],
+		{Name: "Dee", Kinds: []string{RoleDesigner}, Engine: "claude", Member: dee.ID},
 		{Name: "Pam", Kinds: []string{RolePM}, Engine: "claude", Member: pam.ID},
 	}
 	if _, err := s.SetPlaybook(testContext, p.ID, team); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{ada.ID, pam.ID} {
+	for _, id := range []string{ada.ID, dee.ID, pam.ID} {
 		if err := s.DeleteMember(testContext, id); err != nil {
 			t.Fatal(err)
 		}
 	}
 	snap, _ := s.Snapshot(testContext)
 	if roles := snap.Projects[0].Playbook.Roles; !reflect.DeepEqual(roles, code.Roles) {
-		t.Fatalf("the template's planner and implementer should be back, and no PM: %+v", roles)
+		t.Fatalf("the template's researcher and implementer should be back, and no designer or PM: %+v", roles)
 	}
 }
 

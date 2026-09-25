@@ -917,7 +917,7 @@ describe("the team", () => {
         ...ada(),
         id: "m2",
         name: "Rune",
-        kinds: ["qa", "planner"],
+        kinds: ["qa", "researcher"],
         model: "",
         learnings: [],
       },
@@ -931,7 +931,7 @@ describe("the team", () => {
     expect(within(card).getByText("Implementer · Claude opus")).toBeTruthy();
     expect(within(card).getByText("In 2 projects · 2 learnings")).toBeTruthy();
     const rune = screen.getByRole("link", { name: /^Rune/ });
-    expect(within(rune).getByText("Planner and QA · Claude")).toBeTruthy();
+    expect(within(rune).getByText("Researcher and QA · Claude")).toBeTruthy();
     expect(rune.textContent).not.toMatch(/project|learning/);
   });
   it("creates a member and opens it", async () => {
@@ -951,7 +951,7 @@ describe("the team", () => {
     );
     fireEvent.click(within(roles).getByLabelText("Implementer"));
     fireEvent.click(within(roles).getByLabelText("Reviewer"));
-    fireEvent.click(within(roles).getByLabelText("Planner"));
+    fireEvent.click(within(roles).getByLabelText("Researcher"));
     fireEvent.change(screen.getByLabelText("Engine"), {
       target: { value: "codex" },
     });
@@ -967,7 +967,7 @@ describe("the team", () => {
     expect(create.options?.method).toBe("POST");
     expect(JSON.parse(String(create.options?.body))).toEqual({
       name: "Ada",
-      kinds: ["planner", "reviewer"],
+      kinds: ["researcher", "reviewer"],
       engine: "codex",
       model: "gpt-6",
       effort: "",
@@ -989,7 +989,14 @@ describe("the team", () => {
       within(roles)
         .getAllByRole("checkbox")
         .map((c) => c.closest("label")?.textContent),
-    ).toEqual(["Planner", "Implementer", "Reviewer", "QA", "PM"]);
+    ).toEqual([
+      "Researcher",
+      "Designer",
+      "Implementer",
+      "Reviewer",
+      "QA",
+      "PM",
+    ]);
     fireEvent.click(within(roles).getByLabelText("PM"));
     expect(within(roles).queryByText(/^Pick/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Add member" }));
@@ -1012,7 +1019,7 @@ describe("the team", () => {
     fireEvent.click(within(roles).getByLabelText("Reviewer"));
     expect(
       within(roles).getByText(
-        "Pick one of implementer, reviewer and QA, plus planner and PM if you like.",
+        "Pick one of implementer, reviewer and QA, plus researcher, designer and PM if you like.",
       ),
     ).toBeTruthy();
     expect(add).toHaveProperty("disabled", true);
@@ -1021,7 +1028,7 @@ describe("the team", () => {
     fireEvent.click(within(roles).getByLabelText("Reviewer"));
     expect(within(roles).getByText("Pick at least one role.")).toBeTruthy();
     expect(add).toHaveProperty("disabled", true);
-    fireEvent.click(within(roles).getByLabelText("Planner"));
+    fireEvent.click(within(roles).getByLabelText("Researcher"));
     expect(within(roles).queryByText(/^Pick/)).toBeNull();
     expect(add).toHaveProperty("disabled", false);
     expect(writes().filter((c) => c.path === "/api/members")).toEqual([]);

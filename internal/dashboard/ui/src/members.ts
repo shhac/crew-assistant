@@ -21,7 +21,8 @@ export const engineLabel = (id: string) =>
  * kind reads mid-sentence.
  */
 export const memberKinds: { id: MemberKind; label: string; word: string }[] = [
-  { id: "planner", label: "Planner", word: "planner" },
+  { id: "researcher", label: "Researcher", word: "researcher" },
+  { id: "designer", label: "Designer", word: "designer" },
   { id: "implementer", label: "Implementer", word: "implementer" },
   { id: "reviewer", label: "Reviewer", word: "reviewer" },
   { id: "qa", label: "QA", word: "QA" },
@@ -37,16 +38,16 @@ export const holds = (who: { kinds?: readonly string[] }, kind: string) =>
   !!who.kinds?.includes(kind);
 
 /** Kinds held alongside a seat's work, rather than being it. */
-const besideWork = new Set(["planner", "pm"]);
+const besideWork = new Set(["researcher", "designer", "pm"]);
 
 /**
- * What a seat does once the work has started; "" for one that only plans or
- * keeps the list.
+ * What a seat does once the work has started; "" for one that only
+ * researches, designs or keeps the list.
  */
 export const workingKind = (role: Role) =>
   role.kinds.find((k) => !besideWork.has(k)) ?? "";
 
-/** "Planner and implementer": the kinds held, in the order a team works. */
+/** "Researcher and implementer": the kinds held, in the order a team works. */
 export function kindsLabel(kinds: readonly string[]) {
   const rank = (kind: string) => {
     const i = memberKinds.findIndex((k) => k.id === kind);
@@ -62,12 +63,12 @@ export function kindsLabel(kinds: readonly string[]) {
 /**
  * Why a member can't hold these kinds, as the server would refuse them:
  * verdicts and messages name the seat, so it does one kind of work, and
- * planning and keeping the list sit alongside.
+ * research, design and keeping the list sit alongside.
  */
 export function kindsProblem(kinds: readonly string[]) {
   if (!kinds.length) return "Pick at least one role.";
   if (kinds.filter((k) => !besideWork.has(k)).length > 1)
-    return "Pick one of implementer, reviewer and QA, plus planner and PM if you like.";
+    return "Pick one of implementer, reviewer and QA, plus researcher, designer and PM if you like.";
   return "";
 }
 
@@ -117,8 +118,8 @@ export const seatMember = (
   members: Member[],
 ) => memberOf(seatFor(playbook, kind), members);
 
-/** Sent as the planner to leave planning out of a code team. */
-export const noPlanning = "none";
+/** Sent as the researcher to leave research out of a code team. */
+export const noResearch = "none";
 
 /**
  * A project's team as it stands, as a choice to save again. A team is saved
@@ -140,11 +141,12 @@ export function teamChoice(playbook: Playbook, members: Member[]): TeamInput {
     implementer_member: who("implementer"),
     reviewer_member: who("reviewer"),
     qa_member: code ? who("qa") : "",
-    planner_member: !code
+    researcher_member: !code
       ? ""
-      : seatFor(playbook, "planner")
-        ? who("planner")
-        : noPlanning,
+      : seatFor(playbook, "researcher")
+        ? who("researcher")
+        : noResearch,
+    designer_member: who("designer"),
     pm_member: who("pm"),
     max_rounds: String(playbook.max_rounds),
     ...(code
@@ -173,9 +175,9 @@ export function roleMember(
 }
 
 /**
- * The member at work on a request now: the planner while it plans, the
- * implementer while it writes, the checker named while it is checked, and no
- * one otherwise.
+ * The member at work on a request now: the researcher while it researches,
+ * the designer while it gives design input, the implementer while it writes,
+ * the checker named while it is checked, and no one otherwise.
  */
 export function atWork(task: Task, members: Member[]) {
   if (task.status === "writing")
@@ -183,12 +185,14 @@ export function atWork(task: Task, members: Member[]) {
       task.roles?.find((r) => holds(r, "implementer")),
       members,
     );
-  if (task.status === "planning")
+  if (task.status === "researching" || task.status === "designing") {
+    const kind = task.status === "researching" ? "researcher" : "designer";
     return memberOf(
       task.roles?.find((r) => r.name === task.checking) ??
-        task.roles?.find((r) => holds(r, "planner")),
+        task.roles?.find((r) => holds(r, kind)),
       members,
     );
+  }
   if (task.status === "reviewing" || task.status === "deciding")
     return memberOf(
       task.roles?.find((r) => r.name === task.checking),

@@ -12,9 +12,11 @@ import (
 
 // Role is one seat on a project team: a name, the kinds of role it holds,
 // and how it runs. Exactly one implementer produces the artifact; reviewers
-// judge it against the brief and never change it; a planner works out what
-// a task needs before anything is written. A seat can hold the planner role
-// alongside one other, as when the owner's Ada both plans and implements.
+// judge it against the brief and never change it; a researcher works out
+// what a task needs before anything is written; a designer gives design
+// input when the researcher or the implementer hands it the task. A seat can
+// hold those roles alongside one other, as when the owner's Ada both
+// researches and implements.
 type Role struct {
 	Name  string   `json:"name"`
 	Kinds []string `json:"kinds"`
@@ -33,18 +35,20 @@ type Role struct {
 
 // roleKinds are the kinds of role a member or seat can hold, in the order a
 // team works.
-var roleKinds = []string{RolePM, RolePlanner, RoleImplementer, RoleReviewer, RoleQA}
+var roleKinds = []string{RolePM, RoleResearcher, RoleDesigner, RoleImplementer, RoleReviewer, RoleQA}
 
 // working reports whether a kind of role does the work once it has started,
-// rather than planning it or keeping the list.
-func working(kind string) bool { return kind != RolePlanner && kind != RolePM }
+// rather than researching it, advising on its design or keeping the list.
+func working(kind string) bool {
+	return kind != RoleResearcher && kind != RoleDesigner && kind != RolePM
+}
 
 // Holds reports whether the seat holds a kind of role.
 func (r Role) Holds(kind string) bool { return slices.Contains(r.Kinds, kind) }
 
-// Working is the seat's one kind other than planner and PM: what it does
-// once the work has started, and what a message to it reaches. A seat that
-// only plans or keeps the list has none.
+// Working is the seat's one kind other than researcher, designer and PM:
+// what it does once the work has started, and what a message to it reaches.
+// A seat that only researches, designs or keeps the list has none.
 func (r Role) Working() string {
 	i := slices.IndexFunc(r.Kinds, working)
 	if i < 0 {
@@ -59,10 +63,14 @@ const (
 	// RoleQA runs the playbook's check command against a revision and reports
 	// what failed. It may write while it runs; the medium discards it after.
 	RoleQA = "qa"
-	// RolePlanner works out, before anything is written, what the task needs:
-	// what exists, what will change, what is unclear and what it waits on.
-	// It only reads.
-	RolePlanner = "planner"
+	// RoleResearcher works out, before anything is written, what the task
+	// needs: what exists, what will change, what is unclear and what it waits
+	// on. It only reads. Older state calls it the planner.
+	RoleResearcher = "researcher"
+	// RoleDesigner gives design input when the researcher or the implementer
+	// hands it the task, then hands it back. It only reads. No template has
+	// one: a team has a designer only when a member is seated as one.
+	RoleDesigner = "designer"
 	// RolePM keeps the project's to-do list: the order work starts in and
 	// what waits for what. It directs no one; the owner and the assistant
 	// can overrule it.
@@ -208,7 +216,7 @@ var Templates = map[string]Playbook{
 		Template: "code",
 		Medium:   MediumGit,
 		Roles: []Role{
-			{Name: "Planner", Kinds: []string{RolePlanner}, Engine: "claude", Instructions: "Work out what this task needs before anything is written: read the repository, find what already exists, and say what will change, what is out of scope, what is unclear and what it has to wait for."},
+			{Name: "Researcher", Kinds: []string{RoleResearcher}, Engine: "claude", Instructions: "Work out what this task needs before anything is written: read the repository, find what already exists, and say what will change, what is out of scope, what is unclear and what it has to wait for."},
 			{Name: "Implementer", Kinds: []string{RoleImplementer}, Engine: "claude", Model: "opus", Instructions: "Implement the task in this repository with tests, following the repository's own conventions and instructions."},
 			{Name: "Reviewer", Kinds: []string{RoleReviewer}, Engine: "codex", Instructions: "Review the change against the brief and the task's criteria, as a careful senior engineer: correctness first, then design and tests."},
 			{Name: "QA", Kinds: []string{RoleQA}, Engine: "codex", Instructions: "Run the project's check exactly as given and report what failed."},
@@ -289,8 +297,8 @@ func (p Playbook) Validate() error {
 // seatKinds checks what one seat holds: known kinds, each once, and at most
 // one of implementer, reviewer and QA. Verdicts and messages name the seat,
 // so a seat that both reviewed and ran QA would have its verdicts collide,
-// and one that reviewed its own work would not be a review. The planner role
-// sits alongside any one of them.
+// and one that reviewed its own work would not be a review. The researcher,
+// designer and PM roles sit alongside any one of them.
 func seatKinds(r Role) error {
 	if len(r.Kinds) == 0 {
 		return fmt.Errorf("role %s holds no kind of role", r.Name)
@@ -308,7 +316,7 @@ func seatKinds(r Role) error {
 		}
 	}
 	if doing > 1 {
-		return fmt.Errorf("role %s can hold only one of implementer, reviewer and QA, alongside planning and PM", r.Name)
+		return fmt.Errorf("role %s can hold only one of implementer, reviewer and QA, alongside research, design and PM", r.Name)
 	}
 	return nil
 }

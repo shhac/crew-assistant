@@ -141,8 +141,10 @@ func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 		return true, err
 	}
 	switch t.Status {
-	case core.TaskPlanning:
-		return true, lp.planTask(ctx, p, t, m)
+	case core.TaskResearching:
+		return true, lp.researchTask(ctx, p, t, m)
+	case core.TaskDesigning:
+		return true, lp.design(ctx, p, t, m)
 	case core.TaskWriting:
 		return true, lp.write(ctx, p, t, m)
 	case core.TaskReviewing:
@@ -337,13 +339,19 @@ func (lp *Loop) takeInLanded(ctx context.Context, t core.Task, m medium) (core.T
 
 // recordDraft records what the implementer's round produced: a new draft for
 // review, or, answering a pull request, the team's word that nothing needed
-// to change. seen is how much of the owner's direction its prompt carried.
+// to change, or its hand-off to the designer for design input. seen is how
+// much of the owner's direction its prompt carried.
 func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m medium, writer string, result roles.Result, seen int) error {
 	reply, learned := splitBlock(result.Text, "learned")
 	reply, block := splitBlock(reply, "wake")
 	wakeErrors := lp.applyWakeBlock(ctx, p, t, block)
-	if r, ok := t.Role(writer); ok {
+	r, ok := t.Role(writer)
+	if ok {
 		lp.recordLearned(ctx, p, t, r, m, learned)
+	}
+	var question string
+	if ok && designsFor(t, r) {
+		reply, question = splitBlock(reply, "design")
 	}
 	// The round carried out the request it started with; one made while it
 	// ran, even for the same thing, waits for the next round.
@@ -352,6 +360,15 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 		if t.WriterRequest == applied {
 			t.WriterNext = ""
 		}
+	}
+	// Asking for design input ends the turn without a draft: whatever it
+	// changed is set aside when the workspace is next reset, and its session
+	// resumes with the answer.
+	if question != "" {
+		return lp.askDesign(ctx, t, writer, question, func(t *core.Task) {
+			t.WriterSession, t.WakeErrors = result.Session, wakeErrors
+			took(t)
+		})
 	}
 	n := len(t.Revisions) + 1
 	revision, err := m.snapshot(ctx, t, n)
@@ -669,14 +686,29 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 		if d.Kind == core.DecisionQuestion || (!chose(choiceAnotherRound) && !chose(choiceChanges)) {
 			t.AddDirection(&d, answer)
 		}
+		// A design question goes back to the step that asked it, in the same
+		// round, with the owner's answer in its direction.
+		if r := t.DesignDecision(d.ID); r != nil {
+			if r.Open() {
+				r.AnsweredAt = time.Now().UTC()
+			}
+			t.Status, t.DecisionID, t.Detail = r.Step, "", "Going on with your answer"
+			return fmt.Sprintf("%s goes on with your answer about the design of %s", r.From, t.Objective), nil
+		}
+		// A designer that failed is asked again within the same round.
+		if d.Kind == core.DecisionFailure && t.ResumeStatus == core.TaskDesigning {
+			t.Status, t.ResumeStatus, t.DecisionID, t.Detail = core.TaskDesigning, "", "", "Asking for design input again with your answer"
+			return fmt.Sprintf("Asking again for design input on %s", t.Objective), nil
+		}
 		t.NextRound()
 		status, detail, activity := core.TaskWriting, "Revising with your answer", fmt.Sprintf("Revising %s with your direction", t.Objective)
 		if len(t.Revisions) == 0 {
 			detail, activity = "Starting with your answer", fmt.Sprintf("Starting %s with your answer", t.Objective)
 		}
-		// A planner that failed plans again, with the owner's words to go on.
-		if d.Kind == core.DecisionFailure && t.ResumeStatus == core.TaskPlanning {
-			status, detail, t.ResumeStatus = core.TaskPlanning, "Planning again with your answer", ""
+		// A researcher that failed researches again, with the owner's words to
+		// go on.
+		if d.Kind == core.DecisionFailure && t.ResumeStatus == core.TaskResearching {
+			status, detail, t.ResumeStatus = core.TaskResearching, "Researching again with your answer", ""
 		}
 		t.Status, t.DecisionID, t.Detail = status, "", detail
 		return activity, nil

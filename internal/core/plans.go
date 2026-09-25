@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Plan is what a planner worked out about a task before anything was
+// Plan is what a researcher worked out about a task before anything was
 // written: what already exists, what will change, what stays out, and what
 // is unclear. What the task waits for is kept on the task itself.
 type Plan struct {
@@ -103,11 +103,12 @@ func reaches(v *Snapshot, from, to string, seen map[string]bool) bool {
 	return false
 }
 
-// RecordPlan keeps a planner's plan on its task and moves the task on. What
-// it waits for comes first: a task with unlanded work to wait for goes back
-// to the queue, keeping neither this plan nor its branch point, so it plans
-// again on top of the landed work. Then the planner's questions, which the
-// loop brings to the owner. Otherwise the implementer starts.
+// RecordPlan keeps a researcher's plan on its task and moves the task on.
+// What it waits for comes first: a task with unlanded work to wait for goes
+// back to the queue, keeping neither this plan nor its branch point, so it is
+// researched again on top of the landed work. Then the researcher's
+// questions, which the loop brings to the owner. Otherwise the implementer
+// starts.
 func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, dependsOn []string) (Task, error) {
 	var out Task
 	err := s.store.update(ctx, func(v *Snapshot) error {
@@ -115,9 +116,9 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 		if t == nil {
 			return ErrNotFound
 		}
-		// A task stopped while the planner worked stays stopped.
-		if t.Status != TaskPlanning {
-			return fmt.Errorf("the task is no longer planning: %w", ErrConflict)
+		// A task stopped while the researcher worked stays stopped.
+		if t.Status != TaskResearching {
+			return fmt.Errorf("the task is no longer being researched: %w", ErrConflict)
 		}
 		deps := possibleDependencies(v, *t, append(slices.Clone(t.DependsOn), dependsOn...))
 		now := s.now().UTC()

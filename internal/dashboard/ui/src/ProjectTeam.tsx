@@ -9,7 +9,7 @@ import {
   kindLabel,
   kindsLabel,
   memberOf,
-  noPlanning,
+  noResearch,
   seatFor,
   seatMember,
   teamChoice,
@@ -32,12 +32,18 @@ const seatLabel = (kind: string, code: boolean) =>
 
 /**
  * The roles a team has places for, in the order it works: a writing team
- * neither plans nor runs QA, and any team can have a PM.
+ * neither researches nor runs QA, and any team can have a designer and a PM.
  */
 const seatKinds = (code: boolean): MemberKind[] =>
   code
-    ? ["planner", "implementer", "reviewer", "qa", "pm"]
-    : ["implementer", "reviewer", "pm"];
+    ? ["researcher", "designer", "implementer", "reviewer", "qa", "pm"]
+    : ["designer", "implementer", "reviewer", "pm"];
+
+/** What a role no member or template fills reads as. */
+const nobody: Partial<Record<MemberKind, string>> = {
+  designer: "No designer",
+  pm: "No PM",
+};
 
 export function TeamTab({
   project,
@@ -140,8 +146,9 @@ function Seats({
 }
 
 /**
- * One role: the member in it, the template's seat, or no one. Only planning
- * can be left out of a team that has it, and no template has a PM.
+ * One role: the member in it, the template's seat, or no one. Only research
+ * can be left out of a team that has it, and no template has a designer or a
+ * PM.
  */
 function Seat({
   kind,
@@ -165,9 +172,9 @@ function Seat({
   const eligible = members.filter((m) => holds(m, kind));
   const kept = !!filled && !holds(filled, kind);
   const options = filled && kept ? [...eligible, filled] : eligible;
-  const optional = kind === "planner";
-  const empty = kind === "pm" ? "No PM" : "Template default";
-  const value = filled?.id ?? (optional && !role ? noPlanning : "");
+  const optional = kind === "researcher";
+  const empty = nobody[kind] ?? "Template default";
+  const value = filled?.id ?? (optional && !role ? noResearch : "");
   return (
     <li className="seat">
       <span className="seat-role">{label}</span>
@@ -179,7 +186,7 @@ function Seat({
             Template default · {engineLabel(role.engine)}
           </span>
         ) : (
-          <span className="muted">{optional ? "No planning" : empty}</span>
+          <span className="muted">{optional ? "No research" : empty}</span>
         )}
         {filled && role && role.kinds.length > 1 && (
           <span className="muted small"> · {seatSummary(role)}</span>
@@ -201,7 +208,7 @@ function Seat({
             onChange={(e) => onFill(e.target.value)}
           >
             <option value="">{empty}</option>
-            {optional && <option value={noPlanning}>No planning</option>}
+            {optional && <option value={noResearch}>No research</option>}
             {options.map((m) => (
               <option key={m.id} value={m.id} disabled={kept && m === filled}>
                 {m.name}
@@ -260,7 +267,7 @@ function TeamView({ playbook }: { playbook: Playbook }) {
   );
 }
 
-/** "Planner and implementer · Claude": every role a seat holds. */
+/** "Researcher and implementer · Claude": every role a seat holds. */
 function seatSummary(role: Role) {
   return [kindsLabel(role.kinds), engineLabel(role.engine)].join(" · ");
 }
@@ -319,7 +326,8 @@ function TeamEditor({
         implementer_member: current?.implementer_member ?? "",
         reviewer_member: current?.reviewer_member ?? "",
         qa_member: code ? (current?.qa_member ?? "") : "",
-        planner_member: code ? (current?.planner_member ?? "") : "",
+        researcher_member: code ? (current?.researcher_member ?? "") : "",
+        designer_member: current?.designer_member ?? "",
         pm_member: current?.pm_member ?? "",
         max_rounds: rounds,
         ...(code

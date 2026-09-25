@@ -30,16 +30,20 @@ type TeamChoice struct {
 	Implementer string `json:"implementer_member"`
 	Reviewer    string `json:"reviewer_member"`
 	QA          string `json:"qa_member"`
-	// Planner is the member who plans each task first, or NoPlanner for a
-	// team that starts writing at once.
-	Planner string `json:"planner_member"`
+	// Researcher is the member who researches each task first, or
+	// NoResearcher for a team that starts writing at once.
+	Researcher string `json:"researcher_member"`
+	// Designer is the member the researcher and the implementer can hand a
+	// task to for design input; empty or NoResearcher leaves the team
+	// without one.
+	Designer string `json:"designer_member"`
 	// PM is the member who keeps the to-do list in order; empty leaves the
 	// order to the owner and the assistant.
 	PM string `json:"pm_member"`
 }
 
-// NoPlanner, as the planner, leaves planning out of a team.
-const NoPlanner = "none"
+// NoResearcher, as the researcher, leaves research out of a team.
+const NoResearcher = "none"
 
 // teamFrom builds a playbook from a template and the few choices the assistant
 // may make about it. Anything left empty keeps the template's choice. current
@@ -62,13 +66,13 @@ func teamFrom(in TeamChoice, snap core.Snapshot, current *core.Playbook) (core.P
 			playbook.Roles[i].Engine = in.ReviewerEngine
 		}
 	}
-	if in.Planner == NoPlanner {
-		playbook.Roles = slices.DeleteFunc(playbook.Roles, func(r core.Role) bool { return r.Holds(core.RolePlanner) && r.Working() == "" })
+	if in.Researcher == NoResearcher {
+		playbook.Roles = slices.DeleteFunc(playbook.Roles, func(r core.Role) bool { return r.Holds(core.RoleResearcher) && r.Working() == "" })
 	}
-	// The planner and the PM come last, so a member who also fills another
-	// seat plans or keeps the list from that seat.
-	for _, slot := range [][2]string{{core.RoleImplementer, in.Implementer}, {core.RoleReviewer, in.Reviewer}, {core.RoleQA, in.QA}, {core.RolePlanner, in.Planner}, {core.RolePM, in.PM}} {
-		if slot[1] == "" || slot[1] == NoPlanner {
+	// The researcher, the designer and the PM come last, so a member who also
+	// fills another seat does that from the same seat.
+	for _, slot := range [][2]string{{core.RoleImplementer, in.Implementer}, {core.RoleReviewer, in.Reviewer}, {core.RoleQA, in.QA}, {core.RoleResearcher, in.Researcher}, {core.RoleDesigner, in.Designer}, {core.RolePM, in.PM}} {
+		if slot[1] == "" || slot[1] == NoResearcher {
 			continue
 		}
 		if err := fillRole(&playbook, slot[0], slot[1], snap, current); err != nil {
@@ -112,8 +116,9 @@ func fillRole(playbook *core.Playbook, kind, id string, snap core.Snapshot, curr
 		return err
 	}
 	slot := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Holds(kind) })
-	// No template has a PM, so only the PM may join a team without a slot.
-	if slot < 0 && kind != core.RolePM {
+	// No template has a PM or a designer, so only they may join a team
+	// without a slot.
+	if slot < 0 && !memberOnly(kind) {
 		return fmt.Errorf("a %s team has no %s for %s to fill", playbook.Template, kind, m.Name)
 	}
 	if seat := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Member == m.ID }); seat >= 0 && seat != slot {
@@ -130,6 +135,10 @@ func fillRole(playbook *core.Playbook, kind, id string, snap core.Snapshot, curr
 	playbook.Roles[slot] = memberSeat(m, playbook.Roles[slot].Kinds, playbook.Roles[slot].Instructions)
 	return nil
 }
+
+// memberOnly reports a kind of role no template seats, which a team has only
+// when a member holds it.
+func memberOnly(kind string) bool { return kind == core.RolePM || kind == core.RoleDesigner }
 
 // memberFor is the member id names, if it holds that kind of role.
 func memberFor(kind, id string, snap core.Snapshot) (core.Member, error) {
@@ -219,10 +228,10 @@ func sameKinds(a, b []string) bool {
 }
 
 // SetSeat gives one kind of role to a member, or with no member back to the
-// template's seat for it; NoPlanner as the planner leaves planning out.
-// A member already on the team takes the role in the seat it has. Every
-// other seat keeps the copy it has, and requests under way keep the team
-// they started with.
+// template's seat for it; NoResearcher as the researcher leaves research
+// out, and as the designer leaves the team without one. A member already on
+// the team takes the role in the seat it has. Every other seat keeps the copy
+// it has, and requests under way keep the team they started with.
 func (lp *Loop) SetSeat(ctx context.Context, projectID, kind, memberID string) (core.Project, error) {
 	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
@@ -237,17 +246,21 @@ func (lp *Loop) SetSeat(ctx context.Context, projectID, kind, memberID string) (
 	}
 	playbook := *p.Playbook
 	base, templated := playbook.TemplateSeat(kind)
-	// No template has a PM, so only the PM may join a team without a seat
-	// for it; planning can be left out only where the template plans.
-	if !templated && (kind != core.RolePM || memberID == NoPlanner) {
+	// No template has a PM or a designer, so only they may join a team
+	// without a seat for it; research can be left out only where the
+	// template researches.
+	if kind == core.RoleDesigner && memberID == NoResearcher {
+		memberID = ""
+	}
+	if !templated && (!memberOnly(kind) || memberID == NoResearcher) {
 		return core.Project{}, fmt.Errorf("a %s team has no %s", playbook.Template, kind)
 	}
-	if memberID == NoPlanner && kind != core.RolePlanner {
-		return core.Project{}, fmt.Errorf("only planning can be left out of a team")
+	if memberID == NoResearcher && kind != core.RoleResearcher {
+		return core.Project{}, fmt.Errorf("only research can be left out of a team")
 	}
 	at := playbook.Unseat(kind)
 	switch memberID {
-	case NoPlanner:
+	case NoResearcher:
 	case "":
 		if templated {
 			playbook.Roles = slices.Insert(playbook.Roles, at, base)
@@ -267,7 +280,8 @@ func (lp *Loop) SetSeat(ctx context.Context, projectID, kind, memberID string) (
 	if err = playbook.Validate(); err != nil {
 		return core.Project{}, err
 	}
-	// Queued work may have been waiting on a planner or a PM, so look again.
+	// Queued work may have been waiting on a researcher or a PM, so look
+	// again.
 	p, err = lp.Core.SetPlaybook(ctx, projectID, playbook)
 	if err == nil {
 		lp.Nudge()

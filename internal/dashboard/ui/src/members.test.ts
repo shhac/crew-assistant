@@ -7,6 +7,7 @@ import {
   memberOf,
   roleMember,
   taskRoles,
+  teamChoice,
   workingKind,
 } from "./members";
 import type { Member, Playbook, Project, Role, Task } from "./api";
@@ -86,65 +87,119 @@ describe("a request's team", () => {
 describe("the kinds of role a seat holds", () => {
   it("names them in the order a team works, in sentence case", () => {
     expect(kindsLabel(["reviewer"])).toBe("Reviewer");
-    expect(kindsLabel(["implementer", "planner"])).toBe(
-      "Planner and implementer",
+    expect(kindsLabel(["implementer", "researcher"])).toBe(
+      "Researcher and implementer",
     );
-    expect(kindsLabel(["qa", "planner"])).toBe("Planner and QA");
-    expect(kindsLabel(["planner", "implementer", "reviewer"])).toBe(
-      "Planner, implementer and reviewer",
+    expect(kindsLabel(["qa", "researcher"])).toBe("Researcher and QA");
+    expect(kindsLabel(["researcher", "implementer", "reviewer"])).toBe(
+      "Researcher, implementer and reviewer",
     );
     expect(kindsLabel([])).toBe("");
   });
   it("names the PM last, beside the work", () => {
     expect(kindsLabel(["pm"])).toBe("PM");
     expect(kindsLabel(["pm", "reviewer"])).toBe("Reviewer and PM");
-    expect(kindsLabel(["pm", "implementer", "planner"])).toBe(
-      "Planner, implementer and PM",
+    expect(kindsLabel(["pm", "implementer", "researcher"])).toBe(
+      "Researcher, implementer and PM",
     );
   });
-  it("tells the work a seat does from the planning it may also do", () => {
+  it("names the designer after research and before the work", () => {
+    expect(kindsLabel(["implementer", "designer", "researcher"])).toBe(
+      "Researcher, designer and implementer",
+    );
+    expect(kindsLabel(["designer"])).toBe("Designer");
+  });
+  it("holds a designer alone or beside one kind of work", () => {
+    expect(kindsProblem(["designer"])).toBe("");
+    expect(kindsProblem(["designer", "implementer", "researcher", "pm"])).toBe(
+      "",
+    );
+    expect(kindsProblem(["designer", "implementer", "reviewer"])).not.toBe("");
+    expect(
+      workingKind({ name: "Dee", kinds: ["designer"], engine: "claude" }),
+    ).toBe("");
+    expect(
+      workingKind({
+        name: "Ada",
+        kinds: ["designer", "reviewer"],
+        engine: "x",
+      }),
+    ).toBe("reviewer");
+  });
+  it("finds the designer at work while a request is with it", () => {
+    const dee: Member = { ...ada, id: "m5", name: "Dee", kinds: ["designer"] };
+    const seats: Role[] = [
+      ...roles,
+      { name: "Dee", kinds: ["designer"], engine: "claude", member: "m5" },
+    ];
+    expect(
+      atWork(task({ status: "designing", roles: seats, checking: "Dee" }), [
+        ada,
+        dee,
+      ]),
+    ).toBe(dee);
+    expect(atWork(task({ status: "designing", roles: seats }), [dee])).toBe(
+      dee,
+    );
+  });
+  it("saves a team with its designer, or without one", () => {
+    const dee: Member = { ...ada, id: "m5", name: "Dee", kinds: ["designer"] };
+    const seated = playbook([
+      ...roles.slice(0, 1),
+      { name: "Dee", kinds: ["designer"], engine: "claude", member: "m5" },
+    ]);
+    expect(teamChoice(seated, [ada, dee]).designer_member).toBe("m5");
+    expect(teamChoice(playbook(roles), [ada]).designer_member).toBe("");
+  });
+  it("tells the work a seat does from the research it may also do", () => {
     const both: Role = {
       name: "Ada",
-      kinds: ["planner", "implementer"],
+      kinds: ["researcher", "implementer"],
       engine: "claude",
     };
-    const plans: Role = { name: "Planner", kinds: ["planner"], engine: "x" };
-    expect(holds(both, "planner")).toBe(true);
+    const plans: Role = {
+      name: "Researcher",
+      kinds: ["researcher"],
+      engine: "x",
+    };
+    expect(holds(both, "researcher")).toBe(true);
     expect(holds(both, "reviewer")).toBe(false);
-    expect(holds({}, "planner")).toBe(false);
+    expect(holds({}, "researcher")).toBe(false);
     expect(workingKind(both)).toBe("implementer");
     expect(workingKind(plans)).toBe("");
     const keeps: Role = { name: "Pia", kinds: ["pm"], engine: "claude" };
     expect(workingKind(keeps)).toBe("");
-    expect(workingKind({ ...keeps, kinds: ["pm", "planner"] })).toBe("");
+    expect(workingKind({ ...keeps, kinds: ["pm", "researcher"] })).toBe("");
     expect(workingKind({ ...keeps, kinds: ["pm", "qa"] })).toBe("qa");
   });
   it("refuses what the server refuses", () => {
-    expect(kindsProblem(["planner"])).toBe("");
-    expect(kindsProblem(["planner", "qa"])).toBe("");
+    expect(kindsProblem(["researcher"])).toBe("");
+    expect(kindsProblem(["researcher", "qa"])).toBe("");
     expect(kindsProblem([])).toBe("Pick at least one role.");
     expect(kindsProblem(["pm"])).toBe("");
-    expect(kindsProblem(["planner", "implementer", "pm"])).toBe("");
+    expect(kindsProblem(["researcher", "implementer", "pm"])).toBe("");
     expect(kindsProblem(["implementer", "reviewer"])).toBe(
-      "Pick one of implementer, reviewer and QA, plus planner and PM if you like.",
+      "Pick one of implementer, reviewer and QA, plus researcher, designer and PM if you like.",
     );
     expect(kindsProblem(["pm", "reviewer", "qa"])).not.toBe("");
   });
-  it("finds the planner at work while a request plans", () => {
+  it("finds the researcher at work while a request is researched", () => {
     const seats: Role[] = [
       {
         name: "Ada",
-        kinds: ["implementer", "planner"],
+        kinds: ["implementer", "researcher"],
         engine: "claude",
         member: "m1",
       },
       ...roles.slice(1),
     ];
     expect(
-      atWork(task({ status: "planning", roles: seats, checking: "Ada" }), [
+      atWork(task({ status: "researching", roles: seats, checking: "Ada" }), [
         ada,
       ]),
     ).toBe(ada);
-    expect(atWork(task({ status: "planning", roles: seats }), [ada])).toBe(ada);
+    expect(atWork(task({ status: "researching", roles: seats }), [ada])).toBe(
+      ada,
+    );
   });
 });
