@@ -14,6 +14,9 @@ func assistantView(s core.Snapshot) core.Snapshot {
 	tasks := make([]core.Task, 0, len(s.Tasks))
 	for _, t := range s.Tasks {
 		t.WriterSession, t.Playbook, t.Roles = nil, nil, nil
+		if t.Plan != nil {
+			t.Plan = clippedPlan(*t.Plan)
+		}
 		keep := 2
 		if t.Finished() {
 			keep = 1
@@ -98,4 +101,19 @@ func assistantView(s core.Snapshot) core.Snapshot {
 	}
 	s.Members = members
 	return s
+}
+
+// clippedPlan is a plan as the assistant reads it each turn: the gist, not
+// every detail.
+func clippedPlan(p core.Plan) *core.Plan {
+	list := func(items []string) []string {
+		var out []string
+		for _, item := range items[:min(len(items), 5)] {
+			out = append(out, text.Clip(item, 200))
+		}
+		return out
+	}
+	p.Summary = text.Clip(p.Summary, 600)
+	p.Exists, p.Changes, p.OutOfScope, p.Questions = list(p.Exists), list(p.Changes), list(p.OutOfScope), list(p.Questions)
+	return &p
 }
