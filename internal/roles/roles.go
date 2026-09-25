@@ -154,32 +154,20 @@ func options(spec Spec) session.Options {
 	return o
 }
 
-// open resumes the recorded session when it is still compatible and otherwise
-// starts a fresh one, saying which. A changed model or engine makes an old
-// session unusable; the prompt carries everything a fresh session needs.
+// open resumes the recorded session when it can and otherwise starts a fresh
+// one, saying which. A changed model or engine, or a conversation the CLI no
+// longer has, means a fresh one; the prompt carries everything it needs.
 func open(ctx context.Context, o session.Options, resume json.RawMessage) (conversation, bool, error) {
-	fresh := func() (conversation, bool, error) {
-		s, err := session.Start(ctx, o)
-		if err != nil {
-			return nil, false, err
-		}
-		return harnessSession{s}, false, nil
+	var ref *session.Ref
+	var stored session.Ref
+	if len(resume) > 0 && json.Unmarshal(resume, &stored) == nil {
+		ref = &stored
 	}
-	if len(resume) == 0 {
-		return fresh()
-	}
-	var ref session.Ref
-	if json.Unmarshal(resume, &ref) != nil || ref.Engine != o.Engine {
-		return fresh()
-	}
-	s, err := session.Resume(ctx, o, ref)
-	if errors.Is(err, session.ErrIncompatibleResume) || errors.Is(err, session.ErrRejected) {
-		return fresh()
-	}
+	s, opened, err := session.Open(ctx, o, ref)
 	if err != nil {
 		return nil, false, err
 	}
-	return harnessSession{s}, true, nil
+	return harnessSession{s}, opened.Resumed, nil
 }
 
 // compact runs the session's own context compaction to its end.
