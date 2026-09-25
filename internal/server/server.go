@@ -263,6 +263,9 @@ func problem(w http.ResponseWriter, err error) {
 	if errors.Is(err, core.ErrConflict) {
 		status = 409
 	}
+	if errors.Is(err, app.ErrStopping) {
+		status = http.StatusServiceUnavailable
+	}
 	fail(w, status, ownerText(err))
 }
 

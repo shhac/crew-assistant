@@ -11,6 +11,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 )
 
 var ErrChatQueueUnavailable = errors.New("the chat has stopped; restart crew-assistant to pick up waiting messages")
@@ -70,6 +71,11 @@ func (a *App) Chat(ctx context.Context, message string) (engine.Result, error) {
 	if _, err := a.EnqueueChat(ctx, id, message); err != nil {
 		return engine.Result{}, err
 	}
+	// Checked after the waiter is in place: the queue closes the waiters it
+	// can see, and one it couldn't see sees this.
+	if a.chatClosed.Load() {
+		return engine.Result{}, a.chatClosedErr()
+	}
 	select {
 	case <-ctx.Done():
 		return engine.Result{}, ctx.Err()
@@ -80,26 +86,32 @@ func (a *App) Chat(ctx context.Context, message string) (engine.Result, error) {
 
 // RunChatQueue owns inference independently of dashboard HTTP connections. It
 // holds the conversation lock while recovering, so startup cannot mark a live
-// in-process turn interrupted.
-func (a *App) RunChatQueue(ctx context.Context) (queueErr error) {
+// in-process turn interrupted. A turn is taken only while stop.Graceful
+// lasts and runs on stop.Force, so a stop lets the reply in progress finish
+// and leaves the rest queued for the next run.
+func (a *App) RunChatQueue(stop lifecycle.Stop) (queueErr error) {
 	owned := false
 	defer func() {
-		if owned && queueErr != nil && ctx.Err() == nil {
+		if !owned {
+			return
+		}
+		if queueErr != nil && !stop.Stopping() {
 			a.chatFailed.Store(true)
 			a.Status("chat", "Conversation", "error", ErrChatQueueUnavailable.Error())
 		}
+		a.closeChatWaiters()
 	}()
 	select {
 	case a.chat <- struct{}{}:
-	case <-ctx.Done():
-		return ctx.Err()
+	case <-stop.Graceful.Done():
+		return nil
 	}
 	if a.chatRunning.Load() {
 		<-a.chat
 		return errors.New("chat queue already running")
 	}
 	owned = true
-	if err := a.Core.RecoverChatTurns(ctx); err != nil {
+	if err := a.Core.RecoverChatTurns(stop.Force); err != nil {
 		<-a.chat
 		return err
 	}
@@ -111,15 +123,12 @@ func (a *App) RunChatQueue(ctx context.Context) (queueErr error) {
 	// The model session lives with the queue; its conversation stays saved in
 	// the CLI and is resumed next time.
 	if a.sessions.open == nil && !a.Demo {
-		a.sessions.open = harnessChatOpener(ctx)
+		a.sessions.open = harnessChatOpener(stop.Force)
 	}
 	defer a.closeChat()
-	for {
-		if ctx.Err() != nil {
-			return nil
-		}
+	for !stop.Stopping() {
 		a.closeIdleChat(time.Now())
-		worked, err := a.processNextChat(ctx)
+		worked, err := a.processNextChat(stop)
 		if err != nil && !errors.Is(err, core.ErrNotFound) {
 			return err
 		}
@@ -127,24 +136,27 @@ func (a *App) RunChatQueue(ctx context.Context) (queueErr error) {
 			continue
 		}
 		select {
-		case <-ctx.Done():
+		case <-stop.Graceful.Done():
 			return nil
 		case <-a.chatWake:
 		case <-tick.C:
 		}
 	}
+	return nil
 }
 
-func (a *App) processNextChat(ctx context.Context) (bool, error) {
+func (a *App) processNextChat(stop lifecycle.Stop) (bool, error) {
 	select {
 	case a.chat <- struct{}{}:
-	case <-ctx.Done():
-		return false, ctx.Err()
+	case <-stop.Graceful.Done():
+		return false, nil
 	}
 	defer func() { <-a.chat }()
-	if err := ctx.Err(); err != nil {
-		return false, err
+	// The lock may have come free just as the stop was asked for.
+	if stop.Stopping() {
+		return false, nil
 	}
+	ctx := stop.Force
 	turn, err := a.Core.StartNextChat(ctx)
 	if errors.Is(err, core.ErrChatHeld) {
 		// The owner is changing the queue. Nothing is wrong and nothing starts.
@@ -273,4 +285,25 @@ func (a *App) chatRetryStatus(ctx context.Context, id string, e engine.RetryEven
 		text = "Model provider recovery stopped; saved actions are preserved."
 	}
 	return a.Core.SetChatModelStatus(ctx, id, text, e.RetryAt)
+}
+
+// closeChatWaiters tells whoever still waits for an answer that none is
+// coming in this run. Their messages stay queued for the next one.
+func (a *App) closeChatWaiters() {
+	a.chatClosed.Store(true)
+	err := a.chatClosedErr()
+	a.chatWaiters.Range(func(_, w any) bool {
+		select {
+		case w.(chan chatOutcome) <- chatOutcome{err: err}:
+		default: // It already has its answer.
+		}
+		return true
+	})
+}
+
+func (a *App) chatClosedErr() error {
+	if a.Stopping() {
+		return errStoppingQueued
+	}
+	return ErrChatQueueUnavailable
 }

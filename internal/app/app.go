@@ -17,6 +17,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/integrations/connections"
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 	"github.com/shhac/crew-assistant/internal/work"
 )
 
@@ -50,6 +51,12 @@ type App struct {
 	paint    sync.Mutex      // One drawing at a time.
 	life     context.Context // The daemon's run; drawings stop with it.
 	drawings sync.WaitGroup
+	// drawingsClosed refuses new drawings once the run waits for them.
+	drawingsClosed bool
+	stop           lifecycle.Stop
+	// chatClosed is set once the chat queue takes no more turns, so a
+	// message queued after it hears so rather than waiting for an answer.
+	chatClosed atomic.Bool
 }
 
 // Options are what the daemon decides about the app it builds.
@@ -154,6 +161,7 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 		return s, err
 	}
 	cfg := a.Config()
+	s.Stopping = a.Stopping()
 	s.Integrations = []core.Integration{{ID: "model", Name: "Assistant model", Status: "not_configured", Detail: "Choose a model in Settings"}, {ID: "slack", Name: "Slack bot messaging", Status: "not_configured", Detail: "Sends and receives owner direct messages. Configure owner identity and Socket Mode credentials"}}
 	if cfg.Model.Model != "" {
 		s.Integrations[0].Status = "configured"

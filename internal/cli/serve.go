@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -21,6 +20,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 	"github.com/shhac/crew-assistant/internal/sample"
 	"github.com/shhac/crew-assistant/internal/server"
 	"github.com/spf13/cobra"
@@ -62,10 +62,13 @@ func registerServe(root *cobra.Command, o *options) {
 		if err = cfg.Validate(); err != nil {
 			return err
 		}
-		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
+		signals := make(chan os.Signal, 2)
+		signal.Notify(signals, lifecycle.Signals...)
+		defer signal.Stop(signals)
+		stop, cancelAll := lifecycle.Watch(cmd.Context(), signals, func(s string) { fmt.Fprintln(cmd.ErrOrStderr(), s) })
+		defer cancelAll()
 		o.diagnostics = diagnostics.New(cmd.ErrOrStderr())
-		return serve(ctx, o, cfg, demo, sampleDir, open, noDispatch)
+		return serve(stop, o, cfg, demo, sampleDir, open, noDispatch)
 	}}
 	cmd.Flags().StringVar(&addr, "http", "", "Local dashboard address (loopback only)")
 	cmd.Flags().StringVar(&mode, "tailscale", "", "Private dashboard access: off or serve")
@@ -75,9 +78,14 @@ func registerServe(root *cobra.Command, o *options) {
 	cmd.Flags().BoolVar(&noDispatch, "no-dispatch", false, "Do not start or resume workers during this boot")
 	root.AddCommand(cmd)
 }
-func serve(ctx context.Context, o *options, cfg config.Config, demo bool, sampleDir string, open, noDispatch bool) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+// serve runs the daemon until stop. The dashboard stays up while the work in
+// progress finishes, so the owner can watch it finish.
+func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sampleDir string, open, noDispatch bool) error {
+	graceful, endGraceful := context.WithCancel(stop.Graceful)
+	defer endGraceful()
+	force, endForce := context.WithCancel(stop.Force)
+	defer endForce()
+	stop = lifecycle.Stop{Graceful: graceful, Force: force}
 	if err := os.MkdirAll(filepath.Dir(o.statePath), 0700); err != nil {
 		return err
 	}
@@ -104,7 +112,7 @@ func serve(ctx context.Context, o *options, cfg config.Config, demo bool, sample
 	defer store.Close()
 	service := core.NewService(store, cfg)
 	if sampleDir != "" {
-		if err = sample.Seed(ctx, service, sampleDir); err != nil {
+		if err = sample.Seed(stop.Force, service, sampleDir); err != nil {
 			return fmt.Errorf("the demo sample: %w", err)
 		}
 	}
@@ -116,7 +124,7 @@ func serve(ctx context.Context, o *options, cfg config.Config, demo bool, sample
 	publicURL := ""
 	if cfg.Dashboard.Tailscale == "serve" {
 		var cleanup func() error
-		publicURL, cleanup, err = access.DefaultTailscale().Start(ctx, cfg.Dashboard.TailscalePort, cfg.Dashboard.Addr, filepath.Join(o.runtimeDir(), "tailscale-route.json"))
+		publicURL, cleanup, err = access.DefaultTailscale().Start(stop.Force, cfg.Dashboard.TailscalePort, cfg.Dashboard.Addr, filepath.Join(o.runtimeDir(), "tailscale-route.json"))
 		if err != nil {
 			return err
 		}
@@ -140,15 +148,14 @@ func serve(ctx context.Context, o *options, cfg config.Config, demo bool, sample
 		return err
 	}
 	defer os.Remove(filepath.Join(o.runtimeDir(), "daemon.json"))
-	httpServer := &http.Server{Handler: server.New(a, auth), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20, BaseContext: func(net.Listener) context.Context { return ctx }}
+	httpServer := &http.Server{Handler: server.New(a, auth), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20, BaseContext: func(net.Listener) context.Context { return stop.Force }}
 	errs := make(chan error, 1)
 	go func() { errs <- httpServer.Serve(listener) }()
-	loopCtx := ctx
 	done := make(chan struct{})
 	loopErrors := make(chan error, 1)
 	go func() {
 		defer close(done)
-		err := a.Run(loopCtx, noDispatch)
+		err := a.Run(stop, noDispatch)
 		a.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "supervision_loop"}, err)
 		loopErrors <- err
 	}()
@@ -167,29 +174,47 @@ func serve(ctx context.Context, o *options, cfg config.Config, demo bool, sample
 	}
 	var serveErr error
 	select {
-	case <-ctx.Done():
+	case <-stop.Graceful.Done():
 	case serveErr = <-loopErrors:
 	case serveErr = <-errs:
 		if errors.Is(serveErr, http.ErrServerClosed) {
 			serveErr = nil
 		}
 	}
-	// Every exit cancels request and integration contexts before closing their
-	// shared store. A listener failure follows the same drain path as SIGTERM.
-	cancel()
-	shutdown, stop := context.WithTimeout(context.Background(), 10*time.Second)
-	defer stop()
+	// A failure of the loop or the listener stops everything at once. Every
+	// exit ends request and integration contexts before closing their shared
+	// store.
+	asked := stop.Stopping()
+	endGraceful()
+	if !asked {
+		endForce()
+	}
+	loopErr := waitForRun(done, stop.Force)
+	endForce()
+	shutdown, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelShutdown()
 	shutdownErr := httpServer.Shutdown(shutdown)
 	if shutdownErr != nil {
 		_ = httpServer.Close()
 	}
-	var loopErr error
+	return errors.Join(serveErr, shutdownErr, loopErr)
+}
+
+// waitForRun waits for the work in progress: all of it after a stop, and
+// only briefly once the stop is forced, so a wedged step can't hold up an
+// exit the owner asked to force.
+func waitForRun(done <-chan struct{}, force context.Context) error {
 	select {
 	case <-done:
-	case <-shutdown.Done():
-		loopErr = errors.New("integration shutdown exceeded its grace period")
+		return nil
+	case <-force.Done():
 	}
-	return errors.Join(serveErr, shutdownErr, loopErr)
+	select {
+	case <-done:
+		return nil
+	case <-time.After(lifecycle.ForceDrain):
+		return fmt.Errorf("the work in progress did not stop within %s", lifecycle.ForceDrain)
+	}
 }
 func registerDashboard(root *cobra.Command, o *options) {
 	d := &cobra.Command{Use: "dashboard", Short: "Open the running dashboard"}

@@ -44,6 +44,9 @@ func (a *App) SuggestNextMessage(ctx context.Context, after string) (string, err
 	if a.Demo {
 		return "", errors.New("demo mode never runs a model")
 	}
+	if err := a.refuseWhileStopping(); err != nil {
+		return "", err
+	}
 	models, err := cfg.SmallModels()
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrSuggestionUnavailable, err)

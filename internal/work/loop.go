@@ -16,6 +16,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 	"github.com/shhac/crew-assistant/internal/integrations/github"
 	"github.com/shhac/crew-assistant/internal/quota"
 	"github.com/shhac/crew-assistant/internal/roles"
@@ -66,25 +67,27 @@ func (lp *Loop) Nudge() {
 
 // Run works tasks one step at a time. Each step is one role turn or one
 // state transition, and every step is recorded before the next begins, so a
-// restart resumes at the step it was on.
-func (lp *Loop) Run(ctx context.Context, noDispatch bool) {
+// restart resumes at the step it was on. A step is taken only while
+// stop.Graceful lasts and runs on stop.Force, so a stop lets the step in
+// progress finish and starts no other.
+func (lp *Loop) Run(stop lifecycle.Stop, noDispatch bool) {
 	// Learnings are copied out only while a turn runs; any left here were
 	// left by a daemon that stopped mid-turn.
 	os.RemoveAll(lp.learningsRoot())
 	tick := time.NewTicker(15 * time.Second)
 	defer tick.Stop()
 	for {
-		for {
-			progressed, err := lp.loopStep(ctx, noDispatch)
-			if err != nil && ctx.Err() == nil {
+		for !stop.Stopping() {
+			progressed, err := lp.loopStep(stop.Force, noDispatch)
+			if err != nil && stop.Force.Err() == nil {
 				lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_loop"}, err)
 			}
-			if !progressed || err != nil || ctx.Err() != nil {
+			if !progressed || err != nil {
 				break
 			}
 		}
 		select {
-		case <-ctx.Done():
+		case <-stop.Graceful.Done():
 			return
 		case <-tick.C:
 		case <-lp.loopWake:

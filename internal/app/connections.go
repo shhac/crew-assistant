@@ -14,6 +14,9 @@ func (a *App) DiscoverConnectionProfiles(ctx context.Context, tool string) (conn
 	if a.Demo {
 		return connections.Discovery{Tool: tool, Profiles: []connections.Profile{}, Detail: "Demo mode does not inspect local accounts"}, nil
 	}
+	if err := a.refuseWhileStopping(); err != nil {
+		return connections.Discovery{}, err
+	}
 	return a.connectionClient.Discover(ctx, tool)
 }
 func (a *App) runConnectionTool(ctx context.Context, name string, raw json.RawMessage) (any, error) {

@@ -185,8 +185,11 @@ type Snapshot struct {
 	Integrations      []Integration      `json:"integrations"`
 	Members           []Member           `json:"members"`
 	Paused            bool               `json:"paused"`
-	Wakes             []Wake             `json:"wakes,omitempty"`
-	ModelCalls        map[string]int     `json:"-"`
+	// Stopping says the daemon is finishing the work in progress before it
+	// stops; nothing new starts. It is the running daemon's, never stored.
+	Stopping   bool           `json:"stopping,omitempty"`
+	Wakes      []Wake         `json:"wakes,omitempty"`
+	ModelCalls map[string]int `json:"-"`
 	// ModelWindows are the context windows, in tokens, the providers have
 	// stated for each engine's models, keyed by ModelKey.
 	ModelWindows map[string]int `json:"-"`

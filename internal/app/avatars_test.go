@@ -16,6 +16,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/avatars"
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 )
 
 type fakePainter struct {
@@ -324,7 +325,7 @@ func TestStoppingTheDaemonStopsADrawing(t *testing.T) {
 	a := testApp(t)
 	a.Painter = waitingPainter{started: make(chan struct{})}
 	life, stop := context.WithCancel(context.Background())
-	a.setLife(life)
+	a.setStop(lifecycle.Stop{Graceful: life, Force: context.Background()})
 	ctx := context.Background()
 	m, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
 	if err := a.DrawMember(ctx, m.ID, "Violet bob"); err != nil {

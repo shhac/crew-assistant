@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 	"github.com/shhac/crew-assistant/internal/engine"
 )
 
@@ -35,7 +36,7 @@ func startTestQueue(t *testing.T, a *App) context.CancelFunc {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- a.RunChatQueue(ctx) }()
+	go func() { done <- a.RunChatQueue(lifecycle.Now(ctx)) }()
 	t.Cleanup(func() {
 		cancel()
 		select {

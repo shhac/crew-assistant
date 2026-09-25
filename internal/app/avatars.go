@@ -133,6 +133,9 @@ func (a *App) drawingOf(key string) drawing {
 func (a *App) markDrawing(key string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.drawingsClosed || (a.stop.Graceful != nil && a.stop.Stopping()) {
+		return errStoppingRefused
+	}
 	if a.drawing[key].busy {
 		return fmt.Errorf("already drawing: %w", core.ErrConflict)
 	}
@@ -214,11 +217,13 @@ func lookOrChoose(look string) string {
 // WaitForDrawings returns once every drawing under way has finished.
 func (a *App) WaitForDrawings() { a.drawings.Wait() }
 
-// setLife ties drawings to the daemon's run, so stopping it stops Codex too.
-func (a *App) setLife(ctx context.Context) {
+// closeDrawings refuses new drawings and waits for those under way, as the
+// daemon stops. Refusing first keeps a new one from starting as it waits.
+func (a *App) closeDrawings() {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.life = ctx
+	a.drawingsClosed = true
+	a.mu.Unlock()
+	a.drawings.Wait()
 }
 
 func (a *App) lifetime() context.Context {

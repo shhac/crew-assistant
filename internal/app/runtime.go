@@ -10,25 +10,41 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 	linearapi "github.com/shhac/crew-assistant/internal/integrations/linear"
 	slackapi "github.com/shhac/crew-assistant/internal/integrations/slack"
 )
 
 // Run owns deterministic supervision. noDispatch is fixed at process boot;
 // changing pause or live configuration cannot enable starts or resumes beneath it.
-func (a *App) Run(ctx context.Context, noDispatch bool) error {
-	ctx, cancel := context.WithCancel(ctx)
+//
+// Work is taken while stop.Graceful lasts: a task step, a chat reply, a Slack
+// message, a wake. Work taken runs on stop.Force, so when Graceful ends Run
+// returns once that work is done, and when Force ends it is cut short.
+func (a *App) Run(stop lifecycle.Stop, noDispatch bool) (runErr error) {
+	// Run's own failure stops everything it started, as a forced stop would.
+	graceful, endGraceful := context.WithCancel(stop.Graceful)
+	force, endForce := context.WithCancel(stop.Force)
+	stop = lifecycle.Stop{Graceful: graceful, Force: force}
 	var listeners sync.WaitGroup
-	a.setLife(ctx)
-	defer func() { cancel(); listeners.Wait(); a.WaitForDrawings() }()
+	a.setStop(stop)
+	defer func() {
+		endGraceful()
+		if runErr != nil {
+			endForce()
+		}
+		listeners.Wait()
+		a.closeDrawings()
+		endForce()
+	}()
 	if a.Demo {
-		<-ctx.Done()
+		<-stop.Graceful.Done()
 		return nil
 	}
 	listeners.Add(1)
 	go func() {
 		defer listeners.Done()
-		if err := a.RunChatQueue(ctx); err != nil && ctx.Err() == nil {
+		if err := a.RunChatQueue(stop); err != nil && !stop.Stopping() {
 			a.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "chat_queue"}, err)
 			a.Status("chat", "Conversation", "error", "The chat stopped; restart crew-assistant to pick up waiting messages")
 		}
@@ -36,24 +52,24 @@ func (a *App) Run(ctx context.Context, noDispatch bool) error {
 	listeners.Add(1)
 	go func() {
 		defer listeners.Done()
-		a.Work.Run(ctx, noDispatch)
+		a.Work.Run(stop, noDispatch)
 	}()
 	listeners.Add(1)
 	go func() {
 		defer listeners.Done()
-		a.Work.RunWakes(ctx)
+		a.Work.RunWakes(stop)
 	}()
 	listeners.Add(1)
 	go func() {
 		defer listeners.Done()
-		a.watchConfig(ctx)
+		a.watchConfig(stop.Graceful)
 	}()
-	pending, err := a.Core.PendingEvents(ctx)
+	pending, err := a.Core.PendingEvents(stop.Force)
 	if err != nil {
 		return err
 	}
 	if len(pending) > 0 {
-		a.Core.RecordActivity(ctx, "", "recovery.pending", fmt.Sprintf("%d interrupted inbound or outbound operations need inspection. Uncertain effects were not replayed.", len(pending)))
+		a.Core.RecordActivity(stop.Force, "", "recovery.pending", fmt.Sprintf("%d interrupted inbound or outbound operations need inspection. Uncertain effects were not replayed.", len(pending)))
 	}
 	var slackClient *slackapi.Client
 	cfg := a.Config()
@@ -66,26 +82,19 @@ func (a *App) Run(ctx context.Context, noDispatch bool) error {
 			listeners.Add(1)
 			go func() {
 				defer listeners.Done()
-				err := slackClient.Run(ctx, func(c context.Context, m slackapi.Message) (string, error) {
-					result, chatErr := a.Chat(c, m.Text)
-					if chatErr != nil {
-						return "", chatErr
-					}
-					if e := a.Core.CompleteEvent(c, "slack:"+m.ID); e != nil {
-						return "", e
-					}
-					return result.Message, nil
-				})
-				if ctx.Err() == nil && err != nil {
+				err := slackClient.Run(stop, a.answerSlack)
+				if !stop.Stopping() && err != nil {
 					a.Status("slack", "Slack bot messaging", "error", err.Error())
 				}
 			}()
 		}
 	}
-	_ = a.SyncLinear(ctx)
+	_ = a.SyncLinear(stop.Graceful)
+	// Each look runs on Force: claiming a notice and sending it belong
+	// together. No look starts once stopping.
 	supervise := func() {
-		if slackClient != nil {
-			a.notify(ctx, slackClient.Notify)
+		if slackClient != nil && !stop.Stopping() {
+			a.notify(stop.Force, slackClient.Notify)
 		}
 	}
 	supervise()
@@ -95,14 +104,31 @@ func (a *App) Run(ctx context.Context, noDispatch bool) error {
 	defer linearTick.Stop()
 	for {
 		select {
-		case <-ctx.Done():
+		case <-stop.Graceful.Done():
 			return nil
 		case <-tick.C:
 			supervise()
 		case <-linearTick.C:
-			_ = a.SyncLinear(ctx)
+			_ = a.SyncLinear(stop.Graceful)
 		}
 	}
+}
+
+// answerSlack answers the owner's Slack message through the chat queue. A
+// message that arrives as the daemon stops is queued for the next run, and
+// the owner is told where the answer will be.
+func (a *App) answerSlack(ctx context.Context, m slackapi.Message) (string, error) {
+	result, err := a.Chat(ctx, m.Text)
+	if err != nil && !errors.Is(err, ErrStopping) {
+		return "", err
+	}
+	if e := a.Core.CompleteEvent(ctx, "slack:"+m.ID); e != nil {
+		return "", e
+	}
+	if err != nil {
+		return "I'm stopping for now. Your message is queued, and I'll answer it in the dashboard when I'm running again.", nil
+	}
+	return result.Message, nil
 }
 
 type inbox struct{ s *core.Service }

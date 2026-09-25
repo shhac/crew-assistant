@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 	"github.com/shhac/crew-assistant/internal/roles"
 )
 
@@ -123,7 +124,7 @@ func TestTheLoopClearsLearningsLeftByACrash(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	a.Run(ctx, true)
+	a.Run(lifecycle.Now(ctx), true)
 	if _, err := os.Stat(filepath.Dir(filepath.Dir(left))); !os.IsNotExist(err) {
 		t.Fatalf("learnings left behind: %v", err)
 	}

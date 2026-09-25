@@ -9,12 +9,13 @@ import (
 	"log"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	slackapi "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 )
 
 type Config struct {
@@ -81,74 +82,90 @@ func ParseOwnerMessage(owner string, event slackevents.EventsAPIEvent) (Message,
 	return Message{ID: callback.EventID, Text: msg.Text, Channel: msg.Channel, ThreadTS: thread}, true
 }
 
-func (c *Client) Run(ctx context.Context, handler Handler) error {
+// transport is how Run reaches Slack, replaced in tests.
+type transport struct {
+	events <-chan socketmode.Event
+	listen func(context.Context) error
+	ack    func(context.Context, string)
+	reply  func(context.Context, Message, string) error
+}
+
+// Run takes the owner's messages while stop.Graceful lasts and answers them
+// on stop.Force. Once stopping, nothing more is claimed or acknowledged, so
+// Slack delivers it to the next run; messages already claimed are still
+// answered before Run returns.
+func (c *Client) Run(stop lifecycle.Stop, handler Handler) error {
+	return c.run(stop, handler, transport{events: c.socket.Events, listen: c.socket.RunContext, ack: c.ack, reply: c.reply})
+}
+
+func (c *Client) run(stop lifecycle.Stop, handler Handler, t transport) error {
 	if handler == nil {
 		return errors.New("Slack handler is required")
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	var loops sync.WaitGroup
-	defer func() { cancel(); loops.Wait() }()
-	runErr := make(chan error, 1)
-	loops.Add(1)
-	go func() { defer loops.Done(); runErr <- c.socket.RunContext(ctx) }()
+	listening, stopListening := context.WithCancel(stop.Graceful)
+	defer stopListening()
+	listened := make(chan error, 1)
+	go func() { listened <- t.listen(listening) }()
 	queue := make(chan Message, 64)
-	handlerErr := make(chan error, 1)
-	loops.Add(1)
-	go func() {
-		defer loops.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case m := <-queue:
-				response, err := handler(ctx, m)
-				if err != nil {
-					response = "I couldn't complete that request. Its recorded state is available in the dashboard; I have not automatically repeated it."
-				}
-				if response != "" {
-					if replyErr := c.reply(ctx, m, response); replyErr != nil {
-						select {
-						case handlerErr <- replyErr:
-						default:
-						}
-						return
-					}
-				}
-			}
+	answered := make(chan error, 1)
+	go func() { answered <- answer(stop.Force, queue, handler, t.reply) }()
+
+	listenerDone, answererDone, err := c.intake(stop, listening, queue, t, listened, answered)
+	stopListening()
+	close(queue)
+	if !answererDone {
+		err = errors.Join(err, <-answered)
+	}
+	if !listenerDone {
+		<-listened
+	}
+	return err
+}
+
+// answer replies to each claimed message in turn, until the queue closes.
+func answer(ctx context.Context, queue <-chan Message, handler Handler, reply func(context.Context, Message, string) error) error {
+	for m := range queue {
+		response, err := handler(ctx, m)
+		if err != nil {
+			response = "I couldn't complete that request. Its recorded state is available in the dashboard; I have not automatically repeated it."
 		}
-	}()
+		if response == "" {
+			continue
+		}
+		if err := reply(ctx, m, response); err != nil {
+			return errors.New("Slack reply delivery is uncertain; inspect the recorded conversation before resending")
+		}
+	}
+	return nil
+}
+
+// intake claims the owner's messages and queues them for answering, until
+// the stop, a failed reply or the socket ending. It says which of the
+// listener and the answerer it has already heard finish.
+func (c *Client) intake(stop lifecycle.Stop, listening context.Context, queue chan<- Message, t transport, listened, answered <-chan error) (listenerDone, answererDone bool, err error) {
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-handlerErr:
-			return errors.New("Slack reply delivery is uncertain; inspect the recorded conversation before resending")
-		case err := <-runErr:
-			if err != nil {
-				return errors.New("Slack Socket Mode stopped; check connectivity and app credentials")
+		case <-stop.Graceful.Done():
+			return false, false, nil
+		case err := <-answered:
+			return false, true, err
+		case err := <-listened:
+			if err != nil && !stop.Stopping() {
+				return true, false, errors.New("Slack Socket Mode stopped; check connectivity and app credentials")
 			}
-			return nil
-		case event := <-c.socket.Events:
+			return true, false, nil
+		case event := <-t.events:
+			// Both cases may be ready at once, and a select picks either.
+			if stop.Stopping() {
+				return false, false, nil
+			}
 			if event.Type == socketmode.EventTypeInvalidAuth {
-				return errors.New("Slack rejected app credentials")
+				return false, false, errors.New("Slack rejected app credentials")
 			}
-			if event.Type != socketmode.EventTypeEventsAPI {
-				if event.Request != nil {
-					c.ack(ctx, event.Request.EnvelopeID)
-				}
-				continue
-			}
-			payload, ok := event.Data.(slackevents.EventsAPIEvent)
-			if !ok {
-				if event.Request != nil {
-					c.ack(ctx, event.Request.EnvelopeID)
-				}
-				continue
-			}
-			msg, allowed := ParseOwnerMessage(c.cfg.OwnerUserID, payload)
+			msg, allowed := c.ownerMessage(event)
 			if !allowed {
 				if event.Request != nil {
-					c.ack(ctx, event.Request.EnvelopeID)
+					t.ack(listening, event.Request.EnvelopeID)
 				}
 				continue
 			}
@@ -157,12 +174,12 @@ func (c *Client) Run(ctx context.Context, handler Handler) error {
 			if len(queue) == cap(queue) {
 				continue
 			}
-			fresh, err := c.inbox.Claim(ctx, msg.ID)
+			fresh, err := c.inbox.Claim(stop.Force, msg.ID)
 			if err != nil {
-				return errors.New("cannot persist Slack event receipt")
+				return false, false, errors.New("cannot persist Slack event receipt")
 			}
 			if event.Request != nil {
-				c.ack(ctx, event.Request.EnvelopeID)
+				t.ack(listening, event.Request.EnvelopeID)
 			}
 			if fresh {
 				queue <- msg
@@ -170,6 +187,19 @@ func (c *Client) Run(ctx context.Context, handler Handler) error {
 		}
 	}
 }
+
+// ownerMessage is the owner's direct message an event carries, if it is one.
+func (c *Client) ownerMessage(event socketmode.Event) (Message, bool) {
+	if event.Type != socketmode.EventTypeEventsAPI {
+		return Message{}, false
+	}
+	payload, ok := event.Data.(slackevents.EventsAPIEvent)
+	if !ok {
+		return Message{}, false
+	}
+	return ParseOwnerMessage(c.cfg.OwnerUserID, payload)
+}
+
 func (c *Client) ack(ctx context.Context, id string) {
 	ackCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()

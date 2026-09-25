@@ -11,6 +11,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/integrations/github"
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 	"github.com/shhac/crew-assistant/internal/text"
 )
@@ -140,16 +141,17 @@ func projectRepo(snap core.Snapshot, projectID string) (string, error) {
 }
 
 // RunWakes watches what cannot tell the daemon it changed: branches, the
-// clock, and every wake's expiry.
-func (lp *Loop) RunWakes(ctx context.Context) {
+// clock, and every wake's expiry. A look runs on stop.Force, since firing a
+// wake and waking its task belong together; no look starts once stopping.
+func (lp *Loop) RunWakes(stop lifecycle.Stop) {
 	tick := time.NewTicker(wakeCheckEvery)
 	defer tick.Stop()
-	for {
-		if err := lp.checkWakes(ctx, time.Now()); err != nil && ctx.Err() == nil {
+	for !stop.Stopping() {
+		if err := lp.checkWakes(stop.Force, time.Now()); err != nil && stop.Force.Err() == nil {
 			lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "wakes"}, err)
 		}
 		select {
-		case <-ctx.Done():
+		case <-stop.Graceful.Done():
 			return
 		case <-tick.C:
 		}

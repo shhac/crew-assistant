@@ -112,6 +112,9 @@ func (a *App) InterviewIdentity(ctx context.Context, message string) (IdentitySe
 	if a.Demo {
 		return IdentitySetup{}, errors.New("demo mode does not invoke models; configure a model and start without --demo to interview your assistant")
 	}
+	if err := a.refuseWhileStopping(); err != nil {
+		return IdentitySetup{}, err
+	}
 	select {
 	case a.chat <- struct{}{}:
 		defer func() { <-a.chat }()
@@ -272,6 +275,9 @@ func proposal(cfg config.Config, arguments string) (*IdentityRecommendation, err
 func (a *App) ApplyIdentity(ctx context.Context, id string, accepted bool) (applied config.Assistant, err error) {
 	if !accepted || strings.TrimSpace(id) == "" {
 		return config.Assistant{}, errors.New("accept the previewed identity recommendation explicitly")
+	}
+	if err := a.refuseWhileStopping(); err != nil {
+		return config.Assistant{}, err
 	}
 	select {
 	case a.chat <- struct{}{}:
