@@ -35,6 +35,7 @@ type diskState struct {
 	// outside the daemon, rather than silently reinterpreted.
 	Schema            int             `json:"schema"`
 	ChatCheckpoint    ChatCheckpoint  `json:"chat_checkpoint,omitempty"`
+	ChatSession       *ChatSession    `json:"chat_session,omitempty"`
 	ConversationID    string          `json:"conversation_id,omitempty"`
 	Conversations     []Conversation  `json:"conversations,omitempty"`
 	ChatTurns         []ChatTurn      `json:"chat_turns,omitempty"`
@@ -141,6 +142,7 @@ func readState(ctx context.Context, conn *sql.Conn) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("%w: found schema %d, this build reads %d", ErrStateSchema, d.Schema, stateSchema)
 	}
 	d.Snapshot.ChatCheckpoint = d.ChatCheckpoint
+	d.Snapshot.ChatSession = d.ChatSession
 	d.Snapshot.ConversationID = d.ConversationID
 	d.Snapshot.Conversations = d.Conversations
 	d.Snapshot.ChatTurns = d.ChatTurns
@@ -192,7 +194,7 @@ func (s *Store) update(ctx context.Context, fn func(*Snapshot) error) error {
 	// A task's status can pass through a value within one change; checking
 	// here, not by polling, means a wake waiting on it never misses it.
 	settleTaskWakes(&state, time.Now().UTC())
-	data, err := json.Marshal(diskState{Schema: stateSchema, ChatCheckpoint: state.ChatCheckpoint, ConversationID: state.ConversationID, Conversations: state.Conversations, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: state, ModelCalls: state.ModelCalls, ModelWindows: state.ModelWindows, Events: state.Events})
+	data, err := json.Marshal(diskState{Schema: stateSchema, ChatCheckpoint: state.ChatCheckpoint, ChatSession: state.ChatSession, ConversationID: state.ConversationID, Conversations: state.Conversations, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: state, ModelCalls: state.ModelCalls, ModelWindows: state.ModelWindows, Events: state.Events})
 	if err != nil {
 		return err
 	}

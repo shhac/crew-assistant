@@ -227,6 +227,8 @@ type ChatQueueView struct {
 	Hold         *ChatHold  `json:"hold,omitempty"`
 	Revision     int        `json:"revision"`
 	Conversation string     `json:"conversation"`
+	// Session is the model session the conversation runs on, if it has one.
+	Session *ChatSession `json:"session,omitempty"`
 }
 
 func (s *Service) ChatQueue(ctx context.Context) (ChatQueueView, error) {
@@ -234,5 +236,5 @@ func (s *Service) ChatQueue(ctx context.Context) (ChatQueueView, error) {
 	if err != nil {
 		return ChatQueueView{}, err
 	}
-	return ChatQueueView{Turns: conversationTurns(&v), Hold: shownHold(&v, s.now().UTC()), Revision: v.ChatQueueRevision, Conversation: v.ConversationID}, nil
+	return ChatQueueView{Turns: conversationTurns(&v), Hold: shownHold(&v, s.now().UTC()), Revision: v.ChatQueueRevision, Conversation: v.ConversationID, Session: v.ChatSession.shown()}, nil
 }

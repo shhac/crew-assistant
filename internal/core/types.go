@@ -164,6 +164,8 @@ type PendingOperation struct {
 
 type Snapshot struct {
 	ChatCheckpoint ChatCheckpoint `json:"-"`
+	// ChatSession is the current conversation's model session.
+	ChatSession *ChatSession `json:"-"`
 	// ConversationID names the conversation Messages holds; Conversations
 	// are the ones archived by /new and /clear.
 	ConversationID    string             `json:"-"`

@@ -66,6 +66,8 @@ type Conversation struct {
 	ArchivedAt time.Time      `json:"archived_at"`
 	Messages   []Message      `json:"messages"`
 	Checkpoint ChatCheckpoint `json:"checkpoint"`
+	// Session is the model session it ran on, resumed if it is picked up.
+	Session *ChatSession `json:"session,omitempty"`
 }
 
 // ConversationEntry lists an archived conversation without its messages.
@@ -99,6 +101,7 @@ func (s *Service) Conversation(ctx context.Context, id string) (Conversation, er
 	}
 	for _, c := range v.Conversations {
 		if c.ID == id {
+			c.Session = c.Session.shown()
 			return c, nil
 		}
 	}
@@ -134,7 +137,7 @@ func (s *Service) ResumeConversation(ctx context.Context, id string) error {
 		picked := v.Conversations[at]
 		v.Conversations = append(v.Conversations[:at], v.Conversations[at+1:]...)
 		archiveConversation(v, s.now().UTC())
-		v.ConversationID, v.Messages, v.ChatCheckpoint = picked.ID, picked.Messages, picked.Checkpoint
+		v.ConversationID, v.Messages, v.ChatCheckpoint, v.ChatSession = picked.ID, picked.Messages, picked.Checkpoint, picked.Session
 		return nil
 	})
 }
@@ -214,9 +217,9 @@ func archiveConversation(v *Snapshot, now time.Time) {
 		said = said || m.Origin != OriginOverview
 	}
 	if said {
-		v.Conversations = append(v.Conversations, Conversation{ID: id, Title: conversationTitle(v.Messages), StartedAt: v.Messages[0].CreatedAt, ArchivedAt: now, Messages: v.Messages, Checkpoint: v.ChatCheckpoint})
+		v.Conversations = append(v.Conversations, Conversation{ID: id, Title: conversationTitle(v.Messages), StartedAt: v.Messages[0].CreatedAt, ArchivedAt: now, Messages: v.Messages, Checkpoint: v.ChatCheckpoint, Session: v.ChatSession})
 	}
-	v.ConversationID, v.Messages, v.ChatCheckpoint = uid(), []Message{}, ChatCheckpoint{}
+	v.ConversationID, v.Messages, v.ChatCheckpoint, v.ChatSession = uid(), []Message{}, ChatCheckpoint{}, nil
 }
 
 // conversationTitle is the owner's first message, on one line.
