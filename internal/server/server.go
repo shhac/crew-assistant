@@ -141,21 +141,11 @@ func New(a *app.App, auth *Auth) http.Handler {
 		if decode(w, r, &in) != nil {
 			return
 		}
-		if (strings.TrimSpace(in.Choice) == "") == (strings.TrimSpace(in.Answer) == "") {
-			problem(w, errors.New("provide one selected choice or custom answer"))
-			return
-		}
-		choose := a.Core.ChooseDecision
-		answer := in.Choice
-		if strings.TrimSpace(in.Answer) != "" {
-			choose, answer = a.Core.AnswerDecision, in.Answer
-		}
-		v, err := choose(r.Context(), r.PathValue("id"), answer)
+		v, err := a.Work.ResolveDecision(r.Context(), r.PathValue("id"), in.Choice, in.Answer)
 		if err != nil {
 			problem(w, err)
 			return
 		}
-		a.Work.Nudge()
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("POST /api/decisions/{id}/dismiss", func(w http.ResponseWriter, r *http.Request) {
@@ -165,12 +155,11 @@ func New(a *app.App, auth *Auth) http.Handler {
 		if decode(w, r, &in) != nil {
 			return
 		}
-		v, err := a.Core.DismissDecision(r.Context(), r.PathValue("id"), in.Reason)
+		v, err := a.Work.DismissDecision(r.Context(), r.PathValue("id"), in.Reason)
 		if err != nil {
 			problem(w, err)
 			return
 		}
-		a.Work.Nudge()
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("POST /api/memories", func(w http.ResponseWriter, r *http.Request) {

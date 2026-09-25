@@ -49,11 +49,7 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		project, err := a.Core.UpdateBrief(ctx, in.ProjectID, core.BriefInput{Goal: in.Goal, Audience: in.Audience, Constraints: in.Constraints, Criteria: in.Criteria})
-		if err == nil {
-			a.Work.Nudge()
-		}
-		return project, err
+		return a.Work.UpdateBrief(ctx, in.ProjectID, core.BriefInput{Goal: in.Goal, Audience: in.Audience, Constraints: in.Constraints, Criteria: in.Criteria})
 	case "set_team":
 		var in engine.SetTeamArgs
 		if err := args(raw, &in); err != nil {
@@ -109,11 +105,7 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		queued, err := a.Core.QueueTask(ctx, in.ProjectID, core.TaskInput{Objective: in.Objective, Criteria: in.Criteria, DependsOn: in.DependsOn})
-		if err == nil {
-			a.Work.Nudge()
-		}
-		return queued, err
+		return a.Work.QueueTask(ctx, in.ProjectID, core.TaskInput{Objective: in.Objective, Criteria: in.Criteria, DependsOn: in.DependsOn})
 	case "ask_pm":
 		var in engine.AskPMArgs
 		if err := args(raw, &in); err != nil {
@@ -162,28 +154,13 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		if (strings.TrimSpace(in.Choice) == "") == (strings.TrimSpace(in.Answer) == "") {
-			return nil, errors.New("give either a choice or an answer")
-		}
-		choose, answer := a.Core.ChooseDecision, in.Choice
-		if strings.TrimSpace(in.Answer) != "" {
-			choose, answer = a.Core.AnswerDecision, in.Answer
-		}
-		decision, err := choose(ctx, in.DecisionID, answer)
-		if err == nil {
-			a.Work.Nudge()
-		}
-		return decision, err
+		return a.Work.ResolveDecision(ctx, in.DecisionID, in.Choice, in.Answer)
 	case "ask_decision":
 		var in engine.DecisionArgs
 		if err := args(raw, &in); err != nil {
 			return nil, err
 		}
-		why := in.Why
-		if len(in.Evidence) > 0 {
-			why += "\nEvidence: " + strings.Join(in.Evidence, "; ")
-		}
-		return a.Core.CreateDecision(ctx, core.DecisionInput{ProjectID: in.ProjectID, Title: in.Question, Context: why, Recommendation: in.Recommendation, Choices: in.Options})
+		return a.Core.CreateDecision(ctx, core.DecisionInput{ProjectID: in.ProjectID, Title: in.Question, Context: in.Why + evidenceText(in.Evidence), Recommendation: in.Recommendation, Choices: in.Options})
 	case "remember_preference":
 		var in engine.PreferenceArgs
 		if err := args(raw, &in); err != nil {

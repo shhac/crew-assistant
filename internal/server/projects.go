@@ -17,12 +17,11 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		if decode(w, r, &in) != nil {
 			return
 		}
-		v, err := a.Core.UpdateBrief(r.Context(), r.PathValue("id"), in)
+		v, err := a.Work.UpdateBrief(r.Context(), r.PathValue("id"), in)
 		if err != nil {
 			problem(w, err)
 			return
 		}
-		a.Work.Nudge()
 		respond(w, 200, v)
 	})
 	mux.HandleFunc("PUT /api/projects/{id}/team", func(w http.ResponseWriter, r *http.Request) {
@@ -88,12 +87,11 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		if decode(w, r, &in) != nil {
 			return
 		}
-		v, err := a.Core.QueueTask(r.Context(), r.PathValue("id"), in)
+		v, err := a.Work.QueueTask(r.Context(), r.PathValue("id"), in)
 		if err != nil {
 			problem(w, err)
 			return
 		}
-		a.Work.Nudge()
 		respond(w, 201, v)
 	})
 	mux.HandleFunc("PUT /api/projects/{id}/tasks/order", func(w http.ResponseWriter, r *http.Request) {
