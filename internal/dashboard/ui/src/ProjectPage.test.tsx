@@ -608,6 +608,54 @@ describe("a request", () => {
     ).toBe(true);
     expect(calls.some((c) => c.path.endsWith("/revisions/1"))).toBe(false);
   });
+  it("stays open and leaves focus in a text field across a refresh", () => {
+    window.history.replaceState(null, "", "/#/projects/p1/requests/t1");
+    const view = show(project(), { tasks: [started()] }, { request: "t1" });
+    const panel = screen.getByRole("complementary", {
+      name: "Cache the lookups",
+    });
+    const field = document.body.appendChild(
+      document.createElement("textarea"),
+    );
+    try {
+      field.focus();
+      view.rerender(
+        <ProjectPage
+          project={project()}
+          route={{ page: "project", id: "p1", tab: "board", request: "t1" }}
+          state={normalizeState({
+            assistant: { name: "Iris", personality: "" },
+            projects: [project()],
+            tasks: [started({ detail: "Writing the cache" })],
+          })}
+          refresh={refresh}
+        />,
+      );
+      expect(screen.getByText("Writing the cache")).toBeTruthy();
+      expect(document.activeElement).toBe(field);
+      fireEvent.keyDown(field, { key: "Escape" });
+      expect(window.location.hash).toBe("#/projects/p1/requests/t1");
+      expect(panel.isConnected).toBe(true);
+    } finally {
+      field.remove();
+    }
+  });
+  it("closes on Escape away from text fields", () => {
+    window.history.replaceState(null, "", "/#/projects/p1/requests/t1");
+    show(project(), { tasks: [started()] }, { request: "t1" });
+    const field = document.body.appendChild(document.createElement("div"));
+    field.setAttribute("contenteditable", "true");
+    try {
+      fireEvent.keyDown(field, { key: "Escape" });
+      expect(window.location.hash).toBe("#/projects/p1/requests/t1");
+      fireEvent.keyDown(screen.getByRole("button", { name: "Close" }), {
+        key: "Escape",
+      });
+      expect(window.location.hash).toBe("#/projects/p1");
+    } finally {
+      field.remove();
+    }
+  });
 });
 
 describe("the project's tabs", () => {

@@ -172,6 +172,31 @@ export function focusedElement() {
 }
 
 /**
+ * Whether a key press is typing into a text field. Page-wide shortcuts leave
+ * those keys to the field.
+ */
+export function typingIn(event: KeyboardEvent) {
+  const target = event.target;
+  if (target instanceof HTMLTextAreaElement) return true;
+  if (target instanceof HTMLInputElement)
+    return ![
+      "button",
+      "checkbox",
+      "color",
+      "file",
+      "image",
+      "radio",
+      "range",
+      "reset",
+      "submit",
+    ].includes(target.type);
+  return (
+    target instanceof Element &&
+    !!target.closest('[contenteditable]:not([contenteditable="false"])')
+  );
+}
+
+/**
  * useAction runs one owner action at a time: it marks the component busy,
  * clears the last error, and shows a failure as the error.
  */

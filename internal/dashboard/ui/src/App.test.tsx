@@ -142,6 +142,60 @@ describe("the shell", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Chat/ }));
     expect(screen.getByLabelText("Message Iris")).toBeTruthy();
   });
+  it("leaves ⌘J to a text field that has focus", async () => {
+    render(<App />);
+    const field = await screen.findByLabelText("Message Iris");
+    field.focus();
+    fireEvent.keyDown(field, { key: "j", metaKey: true });
+    expect(screen.getByLabelText("Message Iris")).toBe(field);
+    expect(document.activeElement).toBe(field);
+  });
+  it("keeps an open request and the chat's focus and draft across refreshes", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval"] });
+    try {
+      state.projects = [project];
+      state.tasks = [
+        {
+          id: "t1",
+          project_id: "p1",
+          objective: "Draft the note",
+          criteria: [],
+          status: "writing",
+          stage: "implementing",
+          round: 1,
+          revisions: [],
+          verdicts: [],
+          created_at: "2026-09-21T10:00:00Z",
+        },
+      ];
+      window.history.replaceState(null, "", "/#/projects/p1/requests/t1");
+      render(<App />);
+      const panel = await screen.findByRole("complementary", {
+        name: "Draft the note",
+      });
+      const field = screen.getByLabelText("Message Iris");
+      field.focus();
+      fireEvent.change(field, { target: { value: "Also mention pric" } });
+      const fetched = calls.filter((c) => c.path === "/api/state").length;
+      state = { ...state, tasks: [{ ...state.tasks[0], detail: "Writing" }] };
+      vi.advanceTimersByTime(5000);
+      await waitFor(() => expect(screen.getByText("Writing")).toBeTruthy());
+      expect(
+        calls.filter((c) => c.path === "/api/state").length,
+      ).toBeGreaterThan(fetched);
+      expect(document.activeElement).toBe(field);
+      // Keys meant for the draft never reach the request.
+      fireEvent.keyDown(field, { key: " " });
+      fireEvent.keyDown(field, { key: "Escape" });
+      fireEvent.change(field, { target: { value: "Also mention pricing" } });
+      expect(document.activeElement).toBe(field);
+      expect(field).toHaveProperty("value", "Also mention pricing");
+      expect(panel.isConnected).toBe(true);
+      expect(window.location.hash).toBe("#/projects/p1/requests/t1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("widens the chat without losing its draft and gives the work back", async () => {
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
       callback(0);
@@ -209,6 +263,47 @@ describe("the shell", () => {
     expect(calls.some((c) => c.path === "/api/chat/messages")).toBe(false);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Chat" })).toBeNull();
+  });
+  it("on a narrow screen leaves Escape in the drawer's composer to the draft", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("max-width"),
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    state.projects = [project];
+    state.tasks = [
+      {
+        id: "t1",
+        project_id: "p1",
+        objective: "Draft the note",
+        criteria: [],
+        status: "writing",
+        stage: "implementing",
+        round: 1,
+        revisions: [],
+        verdicts: [],
+        created_at: "2026-09-21T10:00:00Z",
+      },
+    ];
+    window.history.replaceState(null, "", "/#/projects/p1/requests/t1");
+    render(<App />);
+    const panel = await screen.findByRole("complementary", {
+      name: "Draft the note",
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Chat/ }));
+    const drawer = await screen.findByRole("dialog", { name: "Chat" });
+    const field = within(drawer).getByLabelText("Message Iris");
+    field.focus();
+    fireEvent.change(field, { target: { value: "Also mention pric" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Chat" })).toBe(drawer);
+    expect(document.activeElement).toBe(field);
+    expect(field).toHaveProperty("value", "Also mention pric");
+    // Away from the draft, Escape still closes the drawer, and only the drawer.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Chat" })).toBeNull();
+    expect(panel.isConnected).toBe(true);
+    expect(window.location.hash).toBe("#/projects/p1/requests/t1");
   });
   it("keeps a message that wasn't confirmed, ready to retry", async () => {
     respond = (path) =>

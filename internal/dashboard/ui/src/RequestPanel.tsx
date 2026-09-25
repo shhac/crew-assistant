@@ -15,6 +15,7 @@ import {
   Icon,
   Pill,
   focusedElement,
+  typingIn,
   useAction,
 } from "./ui";
 import {
@@ -40,19 +41,38 @@ export function RequestPanel({
   refresh: () => Promise<void>;
   onClose: () => void;
 }) {
+  const panel = useRef<HTMLElement>(null);
   const close = useRef<HTMLButtonElement>(null);
+  // The page hands a fresh onClose on every refresh; focus moves only when
+  // the request opens or closes, never on a refresh.
+  const closing = useRef(onClose);
+  useEffect(() => {
+    closing.current = onClose;
+  });
   useEffect(() => {
     const prior = focusedElement();
+    const inside = panel.current;
     close.current?.focus();
     const keydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) onClose();
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !typingIn(event) &&
+        // Covered by the chat drawer or the widened chat; Escape is theirs.
+        !inside?.closest("[inert]")
+      )
+        closing.current();
     };
     document.addEventListener("keydown", keydown);
     return () => {
       document.removeEventListener("keydown", keydown);
-      prior?.focus?.();
+      // Hand focus back only if it is still here; the owner may be typing
+      // somewhere else by now.
+      const now = document.activeElement;
+      if (!now || now === document.body || inside?.contains(now))
+        prior?.focus?.();
     };
-  }, [onClose]);
+  }, []);
   // Direction that came from the team thread is already shown there.
   const fromThread = new Set(
     (task?.messages ?? [])
@@ -62,7 +82,11 @@ export function RequestPanel({
   const said = (task?.direction ?? []).filter((_, i) => !fromThread.has(i));
   const decision = task ? decisionFor(task, state.decisions) : undefined;
   return (
-    <aside className="request-panel" aria-labelledby="request-title">
+    <aside
+      ref={panel}
+      className="request-panel"
+      aria-labelledby="request-title"
+    >
       <div className="request-panel-bar">
         <button
           ref={close}

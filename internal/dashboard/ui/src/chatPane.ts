@@ -5,7 +5,7 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { focusedElement } from "./ui";
+import { focusedElement, typingIn } from "./ui";
 
 const chatKey = "crew-assistant.chat";
 
@@ -38,7 +38,7 @@ function useFocusTrap(
     if (!active) return;
     const prior = focusedElement();
     const keydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !typingIn(event)) {
         event.preventDefault();
         escape.current();
       }
@@ -95,7 +95,11 @@ export function useChatPane() {
   }, []);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "j") {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.key.toLowerCase() === "j" &&
+        !typingIn(event)
+      ) {
         event.preventDefault();
         toggle();
       }
