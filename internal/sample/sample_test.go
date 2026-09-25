@@ -3,6 +3,7 @@ package sample
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -36,6 +37,12 @@ func TestTheSampleShowsWorkAtEveryStageAndNeverTouchesRealState(t *testing.T) {
 	}
 	if len(snap.Members) == 0 {
 		t.Error("the sample has no team members")
+	}
+	if !slices.ContainsFunc(snap.Projects, func(p core.Project) bool {
+		_, ok := p.PMSeat()
+		return ok && p.OrderedBy == core.OrderedByPM
+	}) {
+		t.Error("no sample project has a PM keeping its list")
 	}
 	for _, m := range snap.Members {
 		if !strings.HasPrefix(m.AvatarSVG, "<svg") {

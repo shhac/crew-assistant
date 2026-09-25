@@ -69,10 +69,11 @@ var (
 		{Name: "QA", Kinds: []string{core.RoleQA}, Engine: "claude"},
 	}
 	// The crew-assistant project is staffed by two of the owner's members;
-	// Ada plans each task and then implements it, from one seat.
+	// Ada plans each task and then implements it, from one seat, and Rune
+	// reviews and keeps the to-do list in order.
 	crewTeam = []core.Role{
 		{Name: "Ada", Kinds: []string{core.RoleImplementer, core.RolePlanner}, Engine: "claude", Model: "opus", Member: "demo-ada"},
-		{Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "codex", Member: "demo-rune"},
+		{Name: "Rune", Kinds: []string{core.RoleReviewer, core.RolePM}, Engine: "codex", Member: "demo-rune"},
 		{Name: "QA", Kinds: []string{core.RoleQA}, Engine: "claude"},
 	}
 	writingTeam = []core.Role{
@@ -90,7 +91,7 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 	docsRepo := filepath.Join(dir, "projects", "docs-site")
 	fastForward := core.LandPolicy{Via: core.LandPush, Target: "main", Method: "fast-forward", Approve: core.ApproveBefore, Means: "the next release includes it"}
 	pullRequest := core.LandPolicy{Via: core.LandPullRequest, Target: "main", Method: "squash", GitHub: "example/docs-site", Approve: core.ApproveBefore}
-	crew := core.Project{ID: "demo-crew", Title: "crew-assistant", Status: "active", Directories: []string{crewRepo}, Playbook: codePlaybook(crewRepo, fastForward, crewTeam), UpdatedAt: ago(4 * time.Minute),
+	crew := core.Project{ID: "demo-crew", Title: "crew-assistant", Status: "active", Directories: []string{crewRepo}, Playbook: codePlaybook(crewRepo, fastForward, crewTeam), UpdatedAt: ago(4 * time.Minute), OrderedBy: core.OrderedByPM, OrderedAt: ago(26 * time.Minute),
 		Brief: core.Brief{Version: 3, Goal: "Make crew-assistant a software factory that can build and improve itself.", Criteria: []string{"Features land on main without losing work", "Tests never touch real services"}, UpdatedAt: ago(72 * time.Hour)}}
 	docs := core.Project{ID: "demo-docs", Title: "docs-site", Status: "active", Directories: []string{docsRepo}, Playbook: codePlaybook(docsRepo, pullRequest, codeTeam), UpdatedAt: ago(22 * time.Minute),
 		Brief: core.Brief{Version: 1, Goal: "A documentation site people can find answers in quickly.", Audience: "Developers new to the product", Criteria: []string{"Every page loads fast", "Search finds pages by their headings"}, UpdatedAt: ago(240 * time.Hour)}}
@@ -218,7 +219,7 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 					{ID: "demo-l1", When: "Finishing a change", Text: "Run the whole test suite before finishing, not only the package you changed. A change in one package often breaks a test in another that imports it.", Source: core.LearnedByOwner, ProjectID: crew.ID, At: ago(9 * 24 * time.Hour)},
 					{ID: "demo-l2", When: "Writing text people will read", Text: "Keep copy plain and specific. Say what happens, in sentence case, and cut any line the layout already makes obvious; filler gets rewritten.", Source: core.LearnedByMember, ProjectID: crew.ID, At: ago(2 * 24 * time.Hour)},
 				}},
-			{ID: "demo-rune", Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "codex", Instructions: "Read the tests before the code.", CreatedAt: ago(20 * 24 * time.Hour),
+			{ID: "demo-rune", Name: "Rune", Kinds: []string{core.RoleReviewer, core.RolePM}, Engine: "codex", Instructions: "Read the tests before the code.", CreatedAt: ago(20 * 24 * time.Hour),
 				Avatar: config.Avatar{Look: "Messy sky-blue hair with a cowlick, calm thoughtful eyes, a pencil behind one ear, on deep teal.", Background: "#10202b", Accent: "#8ecae6", Marks: []config.Mark{{D: "M40 30 H80 A22 22 0 0 1 80 74 H52 L88 104", Color: "#8ecae6", StrokeWidth: 12}, {D: "M40 30 V104", Color: "#8ecae6", StrokeWidth: 12}}},
 				Learnings: []core.Learning{
 					{ID: "demo-l3", When: "Reviewing error handling", Text: "Ask for a test of the failure path, not only the happy one: for example, what a save does when the disk is full.", Source: core.LearnedByMember, ProjectID: crew.ID, At: ago(5 * 24 * time.Hour)},
@@ -230,6 +231,7 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 			{ID: "demo-mem3", Key: "docs-approvals", Content: "docs-site pull requests need two approvals.", Kind: "observation", Source: "assistant", UpdatedAt: ago(42 * 24 * time.Hour)},
 		},
 		Activity: []core.Activity{
+			{ID: "demo-a0", ProjectID: crew.ID, Kind: "task.ordered", Summary: "Changed what “Light and dark screenshots in the README” waits for: the screenshots should show the new search", CreatedAt: ago(26 * time.Minute)},
 			{ID: "demo-a1", ProjectID: crew.ID, Kind: "task.landed", Summary: "Next-message suggestions landed on main", CreatedAt: ago(150 * time.Minute)},
 			{ID: "demo-a2", ProjectID: crew.ID, Kind: "task.landed", Summary: "Composer asset drop and paste landed on main", CreatedAt: ago(3 * time.Hour)},
 			{ID: "demo-a3", ProjectID: crew.ID, Kind: "decision.opened", Summary: "Land “Sign commits as your git config says” on main", CreatedAt: ago(4 * time.Minute)},
