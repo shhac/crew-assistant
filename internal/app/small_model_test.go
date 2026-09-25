@@ -101,7 +101,7 @@ func (f *fakeCLIs) calls() int {
 	return len(f.discovered) + len(f.completed)
 }
 
-func smallModelsFor(t *testing.T, engineName string) []config.Model {
+func smallModelsFor(t *testing.T, engineName string) []config.Harness {
 	t.Helper()
 	cfg := config.Default()
 	cfg.Model.Engine = engineName
@@ -255,9 +255,8 @@ func TestSmallModelsNeverSendAnUnapprovedModel(t *testing.T) {
 	f := newFakeCLIs(t)
 	s := f.models()
 	cfg := config.Default()
-	astra, opus := cfg.Model, cfg.Model
-	opus.Engine, opus.Model = "claude", "opus"
-	if _, err := s.ask(context.Background(), []config.Model{astra, opus}, nil, nil); err == nil || f.calls() != 0 {
+	astra, opus := cfg.AssistantHarness(), cfg.Harness("claude", "opus", "")
+	if _, err := s.ask(context.Background(), []config.Harness{astra, opus}, nil, nil); err == nil || f.calls() != 0 {
 		t.Fatal(err, f.calls())
 	}
 }

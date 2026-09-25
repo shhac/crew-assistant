@@ -83,7 +83,7 @@ func (a *App) SuggestNextMessage(ctx context.Context, after string) (string, err
 	return suggestion, nil
 }
 
-func generateSuggestion(ctx context.Context, small *smallModels, models []config.Model, messages []core.Message, reserve func(context.Context) error) (string, error) {
+func generateSuggestion(ctx context.Context, small *smallModels, models []config.Harness, messages []core.Message, reserve func(context.Context) error) (string, error) {
 	recent := []string{}
 	for i := len(messages) - 1; i >= 0 && len(recent) < 6; i-- {
 		switch messages[i].Role {

@@ -16,12 +16,12 @@ import (
 
 func TestModelEndpointUsesSavedProfileAndCaches(t *testing.T) {
 	cfg := config.Default()
-	cfg.Model.CodexHome = "/test/assistant-login"
+	cfg.Engines.Codex.Home = "/test/assistant-login"
 	a := app.New(nil, cfg, filepath.Join(t.TempDir(), "config.json"), app.Options{})
 	calls := 0
 	handler := modelHandler(a, func(_ context.Context, c engine.Config) ([]engine.ModelOption, error) {
 		calls++
-		if c.CodexHome != cfg.Model.CodexHome {
+		if c.CodexHome != cfg.Engines.Codex.Home {
 			t.Fatal("wrong profile", c.CodexHome)
 		}
 		return []engine.ModelOption{{ID: "test", Name: "Test model", DefaultEffort: "high"}}, nil
@@ -79,10 +79,10 @@ func TestDemoModelDiscoveryNeverStartsProcess(t *testing.T) {
 
 func TestModelEndpointCanPreviewClaudeBeforeSavingEngine(t *testing.T) {
 	cfg := config.Default()
-	cfg.Model.ClaudeHome = "/test/shared-claude"
+	cfg.Engines.Claude.Home = "/test/shared-claude"
 	a := app.New(nil, cfg, "", app.Options{})
 	handler := modelHandler(a, func(_ context.Context, c engine.Config) ([]engine.ModelOption, error) {
-		if c.Engine != "claude" || c.ClaudeHome != cfg.Model.ClaudeHome {
+		if c.Engine != "claude" || c.ClaudeHome != cfg.Engines.Claude.Home {
 			t.Fatal(c)
 		}
 		return []engine.ModelOption{{ID: "opus", Name: "Opus"}}, nil

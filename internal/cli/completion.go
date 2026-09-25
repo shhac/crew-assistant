@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"reflect"
-	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -25,28 +23,28 @@ func registerCompletions(root *cobra.Command, o *options) {
 		}
 	}
 	visit(root)
+	values := map[string][]string{}
+	for _, k := range configKeys(o) {
+		values[k.Name] = k.Values
+	}
 	set, _, _ := root.Find([]string{"config", "set"})
-	keys := completionConfigKeys(reflect.TypeFor[config.Config](), "")
-	set.ValidArgsFunction = func(_ *cobra.Command, args []string, prefix string) ([]string, cobra.ShellCompDirective) {
-		switch len(args) {
-		case 0:
-			return completionValues(keys, prefix)
-		case 1:
-			if args[0] == "model.codex_home" {
-				return nil, cobra.ShellCompDirectiveFilterDirs
-			}
-			values := completionConfigValues(args[0])
-			if args[0] == "model.model" {
-				values = configuredModels(o)
-			}
-			return completionValues(values, prefix)
-		default:
+	keys := set.ValidArgsFunction
+	set.ValidArgsFunction = func(cmd *cobra.Command, args []string, prefix string) ([]string, cobra.ShellCompDirective) {
+		switch {
+		case len(args) == 0:
+			return keys(cmd, args, prefix)
+		case len(args) > 1:
 			return completionValues(nil, prefix)
+		case strings.HasSuffix(args[0], ".home"):
+			return nil, cobra.ShellCompDirectiveFilterDirs
+		case args[0] == "model.model":
+			return completionValues(configuredModels(o), prefix)
 		}
+		return completionValues(values[args[0]], prefix)
 	}
 	serve, _, _ := root.Find([]string{"serve"})
-	_ = serve.RegisterFlagCompletionFunc("tailscale", completeStatic(completionConfigValues("dashboard.tailscale")))
-	_ = serve.RegisterFlagCompletionFunc("tailscale-port", completeStatic(completionConfigValues("dashboard.tailscale_port")))
+	_ = serve.RegisterFlagCompletionFunc("tailscale", completeStatic(values["dashboard.tailscale"]))
+	_ = serve.RegisterFlagCompletionFunc("tailscale-port", completeStatic(values["dashboard.tailscale_port"]))
 	_ = serve.RegisterFlagCompletionFunc("http", completeStatic(nil))
 	login, _, _ := root.Find([]string{"model", "login"})
 	_ = login.RegisterFlagCompletionFunc("engine", completeStatic([]string{"codex", "claude"}))
@@ -72,46 +70,6 @@ func completionValues(values []string, prefix string) ([]string, cobra.ShellComp
 	}
 	sort.Strings(matches)
 	return matches, cobra.ShellCompDirectiveNoFileComp
-}
-
-// Match config set's dotted object traversal. Arrays are set as a whole JSON
-// value; suggesting workers.0.id would advertise a path the command rejects.
-func completionConfigKeys(t reflect.Type, prefix string) []string {
-	var keys []string
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		tag := strings.Split(field.Tag.Get("json"), ",")
-		// Optional keys, such as an avatar's drawn marks, are written by the
-		// setup interview rather than typed, and are absent until then.
-		if tag[0] == "" || tag[0] == "-" || slices.Contains(tag[1:], "omitempty") {
-			continue
-		}
-		name := tag[0]
-		key := prefix + name
-		keys = append(keys, key)
-		if field.Type.Kind() == reflect.Struct {
-			keys = append(keys, completionConfigKeys(field.Type, key+".")...)
-		}
-	}
-	return keys
-}
-
-func completionConfigValues(key string) []string {
-	switch key {
-	case "assistant.theme":
-		return []string{"system", "light", "dark"}
-	case "assistant.avatar.shape":
-		return []string{"orb", "spark", "leaf"}
-	case "dashboard.tailscale":
-		return []string{"off", "serve"}
-	case "dashboard.tailscale_port":
-		return []string{"443", "8443", "10000"}
-	case "model.engine":
-		return []string{"codex", "claude", "openai-compatible"}
-	case "model.effort":
-		return []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
-	}
-	return nil
 }
 
 func configuredModels(o *options) []string {

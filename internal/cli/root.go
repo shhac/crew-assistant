@@ -93,61 +93,21 @@ func NewRoot(version string) *cobra.Command {
 			return o.emit(v)
 		}})
 	}
-	cfgcmd := &cobra.Command{Use: "config", Short: "Inspect and update typed configuration"}
-	cfgcmd.AddCommand(&cobra.Command{Use: "path", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error { return o.emit(map[string]string{"path": o.configPath}) }})
-	cfgcmd.AddCommand(&cobra.Command{Use: "show", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+	cfgcmd := configCommand(o)
+	cfgcmd.AddCommand(&cobra.Command{Use: "path", Short: "Show where the config file is", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error { return o.emit(map[string]string{"path": o.configPath}) }})
+	cfgcmd.AddCommand(&cobra.Command{Use: "show", Short: "Show the whole config", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load(o.configPath)
 		if err != nil {
 			return err
 		}
 		return o.emit(cfg)
 	}})
-	cfgcmd.AddCommand(&cobra.Command{Use: "validate", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+	cfgcmd.AddCommand(&cobra.Command{Use: "validate", Short: "Check the config file", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := config.Load(o.configPath)
 		if err != nil {
 			return err
 		}
 		return o.emit(map[string]bool{"valid": true})
-	}})
-	cfgcmd.AddCommand(&cobra.Command{Use: "set <key.path> <value>", Short: "Set a string, JSON number, boolean, array or object", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := config.Load(o.configPath)
-		if err != nil {
-			return err
-		}
-		raw, _ := json.Marshal(c)
-		var object map[string]any
-		_ = json.Unmarshal(raw, &object)
-		parts := strings.Split(args[0], ".")
-		target := object
-		for _, p := range parts[:len(parts)-1] {
-			next, ok := target[p].(map[string]any)
-			if !ok {
-				return errors.New("unknown configuration object")
-			}
-			target = next
-		}
-		key := parts[len(parts)-1]
-		if _, ok := target[key]; !ok {
-			return errors.New("unknown configuration key")
-		}
-		var value any
-		if json.Unmarshal([]byte(args[1]), &value) != nil {
-			value = args[1]
-		}
-		target[key] = value
-		raw, _ = json.Marshal(object)
-		d := json.NewDecoder(bytes.NewReader(raw))
-		d.DisallowUnknownFields()
-		if err = d.Decode(&c); err != nil {
-			return err
-		}
-		if err = c.Validate(); err != nil {
-			return err
-		}
-		if err = o.saveConfig(c); err != nil {
-			return err
-		}
-		return o.emit(map[string]string{"updated": args[0]})
 	}})
 	root.AddCommand(cfgcmd)
 	doctor := &cobra.Command{Use: "doctor", Short: "Check configuration and credential availability without calling providers", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
@@ -155,7 +115,8 @@ func NewRoot(version string) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		checks := []map[string]any{{"name": "config", "ok": true}, {"name": "model", "ok": cfg.Model.Model != "", "engine": cfg.Model.Engine, "model": cfg.Model.Model, "effort": cfg.Model.Effort}}
+		problems := configProblems(o.configPath)
+		checks := []map[string]any{{"name": "config", "ok": true}, {"name": "config keys", "ok": len(problems) == 0, "problems": problems}, {"name": "model", "ok": cfg.Model.Model != "", "engine": cfg.Model.Engine, "model": cfg.Model.Model, "effort": cfg.Model.Effort}}
 		for _, connection := range cfg.Connections {
 			_, lookupErr := exec.LookPath(connection.Tool)
 			hint := "Account credentials are managed by this CLI; choose its existing profiles in Settings."
@@ -171,21 +132,23 @@ func NewRoot(version string) *cobra.Command {
 		if cfg.LegacyLinearImportEnabled() {
 			refs = append(refs, cfg.Linear.APIKeyEnv)
 		}
+		codexBin, codexHome := cfg.Engines.Binary("codex")
+		claudeBin, claudeHome := cfg.Engines.Binary("claude")
 		if cfg.Model.Engine == "codex" {
-			isolationErr := engine.ValidateCodexHome(cfg.Model.CodexHome)
-			isolationHint := "Run crew-assistant model login to sign into the configured model.codex_home."
+			isolationErr := engine.ValidateCodexHome(codexHome)
+			isolationHint := "Run crew-assistant model login to sign into the configured engines.codex.home."
 			if isolationErr != nil {
 				isolationHint = isolationErr.Error()
 			}
 			checks = append(checks, map[string]any{"name": "codex instruction isolation", "ok": isolationErr == nil, "hint": isolationHint})
-			binary, lookupErr := exec.LookPath(cfg.Model.CodexBin)
-			checks = append(checks, map[string]any{"name": "codex executable", "ok": lookupErr == nil, "hint": "install Codex or set model.codex_bin"})
+			binary, lookupErr := exec.LookPath(codexBin)
+			checks = append(checks, map[string]any{"name": "codex executable", "ok": lookupErr == nil, "hint": "install Codex or set engines.codex.bin"})
 			if lookupErr == nil {
 				ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Second)
 				probe := exec.CommandContext(ctx, binary, "login", "status")
 				// Match the inference transport: use Codex's stored login, not
 				// unrelated provider keys inherited from the daemon environment.
-				probe.Env, err = engine.CodexEnvironment(cfg.Model.CodexHome)
+				probe.Env, err = engine.CodexEnvironment(codexHome)
 				if err != nil {
 					cancel()
 					return err
@@ -196,12 +159,12 @@ func NewRoot(version string) *cobra.Command {
 				checks = append(checks, map[string]any{"name": "codex login", "ok": loginErr == nil, "hint": "run crew-assistant model login; no inference was invoked"})
 			}
 		} else if cfg.Model.Engine == "claude" {
-			binary, lookupErr := exec.LookPath(cfg.Model.ClaudeBin)
+			binary, lookupErr := exec.LookPath(claudeBin)
 			checks = append(checks, map[string]any{"name": "claude executable", "ok": lookupErr == nil, "hint": "Install Claude CLI to use its existing subscription login."})
 			if lookupErr == nil {
 				ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Second)
 				probe := exec.CommandContext(ctx, binary, "auth", "status")
-				probe.Env, err = engine.ClaudeEnvironment(cfg.Model.ClaudeHome)
+				probe.Env, err = engine.ClaudeEnvironment(claudeHome)
 				if err != nil {
 					cancel()
 					return err
@@ -212,7 +175,8 @@ func NewRoot(version string) *cobra.Command {
 				checks = append(checks, map[string]any{"name": "claude login", "ok": loginErr == nil, "hint": "Sign in once with crew-assistant model login; workers using this CLI home share the login."})
 			}
 		} else {
-			refs = append(refs, cfg.Model.APIKeyEnv)
+			_, apiKeyEnv := cfg.Engines.Endpoint()
+			refs = append(refs, apiKeyEnv)
 		}
 		checks = append(checks, roleSandboxChecks(cmd.Context(), cfg, o.statePath)...)
 		for _, ref := range refs {

@@ -23,7 +23,7 @@ func roleSandboxChecks(ctx context.Context, cfg config.Config, statePath string)
 	defer os.RemoveAll(work)
 	for _, engine := range []session.Engine{session.Codex, session.Claude} {
 		o := session.Options{Engine: engine, WorkDir: work, Sandbox: &session.Sandbox{Write: true}}
-		o.Binary, o.Home = cfg.Model.EngineBinary(string(engine))
+		o.Binary, o.Home = cfg.Engines.Binary(string(engine))
 		if engine == session.Codex {
 			o.RuntimeHome = filepath.Join(filepath.Dir(statePath), "roles", "codex")
 		}

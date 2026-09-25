@@ -15,7 +15,7 @@ func TestLoadingCaptionUsesSmallCLIWithOnlyRecentContext(t *testing.T) {
 	s := f.models()
 	complete := s.complete
 	s.complete = func(ctx context.Context, c engine.Config, m []engine.Message, tools []engine.Tool) (engine.Message, engine.Usage, error) {
-		if c.APIKeyEnv != "" || c.Endpoint != "" || c.CodexHome != config.Default().Model.CodexHome {
+		if _, home := config.Default().Engines.Binary("codex"); c.APIKeyEnv != "" || c.Endpoint != "" || c.CodexHome != home {
 			t.Fatal(c)
 		}
 		if len(m) != 2 || strings.Contains(m[1].Content, "old secret") || !strings.Contains(m[1].Content, "recent answer") || !strings.Contains(m[1].Content, "plan a garden") {

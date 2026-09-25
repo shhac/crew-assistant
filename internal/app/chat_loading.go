@@ -43,7 +43,7 @@ func (a *App) startChatLoading(ctx context.Context, turnID, message string, hist
 	_ = a.Core.SetChatLoadingPhrase(ctx, turnID, phrase)
 }
 
-func generateLoadingPhrase(ctx context.Context, small *smallModels, models []config.Model, message string, history []engine.Message, reserve func(context.Context) error) (string, error) {
+func generateLoadingPhrase(ctx context.Context, small *smallModels, models []config.Harness, message string, history []engine.Message, reserve func(context.Context) error) (string, error) {
 	recent := []string{}
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role == "user" || history[i].Role == "assistant" {

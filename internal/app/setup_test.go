@@ -24,8 +24,8 @@ func setupModel(t *testing.T, a *App, handler http.HandlerFunc) *httptest.Server
 	cfg.Model.Engine = "openai-compatible"
 	cfg.Model.Model = "fixture-model"
 	cfg.Model.Effort = ""
-	cfg.Model.APIKeyEnv = ""
-	cfg.Model.BaseURL = server.URL + "/v1"
+	cfg.Engines.OpenAICompatible.APIKeyEnv = ""
+	cfg.Engines.OpenAICompatible.BaseURL = server.URL + "/v1"
 	if err := a.UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
 	}

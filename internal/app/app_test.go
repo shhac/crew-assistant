@@ -23,7 +23,7 @@ func testApp(t *testing.T) *App {
 	cfg.Model.Effort = ""
 	cfg.Model.Model = ""
 	cfg.Assistant.Name = "Quill"
-	cfg.Model.APIKeyEnv = ""
+	cfg.Engines.OpenAICompatible.APIKeyEnv = ""
 	s, err := core.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestChatModelUsesConfiguredNameAndPersistsToolEffects(t *testing.T) {
 	}))
 	defer remote.Close()
 	cfg := a.Config()
-	cfg.Model.BaseURL = remote.URL + "/v1"
+	cfg.Engines.OpenAICompatible.BaseURL = remote.URL + "/v1"
 	cfg.Model.Model = "fixture-model"
 	if err := a.UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
@@ -105,12 +105,16 @@ func TestTheAppIsBuiltWhole(t *testing.T) {
 func TestTheDaemonTakesOnAChangedConfigFile(t *testing.T) {
 	a := testApp(t)
 	cfg := a.Config()
-	cfg.Limits.RoleUsage.ClaudeMaxUsedPercent = 98
+	floor := 2
+	cfg.Engines.Claude.UsageFloor.WeekPercent = &floor
 	if err := config.Save(a.configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if changed, err := a.ReloadConfig(); err != nil || !changed || a.Config().Limits.RoleUsage.ClaudeMaxUsedPercent != 98 {
-		t.Fatalf("changed %v, %v, limit %d", changed, err, a.Config().Limits.RoleUsage.ClaudeMaxUsedPercent)
+	if changed, err := a.ReloadConfig(); err != nil || !changed {
+		t.Fatalf("changed %v, %v", changed, err)
+	}
+	if _, week, _ := a.Config().Engines.Floors("claude"); week != 2 {
+		t.Fatalf("weekly floor %d", week)
 	}
 	if changed, err := a.ReloadConfig(); err != nil || changed {
 		t.Fatalf("an unchanged file changed something: %v %v", changed, err)

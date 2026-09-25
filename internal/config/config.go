@@ -12,18 +12,24 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/shhac/lib-agent-cli/creds"
 )
 
 const Namespace = "app.paulie.crew-assistant"
 const DefaultAssistantName = "Milo"
 
 type Config struct {
-	Chat        Chat         `json:"chat"`
-	Assistant   Assistant    `json:"assistant"`
-	Dashboard   Dashboard    `json:"dashboard"`
+	Chat      Chat      `json:"chat"`
+	Assistant Assistant `json:"assistant"`
+	Dashboard Dashboard `json:"dashboard"`
+	// Model is the assistant's own model; Engines are how every model is
+	// reached.
 	Model       Model        `json:"model"`
+	Engines     Engines      `json:"engines"`
 	Slack       Slack        `json:"slack"`
 	Linear      Linear       `json:"linear"`
 	Limits      Limits       `json:"limits"`
@@ -51,7 +57,7 @@ var approvedSmallModels = map[string]struct{ model, effort string }{
 // assistant's own CLI engine first, then the other one. Each uses that CLI's
 // configured login. An API assistant has no CLI of its own to start from, so it
 // gets none rather than a guessed engine.
-func (c Config) SmallModels() ([]Model, error) {
+func (c Config) SmallModels() ([]Harness, error) {
 	var order []string
 	switch c.Model.Engine {
 	case "codex":
@@ -61,11 +67,11 @@ func (c Config) SmallModels() ([]Model, error) {
 	default:
 		return nil, fmt.Errorf("no approved small model for the %s engine", c.Model.Engine)
 	}
-	models := make([]Model, 0, len(order))
+	models := make([]Harness, 0, len(order))
 	for _, engine := range order {
-		m := c.Model
 		approved := approvedSmallModels[engine]
-		m.Engine, m.Model, m.Effort, m.MaxTokens = engine, approved.model, approved.effort, 128
+		m := c.Harness(engine, approved.model, approved.effort)
+		m.MaxTokens = 128
 		models = append(models, m)
 	}
 	return models, nil
@@ -114,26 +120,14 @@ type Dashboard struct {
 	TailscalePort int      `json:"tailscale_port"`
 	AllowedUsers  []string `json:"allowed_users"`
 }
-type Model struct {
-	ClaudeBin  string `json:"claude_bin"`
-	ClaudeHome string `json:"claude_home"`
-	Engine     string `json:"engine"`
-	Effort     string `json:"effort"`
-	CodexBin   string `json:"codex_bin"`
-	CodexHome  string `json:"codex_home"`
-	BaseURL    string `json:"base_url"`
-	Model      string `json:"model"`
-	APIKeyEnv  string `json:"api_key_env"`
-	MaxTokens  int    `json:"max_tokens"`
-}
 
-// EngineBinary is the CLI an engine runs as and the login home it uses:
-// Codex's for codex, and Claude's otherwise.
-func (m Model) EngineBinary(engine string) (binary, home string) {
-	if engine == "codex" {
-		return m.CodexBin, m.CodexHome
-	}
-	return m.ClaudeBin, m.ClaudeHome
+// Model is the assistant's own model choice; the engine it names is reached
+// as Engines says.
+type Model struct {
+	Engine    string `json:"engine"`
+	Model     string `json:"model"`
+	Effort    string `json:"effort"`
+	MaxTokens int    `json:"max_tokens"`
 }
 
 type Slack struct {
@@ -146,22 +140,12 @@ type Linear struct {
 	APIKeyEnv         string   `json:"api_key_env"`
 	TeamIDs           []string `json:"team_ids"`
 }
+
+// Limits bound the assistant's own conversation and tool loop. How much of
+// a subscription team roles may use is each engine's usage floor.
 type Limits struct {
-	// RoleUsage holds team roles back while their subscription is nearly used.
-	RoleUsage RoleUsage `json:"role_usage"`
-	// MaxModelTurns and MaxModelCallsPerDay bound the assistant's own
-	// conversation and tool loop.
 	MaxModelCallsPerDay int `json:"max_model_calls_per_day"`
 	MaxModelTurns       int `json:"max_model_turns"`
-}
-
-// RoleUsage holds team-role turns while a native CLI subscription is nearly
-// used up.
-// A zero threshold disables that engine's usage gate.
-type RoleUsage struct {
-	CodexMaxUsedPercent  int    `json:"codex_max_used_percent"`
-	ClaudeMaxUsedPercent int    `json:"claude_max_used_percent"`
-	OnUnavailable        string `json:"on_unavailable"`
 }
 
 type FilePaths struct {
@@ -175,15 +159,16 @@ func Default() Config {
 		Assistant:   Assistant{Name: DefaultAssistantName, Personality: "Calm, concise and proactive. Bring clear recommendations and evidence; handle the chasing.", Theme: ThemeSystem, Avatar: Avatar{Shape: "orb", Background: "#16211e", Accent: "#a8c5a8"}},
 		Dashboard:   Dashboard{Addr: "127.0.0.1:8340", Tailscale: "off", TailscalePort: 8443, AllowedUsers: []string{}},
 		Model:       defaultModel(),
+		Engines:     Engines{OpenAICompatible: HTTPEngine{BaseURL: defaultBaseURL, APIKeyEnv: defaultAPIKeyEnv}},
 		Connections: []Connection{},
 		Slack:       Slack{BotTokenEnv: "SLACK_BOT_TOKEN", AppTokenEnv: "SLACK_APP_TOKEN"},
 		Linear:      Linear{APIKeyEnv: "LINEAR_API_KEY", TeamIDs: []string{}},
-		Limits:      Limits{RoleUsage: RoleUsage{CodexMaxUsedPercent: 90, ClaudeMaxUsedPercent: 90, OnUnavailable: "allow"}, MaxModelCallsPerDay: 100, MaxModelTurns: 8},
+		Limits:      Limits{MaxModelCallsPerDay: 100, MaxModelTurns: 8},
 	}
 }
 
 func defaultModel() Model {
-	return Model{ClaudeBin: "claude", ClaudeHome: DefaultClaudeHome(), Engine: "codex", Model: "gpt-6-astra", Effort: "high", CodexBin: "codex", CodexHome: DefaultCodexHome(), BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY", MaxTokens: 4096}
+	return Model{Engine: "codex", Model: "gpt-6-astra", Effort: "high", MaxTokens: 4096}
 }
 
 // DefaultCodexHome is app-owned state, independent of an ambient CODEX_HOME.
@@ -219,6 +204,10 @@ func Paths() (FilePaths, error) {
 	}
 	return FilePaths{Config: filepath.Join(configRoot, Namespace, "config.json"), State: filepath.Join(stateRoot, Namespace, "state.db")}, nil
 }
+
+// Load reads the config file, in the current layout or an earlier one. Keys
+// it doesn't know are kept in the file and reported by UnknownKeys, never an
+// error: a file written by a newer version still loads.
 func Load(path string) (Config, error) {
 	c := Default()
 	data, err := os.ReadFile(path)
@@ -228,27 +217,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return c, err
 	}
-	// Existing API configurations must retain their provider and billing path.
-	var sections map[string]json.RawMessage
-	if err := json.Unmarshal(data, &sections); err != nil {
+	if data, err = ConvertLegacyJSON(data); err != nil {
 		return c, fmt.Errorf("decode config: %w", err)
 	}
-	if data, err = dropLoadingModelChoice(data, sections); err != nil {
-		return c, err
-	}
-	if raw, exists := sections["model"]; exists {
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &fields); err != nil {
-			return c, fmt.Errorf("decode model config: %w", err)
-		}
-		if _, explicitEngine := fields["engine"]; !explicitEngine {
-			c.Model.Engine = "openai-compatible"
-			c.Model.Model = ""
-			c.Model.Effort = ""
-		}
-	}
 	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
 	if err = dec.Decode(&c); err != nil {
 		return c, fmt.Errorf("decode config: %w", err)
 	}
@@ -259,41 +231,91 @@ func Load(path string) (Config, error) {
 	return c, c.Validate()
 }
 
-// dropLoadingModelChoice removes the loading-phrase model and effort that
-// earlier versions saved. Loading phrases now use only the approved small
-// models, so a saved choice is discarded rather than honoured, and the file
-// still loads. The next save writes it without them.
-func dropLoadingModelChoice(data []byte, sections map[string]json.RawMessage) ([]byte, error) {
-	var chat map[string]json.RawMessage
-	if raw, ok := sections["chat"]; !ok || json.Unmarshal(raw, &chat) != nil {
-		return data, nil
-	}
-	var phrases map[string]json.RawMessage
-	if raw, ok := chat["loading_phrases"]; !ok || json.Unmarshal(raw, &phrases) != nil {
-		return data, nil
-	}
-	_, model := phrases["model"]
-	_, effort := phrases["effort"]
-	if !model && !effort {
-		return data, nil
-	}
-	delete(phrases, "model")
-	delete(phrases, "effort")
-	var err error
-	if chat["loading_phrases"], err = json.Marshal(phrases); err != nil {
-		return nil, err
-	}
-	if sections["chat"], err = json.Marshal(chat); err != nil {
-		return nil, err
-	}
-	return json.Marshal(sections)
-}
-
+// Save writes c over the config file, keeping what it doesn't model: notes
+// and keys from a newer version. It holds the file's lock, so the daemon, the
+// CLI and the dashboard never write over each other, and it finishes moving
+// a file in an earlier layout to this one first, so no earlier key outlives
+// the save.
 func Save(path string, c Config) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(c, "", "  ")
+	s := Document(path)
+	return s.WithLock(func() error {
+		if _, err := upgradeLocked(path); err != nil {
+			return err
+		}
+		return s.Save(c)
+	})
+}
+
+// Upgrade rewrites a config file in an earlier layout into the current one,
+// once, under the file's lock, keeping everything else in it. It reports
+// whether it rewrote anything.
+func Upgrade(path string) (bool, error) {
+	changed := false
+	err := Document(path).WithLock(func() (err error) {
+		changed, err = upgradeLocked(path)
+		return err
+	})
+	return changed, err
+}
+
+func upgradeLocked(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return false, fmt.Errorf("decode config: %w", err)
+	}
+	if !convertLegacy(doc) {
+		return false, nil
+	}
+	return true, writeFile(path, doc)
+}
+
+// UnknownKeys are the keys in the config file the current layout doesn't
+// have, each with where it moved when it was renamed.
+func UnknownKeys(path string) []UnknownKey {
+	var out []UnknownKey
+	for _, k := range Document(path).UnknownKeys(Config{}) {
+		to, renamed := RenamedKey(k.Path)
+		out = append(out, UnknownKey{Path: k.Path, Value: k.Value, Renamed: renamed, To: to})
+	}
+	return out
+}
+
+// UnknownKey is a key the config file holds that the current layout doesn't.
+type UnknownKey struct {
+	Path, Value string
+	// Renamed says it is an earlier layout's key; To is where it went, or
+	// "" when it was dropped.
+	Renamed bool
+	To      string
+}
+
+// String says what became of the key, for the owner to act on.
+func (k UnknownKey) String() string {
+	switch {
+	case k.Renamed && k.To == "":
+		return k.Path + " is no longer a setting; remove it with crew-assistant config unset " + k.Path
+	case k.Renamed:
+		return k.Path + " is now " + k.To
+	}
+	return k.Path + " is not a setting this version knows, so it has no effect; remove it with crew-assistant config unset " + k.Path
+}
+
+// Document is the config file as a document, for reading and removing keys
+// by path, including ones this version doesn't know.
+func Document(path string) creds.Store { return creds.Store{Path: path, Overlay: true} }
+
+func writeFile(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -307,6 +329,10 @@ func Save(path string, c Config) error {
 	}
 	defer os.Remove(f.Name())
 	if _, err = f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Chmod(0600); err != nil {
 		f.Close()
 		return err
 	}
@@ -367,19 +393,13 @@ func (c Config) Validate() error {
 	if c.Limits.MaxModelTurns < 1 || c.Limits.MaxModelTurns > 32 {
 		return errors.New("limits.max_model_turns must be between 1 and 32")
 	}
-	if c.Limits.RoleUsage.CodexMaxUsedPercent < 0 || c.Limits.RoleUsage.CodexMaxUsedPercent > 100 {
-		return errors.New("limits.role_usage.codex_max_used_percent must be between 0 and 100; 0 disables the limit")
-	}
-	if c.Limits.RoleUsage.ClaudeMaxUsedPercent < 0 || c.Limits.RoleUsage.ClaudeMaxUsedPercent > 100 {
-		return errors.New("limits.role_usage.claude_max_used_percent must be between 0 and 100; 0 disables the limit")
-	}
-	if c.Limits.RoleUsage.OnUnavailable != "allow" && c.Limits.RoleUsage.OnUnavailable != "pause" {
-		return errors.New("limits.role_usage.on_unavailable must be allow or pause")
-	}
 	if err := c.Model.Validate(); err != nil {
 		return fmt.Errorf("model: %w", err)
 	}
-	envs := []string{c.Model.APIKeyEnv, c.Slack.BotTokenEnv, c.Slack.AppTokenEnv, c.Linear.APIKeyEnv}
+	if err := c.Engines.validate(); err != nil {
+		return err
+	}
+	envs := []string{c.Slack.BotTokenEnv, c.Slack.AppTokenEnv, c.Linear.APIKeyEnv}
 	for _, e := range envs {
 		if e != "" && !envName.MatchString(e) {
 			return errors.New("credential references must be environment variable names")
@@ -388,31 +408,24 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// Validate checks configuration syntax. The selected engine checks provider model
+// EngineNames are the engines the assistant can run on.
+var EngineNames = []string{"codex", "claude", "openai-compatible"}
+
+// Efforts are the reasoning efforts a model may be asked for; empty is the
+// model's own default.
+var Efforts = []string{"", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+
+// Validate checks the model choice. The selected engine checks provider model
 // capabilities before inference rather than guessing from model name prefixes.
 func (m Model) Validate() error {
-	if m.Engine != "codex" && m.Engine != "claude" && m.Engine != "openai-compatible" {
+	if !slices.Contains(EngineNames, m.Engine) {
 		return errors.New("engine must be codex, claude or openai-compatible")
 	}
-	switch m.Effort {
-	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
-	default:
+	if !slices.Contains(Efforts, m.Effort) {
 		return errors.New("effort must be empty, none, minimal, low, medium, high, xhigh, max or ultra")
-	}
-	if m.Engine == "codex" && strings.TrimSpace(m.CodexBin) == "" {
-		return errors.New("codex_bin is required for the codex engine")
-	}
-	if m.Engine == "codex" && (!filepath.IsAbs(m.CodexHome) || strings.ContainsRune(m.CodexHome, '\x00')) {
-		return errors.New("codex_home must be an absolute directory path; use the app default or an existing dedicated Codex home")
-	}
-	if m.Engine == "claude" && (strings.TrimSpace(m.ClaudeBin) == "" || !filepath.IsAbs(m.ClaudeHome) || strings.ContainsRune(m.ClaudeHome, '\x00')) {
-		return errors.New("claude requires an executable and absolute CLI home for its shared login")
 	}
 	if m.MaxTokens < 128 || m.MaxTokens > 131072 {
 		return errors.New("max_tokens must be between 128 and 131072")
-	}
-	if err := validateEndpoint(m.BaseURL); err != nil {
-		return fmt.Errorf("base_url: %w", err)
 	}
 	return nil
 }

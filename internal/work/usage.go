@@ -57,17 +57,17 @@ func (lp *Loop) UsageWait(ctx context.Context, engine string) (time.Time, string
 }
 
 // usageWait is when the role may run again, and why, while its subscription
-// is past the owner's threshold; zero when it may run now.
+// has less left than the owner's floor; zero when it may run now.
 func (lp *Loop) usageWait(ctx context.Context, r core.Role) (time.Time, string) {
 	cfg := lp.Config()
-	threshold, supported := quota.Threshold(cfg.Limits.RoleUsage, r.Engine)
-	if !supported || threshold == 0 {
+	fiveHour, week, supported := cfg.Engines.Floors(r.Engine)
+	floors := quota.Floors{FiveHour: fiveHour, Week: week}
+	if !supported || floors.Off() {
 		return time.Time{}, ""
 	}
-	model := cfg.Model
-	model.Engine, model.Model = r.Engine, r.Model
+	h := cfg.Harness(r.Engine, r.Model, r.Effort)
 	now := time.Now()
-	verdict := quota.Evaluate(lp.meter.Read(ctx, model), model, threshold, now)
+	verdict := quota.Evaluate(lp.meter.Read(ctx, h), h, floors, now)
 	switch {
 	case verdict.Held:
 		wait := verdict.ResetsAt
@@ -75,7 +75,7 @@ func (lp *Loop) usageWait(ctx context.Context, r core.Role) (time.Time, string) 
 			wait = now.Add(10 * time.Minute)
 		}
 		return wait, fmt.Sprintf("Waiting for %s usage to reset (%s)", engineName(r.Engine), verdict.Detail)
-	case !verdict.Known && cfg.Limits.RoleUsage.OnUnavailable == "pause":
+	case !verdict.Known && cfg.Engines.PauseOnUnknownUsage(r.Engine):
 		return now.Add(5 * time.Minute), "Waiting until " + engineName(r.Engine) + " usage can be checked"
 	}
 	return time.Time{}, ""

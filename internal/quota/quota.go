@@ -20,7 +20,7 @@ import (
 )
 
 // CacheAge bounds how long one account observation is reused. Admission during
-// that window, and any request already in flight, can overshoot the threshold
+// that window, and any request already in flight, can overshoot the floor
 // by the work those calls consume. Callers must document that tolerance rather
 // than describe the gate as exact.
 const CacheAge = time.Minute
@@ -29,13 +29,9 @@ const CacheAge = time.Minute
 // share one subscription. Account metadata and credentials are never persisted.
 type Identity struct{ Engine, Binary, Home string }
 
-// IdentityFor selects the engine-specific binary and login home.
-func IdentityFor(model config.Model) Identity {
-	key := Identity{Engine: model.Engine, Binary: model.CodexBin, Home: model.CodexHome}
-	if model.Engine == "claude" {
-		key.Binary, key.Home = model.ClaudeBin, model.ClaudeHome
-	}
-	return key
+// IdentityFor is the login a model on an engine is billed to.
+func IdentityFor(h config.Harness) Identity {
+	return Identity{Engine: h.Engine, Binary: h.Bin, Home: h.Home}
 }
 
 type entry struct {
@@ -52,8 +48,8 @@ type Meter struct {
 }
 
 // Read returns the cached or freshly observed allowance for a worker model.
-func (m *Meter) Read(ctx context.Context, model config.Model) session.QuotaSnapshot {
-	key := IdentityFor(model)
+func (m *Meter) Read(ctx context.Context, h config.Harness) session.QuotaSnapshot {
+	key := IdentityFor(h)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
@@ -86,16 +82,24 @@ func (m *Meter) Forget() {
 	m.entries = nil
 }
 
-// Threshold reports the configured percentage for an engine. Supported is false
-// for engines whose subscription allowance cannot be inspected locally.
-func Threshold(policy config.RoleUsage, engine string) (percent int, supported bool) {
-	switch engine {
-	case "codex":
-		return policy.CodexMaxUsedPercent, true
-	case "claude":
-		return policy.ClaudeMaxUsedPercent, true
+// Floors are the share of each window roles leave unused, in percent: the
+// 5-hour floor for windows of a day or less, the weekly floor for longer
+// ones. A floor of 0 turns that window's check off.
+type Floors struct{ FiveHour, Week int }
+
+// Off says no window is checked, so there is nothing to wait for either.
+func (f Floors) Off() bool { return f.FiveHour == 0 && f.Week == 0 }
+
+// For is the floor that governs a window. A window that doesn't say how long
+// it is takes the stricter floor.
+func (f Floors) For(w session.QuotaWindow) (floor int, label string) {
+	switch {
+	case w.WindowMinutes == nil:
+		return max(f.FiveHour, f.Week), "usage"
+	case *w.WindowMinutes <= 24*60:
+		return f.FiveHour, "5-hour usage"
 	}
-	return 0, false
+	return f.Week, "weekly usage"
 }
 
 // Verdict separates the three distinct answers a headroom check can give:
@@ -107,16 +111,17 @@ type Verdict struct {
 	ResetsAt time.Time
 }
 
-// Evaluate applies the threshold to the windows that govern this model. A
-// window whose own observation is stale, invalid or already past its reset is
-// treated as missing, which makes the whole snapshot unknown rather than free.
-func Evaluate(q session.QuotaSnapshot, model config.Model, threshold int, now time.Time) Verdict {
+// Evaluate holds a role when a window that governs its model has less left
+// than that window's floor. A window whose own observation is stale, invalid
+// or already past its reset is treated as missing, which makes the whole
+// snapshot unknown rather than free.
+func Evaluate(q session.QuotaSnapshot, h config.Harness, floors Floors, now time.Time) Verdict {
 	if q.IsStale(now, 2*CacheAge) {
 		return Verdict{}
 	}
-	missing, peak, seen := !q.Complete, 0.0, false
+	missing, least, seen := !q.Complete, 100.0, false
 	for _, w := range q.Windows {
-		if !Applies(w, model) {
+		if !Applies(w, h) {
 			continue
 		}
 		seen = true
@@ -124,10 +129,11 @@ func Evaluate(q session.QuotaSnapshot, model config.Model, threshold int, now ti
 			missing = true
 			continue
 		}
-		used := *w.UsedPercent
-		peak = max(peak, used)
-		if used >= float64(threshold) {
-			out := Verdict{Held: true, Known: true, Detail: fmt.Sprintf("%s %s is %.1f%% consumed (limit %d%%)", model.Engine, w.ID, used, threshold)}
+		left := max(0, 100-*w.UsedPercent)
+		least = min(least, left)
+		floor, label := floors.For(w)
+		if floor > 0 && left < float64(floor) {
+			out := Verdict{Held: true, Known: true, Detail: fmt.Sprintf("%s %s has %.0f%% left (floor %d%%)", h.Engine, label, left, floor)}
 			if w.ResetsAt != nil {
 				out.ResetsAt = w.ResetsAt.UTC()
 				out.Detail += "; resets " + out.ResetsAt.Format(time.RFC3339)
@@ -135,15 +141,15 @@ func Evaluate(q session.QuotaSnapshot, model config.Model, threshold int, now ti
 			return out
 		}
 	}
-	return Verdict{Known: seen && !missing, Detail: fmt.Sprintf("%s peak applicable usage %.1f%%", model.Engine, peak)}
+	return Verdict{Known: seen && !missing, Detail: fmt.Sprintf("%s has %.0f%% left in its tightest window", h.Engine, least)}
 }
 
 // Applies ignores unrelated pools (for example Codex code reviews, or Claude
 // Sonnet when an Opus worker is selected). Unknown-only snapshots stay
 // unavailable, never zero.
-func Applies(w session.QuotaWindow, model config.Model) bool {
-	scope, name := strings.ToLower(w.Scope), strings.ToLower(model.Model)
-	if model.Engine == "codex" {
+func Applies(w session.QuotaWindow, h config.Harness) bool {
+	scope, name := strings.ToLower(w.Scope), strings.ToLower(h.Model)
+	if h.Engine == "codex" {
 		return scope == "default" || scope == "codex" || scope == name
 	}
 	switch w.ID {
@@ -155,5 +161,5 @@ func Applies(w session.QuotaWindow, model config.Model) bool {
 			return true
 		}
 	}
-	return strings.HasPrefix(w.ID, "model:") && strings.EqualFold(w.Scope, model.Model)
+	return strings.HasPrefix(w.ID, "model:") && strings.EqualFold(w.Scope, h.Model)
 }

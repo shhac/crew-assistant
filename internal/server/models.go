@@ -39,7 +39,7 @@ func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
 		detail  string
 		expires time.Time
 	}
-	cache := make(map[config.Model]cached)
+	cache := make(map[config.Harness]cached)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		profile := r.URL.Query().Get("profile")
 		if profile == "" {
@@ -50,7 +50,9 @@ func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
 			return
 		}
 		cfg := a.Config()
-		selected, defaults := cfg.Model, config.Default().Model
+		// The cache is keyed by the CLI and login too, so changing either
+		// discovers again.
+		selected, defaults := cfg.AssistantHarness(), config.Default().Model
 		result := modelCatalog{Profile: profile, Engine: selected.Engine, Models: []engine.ModelOption{}, Current: modelSelection{selected.Model, selected.Effort}, Default: modelSelection{defaults.Model, defaults.Effort}}
 		if a.Demo {
 			result.Detail = "Model discovery is unavailable in the demo."
@@ -62,7 +64,7 @@ func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
 				http.Error(w, "unknown model engine", http.StatusBadRequest)
 				return
 			}
-			selected.Engine = preview
+			selected = cfg.Harness(preview, selected.Model, selected.Effort)
 			result.Engine = preview
 		}
 		if selected.Engine != "codex" && selected.Engine != "claude" {
@@ -73,7 +75,8 @@ func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
 		mu.Lock()
 		entry, found := cache[selected]
 		if !found || time.Now().After(entry.expires) {
-			options, err := discover(r.Context(), engine.Config{Engine: selected.Engine, CodexHome: selected.CodexHome, CodexBin: selected.CodexBin, ClaudeHome: selected.ClaudeHome, ClaudeBin: selected.ClaudeBin})
+			found := app.EngineConfig(selected)
+			options, err := discover(r.Context(), engine.Config{Engine: found.Engine, CodexHome: found.CodexHome, CodexBin: found.CodexBin, ClaudeHome: found.ClaudeHome, ClaudeBin: found.ClaudeBin})
 			entry = cached{value: options, expires: time.Now().Add(time.Minute)}
 			if err != nil {
 				entry.detail = "Could not discover models. Check the selected CLI login and installation, then retry. Your saved selection is unchanged."

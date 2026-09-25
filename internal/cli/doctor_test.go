@@ -26,10 +26,10 @@ func TestDoctorDoesNotRequireUnusedExternalResources(t *testing.T) {
 			cfg.Model.Engine = "openai-compatible"
 			cfg.Model.Effort = ""
 			cfg.Model.Model = "synthetic"
-			cfg.Model.APIKeyEnv = "ASSISTANT_TEST_MODEL_KEY"
+			cfg.Engines.OpenAICompatible.APIKeyEnv = "ASSISTANT_TEST_MODEL_KEY"
 			// Team-role checks must not reach the installed CLIs from a test.
-			cfg.Model.CodexBin = filepath.Join(t.TempDir(), "missing-codex")
-			cfg.Model.ClaudeBin = filepath.Join(t.TempDir(), "missing-claude")
+			cfg.Engines.Codex.Bin = filepath.Join(t.TempDir(), "missing-codex")
+			cfg.Engines.Claude.Bin = filepath.Join(t.TempDir(), "missing-claude")
 			cfg.Linear.TeamIDs = []string{"example-team"}
 			cfg.Linear.ImportAssignments = tc.legacy
 			cfg.Linear.APIKeyEnv = "ASSISTANT_TEST_LINEAR_KEY"

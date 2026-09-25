@@ -39,7 +39,7 @@ func roleWords(kinds []string) string {
 type codexPainter struct{ a *App }
 
 func (p codexPainter) Paint(ctx context.Context, character string) ([]byte, error) {
-	binary, home := p.a.Config().Model.EngineBinary("codex")
+	binary, home := p.a.Config().Engines.Binary("codex")
 	state := p.a.Core.StateDirectory()
 	return avatars.CodexPainter{Runner: roles.Native{}, Spec: roles.Spec{
 		Binary: binary, Home: home,

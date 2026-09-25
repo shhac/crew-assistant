@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/config"
@@ -252,10 +251,11 @@ func (a *App) chatOnce(ctx context.Context, ec engine.Config, req engine.Request
 // assistantConfig is the assistant's own model, as configured, with each
 // request counted against the daily allowance and sized to the model's window.
 func (a *App) assistantConfig(ctx context.Context, cfg config.Config) engine.Config {
-	ec := engine.Config{WorkDirRoot: a.Core.StateDirectory(), Engine: cfg.Model.Engine, Effort: cfg.Model.Effort, CodexBin: cfg.Model.CodexBin, CodexHome: cfg.Model.CodexHome, ClaudeBin: cfg.Model.ClaudeBin, ClaudeHome: cfg.Model.ClaudeHome, Endpoint: strings.TrimRight(cfg.Model.BaseURL, "/") + "/chat/completions", Model: cfg.Model.Model, APIKeyEnv: cfg.Model.APIKeyEnv, MaxOutputTokens: cfg.Model.MaxTokens,
-		BeforeRequest: func(ctx context.Context) error {
-			return a.Core.ReserveModelCall(ctx, a.Config().Limits.MaxModelCallsPerDay)
-		}}
+	ec := EngineConfig(cfg.AssistantHarness())
+	ec.WorkDirRoot = a.Core.StateDirectory()
+	ec.BeforeRequest = func(ctx context.Context) error {
+		return a.Core.ReserveModelCall(ctx, a.Config().Limits.MaxModelCallsPerDay)
+	}
 	if snap, err := a.Core.Snapshot(ctx); err == nil {
 		ec.MaxContextBytes = contextBudget(snap.ModelWindow(ec.Engine, ec.Model), ec.MaxOutputTokens)
 	}

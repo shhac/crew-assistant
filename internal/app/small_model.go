@@ -80,7 +80,7 @@ func (f *smallModelFailure) notOffered() bool {
 
 // ask returns the first reply from the approved models in order. No tools are
 // offered. The reply is the caller's to validate.
-func (s *smallModels) ask(ctx context.Context, models []config.Model, prompt []engine.Message, reserve func(context.Context) error) (engine.Message, error) {
+func (s *smallModels) ask(ctx context.Context, models []config.Harness, prompt []engine.Message, reserve func(context.Context) error) (engine.Message, error) {
 	failure := &smallModelFailure{}
 	for _, m := range models {
 		// Only the approved pair is ever sent, whatever the caller passed.
@@ -107,7 +107,7 @@ func (s *smallModels) ask(ctx context.Context, models []config.Model, prompt []e
 	return engine.Message{}, failure
 }
 
-func (s *smallModels) try(ctx context.Context, m config.Model, prompt []engine.Message, reserve func(context.Context) error) (engine.Message, error) {
+func (s *smallModels) try(ctx context.Context, m config.Harness, prompt []engine.Message, reserve func(context.Context) error) (engine.Message, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.attempt)
 	defer cancel()
 	ec, err := s.verify(ctx, m, reserve)
@@ -121,8 +121,9 @@ func (s *smallModels) try(ctx context.Context, m config.Model, prompt []engine.M
 // verify confirms the exact model is offered to the CLI's login before any
 // inference. It never substitutes another model or raises the effort: a model
 // with effort levels but not the approved one is treated as not offered.
-func (s *smallModels) verify(ctx context.Context, m config.Model, reserve func(context.Context) error) (engine.Config, error) {
-	ec := engine.Config{WorkDirRoot: s.workDir(), Engine: m.Engine, Model: m.Model, CodexBin: m.CodexBin, CodexHome: m.CodexHome, ClaudeBin: m.ClaudeBin, ClaudeHome: m.ClaudeHome, MaxOutputTokens: 128, MaxContextBytes: 8192, Timeout: s.attempt, Retry: &engine.RetryPolicy{MaxRetries: 0}, BeforeRequest: reserve}
+func (s *smallModels) verify(ctx context.Context, m config.Harness, reserve func(context.Context) error) (engine.Config, error) {
+	ec := EngineConfig(m)
+	ec.Effort, ec.WorkDirRoot, ec.MaxOutputTokens, ec.MaxContextBytes, ec.Timeout, ec.Retry, ec.BeforeRequest = "", s.workDir(), 128, 8192, s.attempt, &engine.RetryPolicy{MaxRetries: 0}, reserve
 	models, err := s.discover(ctx, ec)
 	if err != nil {
 		return engine.Config{}, err

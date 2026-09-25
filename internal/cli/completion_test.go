@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -21,49 +22,62 @@ func completionRoot(t *testing.T) *cobra.Command {
 	return NewRoot("test")
 }
 
-func TestConfigCompletionsMatchSetTraversal(t *testing.T) {
+// Every setting in the file has a key, and every key names a setting in the
+// file, so get, set and unset reach the same paths the file holds.
+func TestConfigKeysCoverTheFile(t *testing.T) {
 	root := completionRoot(t)
 	set, _, err := root.Find([]string{"config", "set"})
 	if err != nil || set.ValidArgsFunction == nil {
 		t.Fatal("config set completion missing", err)
 	}
-	got, directive := set.ValidArgsFunction(set, nil, "assistant.avatar")
-	want := []string{"assistant.avatar", "assistant.avatar.accent", "assistant.avatar.background", "assistant.avatar.shape"}
-	if !reflect.DeepEqual(got, want) || directive != cobra.ShellCompDirectiveNoFileComp {
-		t.Fatalf("avatar keys = %v, %v", got, directive)
+	keys, directive := set.ValidArgsFunction(set, nil, "")
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("directive %v", directive)
 	}
-	// Every suggested path exists in the JSON object config set traverses.
-	raw, _ := json.Marshal(config.Default())
+	c := config.Default()
+	floor := 10
+	for _, engine := range []*config.CLIEngine{&c.Engines.Codex, &c.Engines.Claude} {
+		*engine = config.CLIEngine{Bin: "x", Home: "/x", UsageFloor: config.UsageFloor{FiveHourPercent: &floor, WeekPercent: &floor}, OnUnknownUsage: "pause"}
+	}
+	raw, _ := json.Marshal(c)
 	var object map[string]any
 	_ = json.Unmarshal(raw, &object)
-	keys, _ := set.ValidArgsFunction(set, nil, "")
-	for _, key := range keys {
-		var value any = object
-		for _, part := range strings.Split(key, ".") {
-			parent, ok := value.(map[string]any)
-			if !ok {
-				t.Fatalf("completion %s traverses a non-object", key)
-			}
-			value, ok = parent[part]
-			if !ok {
-				t.Fatalf("completion %s is not a configuration key", key)
-			}
+	var leaves []string
+	var walk func(prefix string, v any)
+	walk = func(prefix string, v any) {
+		m, ok := v.(map[string]any)
+		if !ok || slices.Contains(keys, prefix) {
+			leaves = append(leaves, prefix)
+			return
 		}
+		for k, child := range m {
+			walk(strings.TrimPrefix(prefix+"."+k, "."), child)
+		}
+	}
+	walk("", object)
+	slices.Sort(leaves)
+	if !reflect.DeepEqual(leaves, keys) {
+		t.Fatalf("file paths and keys differ:\nfile %v\nkeys %v", leaves, keys)
 	}
 	for _, tc := range []struct {
 		key, prefix string
 		want        []string
 	}{
 		{"model.effort", "m", []string{"max", "medium", "minimal"}},
+		{"model.model", "", []string{"gpt-6-astra"}},
 		{"dashboard.tailscale", "", []string{"off", "serve"}},
+		{"engines.claude.on_unknown_usage", "", []string{"allow", "pause"}},
 		{"assistant.theme", "da", []string{"dark"}},
-		{"model.api_key_env", "", nil},
+		{"engines.openai-compatible.api_key_env", "", nil},
 		{"connections", "", nil},
 	} {
 		values, d := set.ValidArgsFunction(set, []string{tc.key}, tc.prefix)
 		if !reflect.DeepEqual(values, tc.want) || d != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("%s = %v, %v; want %v", tc.key, values, d, tc.want)
 		}
+	}
+	if _, d := set.ValidArgsFunction(set, []string{"engines.codex.home"}, ""); d != cobra.ShellCompDirectiveFilterDirs {
+		t.Error("a home should complete directories")
 	}
 	values, _ := set.ValidArgsFunction(set, []string{"assistant.name", "Iris"}, "")
 	if len(values) != 0 {

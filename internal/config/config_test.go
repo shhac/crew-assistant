@@ -34,17 +34,22 @@ func TestConfigAtomicPrivateRoundTrip(t *testing.T) {
 		t.Fatal("invalid save changed file")
 	}
 }
-func TestUnknownFieldsAndTrailingJSONRejected(t *testing.T) {
-	for _, body := range []string{`{"unexpected":true}`, `{} {}`, `{"limits":{"max_agents":4}}`, `{"workers":[]}`, `{"worker_model":{}}`} {
-		p := filepath.Join(t.TempDir(), "config.json")
-		os.WriteFile(p, []byte(body), 0600)
-		if _, err := Load(p); err == nil {
-			t.Fatalf("accepted %s", body)
-		}
+func TestUnknownKeysLoadAndAreReportedButTrailingJSONIsRefused(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(p, []byte(`{} {}`), 0600)
+	if _, err := Load(p); err == nil {
+		t.Fatal("trailing JSON accepted")
+	}
+	os.WriteFile(p, []byte(`{"limits":{"max_agents":4},"workers":[]}`), 0600)
+	if _, err := Load(p); err != nil {
+		t.Fatalf("a key from another version stopped the load: %v", err)
+	}
+	if unknown := UnknownKeys(p); len(unknown) != 2 {
+		t.Fatalf("unknown %+v", unknown)
 	}
 }
 func TestBoundariesCannotBeConfiguredAway(t *testing.T) {
-	for _, mutate := range []func(*Config){func(c *Config) { c.Dashboard.Addr = "0.0.0.0:8340" }, func(c *Config) { c.Dashboard.Tailscale = "funnel" }, func(c *Config) { c.Dashboard.Tailscale = "serve" }, func(c *Config) { c.Model.BaseURL = "https://secret:password@example.com" }, func(c *Config) { c.Model.BaseURL = "http://example.com" }, func(c *Config) { c.Model.APIKeyEnv = "raw token!" }} {
+	for _, mutate := range []func(*Config){func(c *Config) { c.Dashboard.Addr = "0.0.0.0:8340" }, func(c *Config) { c.Dashboard.Tailscale = "funnel" }, func(c *Config) { c.Dashboard.Tailscale = "serve" }} {
 		c := Default()
 		mutate(&c)
 		if err := c.Validate(); err == nil {
@@ -78,7 +83,8 @@ func TestLegacyAPIConfigRetainsProviderAndBillingPath(t *testing.T) {
 		if got.Model.Engine != "openai-compatible" || got.Model.Effort != "" {
 			t.Fatalf("legacy profile unexpectedly migrated: %+v", got)
 		}
-		if strings.Contains(body, "existing-model") && (got.Model.Model != "existing-model" || got.Model.APIKeyEnv != "EXISTING_KEY" || got.Model.BaseURL != "https://provider.example/v1") {
+		url, key := got.Engines.Endpoint()
+		if strings.Contains(body, "existing-model") && (got.Model.Model != "existing-model" || key != "EXISTING_KEY" || url != "https://provider.example/v1") {
 			t.Fatal(got.Model)
 		}
 		if body == `{"model":{}}` && got.Model.Model != "" {
@@ -98,7 +104,6 @@ func TestInvalidEngineAndEffortRejected(t *testing.T) {
 	for _, mutate := range []func(*Config){
 		func(c *Config) { c.Model.Engine = "unknown" },
 		func(c *Config) { c.Model.Effort = "maximumish" },
-		func(c *Config) { c.Model.CodexBin = "" },
 	} {
 		c := Default()
 		mutate(&c)
@@ -139,19 +144,19 @@ func TestConfiguredCodexHomesDefaultWithoutAmbientEnvironment(t *testing.T) {
 	t.Setenv("CODEX_HOME", filepath.Join(root, "unrelated-codex"))
 	c := Default()
 	want := filepath.Join(root, Namespace, "codex")
-	if c.Model.CodexHome != want {
-		t.Fatal(c.Model.CodexHome)
+	if _, home := c.Engines.Binary("codex"); home != want {
+		t.Fatal(home)
 	}
-	c.Model.CodexHome = filepath.Join(root, "assistant")
+	c.Engines.Codex.Home = filepath.Join(root, "assistant")
 	path := filepath.Join(root, "config.json")
 	if err := Save(path, c); err != nil {
 		t.Fatal(err)
 	}
 	got, err := Load(path)
-	if err != nil || got.Model.CodexHome != c.Model.CodexHome {
+	if err != nil || got.Engines.Codex.Home != c.Engines.Codex.Home {
 		t.Fatal(got, err)
 	}
-	c.Model.CodexHome = "relative/path"
+	c.Engines.Codex.Home = "relative/path"
 	if err := c.Validate(); err == nil {
 		t.Fatal("relative home accepted")
 	}
@@ -215,18 +220,18 @@ func TestSmallModelsTryOwnEngineFirstThenOnlyTheOtherApprovedModel(t *testing.T)
 	c := Default()
 	c.Model.Model = "gpt-6-astra"
 	c.Model.Effort = "high"
-	c.Model.CodexHome = "/synthetic/codex"
-	c.Model.ClaudeHome = "/synthetic/claude"
+	c.Engines.Codex.Home = "/synthetic/codex"
+	c.Engines.Claude.Home = "/synthetic/claude"
 	models, err := c.SmallModels()
 	if err != nil || len(models) != 2 {
 		t.Fatal(models, err)
 	}
 	codex, claude := models[0], models[1]
-	if codex.Engine != "codex" || codex.Model != "gpt-6-luna" || codex.Effort != "low" || codex.CodexHome != "/synthetic/codex" {
+	if codex.Engine != "codex" || codex.Model != "gpt-6-luna" || codex.Effort != "low" || codex.Home != "/synthetic/codex" {
 		t.Fatal(codex)
 	}
 	// Haiku 4.5 has no effort setting; none is sent.
-	if claude.Engine != "claude" || claude.Model != "haiku" || claude.Effort != "" || claude.ClaudeHome != "/synthetic/claude" {
+	if claude.Engine != "claude" || claude.Model != "haiku" || claude.Effort != "" || claude.Home != "/synthetic/claude" {
 		t.Fatal(claude)
 	}
 	c.Model.Engine = "claude"
@@ -268,12 +273,12 @@ func TestLoadDiscardsASavedLoadingModelChoice(t *testing.T) {
 	if err != nil || strings.Contains(string(data), "chosen-small-model") {
 		t.Fatal(string(data), err)
 	}
-	// Other unknown keys are still refused.
+	// Another key it doesn't know loads, and is reported.
 	if err = os.WriteFile(p, []byte(`{"chat":{"loading_phrases":{"enabled":true,"typo":1}}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = Load(p); err == nil {
-		t.Fatal("unknown loading key accepted")
+	if _, err = Load(p); err != nil || len(UnknownKeys(p)) != 1 {
+		t.Fatalf("an unknown loading key: %v %+v", err, UnknownKeys(p))
 	}
 }
 

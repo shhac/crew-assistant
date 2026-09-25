@@ -423,7 +423,8 @@ func TestRaisingAUsageLimitLetsHeldWorkGoAtOnce(t *testing.T) {
 		t.Fatal("work was let go while the limit still held it")
 	}
 	raised := a.Config()
-	raised.Limits.RoleUsage.CodexMaxUsedPercent = 98
+	low := 2
+	raised.Engines.Codex.UsageFloor = config.UsageFloor{FiveHourPercent: &low, WeekPercent: &low}
 	a.Config = func() config.Config { return raised }
 	if task = settle(t, a); task.Status != core.TaskWaiting || task.HeldFor != "" || len(task.Verdicts) == 0 {
 		t.Fatalf("raising the limit should let the reviewer go now: %+v", task)

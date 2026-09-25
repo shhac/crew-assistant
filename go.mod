@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/gofrs/flock v0.13.1
-	github.com/shhac/lib-agent-cli v0.23.0
+	github.com/shhac/lib-agent-cli v0.27.0
 	github.com/shhac/lib-agent-mcp v0.23.1
 	github.com/shhac/lib-agent-output v0.12.0
 	github.com/slack-go/slack v0.29.0
@@ -13,6 +13,13 @@ require (
 )
 
 require golang.org/x/image v0.20.0
+
+require (
+	github.com/danieljoos/wincred v1.2.3 // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
+	github.com/shhac/lib-agent-keyring v0.1.1 // indirect
+	github.com/zalando/go-keyring v0.2.8 // indirect
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

@@ -31,6 +31,12 @@ func registerServe(root *cobra.Command, o *options) {
 	var port int
 	var demo, open, noDispatch bool
 	cmd := &cobra.Command{Use: "serve", Short: "Run the assistant daemon and embedded dashboard", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		// A demo leaves the owner's file as it is; it only reads it.
+		if !demo {
+			if _, err := config.Upgrade(o.configPath); err != nil {
+				return err
+			}
+		}
 		cfg, err := config.Load(o.configPath)
 		if err != nil {
 			return err
@@ -153,12 +159,13 @@ func serve(ctx context.Context, o *options, cfg config.Config, demo bool, sample
 		loopErrors <- err
 	}()
 	_ = o.emit(struct {
-		Version string `json:"version"`
-		URL     string `json:"url"`
-		State   string `json:"state"`
-		Demo    bool   `json:"demo"`
-		Login   string `json:"login"`
-	}{o.version, url, o.statePath, demo, "crew-assistant --state " + o.statePath + " dashboard open"})
+		Version        string   `json:"version"`
+		URL            string   `json:"url"`
+		State          string   `json:"state"`
+		Demo           bool     `json:"demo"`
+		Login          string   `json:"login"`
+		ConfigProblems []string `json:"config_problems,omitempty"`
+	}{o.version, url, o.statePath, demo, "crew-assistant --state " + o.statePath + " dashboard open", configProblems(o.configPath)})
 	if open {
 		if err := openDashboard(o, false); err != nil {
 			fmt.Fprintln(os.Stderr, "Dashboard open:", err)
@@ -224,4 +231,14 @@ func openDashboard(o *options, printOnly bool) error {
 		return errors.New("could not open browser; run dashboard open --print for a sign-in code")
 	}
 	return nil
+}
+
+// configProblems are the keys in the config file that have no effect, said
+// where the owner will see them.
+func configProblems(path string) []string {
+	var problems []string
+	for _, k := range config.UnknownKeys(path) {
+		problems = append(problems, k.String())
+	}
+	return problems
 }
