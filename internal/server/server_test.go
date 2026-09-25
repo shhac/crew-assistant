@@ -206,3 +206,32 @@ func TestErrorsReachTheOwnerWithoutTheirInternalLabels(t *testing.T) {
 		}
 	}
 }
+
+// A dashboard left open across the upgrade to engines still saves: its model
+// section's CLI settings and its used-percent limit land where they now live.
+func TestAConfigInTheEarlierLayoutStillSaves(t *testing.T) {
+	a, call := ownerApp(t)
+	var c map[string]any
+	w := call("GET", "/api/config", "")
+	if json.Unmarshal(w.Body.Bytes(), &c) != nil {
+		t.Fatal(w.Body.String())
+	}
+	model := c["model"].(map[string]any)
+	model["claude_home"] = "/synthetic/claude"
+	delete(c, "engines")
+	c["limits"].(map[string]any)["role_usage"] = map[string]any{"claude_max_used_percent": 95, "on_unavailable": "pause"}
+	body, _ := json.Marshal(c)
+	if w := call("PUT", "/api/config", string(body)); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	claude := a.Config().Engines.Claude
+	if claude.Home != "/synthetic/claude" || *claude.UsageFloor.WeekPercent != 5 || claude.OnUnknownUsage != "pause" {
+		t.Fatalf("old layout lost: %+v", claude)
+	}
+	if w := call("GET", "/api/config/defaults", ""); !strings.Contains(w.Body.String(), `"usage_floor":10`) || !strings.Contains(w.Body.String(), `"bin":"claude"`) {
+		t.Fatal("defaults", w.Body.String())
+	}
+	if w := call("PUT", "/api/config", `{"model":{"engine":"codex","typo":1}}`); w.Code != 400 {
+		t.Fatal("an unknown key in a saved config was accepted", w.Code)
+	}
+}

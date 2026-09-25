@@ -46,9 +46,10 @@ func New(a *app.App, auth *Auth) http.Handler {
 		respond(w, 200, map[string]bool{"acknowledged": true})
 	})
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, a.Config()) })
+	mux.HandleFunc("GET /api/config/defaults", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, configDefaults()) })
 	mux.HandleFunc("PUT /api/config", func(w http.ResponseWriter, r *http.Request) {
 		var c config.Config
-		if decode(w, r, &c) != nil {
+		if decodeConfig(w, r, &c) != nil {
 			return
 		}
 		if err := a.UpdateConfig(c); err != nil {

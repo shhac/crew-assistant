@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -184,6 +185,21 @@ func decode(w http.ResponseWriter, r *http.Request, v any) error {
 		return errors.New("trailing JSON")
 	}
 	return nil
+}
+
+// decodeConfig reads a config in any layout: a dashboard left open across an
+// upgrade still sends the one it loaded.
+func decodeConfig(w http.ResponseWriter, r *http.Request, c *config.Config) error {
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err == nil {
+		data, err = config.ConvertLegacyJSON(data)
+	}
+	if err != nil {
+		fail(w, 400, "invalid request body")
+		return err
+	}
+	r.Body = io.NopCloser(bytes.NewReader(data))
+	return decode(w, r, c)
 }
 func respond(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
