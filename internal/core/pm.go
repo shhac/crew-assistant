@@ -130,6 +130,13 @@ func sameTasks(a, b []string) bool {
 	return slices.Equal(a, b) && len(slices.Compact(a)) == len(b)
 }
 
+// AskForPM brings the PM's questions about a project's order of work to the
+// owner. The answer goes to the PM's next look.
+func (s *Service) AskForPM(ctx context.Context, projectID string, in DecisionInput) (Decision, error) {
+	in.ProjectID = projectID
+	return s.openDecision(ctx, DecisionPMQuestion, in)
+}
+
 // PMSeat is the seat on a project's team that keeps its to-do list.
 func (p Project) PMSeat() (Role, bool) {
 	if p.Playbook == nil {

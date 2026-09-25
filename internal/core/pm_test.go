@@ -133,7 +133,7 @@ func TestTheOwnersAnswerToThePMBringsItBack(t *testing.T) {
 	if _, err := s.ApplyPM(testContext, p.ID, PMAnswer{}); err != nil {
 		t.Fatal(err)
 	}
-	d, err := s.CreateDecision(testContext, DecisionInput{ProjectID: p.ID, Kind: DecisionPMQuestion, Title: "Which first?", Context: "1. Search or shortcuts?", Recommendation: "Answer", Choices: []string{"Use your judgment", "Keep the order as it is"}})
+	d, err := s.AskForPM(testContext, p.ID, DecisionInput{Title: "Which first?", Context: "1. Search or shortcuts?", Recommendation: "Answer", Choices: []string{"Use your judgment", "Keep the order as it is"}})
 	if err != nil || d.Kind != DecisionPMQuestion {
 		t.Fatalf("decision %+v %v", d, err)
 	}

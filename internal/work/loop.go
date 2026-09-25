@@ -221,8 +221,8 @@ func taskPlaybook(p core.Project, t core.Task) *core.Playbook {
 // roleSpec is how a role runs for one turn. The files it reads its learnings
 // from last only as long as the turn: run it before cleanup.
 func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m medium, prompt string) (spec roles.Spec, cleanup func(), err error) {
-	cfg := lp.Config()
-	spec = roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Write: write, Env: m.env(), Read: m.readable(), Instructions: r.Instructions, Prompt: prompt}
+	spec = lp.baseSpec(r, workDir, prompt)
+	spec.Write, spec.Env, spec.Read = write, m.env(), m.readable()
 	learned, err := lp.prepareLearnings(t, r)
 	if err != nil {
 		return spec, nil, err
@@ -231,16 +231,18 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 		spec.Read = append(append([]string(nil), spec.Read...), learned.dir)
 		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + learned.index)
 	}
-	lp.engine(&spec, r, cfg)
 	return spec, learned.cleanup, nil
 }
 
-// engine points a spec at the role's CLI and the login it uses.
-func (lp *Loop) engine(spec *roles.Spec, r core.Role, cfg config.Config) {
-	spec.Binary, spec.Home = cfg.Model.EngineBinary(r.Engine)
+// baseSpec is a read-only turn for a role: its engine, the login that
+// engine uses, its instructions and the prompt.
+func (lp *Loop) baseSpec(r core.Role, workDir, prompt string) roles.Spec {
+	spec := roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Instructions: r.Instructions, Prompt: prompt}
+	spec.Binary, spec.Home = lp.Config().Model.EngineBinary(r.Engine)
 	if r.Engine == "codex" {
 		spec.RuntimeHome = filepath.Join(lp.Core.StateDirectory(), "roles", "codex")
 	}
+	return spec
 }
 
 // write runs the implementer for this round and records what it produced.
@@ -452,7 +454,7 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 			return verdict, nil
 		}
 		parseErr = err
-		spec.Prompt = base + "\n\nYour previous reply could not be used (" + err.Error() + "). Reply with only the JSON object."
+		spec.Prompt = retryPrompt(base, err)
 	}
 	return core.Verdict{}, parseErr
 }

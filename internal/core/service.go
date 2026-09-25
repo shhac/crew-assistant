@@ -103,6 +103,10 @@ func contains(xs []string, x string) bool {
 	return false
 }
 func (s *Service) CreateDecision(ctx context.Context, in DecisionInput) (Decision, error) {
+	return s.openDecision(ctx, DecisionChoice, in)
+}
+
+func (s *Service) openDecision(ctx context.Context, kind string, in DecisionInput) (Decision, error) {
 	if !required(in.Title, in.Context, in.Recommendation) || len(in.Choices) < 2 {
 		return Decision{}, errors.New("decision requires title, context, recommendation and at least two choices")
 	}
@@ -110,10 +114,6 @@ func (s *Service) CreateDecision(ctx context.Context, in DecisionInput) (Decisio
 		if !required(c) {
 			return Decision{}, errors.New("decision choices cannot be blank")
 		}
-	}
-	kind := DecisionChoice
-	if in.Kind != "" {
-		kind = in.Kind
 	}
 	out := Decision{ID: uid(), Kind: kind, ProjectID: in.ProjectID, Title: in.Title, Context: in.Context, Recommendation: in.Recommendation, Choices: in.Choices, Status: DecisionOpen, CreatedAt: s.now().UTC()}
 	err := s.store.update(ctx, func(v *Snapshot) error {

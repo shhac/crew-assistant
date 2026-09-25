@@ -2,7 +2,6 @@ package work
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -55,7 +54,7 @@ func (lp *Loop) planTask(ctx context.Context, p core.Project, t core.Task, m med
 		if plan, dependsOn, err = parsePlan(reply); err == nil {
 			break
 		}
-		spec.Prompt = base + "\n\nYour previous reply could not be used (" + err.Error() + "). Reply with only the JSON object."
+		spec.Prompt = retryPrompt(base, err)
 	}
 	// A plan that still cannot be read is kept as written rather than stopping
 	// the work: the implementer reads it either way.
@@ -79,13 +78,9 @@ func (lp *Loop) askPlanQuestions(ctx context.Context, t core.Task) error {
 	if t.Plan == nil || len(t.Plan.Questions) == 0 {
 		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
 	}
-	var b strings.Builder
-	for i, q := range t.Plan.Questions {
-		fmt.Fprintf(&b, "%d. %s\n", i+1, q)
-	}
 	_, err := lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionQuestion, core.DecisionInput{
 		Title:          fmt.Sprintf("%s has questions about “%s” before starting", t.Plan.Role, t.Objective),
-		Context:        strings.TrimSpace(b.String()),
+		Context:        strings.TrimSpace(numbered(t.Plan.Questions)),
 		Recommendation: "Answer what you can, or let the team use its judgment",
 		Choices:        []string{"Use your judgment", choiceStop},
 	})
@@ -107,15 +102,6 @@ func otherWork(snap core.Snapshot, t core.Task) []core.Task {
 // parsePlan reads the planner's JSON answer, tolerating a fenced block or
 // surrounding prose, and bounds what it keeps.
 func parsePlan(reply string) (core.Plan, []string, error) {
-	body := reply
-	if i := strings.LastIndex(body, "```json"); i >= 0 {
-		body = body[i+len("```json"):]
-		if j := strings.Index(body, "```"); j >= 0 {
-			body = body[:j]
-		}
-	} else if start, end := strings.Index(body, "{"), strings.LastIndex(body, "}"); start >= 0 && end > start {
-		body = body[start : end+1]
-	}
 	var in struct {
 		Summary    string   `json:"summary"`
 		Exists     []string `json:"exists"`
@@ -124,21 +110,13 @@ func parsePlan(reply string) (core.Plan, []string, error) {
 		Questions  []string `json:"questions"`
 		DependsOn  []string `json:"depends_on"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(body)), &in); err != nil {
+	if err := decodeReply(reply, &in); err != nil {
 		return core.Plan{}, nil, errors.New("the plan was not valid JSON")
 	}
 	if strings.TrimSpace(in.Summary) == "" {
 		return core.Plan{}, nil, errors.New("the plan had no summary")
 	}
-	list := func(items []string) []string {
-		var out []string
-		for _, item := range items {
-			if item = strings.TrimSpace(item); item != "" && len(out) < 20 {
-				out = append(out, text.Clip(item, 500))
-			}
-		}
-		return out
-	}
+	list := func(items []string) []string { return listed(items, 20) }
 	return core.Plan{
 		Summary:    text.Clip(strings.TrimSpace(in.Summary), 3000),
 		Exists:     list(in.Exists),

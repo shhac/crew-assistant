@@ -23,9 +23,7 @@ func briefText(p core.Project, t core.Task) string {
 	criteria := append(append([]string{}, p.Brief.Criteria...), t.Criteria...)
 	if len(criteria) > 0 {
 		b.WriteString("\nThe result must meet every one of these criteria:\n")
-		for i, c := range criteria {
-			fmt.Fprintf(&b, "%d. %s\n", i+1, c)
-		}
+		b.WriteString(numbered(criteria))
 	}
 	if len(t.Direction) > 0 {
 		b.WriteString("\nThe owner has also said:\n")
@@ -158,25 +156,61 @@ Reply with only this JSON object:
 	return b.String()
 }
 
+// decodeReply reads the JSON object a role was asked to reply with,
+// tolerating a fenced block or prose around it.
+func decodeReply(reply string, into any) error {
+	return json.Unmarshal([]byte(strings.TrimSpace(jsonBody(reply))), into)
+}
+
+func jsonBody(reply string) string {
+	if i := strings.LastIndex(reply, "```json"); i >= 0 {
+		body, _, _ := strings.Cut(reply[i+len("```json"):], "```")
+		return body
+	}
+	start, end := strings.Index(reply, "{"), strings.LastIndex(reply, "}")
+	if start < 0 || end <= start {
+		return reply
+	}
+	return reply[start : end+1]
+}
+
+// retryPrompt asks a role once more for its JSON object, saying why the
+// last reply couldn't be used.
+func retryPrompt(base string, err error) string {
+	return base + "\n\nYour previous reply could not be used (" + err.Error() + "). Reply with only the JSON object."
+}
+
+// listed is a role's list as kept: trimmed, without blanks, at most max
+// items of at most 500 characters each.
+func listed(items []string, max int) []string {
+	var out []string
+	for _, item := range items {
+		if item = strings.TrimSpace(item); item != "" && len(out) < max {
+			out = append(out, text.Clip(item, 500))
+		}
+	}
+	return out
+}
+
+// numbered lists items as 1., 2., …, one to a line.
+func numbered(items []string) string {
+	var b strings.Builder
+	for i, item := range items {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, item)
+	}
+	return b.String()
+}
+
 // parseVerdict reads the reviewer's JSON answer, tolerating a fenced block or
 // surrounding prose, and rejects anything that is not a usable verdict.
 func parseVerdict(text string) (core.Verdict, error) {
-	body := text
-	if i := strings.LastIndex(body, "```json"); i >= 0 {
-		body = body[i+len("```json"):]
-		if j := strings.Index(body, "```"); j >= 0 {
-			body = body[:j]
-		}
-	} else if start, end := strings.Index(body, "{"), strings.LastIndex(body, "}"); start >= 0 && end > start {
-		body = body[start : end+1]
-	}
 	var v struct {
 		Outcome  string         `json:"outcome"`
 		Summary  string         `json:"summary"`
 		Findings []core.Finding `json:"findings"`
 		Question string         `json:"question"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(body)), &v); err != nil {
+	if err := decodeReply(text, &v); err != nil {
 		return core.Verdict{}, errors.New("the review was not valid JSON")
 	}
 	switch v.Outcome {

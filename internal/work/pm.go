@@ -2,7 +2,6 @@ package work
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
-	"github.com/shhac/crew-assistant/internal/roles"
 	"github.com/shhac/crew-assistant/internal/text"
 )
 
@@ -51,8 +49,7 @@ func (lp *Loop) pmTurn(ctx context.Context, snap core.Snapshot, p core.Project, 
 	}
 	base := pmPrompt(snap, p)
 	// The PM reads only what its prompt carries: no repository, no writing.
-	spec := roles.Spec{Engine: seat.Engine, Model: seat.Model, Effort: seat.Effort, WorkDir: dir, Instructions: seat.Instructions, Prompt: base}
-	lp.engine(&spec, seat, lp.Config())
+	spec := lp.baseSpec(seat, dir, base)
 	for attempt := 0; attempt < 2; attempt++ {
 		result, err := lp.runner.Run(ctx, spec)
 		if err != nil {
@@ -60,30 +57,30 @@ func (lp *Loop) pmTurn(ctx context.Context, snap core.Snapshot, p core.Project, 
 		}
 		answer, questions, err := parsePM(result.Text)
 		if err != nil {
-			spec.Prompt = base + "\n\nYour previous reply could not be used (" + err.Error() + "). Reply with only the JSON object."
+			spec.Prompt = retryPrompt(base, err)
 			continue
 		}
 		if _, err := lp.Core.ApplyPM(ctx, p.ID, answer); err != nil {
 			return err
 		}
-		if len(questions) == 0 {
-			return nil
-		}
-		var b strings.Builder
-		for i, q := range questions {
-			fmt.Fprintf(&b, "%d. %s\n", i+1, q)
-		}
-		_, err = lp.Core.CreateDecision(ctx, core.DecisionInput{
-			ProjectID:      p.ID,
-			Kind:           core.DecisionPMQuestion,
-			Title:          fmt.Sprintf("%s has questions about the order of work in %s", seat.Name, p.Title),
-			Context:        strings.TrimSpace(b.String()),
-			Recommendation: "Answer, or let the PM use its judgment",
-			Choices:        []string{"Use your judgment", "Keep the order as it is"},
-		})
-		return err
+		return lp.askPMQuestions(ctx, p, seat, questions)
 	}
 	return lp.Core.SkipPM(ctx, p.ID, "its reply could not be read")
+}
+
+// askPMQuestions brings what the PM couldn't settle about the order to the
+// owner.
+func (lp *Loop) askPMQuestions(ctx context.Context, p core.Project, seat core.Role, questions []string) error {
+	if len(questions) == 0 {
+		return nil
+	}
+	_, err := lp.Core.AskForPM(ctx, p.ID, core.DecisionInput{
+		Title:          fmt.Sprintf("%s has questions about the order of work in %s", seat.Name, p.Title),
+		Context:        strings.TrimSpace(numbered(questions)),
+		Recommendation: "Answer, or let the PM use its judgment",
+		Choices:        []string{"Use your judgment", "Keep the order as it is"},
+	})
+	return err
 }
 
 // pmPrompt is everything the PM needs to order the list: the brief, every
@@ -125,15 +122,6 @@ Reply with only this JSON object:
 
 // parsePM reads the PM's JSON answer, tolerating a fenced block or prose.
 func parsePM(reply string) (core.PMAnswer, []string, error) {
-	body := reply
-	if i := strings.LastIndex(body, "```json"); i >= 0 {
-		body = body[i+len("```json"):]
-		if j := strings.Index(body, "```"); j >= 0 {
-			body = body[:j]
-		}
-	} else if start, end := strings.Index(body, "{"), strings.LastIndex(body, "}"); start >= 0 && end > start {
-		body = body[start : end+1]
-	}
 	var in struct {
 		Order   []string `json:"order"`
 		Depends []struct {
@@ -143,18 +131,12 @@ func parsePM(reply string) (core.PMAnswer, []string, error) {
 		Note      string   `json:"note"`
 		Questions []string `json:"questions"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(body)), &in); err != nil {
+	if err := decodeReply(reply, &in); err != nil {
 		return core.PMAnswer{}, nil, errors.New("the reply was not valid JSON")
 	}
 	answer := core.PMAnswer{Order: in.Order, Depends: map[string][]string{}, Note: text.Clip(strings.TrimSpace(in.Note), 300)}
 	for _, d := range in.Depends {
 		answer.Depends[strings.TrimSpace(d.Task)] = d.On
 	}
-	var questions []string
-	for _, q := range in.Questions {
-		if q = strings.TrimSpace(q); q != "" && len(questions) < 5 {
-			questions = append(questions, text.Clip(q, 500))
-		}
-	}
-	return answer, questions, nil
+	return answer, listed(in.Questions, 5), nil
 }

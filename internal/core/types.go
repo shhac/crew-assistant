@@ -201,7 +201,4 @@ type DecisionInput struct {
 	Context        string   `json:"context"`
 	Recommendation string   `json:"recommendation"`
 	Choices        []string `json:"choices"`
-	// Kind marks a decision the daemon opens for a role, such as the PM's
-	// questions; the owner and the assistant open ordinary choices.
-	Kind string `json:"-"`
 }
