@@ -114,6 +114,21 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 			a.Work.Nudge()
 		}
 		return queued, err
+	case "read_task":
+		var in engine.ReadTaskArgs
+		if err := args(raw, &in); err != nil {
+			return nil, err
+		}
+		s, err := a.Snapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range s.Tasks {
+			if t.ID == in.TaskID && t.ProjectID == in.ProjectID {
+				return taskDetail(t), nil
+			}
+		}
+		return nil, core.ErrNotFound
 	case "stop_task":
 		var in engine.StopTaskArgs
 		if err := args(raw, &in); err != nil {

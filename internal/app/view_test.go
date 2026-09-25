@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
@@ -23,7 +24,7 @@ func TestTheAssistantSeesWhatItCanActOnAndOnlyTheOutcomeOfWhatIsDone(t *testing.
 	long := strings.Repeat("x", 5000)
 	var s core.Snapshot
 	for i := 0; i < 40; i++ {
-		task := core.Task{ID: fmt.Sprint("done", i), Status: core.TaskLanded, Objective: "done"}
+		task := core.Task{ID: fmt.Sprint("done", i), Status: core.TaskLanded, Objective: "done", UpdatedAt: time.Unix(int64(i), 0)}
 		for n := 1; n <= 5; n++ {
 			task.Revisions = append(task.Revisions, core.Revision{N: n, Summary: long})
 			task.Verdicts = append(task.Verdicts, core.Verdict{Revision: n, Summary: long, Findings: []core.Finding{{Note: long}}})
@@ -48,6 +49,19 @@ func TestTheAssistantSeesWhatItCanActOnAndOnlyTheOutcomeOfWhatIsDone(t *testing.
 	}
 	if len(s.Tasks[0].Revisions) != 5 {
 		t.Fatal("the view changed the state it was made from")
+	}
+	var finished []core.Task
+	for _, task := range view.Tasks {
+		if task.Finished() {
+			finished = append(finished, task)
+		}
+	}
+	if len(finished) != shownFinished || len(finished[0].Revisions) != 0 || finished[0].Objective != "done" {
+		t.Fatalf("finished tasks should be a few, by outcome only: %d, %+v", len(finished), finished[0])
+	}
+	detail := taskDetail(s.Tasks[0])
+	if len(detail.Revisions) != 3 || len(detail.Verdicts) != 5 || detail.Revisions[2].N != 5 {
+		t.Fatalf("read_task should give the latest drafts and every review: %d drafts, %d reviews", len(detail.Revisions), len(detail.Verdicts))
 	}
 }
 

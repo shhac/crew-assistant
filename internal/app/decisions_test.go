@@ -38,3 +38,23 @@ func TestResolveDecisionKeepsChoicesAndWordsApart(t *testing.T) {
 		t.Fatal("both a choice and an answer were accepted")
 	}
 }
+
+func TestTheAssistantReadsOneTaskInFullWithinItsProject(t *testing.T) {
+	a := testApp(t)
+	ctx := context.Background()
+	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Notes", Template: "draft", Brief: core.BriefInput{Goal: "A note", Criteria: []string{"Short"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Write it"})
+	read := func(projectID string) (any, error) {
+		raw, _ := json.Marshal(map[string]string{"project_id": projectID, "task_id": task.ID})
+		return a.Execute(ctx, "read_task", raw)
+	}
+	if out, err := read(p.ID); err != nil || out.(core.Task).Objective != "Write it" {
+		t.Fatalf("read %+v, %v", out, err)
+	}
+	if _, err := read("another-project"); err == nil {
+		t.Fatal("a task was read through the wrong project")
+	}
+}

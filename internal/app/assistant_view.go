@@ -1,28 +1,38 @@
 package app
 
 import (
+	"slices"
+
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/text"
 )
 
+// shownFinished is how many finished tasks the assistant sees each turn; it
+// reads any other with read_task.
+const shownFinished = 12
+
 // assistantView is the state the assistant reads each turn: everything it can
 // act on, and only the outcome of what is finished. Full revision and review
-// history stays on the project pages; carrying it into every turn crowded out
-// the conversation itself.
+// history stays on the project pages, and read_task brings one task's; carrying
+// it into every turn crowded out the conversation itself, and in time no
+// longer fitted at all.
 func assistantView(s core.Snapshot) core.Snapshot {
+	recent := recentlyFinished(s.Tasks, shownFinished)
 	tasks := make([]core.Task, 0, len(s.Tasks))
 	for _, t := range s.Tasks {
+		if t.Finished() {
+			if recent[t.ID] {
+				tasks = append(tasks, finishedBrief(t))
+			}
+			continue
+		}
 		t.WriterSession, t.Playbook, t.Roles = nil, nil, nil
 		if t.Plan != nil {
 			t.Plan = clippedPlan(*t.Plan)
 		}
-		keep := 2
-		if t.Finished() {
-			keep = 1
-		}
-		if n := len(t.Revisions); n > keep {
-			t.Revisions = t.Revisions[n-keep:]
+		if n := len(t.Revisions); n > 2 {
+			t.Revisions = t.Revisions[n-2:]
 		}
 		revisions := make([]core.Revision, len(t.Revisions))
 		for i, r := range t.Revisions {
@@ -34,7 +44,7 @@ func assistantView(s core.Snapshot) core.Snapshot {
 		}
 		t.Revisions = revisions
 		var verdicts []core.Verdict
-		if !t.Finished() && len(revisions) > 0 {
+		if len(revisions) > 0 {
 			latest := revisions[len(revisions)-1].N
 			for _, v := range t.Verdicts {
 				if v.Revision != latest {
@@ -101,6 +111,47 @@ func assistantView(s core.Snapshot) core.Snapshot {
 	}
 	s.Members = members
 	return s
+}
+
+// recentlyFinished is the ids of the last n tasks to finish.
+func recentlyFinished(tasks []core.Task, n int) map[string]bool {
+	var finished []core.Task
+	for _, t := range tasks {
+		if t.Finished() {
+			finished = append(finished, t)
+		}
+	}
+	slices.SortFunc(finished, func(a, b core.Task) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+	out := map[string]bool{}
+	for _, t := range finished[:min(n, len(finished))] {
+		out[t.ID] = true
+	}
+	return out
+}
+
+// finishedBrief is a finished task as the assistant sees it each turn: what
+// was asked, how it ended and where it went.
+func finishedBrief(t core.Task) core.Task {
+	return core.Task{ID: t.ID, ProjectID: t.ProjectID, Objective: text.Clip(t.Objective, 200), Status: t.Status, Stage: t.Stage, Detail: text.Clip(t.Detail, 200), DeliveredTo: t.DeliveredTo, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt}
+}
+
+// taskDetail is one task as read_task gives it: everything the assistant can
+// use, without the team's sessions and setup.
+func taskDetail(t core.Task) core.Task {
+	t.WriterSession, t.Playbook, t.Roles = nil, nil, nil
+	if n := len(t.Revisions); n > 3 {
+		t.Revisions = t.Revisions[n-3:]
+	}
+	revisions := make([]core.Revision, len(t.Revisions))
+	for i, r := range t.Revisions {
+		r.Summary = text.Clip(r.Summary, 2000)
+		revisions[i] = r
+	}
+	t.Revisions = revisions
+	if n := len(t.Messages); n > 10 {
+		t.Messages = t.Messages[n-10:]
+	}
+	return t
 }
 
 // clippedPlan is a plan as the assistant reads it each turn: the gist, not
