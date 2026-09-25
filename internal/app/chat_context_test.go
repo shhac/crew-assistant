@@ -82,12 +82,12 @@ func TestChatSummaryByteLimitKeepsWholeExchanges(t *testing.T) {
 		messages[i] = core.Message{ID: fmt.Sprint(i), Role: role, Content: "small"}
 	}
 	messages[3].Content = strings.Repeat("large", 10*1024)
-	source, through, err := chatSummaryBatch(messages, 0, "")
+	source, through, err := chatSummaryBatchKeeping(messages, 0, "", 24, 8)
 	if err != nil || len(source) != 2 || through != "1" {
 		t.Fatalf("split exchange: %d %s %v", len(source), through, err)
 	}
 	messages[1].Content = messages[3].Content
-	if _, _, err = chatSummaryBatch(messages, 0, ""); err == nil {
+	if _, _, err = chatSummaryBatchKeeping(messages, 0, "", 24, 8); err == nil {
 		t.Fatal("silently skipped oversized original")
 	}
 }

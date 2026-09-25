@@ -76,15 +76,11 @@ func (a *App) summarizeChat(ctx context.Context, currentID string, cfg engine.Co
 	return folded, errors.New("conversation checkpoint catch-up limit reached; saved summaries and original dialogue preserved")
 }
 
-// Wait for a useful batch rather than paying for a new summary every exchange.
-// The byte bound must also end at an assistant reply, not the preceding owner
-// request. Unsummarized messages remain in chatContext verbatim.
-func chatSummaryBatch(messages []core.Message, start int, currentID string) ([]engine.Message, string, error) {
-	return chatSummaryBatchKeeping(messages, start, currentID, 24, 8)
-}
-
 // chatSummaryBatchKeeping is the next batch to summarize, leaving the last
-// keep messages of dialogue as they are and waiting for at least minimum.
+// keep messages of dialogue as they are and waiting for at least minimum, so
+// a new summary isn't paid for every exchange. The byte bound must also end
+// at an assistant reply, not the preceding owner request. Unsummarized
+// messages remain in chatContext verbatim.
 // Only dialogue counts and is summarized: a summary shown to the owner is not
 // something said, so it neither takes a kept message's place nor is folded in.
 func chatSummaryBatchKeeping(messages []core.Message, start int, currentID string, keep, minimum int) ([]engine.Message, string, error) {
