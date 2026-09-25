@@ -281,6 +281,9 @@ Plan this task before anything is written. Read what you need to, and change not
 			fmt.Fprintf(&b, "- %s (%s): %s\n", other.ID, other.Status, text.Clip(other.Objective, 200))
 		}
 	}
+	if len(t.DependsOn) > 0 {
+		fmt.Fprintf(&b, "\nThis task already waits for %s; that stays, so name only what it must also wait for.\n", waitsLine(t))
+	}
 	researcher, _ := t.Researcher()
 	if guide := designGuide(t, researcher, core.TaskResearching, "ask with the design reply below instead of a plan, and plan once the answer is back."); guide != "" {
 		b.WriteString("\n" + strings.TrimSpace(guide) + "\n")

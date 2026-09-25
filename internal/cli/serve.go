@@ -78,6 +78,7 @@ func registerServe(root *cobra.Command, o *options) {
 	cmd.Flags().BoolVar(&noDispatch, "no-dispatch", false, "Do not start or resume workers during this boot")
 	root.AddCommand(cmd)
 }
+
 // serve runs the daemon until stop. The dashboard stays up while the work in
 // progress finishes, so the owner can watch it finish.
 func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sampleDir string, open, noDispatch bool) error {

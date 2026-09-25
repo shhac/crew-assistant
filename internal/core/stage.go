@@ -16,15 +16,22 @@ const (
 )
 
 func deriveStages(v *Snapshot) {
+	index := blocking(v)
 	for i := range v.Tasks {
-		derive(v, &v.Tasks[i])
+		deriveWith(v, &v.Tasks[i], index)
 	}
 }
 
-func derive(v *Snapshot, t *Task) {
+func derive(v *Snapshot, t *Task) { deriveWith(v, t, nil) }
+
+// deriveWith derives t's place, with index, when given, saying which tasks
+// depend on which.
+func deriveWith(v *Snapshot, t *Task, index map[string][]string) {
 	t.Stage, t.Checking, t.WithDesigner, t.Answered, t.WaitsFor = stageOf(v, *t), "", false, false, nil
 	t.PMDeciding = pmDeciding(v, *t)
-	if t.Status == TaskQueued {
+	t.Blocks = blocksOf(v, t.ID, index)
+	// A task under way can be made to wait too: then it can't land yet.
+	if !t.Finished() {
 		t.WaitsFor = waitsFor(v, *t)
 	}
 	if t.Status == TaskResearching {

@@ -87,12 +87,35 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		if decode(w, r, &in) != nil {
 			return
 		}
-		v, err := a.Work.QueueTask(r.Context(), r.PathValue("id"), in)
+		v, err := a.Work.QueueTask(r.Context(), r.PathValue("id"), in, core.LinkedByOwner)
 		if err != nil {
 			problem(w, err)
 			return
 		}
 		respond(w, 201, v)
+	})
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/links", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Relation string `json:"relation"`
+			Task     string `json:"task"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.LinkTasks(r.Context(), r.PathValue("id"), r.PathValue("task"), in.Relation, in.Task, core.LinkedByOwner)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
+	mux.HandleFunc("DELETE /api/projects/{id}/tasks/{task}/links/{other}", func(w http.ResponseWriter, r *http.Request) {
+		v, err := a.Work.UnlinkTasks(r.Context(), r.PathValue("id"), r.PathValue("task"), r.PathValue("other"), core.LinkedByOwner)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
 	})
 	mux.HandleFunc("PUT /api/projects/{id}/tasks/order", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

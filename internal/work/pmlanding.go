@@ -200,7 +200,7 @@ If it lands, choose how. "squash" lands it as one commit worded from the request
 		}
 		fmt.Fprintf(&b, "- %s (%s): %s\n", other.ID, other.Status, text.Clip(other.Objective, 300))
 		if len(other.DependsOn) > 0 {
-			fmt.Fprintf(&b, "  waits for: %s\n", strings.Join(other.DependsOn, ", "))
+			fmt.Fprintf(&b, "  waits for: %s\n", waitsLine(other))
 		}
 	}
 	if p.PMDirection != "" {

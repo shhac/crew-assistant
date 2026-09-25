@@ -269,3 +269,35 @@ func TestAStoppingDaemonRefusesNewModelWork(t *testing.T) {
 		t.Fatal("the dashboard isn't told", w.Body.String())
 	}
 }
+
+// The owner links two tasks of a project from the dashboard, and unlinks
+// them; a task of another project is not theirs to link from here.
+func TestTheOwnerLinksTasks(t *testing.T) {
+	_, call := ownerServer(t)
+	var project, other core.Project
+	for _, p := range []*core.Project{&project, &other} {
+		w := call("POST", "/api/projects", `{"title":"Export","brief":{"goal":"CSV","criteria":["Valid CSV"]},"template":"draft"}`)
+		_ = json.Unmarshal(w.Body.Bytes(), p)
+	}
+	queue := func(projectID, objective string) core.Task {
+		var task core.Task
+		w := call("POST", "/api/projects/"+projectID+"/tasks", `{"objective":"`+objective+`","criteria":[]}`)
+		_ = json.Unmarshal(w.Body.Bytes(), &task)
+		return task
+	}
+	schema, api, elsewhere := queue(project.ID, "Schema"), queue(project.ID, "API"), queue(other.ID, "Elsewhere")
+	w := call("POST", "/api/projects/"+project.ID+"/tasks/"+api.ID+"/links", `{"relation":"depends_on","task":"`+schema.ID+`"}`)
+	var linked core.Task
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &linked) != nil || len(linked.DependsOn) != 1 || linked.LinkedBy["depends_on:"+schema.ID].By != core.LinkedByOwner {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := call("POST", "/api/projects/"+other.ID+"/tasks/"+api.ID+"/links", `{"relation":"relates_to","task":"`+elsewhere.ID+`"}`); w.Code != 404 {
+		t.Fatal("linked across projects", w.Code)
+	}
+	if w := call("DELETE", "/api/projects/"+project.ID+"/tasks/"+schema.ID+"/links/"+api.ID, ""); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := call("DELETE", "/api/projects/"+project.ID+"/tasks/"+schema.ID+"/links/"+api.ID, ""); w.Code != 404 {
+		t.Fatal("unlinked twice", w.Code)
+	}
+}

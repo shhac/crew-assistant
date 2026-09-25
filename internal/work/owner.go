@@ -12,9 +12,25 @@ import (
 // Each wakes the loop itself, so whether a change is noticed at once never
 // depends on the caller remembering to.
 
-// QueueTask asks for an outcome in a project.
-func (lp *Loop) QueueTask(ctx context.Context, projectID string, in core.TaskInput) (core.Task, error) {
-	t, err := lp.Core.QueueTask(ctx, projectID, in)
+// QueueTask asks for an outcome in a project on behalf of by, the owner or
+// the assistant.
+func (lp *Loop) QueueTask(ctx context.Context, projectID string, in core.TaskInput, by string) (core.Task, error) {
+	t, err := lp.Core.QueueTaskAs(ctx, projectID, in, by)
+	lp.nudgeUnless(err)
+	return t, err
+}
+
+// LinkTasks relates two tasks on behalf of by; unlinking can release a
+// task that waited.
+func (lp *Loop) LinkTasks(ctx context.Context, projectID, taskID, relation, otherID, by string) (core.Task, error) {
+	t, err := lp.Core.LinkTasks(ctx, projectID, taskID, relation, otherID, by)
+	lp.nudgeUnless(err)
+	return t, err
+}
+
+// UnlinkTasks takes away the link between two tasks on behalf of by.
+func (lp *Loop) UnlinkTasks(ctx context.Context, projectID, taskID, otherID, by string) (core.Task, error) {
+	t, err := lp.Core.UnlinkTasks(ctx, projectID, taskID, otherID, by)
 	lp.nudgeUnless(err)
 	return t, err
 }

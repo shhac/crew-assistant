@@ -121,9 +121,22 @@ func pmTasks(b *strings.Builder, snap core.Snapshot, p core.Project) {
 			}
 		}
 		if len(t.DependsOn) > 0 {
-			fmt.Fprintf(b, "  waits for: %s\n", strings.Join(t.DependsOn, ", "))
+			fmt.Fprintf(b, "  waits for: %s\n", waitsLine(t))
 		}
 	}
+}
+
+// waitsLine is what a task waits for, marking what the owner set: the team
+// leaves that in place, so a PM that leaves it out changes nothing.
+func waitsLine(t core.Task) string {
+	parts := make([]string, len(t.DependsOn))
+	for i, id := range t.DependsOn {
+		parts[i] = id
+		if t.HeldByOwner(core.RelationDependsOn, id) {
+			parts[i] += " (set by the owner)"
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // AskPM puts the assistant's question to a project's PM and gives its

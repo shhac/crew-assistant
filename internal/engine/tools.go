@@ -92,6 +92,17 @@ type StopTaskArgs struct {
 	ProjectID string `json:"project_id"`
 	TaskID    string `json:"task_id"`
 }
+type LinkTasksArgs struct {
+	ProjectID   string `json:"project_id"`
+	TaskID      string `json:"task_id"`
+	Relation    string `json:"relation"`
+	OtherTaskID string `json:"other_task_id"`
+}
+type UnlinkTasksArgs struct {
+	ProjectID   string `json:"project_id"`
+	TaskID      string `json:"task_id"`
+	OtherTaskID string `json:"other_task_id"`
+}
 type OrderTasksArgs struct {
 	ProjectID string   `json:"project_id"`
 	TaskIDs   []string `json:"task_ids"`
@@ -178,6 +189,8 @@ var tools = []labelled{
 	{Tool: tool("list_wakes", "List wake-ups still waiting or about to be delivered, with their handles.", nil, nil), label: "Check wake-ups"},
 	{Tool: tool("cancel_wake", "Cancel a wake-up by its handle when it is no longer needed.", []string{"handle"}, nil), label: "Cancel a wake-up"},
 	{Tool: tool("queue_task", "Ask the project's team for one outcome. The writer drafts it, reviewers check it against the brief, and the owner approves delivery. Criteria are specific to this task and add to the brief's. depends_on lists ids of the project's unfinished tasks this one builds on: it waits until they have landed, since a task never starts on work that has not; empty for none. A team with a researcher also works out what a task needs, and what it waits for, before writing.", []string{"project_id", "objective"}, []string{"criteria", "depends_on"}), label: "Ask the team for an outcome"},
+	{Tool: tool("link_tasks", "Link two tasks of a project. relation is depends_on (task_id waits for other_task_id to finish before it starts, and cannot land before it lands), blocks (the other way round), or relates_to (worth reading alongside each other; nothing waits). A pair has one link at a time; unlink first to change it. Links you set, like the owner's, hold against the team: its PM and roles can add links but never take yours away. A task whose work has begun can still be made to wait. Use it when the owner asks, or when how tasks fit together is plain from what they ask for.", []string{"project_id", "task_id", "relation", "other_task_id"}, nil), label: "Link two tasks"},
+	{Tool: tool("unlink_tasks", "Take away the link between two tasks of a project, whichever way it points. Taking away what a task waits for can let it start.", []string{"project_id", "task_id", "other_task_id"}, nil), label: "Unlink two tasks"},
 	{Tool: tool("stop_task", "Stop a queued or running task when the owner asks. A turn already under way finishes but changes nothing; any decision it was waiting on is closed.", []string{"project_id", "task_id"}, nil), label: "Stop a task"},
 	{Tool: tool("order_tasks", "Set the order a project's queued tasks start in: task_ids lists every queued task of the project, first to start first. Put what unblocks or matters most first; the owner may also ask for an order. When the team has a PM (ordered_by \"pm\" on the project), the PM keeps the order; set it yourself only to overrule the PM, which then keeps your order and only places tasks queued after it. Tasks already started are not included. If the list has changed since you read it, read the state again and retry.", []string{"project_id"}, []string{"task_ids"}), label: "Reorder the to-do list"},
 	{Tool: tool("draw_member", "Have Codex draw a team member's face, in the same cute chibi manga style as the rest of the team. look describes how they look (hair colour and style, eyes, one distinctive feature, a background colour), or is empty to keep their last look, or to let Codex design one for a member who has none. It takes a few minutes and runs in the background; the member's picture changes when it is done.", []string{"member_id", "look"}, nil), label: "Draw a team member"},

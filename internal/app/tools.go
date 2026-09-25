@@ -92,7 +92,13 @@ var toolActions = map[string]toolAction{
 		return a.Work.SetLanding(ctx, in.ProjectID, core.LandPolicy{Means: in.Means, Via: in.Via, Target: in.Target, Method: in.Method, GitHub: in.GitHub, Approve: in.Approve})
 	}),
 	"queue_task": with(func(a *App, ctx context.Context, in engine.QueueTaskArgs) (any, error) {
-		return a.Work.QueueTask(ctx, in.ProjectID, core.TaskInput{Objective: in.Objective, Criteria: in.Criteria, DependsOn: in.DependsOn})
+		return a.Work.QueueTask(ctx, in.ProjectID, core.TaskInput{Objective: in.Objective, Criteria: in.Criteria, DependsOn: in.DependsOn}, core.LinkedByAssistant)
+	}),
+	"link_tasks": with(func(a *App, ctx context.Context, in engine.LinkTasksArgs) (any, error) {
+		return a.Work.LinkTasks(ctx, in.ProjectID, in.TaskID, in.Relation, in.OtherTaskID, core.LinkedByAssistant)
+	}),
+	"unlink_tasks": with(func(a *App, ctx context.Context, in engine.UnlinkTasksArgs) (any, error) {
+		return a.Work.UnlinkTasks(ctx, in.ProjectID, in.TaskID, in.OtherTaskID, core.LinkedByAssistant)
 	}),
 	"order_tasks": with(func(a *App, ctx context.Context, in engine.OrderTasksArgs) (any, error) {
 		return a.Core.OrderTasks(ctx, in.ProjectID, in.TaskIDs, core.OrderedByAssistant)

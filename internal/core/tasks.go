@@ -66,8 +66,16 @@ type Task struct {
 	// DependsOn names tasks in the same project that must have landed before
 	// this one starts. Without stacking, a task never builds on work that has
 	// not landed.
-	DependsOn []string  `json:"depends_on,omitempty"`
-	Verdicts  []Verdict `json:"verdicts"`
+	DependsOn []string `json:"depends_on,omitempty"`
+	// RelatesTo names tasks in the same project worth looking at alongside
+	// this one. It is kept on both tasks.
+	RelatesTo []string `json:"relates_to,omitempty"`
+	// LinkedBy records who set each of this task's links, keyed by relation
+	// and task; see links.go.
+	LinkedBy map[string]LinkMark `json:"linked_by,omitempty"`
+	// Blocks names the tasks that depend on this one. Derived with Stage.
+	Blocks   []string  `json:"blocks,omitempty"`
+	Verdicts []Verdict `json:"verdicts"`
 	// WriterSession resumes the implementer across rounds. Reviewers always
 	// start fresh, so no earlier judgement anchors the next.
 	WriterSession json.RawMessage `json:"writer_session,omitempty"`
@@ -231,8 +239,15 @@ func decision(v *Snapshot, id string) *Decision {
 	return nil
 }
 
-// QueueTask asks for an outcome. It starts when the loop reaches it.
+// QueueTask asks for an outcome, as the owner. It starts when the loop
+// reaches it.
 func (s *Service) QueueTask(ctx context.Context, projectID string, in TaskInput) (Task, error) {
+	return s.QueueTaskAs(ctx, projectID, in, LinkedByOwner)
+}
+
+// QueueTaskAs asks for an outcome on behalf of by, who holds what it says
+// the task waits for.
+func (s *Service) QueueTaskAs(ctx context.Context, projectID string, in TaskInput, by string) (Task, error) {
 	if !required(in.Objective) {
 		return Task{}, errors.New("a task needs an objective")
 	}
@@ -254,6 +269,7 @@ func (s *Service) QueueTask(ctx context.Context, projectID string, in TaskInput)
 			return err
 		}
 		out.DependsOn = deps
+		markAll(&out, deps, by, now)
 		v.Tasks = append(v.Tasks, out)
 		p.listChanged()
 		record(v, now, projectID, "task.queued", out.Objective)

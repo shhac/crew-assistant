@@ -123,6 +123,7 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 		deps := possibleDependencies(v, *t, append(slices.Clone(t.DependsOn), dependsOn...))
 		now := s.now().UTC()
 		t.DependsOn, t.UpdatedAt = deps, now
+		markAll(t, deps, researcherLinker(*t), now)
 		plan.At = now
 		waiting := waitsFor(v, *t)
 		switch {
@@ -145,4 +146,14 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 		return nil
 	})
 	return out, err
+}
+
+// researcherLinker is how the links a task's researcher adds are marked.
+func researcherLinker(t Task) string {
+	for _, r := range t.Roles {
+		if slices.Contains(r.Kinds, RoleResearcher) {
+			return TeamLinker(r.Member, RoleResearcher)
+		}
+	}
+	return TeamLinker("", RoleResearcher)
 }
