@@ -185,6 +185,9 @@ type Snapshot struct {
 	Paused            bool               `json:"paused"`
 	Wakes             []Wake             `json:"wakes,omitempty"`
 	ModelCalls        map[string]int     `json:"-"`
+	// ModelWindows are the context windows, in tokens, the providers have
+	// stated for each engine's models, keyed by ModelKey.
+	ModelWindows map[string]int `json:"-"`
 }
 type ProjectInput struct {
 	Directories       []string   `json:"directories"`

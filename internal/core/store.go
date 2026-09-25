@@ -43,6 +43,7 @@ type diskState struct {
 	Events            map[string]bool `json:"events"`
 	Snapshot          Snapshot        `json:"snapshot"`
 	ModelCalls        map[string]int  `json:"model_calls"`
+	ModelWindows      map[string]int  `json:"model_windows,omitempty"`
 }
 
 func Open(path string) (*Store, error) {
@@ -153,6 +154,7 @@ func readState(ctx context.Context, conn *sql.Conn) (Snapshot, error) {
 	if d.Snapshot.ModelCalls == nil {
 		d.Snapshot.ModelCalls = map[string]int{}
 	}
+	d.Snapshot.ModelWindows = d.ModelWindows
 	foldLegacyKinds(&d.Snapshot)
 	foldPlanner(&d.Snapshot)
 	deriveStages(&d.Snapshot)
@@ -190,7 +192,7 @@ func (s *Store) update(ctx context.Context, fn func(*Snapshot) error) error {
 	// A task's status can pass through a value within one change; checking
 	// here, not by polling, means a wake waiting on it never misses it.
 	settleTaskWakes(&state, time.Now().UTC())
-	data, err := json.Marshal(diskState{Schema: stateSchema, ChatCheckpoint: state.ChatCheckpoint, ConversationID: state.ConversationID, Conversations: state.Conversations, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: state, ModelCalls: state.ModelCalls, Events: state.Events})
+	data, err := json.Marshal(diskState{Schema: stateSchema, ChatCheckpoint: state.ChatCheckpoint, ConversationID: state.ConversationID, Conversations: state.Conversations, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: state, ModelCalls: state.ModelCalls, ModelWindows: state.ModelWindows, Events: state.Events})
 	if err != nil {
 		return err
 	}

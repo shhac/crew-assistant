@@ -128,3 +128,17 @@ func TestStateFromAnotherModelIsRefusedAndLeftAlone(t *testing.T) {
 	}
 	st.Close()
 }
+
+func TestAModelsStatedWindowIsKeptAndTheLatestStands(t *testing.T) {
+	s, _ := fixture(t)
+	if err := s.RecordModelWindow(testContext, "claude", "opus", 200000); err != nil {
+		t.Fatal(err)
+	}
+	s.RecordModelWindow(testContext, "claude", "haiku", 0)
+	s.RecordModelWindow(testContext, "codex", "gpt", 400000)
+	s.RecordModelWindow(testContext, "claude", "opus", 1000000)
+	snap, _ := s.Snapshot(testContext)
+	if snap.ModelWindow("claude", "opus") != 1000000 || snap.ModelWindow("codex", "gpt") != 400000 || snap.ModelWindow("claude", "haiku") != 0 {
+		t.Fatalf("windows %v", snap.ModelWindows)
+	}
+}

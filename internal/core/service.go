@@ -142,6 +142,33 @@ func (s *Service) SetPaused(ctx context.Context, paused bool) error {
 	})
 }
 
+// ModelKey names one engine's model for ModelWindows.
+func ModelKey(engine, model string) string { return engine + "/" + model }
+
+// ModelWindow is the context window, in tokens, the provider last stated for
+// an engine's model, or 0 when it has not said.
+func (s Snapshot) ModelWindow(engine, model string) int {
+	return s.ModelWindows[ModelKey(engine, model)]
+}
+
+// RecordModelWindow keeps the context window a provider stated for a model.
+// Windows change when a model does, so the latest statement stands.
+func (s *Service) RecordModelWindow(ctx context.Context, engine, model string, tokens int) error {
+	if tokens <= 0 || engine == "" || model == "" {
+		return nil
+	}
+	if snap, err := s.store.Snapshot(ctx); err == nil && snap.ModelWindow(engine, model) == tokens {
+		return nil
+	}
+	return s.store.update(ctx, func(v *Snapshot) error {
+		if v.ModelWindows == nil {
+			v.ModelWindows = map[string]int{}
+		}
+		v.ModelWindows[ModelKey(engine, model)] = tokens
+		return nil
+	})
+}
+
 // ReserveModelCall is persisted before inference and is deliberately never
 // refunded on ambiguous errors. The quota window is a UTC calendar day.
 func (s *Service) ReserveModelCall(ctx context.Context, limit int) error {
