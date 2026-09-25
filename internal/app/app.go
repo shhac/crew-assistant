@@ -20,8 +20,8 @@ import (
 )
 
 type App struct {
-	Diagnostics      *diagnostics.Logger // Set before starting the daemon.
-	small            *smallModels        // Loading captions and suggestions.
+	Diagnostics      *diagnostics.Logger
+	small            *smallModels // Loading captions and suggestions.
 	connectionClient connections.Client
 	Core             *core.Service
 	mu               sync.RWMutex
@@ -51,9 +51,25 @@ type App struct {
 	drawings sync.WaitGroup
 }
 
-func New(s *core.Service, cfg config.Config, path string, demo bool) *App {
-	a := &App{connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), summarize: engine.Complete, statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
-	a.Work = work.New(s, a.Config, demo)
+// Options are what the daemon decides about the app it builds.
+type Options struct {
+	// Demo runs on sample data, with every model and integration off.
+	Demo bool
+	// Diagnostics records failures, the app's and its loop's; nil keeps the
+	// default log.
+	Diagnostics *diagnostics.Logger
+	// DrawWithCodex has Codex draw faces. Without it nothing is drawn unless a
+	// Painter is set.
+	DrawWithCodex bool
+}
+
+func New(s *core.Service, cfg config.Config, path string, opts Options) *App {
+	a := &App{Diagnostics: opts.Diagnostics, connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: opts.Demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), summarize: engine.Complete, statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
+	a.Work = work.New(s, a.Config, opts.Demo)
+	a.Work.Diagnostics = opts.Diagnostics
+	if opts.DrawWithCodex && !opts.Demo {
+		a.Painter = codexPainter{a}
+	}
 	return a
 }
 

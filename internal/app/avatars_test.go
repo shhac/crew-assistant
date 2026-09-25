@@ -350,7 +350,7 @@ func TestARestartedAppDoesNotShowADrawingUnderWay(t *testing.T) {
 	if err := a.DrawMember(ctx, m.ID, ""); err != nil {
 		t.Fatal(err)
 	}
-	restarted := New(a.Core, a.Config(), a.configPath, false)
+	restarted := New(a.Core, a.Config(), a.configPath, Options{})
 	restarted.Painter = &fakePainter{}
 	if snap, _ := restarted.Snapshot(ctx); snap.Members[0].Drawing {
 		t.Fatal("a restarted app shows a drawing it is not doing")

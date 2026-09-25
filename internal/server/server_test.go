@@ -31,7 +31,7 @@ func ownerApp(t *testing.T) (*app.App, func(method, path, body string) *httptest
 	}
 	t.Cleanup(func() { store.Close() })
 	s := core.NewService(store, cfg)
-	a := app.New(s, cfg, filepath.Join(dir, "config.json"), false)
+	a := app.New(s, cfg, filepath.Join(dir, "config.json"), app.Options{})
 	auth, _ := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
 	h := New(a, auth)
 	return a, func(method, path, body string) *httptest.ResponseRecorder {

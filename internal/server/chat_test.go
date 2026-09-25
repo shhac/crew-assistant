@@ -24,7 +24,7 @@ func TestChatQueueRoutesAuthenticateValidateAndRetryIdempotently(t *testing.T) {
 	}
 	defer store.Close()
 	s := core.NewService(store, cfg)
-	a := app.New(s, cfg, filepath.Join(dir, "config.json"), false)
+	a := app.New(s, cfg, filepath.Join(dir, "config.json"), app.Options{})
 	auth, err := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func TestChatQueueHoldEditAndReorder(t *testing.T) {
 	}
 	defer store.Close()
 	s := core.NewService(store, cfg)
-	a := app.New(s, cfg, filepath.Join(dir, "config.json"), false)
+	a := app.New(s, cfg, filepath.Join(dir, "config.json"), app.Options{})
 	auth, err := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestChatSuggestionRouteRefusesStaleRequestsAndReportsUnavailableModels(t *t
 		t.Fatal(err)
 	}
 	defer store.Close()
-	a := app.New(core.NewService(store, cfg), cfg, filepath.Join(dir, "config.json"), false)
+	a := app.New(core.NewService(store, cfg), cfg, filepath.Join(dir, "config.json"), app.Options{})
 	auth, err := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
 	if err != nil {
 		t.Fatal(err)

@@ -33,11 +33,9 @@ func roleWords(kinds []string) string {
 	return strings.Join(words, " and ")
 }
 
-// CodexPainter draws with Codex, as the config says at the time of drawing.
-func (a *App) CodexPainter() avatars.Painter { return codexPainter{a} }
-
-// codexPainter's session has a Codex home of its own, so a drawing never
-// shares a runtime with the team's turns.
+// codexPainter draws with Codex, as the config says at the time of drawing.
+// Its session has a Codex home of its own, so a drawing never shares a
+// runtime with the team's turns.
 type codexPainter struct{ a *App }
 
 func (p codexPainter) Paint(ctx context.Context, character string) ([]byte, error) {

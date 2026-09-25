@@ -23,7 +23,7 @@ func TestFilesystemRequiresOwnerAndReturnsMetadataOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	a := app.New(core.NewService(store, cfg), cfg, filepath.Join(t.TempDir(), "config.json"), false)
+	a := app.New(core.NewService(store, cfg), cfg, filepath.Join(t.TempDir(), "config.json"), app.Options{})
 	auth, err := NewAuth(t.TempDir(), "http://127.0.0.1:8340", "", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestExistingProjectDirectoriesHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	a := app.New(core.NewService(store, cfg), cfg, filepath.Join(state, "config.json"), false)
+	a := app.New(core.NewService(store, cfg), cfg, filepath.Join(state, "config.json"), app.Options{})
 	auth, err := NewAuth(t.TempDir(), "http://127.0.0.1:8340", "", nil)
 	if err != nil {
 		t.Fatal(err)

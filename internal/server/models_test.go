@@ -17,7 +17,7 @@ import (
 func TestModelEndpointUsesSavedProfileAndCaches(t *testing.T) {
 	cfg := config.Default()
 	cfg.Model.CodexHome = "/test/assistant-login"
-	a := app.New(nil, cfg, filepath.Join(t.TempDir(), "config.json"), false)
+	a := app.New(nil, cfg, filepath.Join(t.TempDir(), "config.json"), app.Options{})
 	calls := 0
 	handler := modelHandler(a, func(_ context.Context, c engine.Config) ([]engine.ModelOption, error) {
 		calls++
@@ -49,7 +49,7 @@ func TestModelEndpointUsesSavedProfileAndCaches(t *testing.T) {
 
 func TestModelEndpointFailureDoesNotInventModels(t *testing.T) {
 	cfg := config.Default()
-	a := app.New(nil, cfg, filepath.Join(t.TempDir(), "config.json"), false)
+	a := app.New(nil, cfg, filepath.Join(t.TempDir(), "config.json"), app.Options{})
 	handler := modelHandler(a, func(context.Context, engine.Config) ([]engine.ModelOption, error) {
 		return nil, errors.New("secret-provider-diagnostic")
 	})
@@ -65,7 +65,7 @@ func TestModelEndpointFailureDoesNotInventModels(t *testing.T) {
 }
 
 func TestDemoModelDiscoveryNeverStartsProcess(t *testing.T) {
-	a := app.New(nil, config.Default(), "", true)
+	a := app.New(nil, config.Default(), "", app.Options{Demo: true})
 	handler := modelHandler(a, func(context.Context, engine.Config) ([]engine.ModelOption, error) {
 		t.Fatal("demo started discovery")
 		return nil, nil
@@ -80,7 +80,7 @@ func TestDemoModelDiscoveryNeverStartsProcess(t *testing.T) {
 func TestModelEndpointCanPreviewClaudeBeforeSavingEngine(t *testing.T) {
 	cfg := config.Default()
 	cfg.Model.ClaudeHome = "/test/shared-claude"
-	a := app.New(nil, cfg, "", false)
+	a := app.New(nil, cfg, "", app.Options{})
 	handler := modelHandler(a, func(_ context.Context, c engine.Config) ([]engine.ModelOption, error) {
 		if c.Engine != "claude" || c.ClaudeHome != cfg.Model.ClaudeHome {
 			t.Fatal(c)
@@ -104,7 +104,7 @@ func TestModelDiscoveryRequiresOwnerAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := app.New(nil, config.Default(), "", false)
+	a := app.New(nil, config.Default(), "", app.Options{})
 	handler := auth.Middleware(modelHandler(a, func(context.Context, engine.Config) ([]engine.ModelOption, error) {
 		t.Fatal("unauthenticated discovery")
 		return nil, nil

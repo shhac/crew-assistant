@@ -112,12 +112,7 @@ func serve(ctx context.Context, o *options, cfg config.Config, demo bool, sample
 	if demo {
 		appConfigPath = filepath.Join(o.runtimeDir(), "demo-config.json")
 	}
-	a := app.New(service, cfg, appConfigPath, demo)
-	a.Diagnostics = o.diagnostics
-	a.Work.Diagnostics = o.diagnostics
-	if !demo {
-		a.Painter = a.CodexPainter()
-	}
+	a := app.New(service, cfg, appConfigPath, app.Options{Demo: demo, Diagnostics: o.diagnostics, DrawWithCodex: true})
 	publicURL := ""
 	if cfg.Dashboard.Tailscale == "serve" {
 		var cleanup func() error

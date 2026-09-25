@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
@@ -27,7 +29,7 @@ func testApp(t *testing.T) *App {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	return New(core.NewService(s, cfg), cfg, filepath.Join(t.TempDir(), "config.json"), false)
+	return New(core.NewService(s, cfg), cfg, filepath.Join(t.TempDir(), "config.json"), Options{})
 }
 func TestChatModelUsesConfiguredNameAndPersistsToolEffects(t *testing.T) {
 	a := testApp(t)
@@ -78,5 +80,22 @@ func TestDemoCannotCallModel(t *testing.T) {
 	a.Demo = true
 	if _, err := a.Chat(context.Background(), "do work"); err == nil {
 		t.Fatal("demo invoked model")
+	}
+}
+
+func TestTheAppIsBuiltWhole(t *testing.T) {
+	cfg := config.Default()
+	s, err := core.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	logs := diagnostics.New(io.Discard)
+	a := New(core.NewService(s, cfg), cfg, "", Options{Diagnostics: logs, DrawWithCodex: true})
+	if a.Diagnostics != logs || a.Work.Diagnostics != logs || a.Painter == nil {
+		t.Fatal("the app and its loop should share one log, and Codex should draw")
+	}
+	if demo := New(core.NewService(s, cfg), cfg, "", Options{Demo: true, DrawWithCodex: true}); demo.Painter != nil {
+		t.Fatal("a demo drew with Codex")
 	}
 }
