@@ -8,6 +8,7 @@ import {
   roleMember,
   taskRoles,
   teamChoice,
+  teamWith,
   workingKind,
 } from "./members";
 import type { Member, Playbook, Project, Role, Task } from "./api";
@@ -201,5 +202,60 @@ describe("the kinds of role a seat holds", () => {
     expect(atWork(task({ status: "researching", roles: seats }), [ada])).toBe(
       ada,
     );
+  });
+});
+
+describe("a team to save", () => {
+  const kept = {
+    implementer_member: "m1",
+    qa_member: "m3",
+    researcher_member: "none",
+    pm_member: "m4",
+    repo: "/work/service",
+    branch_prefix: "crew/",
+    prepare: ["vendor"],
+    sign: "always",
+  };
+  const edits = {
+    writer_engine: "claude",
+    reviewer_engine: "codex",
+    max_rounds: "4",
+    check: "make check",
+    deliver_to: "/work/out",
+  };
+  it("keeps who fills each role and where a code team works", () => {
+    expect(teamWith(kept, { template: "code", ...edits })).toEqual({
+      template: "code",
+      writer_engine: "claude",
+      reviewer_engine: "codex",
+      implementer_member: "m1",
+      reviewer_member: "",
+      qa_member: "m3",
+      researcher_member: "none",
+      designer_member: "",
+      pm_member: "m4",
+      max_rounds: "4",
+      deliver_to: "",
+      repo: "/work/service",
+      branch_prefix: "crew/",
+      check: "make check",
+      prepare: ["vendor"],
+      sign: "always",
+    });
+  });
+  it("sends a writing team no QA, research, workspace or check", () => {
+    expect(teamWith(kept, { template: "draft", ...edits })).toEqual({
+      template: "draft",
+      writer_engine: "claude",
+      reviewer_engine: "codex",
+      implementer_member: "m1",
+      reviewer_member: "",
+      qa_member: "",
+      researcher_member: "",
+      designer_member: "",
+      pm_member: "m4",
+      max_rounds: "4",
+      deliver_to: "/work/out",
+    });
   });
 });

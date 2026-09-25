@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { FileSystemPicker } from "./FileSystemPicker";
 import { isCode } from "./landing";
-import { engines, teamChoice } from "./members";
+import { engines, teamChoice, teamWith } from "./members";
 import { projectKind } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
 import { setTeam, type Member, type Playbook, type Project } from "./api";
@@ -121,28 +121,17 @@ function TeamEditor({
   async function save(e: FormEvent) {
     e.preventDefault();
     await run(async () => {
-      await setTeam(project.id, {
-        template,
-        writer_engine: writer,
-        reviewer_engine: reviewer,
-        implementer_member: current?.implementer_member ?? "",
-        reviewer_member: current?.reviewer_member ?? "",
-        qa_member: code ? (current?.qa_member ?? "") : "",
-        researcher_member: code ? (current?.researcher_member ?? "") : "",
-        designer_member: current?.designer_member ?? "",
-        pm_member: current?.pm_member ?? "",
-        max_rounds: rounds,
-        ...(code
-          ? {
-              deliver_to: "",
-              repo: current?.repo ?? "",
-              branch_prefix: current?.branch_prefix ?? "",
-              check: check.trim(),
-              prepare: current?.prepare ?? [],
-              sign: current?.sign ?? "",
-            }
-          : { deliver_to: deliverTo }),
-      });
+      await setTeam(
+        project.id,
+        teamWith(current ?? {}, {
+          template,
+          writer_engine: writer,
+          reviewer_engine: reviewer,
+          max_rounds: rounds,
+          check: check.trim(),
+          deliver_to: deliverTo,
+        }),
+      );
       await refresh();
       onDone();
     });

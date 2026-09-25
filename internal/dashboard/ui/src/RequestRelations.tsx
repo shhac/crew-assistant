@@ -18,12 +18,17 @@ const relations: { relation: Relation; label: string }[] = [
   { relation: "relates_to", label: "Relates to" },
 ];
 
+const linkedIds: Record<Relation, (task: Task) => string[] | undefined> = {
+  depends_on: (task) => task.depends_on,
+  blocks: (task) => task.blocks,
+  relates_to: (task) => task.relates_to,
+};
+
 const linked = (task: Task, relation: Relation) =>
-  (relation === "depends_on"
-    ? task.depends_on
-    : relation === "blocks"
-      ? task.blocks
-      : task.relates_to) ?? [];
+  linkedIds[relation](task) ?? [];
+
+const isRelation = (value: string): value is Relation =>
+  Object.hasOwn(linkedIds, value);
 
 /**
  * Who set a link. A blocking link is kept on the task it holds back, and a
@@ -162,12 +167,9 @@ function AddRelation({
         className="field relation-kind"
         aria-label="Relation"
         value={relation}
-        onChange={(e) =>
-          setRelation(
-            relations.find((r) => r.relation === e.target.value)?.relation ??
-              "depends_on",
-          )
-        }
+        onChange={(e) => {
+          if (isRelation(e.target.value)) setRelation(e.target.value);
+        }}
       >
         {relations.map((r) => (
           <option key={r.relation} value={r.relation}>

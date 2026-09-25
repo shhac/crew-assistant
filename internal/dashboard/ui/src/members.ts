@@ -1,4 +1,3 @@
-import { isCode } from "./landing";
 import type {
   Member,
   MemberKind,
@@ -121,45 +120,83 @@ export const seatMember = (
 /** Sent as the researcher to leave research out of a code team. */
 export const noResearch = "none";
 
+/** What the owner edits of a team as a whole, apart from who fills its roles. */
+export type TeamEdits = Pick<
+  TeamInput,
+  "template" | "writer_engine" | "reviewer_engine" | "max_rounds" | "check"
+> & { deliver_to: string };
+
+/**
+ * A team to save, keeping who fills each role and where a code team works
+ * from kept. The kind of work decides the shape: a code team has QA,
+ * research, a workspace and a check; a writing team has none of those, only
+ * a folder approved drafts are copied into.
+ */
+export function teamWith(
+  kept: Partial<TeamInput>,
+  edits: TeamEdits,
+): TeamInput {
+  const code = edits.template === "code";
+  return {
+    template: edits.template,
+    writer_engine: edits.writer_engine,
+    reviewer_engine: edits.reviewer_engine,
+    implementer_member: kept.implementer_member ?? "",
+    reviewer_member: kept.reviewer_member ?? "",
+    qa_member: code ? (kept.qa_member ?? "") : "",
+    researcher_member: code ? (kept.researcher_member ?? "") : "",
+    designer_member: kept.designer_member ?? "",
+    pm_member: kept.pm_member ?? "",
+    max_rounds: edits.max_rounds,
+    ...(code
+      ? {
+          deliver_to: "",
+          repo: kept.repo ?? "",
+          branch_prefix: kept.branch_prefix ?? "",
+          check: edits.check ?? "",
+          prepare: kept.prepare ?? [],
+          sign: kept.sign ?? "",
+        }
+      : { deliver_to: edits.deliver_to }),
+  };
+}
+
 /**
  * A project's team as it stands, as a choice to save again. A team is saved
  * whole, so a change to one part sends the rest as it is. A role a member
  * fills sends no engine, so emptying it brings back the template's.
  */
 export function teamChoice(playbook: Playbook, members: Member[]): TeamInput {
-  const code = isCode(playbook);
   const engine = (kind: MemberKind) => {
     const role = seatFor(playbook, kind);
     return role && !role.member ? role.engine : "";
   };
   const who = (kind: MemberKind) =>
     seatMember(playbook, kind, members)?.id ?? "";
-  return {
-    template: playbook.template,
-    writer_engine: engine("implementer"),
-    reviewer_engine: engine("reviewer"),
-    implementer_member: who("implementer"),
-    reviewer_member: who("reviewer"),
-    qa_member: code ? who("qa") : "",
-    researcher_member: !code
-      ? ""
-      : seatFor(playbook, "researcher")
+  return teamWith(
+    {
+      implementer_member: who("implementer"),
+      reviewer_member: who("reviewer"),
+      qa_member: who("qa"),
+      researcher_member: seatFor(playbook, "researcher")
         ? who("researcher")
         : noResearch,
-    designer_member: who("designer"),
-    pm_member: who("pm"),
-    max_rounds: String(playbook.max_rounds),
-    ...(code
-      ? {
-          deliver_to: "",
-          repo: playbook.repo ?? "",
-          branch_prefix: playbook.branch_prefix ?? "",
-          check: playbook.check ?? "",
-          prepare: playbook.prepare ?? [],
-          sign: playbook.sign ?? "",
-        }
-      : { deliver_to: playbook.deliver_to ?? "" }),
-  };
+      designer_member: who("designer"),
+      pm_member: who("pm"),
+      repo: playbook.repo,
+      branch_prefix: playbook.branch_prefix,
+      prepare: playbook.prepare,
+      sign: playbook.sign,
+    },
+    {
+      template: playbook.template,
+      writer_engine: engine("implementer"),
+      reviewer_engine: engine("reviewer"),
+      max_rounds: String(playbook.max_rounds),
+      check: playbook.check,
+      deliver_to: playbook.deliver_to ?? "",
+    },
+  );
 }
 
 /** The member behind the role of a request's team with this name. */
