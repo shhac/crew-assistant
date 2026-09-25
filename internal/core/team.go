@@ -113,7 +113,7 @@ func (s *Service) SendTeamMessage(ctx context.Context, projectID, taskID, to, fr
 		}
 		kind := role.Working()
 		if kind == "" {
-			return fmt.Errorf("%s only plans, before the work starts; message the implementer instead: %w", role.Name, ErrConflict)
+			return fmt.Errorf("%s only %s, which a message doesn't reach; message the implementer instead: %w", role.Name, sideWork(role), ErrConflict)
 		}
 		now := s.now().UTC()
 		out = TeamMessage{ID: uid(), To: role.Name, Kind: kind, From: from, Text: message, Status: MessageWaiting, At: now}
@@ -130,6 +130,17 @@ func (s *Service) SendTeamMessage(ctx context.Context, projectID, taskID, to, fr
 		return nil
 	})
 	return out, err
+}
+
+// sideWork says what a seat without a working role does instead.
+func sideWork(r Role) string {
+	if r.Holds(RolePM) && r.Holds(RolePlanner) {
+		return "plans and keeps the to-do list"
+	}
+	if r.Holds(RolePM) {
+		return "keeps the to-do list"
+	}
+	return "plans, before the work starts"
 }
 
 // addressee finds a team member by name, or by kind when only one member has

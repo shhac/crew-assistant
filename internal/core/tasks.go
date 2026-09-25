@@ -21,8 +21,9 @@ type Task struct {
 	// Stage is where the task sits on its project's board, derived from the
 	// rest of the record; see stage.go.
 	Stage string `json:"stage,omitempty"`
-	// Checking names the checker at work while the task is being checked,
-	// derived with Stage.
+	// Checking names who is at work in a stage someone else leads: the
+	// checker while the task is checked, the planner while it is planned.
+	// Derived with Stage.
 	Checking string `json:"checking,omitempty"`
 	// Answered is a task waiting on a decision the owner has already made:
 	// the loop takes the answer at its next step, so it no longer needs

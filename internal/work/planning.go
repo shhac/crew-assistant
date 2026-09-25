@@ -61,11 +61,11 @@ func (lp *Loop) planTask(ctx context.Context, p core.Project, t core.Task, m med
 		plan, dependsOn = core.Plan{Summary: text.Clip(strings.TrimSpace(reply), 3000)}, nil
 	}
 	plan.Role = planner.Name
-	planned, outcome, err := lp.Core.RecordPlan(ctx, t.ID, plan, dependsOn)
+	planned, err := lp.Core.RecordPlan(ctx, t.ID, plan, dependsOn)
 	if errors.Is(err, core.ErrConflict) {
 		return nil
 	}
-	if err != nil || outcome != core.PlanAsks {
+	if err != nil || planned.Status != core.TaskPlanning {
 		return err
 	}
 	return lp.askPlanQuestions(ctx, planned)

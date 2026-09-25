@@ -22,20 +22,6 @@ type Plan struct {
 	At         time.Time `json:"at"`
 }
 
-// PlanOutcome is where a recorded plan leaves the task.
-type PlanOutcome string
-
-const (
-	// PlanWrites starts the implementer on the plan.
-	PlanWrites PlanOutcome = "writes"
-	// PlanAsks keeps the task in planning until the owner answers the
-	// planner's questions.
-	PlanAsks PlanOutcome = "asks"
-	// PlanWaits puts the task back in the queue until what it depends on has
-	// landed; it plans afresh then, so the plan sees the landed work.
-	PlanWaits PlanOutcome = "waits"
-)
-
 // unfinished reports a task that has not landed, been delivered or stopped.
 func unfinished(v *Snapshot, id string) *Task {
 	t := task(v, id)
@@ -122,9 +108,8 @@ func reaches(v *Snapshot, from, to string, seen map[string]bool) bool {
 // to the queue, keeping neither this plan nor its branch point, so it plans
 // again on top of the landed work. Then the planner's questions, which the
 // loop brings to the owner. Otherwise the implementer starts.
-func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, dependsOn []string) (Task, PlanOutcome, error) {
+func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, dependsOn []string) (Task, error) {
 	var out Task
-	var outcome PlanOutcome
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		t := task(v, taskID)
 		if t == nil {
@@ -143,15 +128,12 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 		case len(waiting) > 0:
 			t.Status, t.Plan, t.Detail = TaskQueued, nil, ""
 			t.Base, t.From, t.Branch = "", "", ""
-			outcome = PlanWaits
 			record(v, now, t.ProjectID, "task.queued", fmt.Sprintf("%s waits for %s", t.Objective, strings.Join(waiting, ", ")))
 		case len(plan.Questions) > 0:
 			t.Plan = &plan
-			outcome = PlanAsks
 		default:
 			t.Plan = &plan
 			t.Status, t.Detail = TaskWriting, ""
-			outcome = PlanWrites
 			record(v, now, t.ProjectID, "task.planned", fmt.Sprintf("Planned %s", t.Objective))
 		}
 		if p := project(v, t.ProjectID); p != nil {
@@ -161,5 +143,5 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 		out = *t
 		return nil
 	})
-	return out, outcome, err
+	return out, err
 }

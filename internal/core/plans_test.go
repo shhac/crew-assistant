@@ -96,6 +96,11 @@ func TestAMessageReachesASeatsWorkingRoleAndNeverAPlannerAlone(t *testing.T) {
 	if _, err := s.SendTeamMessage(testContext, p.ID, task.ID, "Planner", FromOwner, "Hello"); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "only plans") {
 		t.Fatalf("a message to the planner: %v", err)
 	}
+	withPM := pmProject(t, s)
+	task, _ = s.QueueTask(testContext, withPM.ID, TaskInput{Objective: "Another draft"})
+	if _, err := s.SendTeamMessage(testContext, withPM.ID, task.ID, "Pim", FromOwner, "Hello"); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "only keeps the to-do list") {
+		t.Fatalf("a message to the PM: %v", err)
+	}
 }
 
 func TestATaskStartsOnlyOnceWhatItDependsOnHasFinished(t *testing.T) {
@@ -145,18 +150,18 @@ func TestAPlanMovesTheTaskOnAndNeverMakesALoop(t *testing.T) {
 		t.Fatal(started)
 	}
 	// A cannot wait for B, which waits for A: that dependency is dropped.
-	planned, outcome, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", Questions: []string{"Which colour?"}}, []string{b.ID})
-	if err != nil || outcome != PlanAsks || len(planned.DependsOn) != 0 || planned.Status != TaskPlanning || planned.Plan == nil {
-		t.Fatalf("questions keep the task in planning with its plan: %+v %s %v", planned, outcome, err)
+	planned, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", Questions: []string{"Which colour?"}}, []string{b.ID})
+	if err != nil || len(planned.DependsOn) != 0 || planned.Status != TaskPlanning || planned.Plan == nil {
+		t.Fatalf("questions keep the task in planning with its plan: %+v %v", planned, err)
 	}
 	s.UpdateTask(testContext, a.ID, func(t *Task, _ *Project) (string, error) {
 		t.Status, t.Plan = TaskPlanning, nil
 		return "", nil
 	})
-	if written, outcome, _ := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A"}, nil); outcome != PlanWrites || written.Status != TaskWriting || written.Plan.Role != "" || written.Plan.At.IsZero() {
-		t.Fatalf("a clear plan starts the writer: %+v %s", written, outcome)
+	if written, _ := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A"}, nil); written.Status != TaskWriting || written.Plan.Role != "" || written.Plan.At.IsZero() {
+		t.Fatalf("a clear plan starts the writer: %+v", written)
 	}
-	if _, _, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "again"}, nil); !errors.Is(err, ErrConflict) {
+	if _, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "again"}, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("a task no longer planning took a plan: %v", err)
 	}
 	c, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "C"})
@@ -173,9 +178,9 @@ func TestAPlanMovesTheTaskOnAndNeverMakesALoop(t *testing.T) {
 		return "", nil
 	})
 	// One impossible id among the planner's doesn't lose the rest.
-	back, outcome, _ := s.RecordPlan(testContext, c.ID, Plan{Summary: "C builds on A"}, []string{"not-a-task", c.ID, a.ID})
-	if outcome != PlanWaits || back.Status != TaskQueued || back.Plan != nil || back.Base != "" || back.Branch != "" || len(back.WaitsFor) != 1 {
-		t.Fatalf("a task that waits goes back to the queue to plan again later: %+v %s", back, outcome)
+	back, _ := s.RecordPlan(testContext, c.ID, Plan{Summary: "C builds on A"}, []string{"not-a-task", c.ID, a.ID})
+	if back.Status != TaskQueued || back.Plan != nil || back.Base != "" || back.Branch != "" || len(back.WaitsFor) != 1 {
+		t.Fatalf("a task that waits goes back to the queue to plan again later: %+v", back)
 	}
 }
 

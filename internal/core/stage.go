@@ -178,14 +178,13 @@ func waitingStage(v *Snapshot, t Task) string {
 		if len(t.Revisions) == 0 {
 			return StagePlanning
 		}
-		if n := len(t.Revisions); n > 0 {
-			for _, verdict := range t.Verdicts {
-				if verdict.Revision != t.Revisions[n-1].N || verdict.Outcome != VerdictQuestion {
-					continue
-				}
-				if r, ok := t.Role(verdict.Role); ok && r.Holds(RoleQA) {
-					return StageQA
-				}
+		latest := t.Revisions[len(t.Revisions)-1].N
+		for _, verdict := range t.Verdicts {
+			if verdict.Revision != latest || verdict.Outcome != VerdictQuestion {
+				continue
+			}
+			if r, ok := t.Role(verdict.Role); ok && r.Holds(RoleQA) {
+				return StageQA
 			}
 		}
 		return StageReviewing
