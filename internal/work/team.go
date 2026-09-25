@@ -42,8 +42,9 @@ type TeamChoice struct {
 const NoPlanner = "none"
 
 // teamFrom builds a playbook from a template and the few choices the assistant
-// may make about it. Anything left empty keeps the template's choice.
-func teamFrom(in TeamChoice, snap core.Snapshot) (core.Playbook, error) {
+// may make about it. Anything left empty keeps the template's choice. current
+// is the team as it stands, if there is one.
+func teamFrom(in TeamChoice, snap core.Snapshot, current *core.Playbook) (core.Playbook, error) {
 	template := in.Template
 	if template == "" {
 		template = "draft"
@@ -70,7 +71,7 @@ func teamFrom(in TeamChoice, snap core.Snapshot) (core.Playbook, error) {
 		if slot[1] == "" || slot[1] == NoPlanner {
 			continue
 		}
-		if err := fillRole(&playbook, slot[0], slot[1], snap); err != nil {
+		if err := fillRole(&playbook, slot[0], slot[1], snap, current); err != nil {
 			return core.Playbook{}, err
 		}
 	}
@@ -98,14 +99,17 @@ func teamFrom(in TeamChoice, snap core.Snapshot) (core.Playbook, error) {
 // template's instructions stay, since they say how this kind of work is done
 // here; the member's own follow them. A member already in another seat takes
 // the role in that seat instead, so it is one seat, working on one thing at a
-// time, rather than the same member twice.
-func fillRole(playbook *core.Playbook, kind, id string, snap core.Snapshot) error {
-	m, ok := snap.Member(id)
-	if !ok {
-		return fmt.Errorf("there is no team member %q: %w", id, core.ErrNotFound)
+// time, rather than the same member twice. A member who holds the role in
+// the current team keeps it, even if it no longer holds that kind: the
+// team's copy is what counts until the owner changes it.
+func fillRole(playbook *core.Playbook, kind, id string, snap core.Snapshot, current *core.Playbook) error {
+	m, err := memberFor(kind, id, snap)
+	if err != nil && current != nil && slices.ContainsFunc(current.Roles, func(r core.Role) bool { return r.Member == id && r.Holds(kind) }) {
+		m, _ = snap.Member(id)
+		err = nil
 	}
-	if !m.Holds(kind) {
-		return fmt.Errorf("%s doesn't hold the %s role; they hold %s", m.Name, kind, strings.Join(m.Kinds, ", "))
+	if err != nil {
+		return err
 	}
 	slot := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Holds(kind) })
 	// No template has a PM, so only the PM may join a team without a slot.
@@ -113,20 +117,36 @@ func fillRole(playbook *core.Playbook, kind, id string, snap core.Snapshot) erro
 		return fmt.Errorf("a %s team has no %s for %s to fill", playbook.Template, kind, m.Name)
 	}
 	if seat := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Member == m.ID }); seat >= 0 && seat != slot {
-		playbook.Roles[seat].Kinds = slices.Concat(playbook.Roles[seat].Kinds, []string{kind})
+		playbook.Rekind(seat, slices.Concat(playbook.Roles[seat].Kinds, []string{kind}))
 		if slot >= 0 {
 			playbook.Roles = slices.Delete(playbook.Roles, slot, slot+1)
 		}
 		return nil
 	}
 	if slot < 0 {
-		playbook.Roles = append(playbook.Roles, core.Role{Name: m.Name, Kinds: []string{kind}, Engine: m.Engine, Model: m.Model, Effort: m.Effort, Member: m.ID, Instructions: m.Instructions})
+		playbook.Roles = append(playbook.Roles, memberSeat(m, []string{kind}, ""))
 		return nil
 	}
-	r := &playbook.Roles[slot]
-	r.Name, r.Engine, r.Model, r.Effort, r.Member = m.Name, m.Engine, m.Model, m.Effort, m.ID
-	r.Instructions = strings.TrimSpace(r.Instructions + "\n\n" + m.Instructions)
+	playbook.Roles[slot] = memberSeat(m, playbook.Roles[slot].Kinds, playbook.Roles[slot].Instructions)
 	return nil
+}
+
+// memberFor is the member id names, if it holds that kind of role.
+func memberFor(kind, id string, snap core.Snapshot) (core.Member, error) {
+	m, ok := snap.Member(id)
+	if !ok {
+		return core.Member{}, fmt.Errorf("there is no team member %q: %w", id, core.ErrNotFound)
+	}
+	if !m.Holds(kind) {
+		return core.Member{}, fmt.Errorf("%s doesn't hold the %s role; they hold %s", m.Name, kind, strings.Join(m.Kinds, ", "))
+	}
+	return m, nil
+}
+
+// memberSeat is a member in a seat holding kinds of role, after the
+// template's instructions for them.
+func memberSeat(m core.Member, kinds []string, instructions string) core.Role {
+	return core.Role{Name: m.Name, Kinds: kinds, Engine: m.Engine, Model: m.Model, Effort: m.Effort, Member: m.ID, Instructions: strings.TrimSpace(instructions + "\n\n" + m.Instructions)}
 }
 
 // SetTeam applies a team choice made in the dashboard or by the assistant.
@@ -135,22 +155,34 @@ func (lp *Loop) SetTeam(ctx context.Context, projectID string, in TeamChoice) (c
 	if err != nil {
 		return core.Project{}, err
 	}
-	playbook, err := teamFrom(in, snap)
+	var current *core.Playbook
+	if p, ok := findProject(snap, projectID); ok {
+		current = p.Playbook
+	}
+	playbook, err := teamFrom(in, snap, current)
 	if err != nil {
 		return core.Project{}, err
 	}
+	// A member who stays in the same seat keeps the copy the team has; changes
+	// to the member since reach this team when it is given the seat again.
+	if p, ok := findProject(snap, projectID); ok && p.Playbook != nil && p.Playbook.Template == playbook.Template {
+		for k, r := range playbook.Roles {
+			i := slices.IndexFunc(p.Playbook.Roles, func(c core.Role) bool { return r.Member != "" && c.Member == r.Member })
+			if i >= 0 && sameKinds(p.Playbook.Roles[i].Kinds, r.Kinds) {
+				playbook.Roles[k] = p.Playbook.Roles[i]
+			}
+		}
+	}
+	// The template's seats are made afresh, so one named like a member gives
+	// way again, as it did when the member was given its seat.
+	playbook.NameSeats()
 	if playbook.Medium == core.MediumGit {
 		p, ok := findProject(snap, projectID)
 		if !ok {
 			return core.Project{}, core.ErrNotFound
 		}
-		// A code team works on one of the project's own folders, never an
-		// arbitrary path.
-		if playbook.Repo == "" && len(p.Directories) > 0 {
-			playbook.Repo = p.Directories[0]
-		}
-		if !slices.Contains(p.Directories, playbook.Repo) {
-			return core.Project{}, errors.New("a code team works on one of the project's linked folders; link the repository first")
+		if playbook.Repo, err = teamRepo(p, playbook.Repo); err != nil {
+			return core.Project{}, err
 		}
 		// Choosing a team never changes where its work lands; that is its own
 		// setting.
@@ -167,6 +199,118 @@ func (lp *Loop) SetTeam(ctx context.Context, projectID string, in TeamChoice) (c
 		lp.Nudge()
 	}
 	return p, err
+}
+
+// teamRepo is the repository a code team works on: one of the project's own
+// folders, never an arbitrary path. Empty means the first.
+func teamRepo(p core.Project, repo string) (string, error) {
+	if repo == "" && len(p.Directories) > 0 {
+		repo = p.Directories[0]
+	}
+	if !slices.Contains(p.Directories, repo) {
+		return "", errors.New("a code team works on one of the project's linked folders; link the repository first")
+	}
+	return repo, nil
+}
+
+// sameKinds reports whether two seats hold the same kinds, in any order.
+func sameKinds(a, b []string) bool {
+	return len(a) == len(b) && !slices.ContainsFunc(a, func(k string) bool { return !slices.Contains(b, k) })
+}
+
+// SetSeat gives one kind of role to a member, or with no member back to the
+// template's seat for it; NoPlanner as the planner leaves planning out.
+// A member already on the team takes the role in the seat it has. Every
+// other seat keeps the copy it has, and requests under way keep the team
+// they started with.
+func (lp *Loop) SetSeat(ctx context.Context, projectID, kind, memberID string) (core.Project, error) {
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return core.Project{}, err
+	}
+	p, ok := findProject(snap, projectID)
+	if !ok {
+		return core.Project{}, core.ErrNotFound
+	}
+	if p.Playbook == nil {
+		return core.Project{}, errors.New("choose a team first")
+	}
+	playbook := *p.Playbook
+	base, templated := playbook.TemplateSeat(kind)
+	// No template has a PM, so only the PM may join a team without a seat
+	// for it; planning can be left out only where the template plans.
+	if !templated && (kind != core.RolePM || memberID == NoPlanner) {
+		return core.Project{}, fmt.Errorf("a %s team has no %s", playbook.Template, kind)
+	}
+	if memberID == NoPlanner && kind != core.RolePlanner {
+		return core.Project{}, fmt.Errorf("only planning can be left out of a team")
+	}
+	at := playbook.Unseat(kind)
+	switch memberID {
+	case NoPlanner:
+	case "":
+		if templated {
+			playbook.Roles = slices.Insert(playbook.Roles, at, base)
+		}
+	default:
+		m, err := memberFor(kind, memberID, snap)
+		if err != nil {
+			return core.Project{}, err
+		}
+		if seat := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Member == m.ID }); seat >= 0 {
+			playbook.Rekind(seat, slices.Concat(playbook.Roles[seat].Kinds, []string{kind}))
+			break
+		}
+		playbook.Roles = slices.Insert(playbook.Roles, at, memberSeat(m, []string{kind}, base.Instructions))
+		playbook.NameSeats()
+	}
+	if err = playbook.Validate(); err != nil {
+		return core.Project{}, err
+	}
+	// Queued work may have been waiting on a planner or a PM, so look again.
+	p, err = lp.Core.SetPlaybook(ctx, projectID, playbook)
+	if err == nil {
+		lp.Nudge()
+	}
+	return p, err
+}
+
+// Workspace is where a code team works and how its work is kept there.
+type Workspace struct {
+	Repo         string   `json:"repo"`
+	BranchPrefix string   `json:"branch_prefix"`
+	Prepare      []string `json:"prepare"`
+	Sign         string   `json:"sign"`
+}
+
+// SetWorkspace changes where a code team works and nothing else: its roles,
+// check and landing stay as they are.
+func (lp *Loop) SetWorkspace(ctx context.Context, projectID string, in Workspace) (core.Project, error) {
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return core.Project{}, err
+	}
+	p, ok := findProject(snap, projectID)
+	if !ok {
+		return core.Project{}, core.ErrNotFound
+	}
+	if p.Playbook == nil || p.Playbook.Medium != core.MediumGit {
+		return core.Project{}, errors.New("a workspace is for code teams; choose a code team first")
+	}
+	playbook := *p.Playbook
+	if playbook.Repo, err = teamRepo(p, in.Repo); err != nil {
+		return core.Project{}, err
+	}
+	playbook.BranchPrefix = strings.TrimSpace(in.BranchPrefix)
+	if playbook.BranchPrefix == "" {
+		playbook.BranchPrefix = core.Templates[playbook.Template].BranchPrefix
+	}
+	playbook.Prepare = append([]string(nil), in.Prepare...)
+	playbook.Sign = in.Sign
+	if err = playbook.Validate(); err != nil {
+		return core.Project{}, err
+	}
+	return lp.Core.SetPlaybook(ctx, projectID, playbook)
 }
 
 // SetLanding sets what landing means for a code project. The owner and the

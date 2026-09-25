@@ -1,9 +1,9 @@
-export type ProjectTab = "board" | "brief" | "team" | "landing" | "activity";
+export type ProjectTab = "board" | "brief" | "team" | "config" | "activity";
 export const projectTabs: ProjectTab[] = [
   "board",
   "brief",
   "team",
-  "landing",
+  "config",
   "activity",
 ];
 

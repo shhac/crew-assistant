@@ -313,6 +313,108 @@ func seatKinds(r Role) error {
 	return nil
 }
 
+// Unseat takes a kind of role from the seat that holds it; the seat goes if
+// that was all it held. It returns where a seat for the kind belongs. The
+// roles are copied first, so a team a task started with never changes.
+func (p *Playbook) Unseat(kind string) int {
+	p.Roles = slices.Clone(p.Roles)
+	at := slices.IndexFunc(p.Roles, func(r Role) bool { return r.Holds(kind) })
+	switch {
+	case at < 0:
+		return len(p.Roles)
+	case len(p.Roles[at].Kinds) == 1:
+		p.Roles = slices.Delete(p.Roles, at, at+1)
+		return at
+	}
+	p.Rekind(at, slices.DeleteFunc(slices.Clone(p.Roles[at].Kinds), func(k string) bool { return k == kind }))
+	return at + 1
+}
+
+// TemplateInstructions is what the template says about how each of these
+// kinds of role is done here, in the order a team works, whatever order the
+// kinds were given in.
+func (p Playbook) TemplateInstructions(kinds []string) string {
+	var parts []string
+	for _, kind := range roleKinds {
+		t := slices.IndexFunc(Templates[p.Template].Roles, func(r Role) bool { return r.Holds(kind) })
+		if slices.Contains(kinds, kind) && t >= 0 {
+			parts = append(parts, Templates[p.Template].Roles[t].Instructions)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// Rekind changes the kinds of role the k-th seat holds. Its instructions
+// become the template's for those kinds, followed by the seat's own, so a
+// seat holds the same instructions however its roles were given to it.
+func (p *Playbook) Rekind(k int, kinds []string) {
+	r := &p.Roles[k]
+	own := p.ownInstructions(*r)
+	r.Kinds = kinds
+	r.Instructions = strings.TrimSpace(p.TemplateInstructions(kinds) + "\n\n" + own)
+}
+
+// ownInstructions is what a seat was told beyond the template's instructions
+// for its roles. A seat that took a second role before seats were told about
+// each carries the template's instructions for one role only, so that is
+// looked for too.
+func (p Playbook) ownInstructions(r Role) string {
+	prefixes := []string{p.TemplateInstructions(r.Kinds)}
+	for _, kind := range r.Kinds {
+		prefixes = append(prefixes, p.TemplateInstructions([]string{kind}))
+	}
+	for _, prefix := range prefixes {
+		if prefix != "" && strings.HasPrefix(r.Instructions, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(r.Instructions, prefix))
+		}
+	}
+	return strings.TrimSpace(r.Instructions)
+}
+
+// NameSeats gives way to members: a template seat named like a member's
+// seat takes a number, so every seat keeps a name of its own.
+func (p *Playbook) NameSeats() {
+	for i, r := range p.Roles {
+		if r.Member == "" && slices.ContainsFunc(p.Roles, func(o Role) bool {
+			return o.Member != "" && strings.EqualFold(strings.TrimSpace(o.Name), strings.TrimSpace(r.Name))
+		}) {
+			p.Roles[i].Name = p.FreeName(i, r.Name)
+		}
+	}
+}
+
+// TemplateSeat is the template's seat for a kind of role, to fill it when no
+// member does, named so that no seat on the team shares its name.
+func (p Playbook) TemplateSeat(kind string) (Role, bool) {
+	template := Templates[p.Template].Roles
+	t := slices.IndexFunc(template, func(r Role) bool { return r.Holds(kind) })
+	if t < 0 {
+		return Role{}, false
+	}
+	seat := template[t]
+	seat.Kinds = []string{kind}
+	seat.Name = p.FreeName(-1, seat.Name)
+	return seat, true
+}
+
+// FreeName is name, or name with a number after it, whichever no seat but
+// the k-th has. Seat names must differ by more than case.
+func (p Playbook) FreeName(k int, name string) string {
+	taken := func(candidate string) bool {
+		for i, r := range p.Roles {
+			if i != k && strings.EqualFold(strings.TrimSpace(r.Name), candidate) {
+				return true
+			}
+		}
+		return false
+	}
+	candidate := name
+	for n := 2; taken(candidate); n++ {
+		candidate = fmt.Sprintf("%s %d", name, n)
+	}
+	return candidate
+}
+
 // SetPlaybook replaces how a project's work gets done. Tasks already started
 // keep the roles they started with.
 func (s *Service) SetPlaybook(ctx context.Context, projectID string, playbook Playbook) (Project, error) {

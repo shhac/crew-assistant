@@ -37,6 +37,32 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		}
 		respond(w, 200, v)
 	})
+	mux.HandleFunc("PUT /api/projects/{id}/team/{kind}", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Member string `json:"member"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.SetSeat(r.Context(), r.PathValue("id"), r.PathValue("kind"), in.Member)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
+	mux.HandleFunc("PUT /api/projects/{id}/workspace", func(w http.ResponseWriter, r *http.Request) {
+		var in work.Workspace
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.SetWorkspace(r.Context(), r.PathValue("id"), in)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
 	mux.HandleFunc("PUT /api/projects/{id}/landing", func(w http.ResponseWriter, r *http.Request) {
 		var in core.LandPolicy
 		if decode(w, r, &in) != nil {

@@ -168,17 +168,60 @@ func (s *Service) SaveMember(ctx context.Context, id string, in MemberInput) (Me
 	return out, err
 }
 
-// DeleteMember removes a member. Project roles copied from it stay as they
-// are; they just stop gaining its learnings.
+// DeleteMember removes a member, and hands any project role it filled back to
+// the team's template. Requests under way keep the team they started with.
 func (s *Service) DeleteMember(ctx context.Context, id string) error {
 	return s.store.update(ctx, func(v *Snapshot) error {
 		i := slices.IndexFunc(v.Members, func(m Member) bool { return m.ID == id })
 		if i < 0 {
 			return ErrNotFound
 		}
+		gone := v.Members[i]
 		v.Members = slices.Delete(v.Members, i, i+1)
+		now := s.now().UTC()
+		// Every team is checked before any is changed: if one would be left
+		// broken, the member stays and nothing is saved.
+		for j := range v.Projects {
+			p := &v.Projects[j]
+			vacated, err := vacate(p, id)
+			if err != nil {
+				return fmt.Errorf("%s can't leave the team for %s: %w", gone.Name, p.Title, err)
+			}
+			if vacated {
+				p.UpdatedAt = now
+				record(v, now, p.ID, "playbook.set", gone.Name+" left the team for "+p.Title)
+			}
+		}
 		return nil
 	})
+}
+
+// vacate takes a member's seat off a team and gives each kind of role it held
+// back to the template's seat for it, if the template has one, and reports
+// whether it had a seat. The team it leaves must still be valid.
+func vacate(p *Project, memberID string) (bool, error) {
+	if p.Playbook == nil {
+		return false, nil
+	}
+	playbook := *p.Playbook
+	playbook.Roles = slices.Clone(playbook.Roles)
+	k := slices.IndexFunc(playbook.Roles, func(r Role) bool { return r.Member == memberID })
+	if k < 0 {
+		return false, nil
+	}
+	kinds := playbook.Roles[k].Kinds
+	playbook.Roles = slices.Delete(playbook.Roles, k, k+1)
+	for _, kind := range kinds {
+		if seat, ok := playbook.TemplateSeat(kind); ok {
+			playbook.Roles = slices.Insert(playbook.Roles, k, seat)
+			k++
+		}
+	}
+	if err := playbook.Validate(); err != nil {
+		return false, err
+	}
+	p.Playbook = &playbook
+	return true, nil
 }
 
 // SetMemberPicture records a picture drawn for a member, and how it was

@@ -1,10 +1,16 @@
 import { Board } from "./Board";
 import { BriefTab } from "./ProjectBrief";
 import { TeamTab } from "./ProjectTeam";
-import { LandingTab } from "./ProjectLanding";
+import { ConfigTab } from "./ProjectConfig";
 import { ActivityTab } from "./ProjectActivity";
 import { RequestPanel } from "./RequestPanel";
-import { href, projectHref, type ProjectTab, type Route } from "./router";
+import {
+  href,
+  projectHref,
+  projectTabs,
+  type ProjectTab,
+  type Route,
+} from "./router";
 import { isCode, needsYou, projectKind, projectTasks } from "./stages";
 import { landsBy } from "./landing";
 import { Icon, Pill } from "./ui";
@@ -14,7 +20,7 @@ const tabLabels: Record<ProjectTab, string> = {
   board: "Board",
   brief: "Brief",
   team: "Team",
-  landing: "Landing",
+  config: "Config",
   activity: "Activity",
 };
 
@@ -32,10 +38,7 @@ export function ProjectPage({
   const tasks = projectTasks(project, state.tasks);
   const waiting = tasks.filter(needsYou).length;
   const code = isCode(project.playbook);
-  const tabs: ProjectTab[] = code
-    ? ["board", "brief", "team", "landing", "activity"]
-    : ["board", "brief", "team", "activity"];
-  const tab = tabs.includes(route.tab) ? route.tab : "board";
+  const tab = route.tab;
   const request = route.request
     ? tasks.find((t) => t.id === route.request)
     : undefined;
@@ -75,7 +78,7 @@ export function ProjectPage({
           )}
         </p>
         <nav className="tabs" aria-label="Project">
-          {tabs.map((t) => (
+          {projectTabs.map((t) => (
             <a
               key={t}
               className="tab"
@@ -94,7 +97,7 @@ export function ProjectPage({
       {tab === "team" && (
         <TeamTab project={project} members={state.members} refresh={refresh} />
       )}
-      {tab === "landing" && <LandingTab project={project} refresh={refresh} />}
+      {tab === "config" && <ConfigTab project={project} refresh={refresh} />}
       {tab === "activity" && <ActivityTab project={project} state={state} />}
       {route.request && (
         <RequestPanel

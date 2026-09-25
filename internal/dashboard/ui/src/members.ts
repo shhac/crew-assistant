@@ -1,4 +1,13 @@
-import type { Member, MemberKind, Project, Role, Task } from "./api";
+import { isCode } from "./landing";
+import type {
+  Member,
+  MemberKind,
+  Playbook,
+  Project,
+  Role,
+  Task,
+  TeamInput,
+} from "./api";
 
 export const engines = [
   { id: "claude", label: "Claude" },
@@ -92,6 +101,64 @@ export const taskRoles = (task: Task, project: Project): Role[] =>
 /** The member a role was copied from, while that member is still there. */
 export const memberOf = (role: Role | undefined, members: Member[]) =>
   role?.member ? members.find((m) => m.id === role.member) : undefined;
+
+/** The seat on a team that holds a kind of role, if one does. */
+export const seatFor = (playbook: Playbook, kind: string) =>
+  playbook.roles.find((r) => holds(r, kind));
+
+/**
+ * The member filling a team's role of this kind, while it is still there.
+ * The team keeps its copy, so a member whose kinds changed since still
+ * fills the role until the owner changes it.
+ */
+export const seatMember = (
+  playbook: Playbook,
+  kind: MemberKind,
+  members: Member[],
+) => memberOf(seatFor(playbook, kind), members);
+
+/** Sent as the planner to leave planning out of a code team. */
+export const noPlanning = "none";
+
+/**
+ * A project's team as it stands, as a choice to save again. A team is saved
+ * whole, so a change to one part sends the rest as it is. A role a member
+ * fills sends no engine, so emptying it brings back the template's.
+ */
+export function teamChoice(playbook: Playbook, members: Member[]): TeamInput {
+  const code = isCode(playbook);
+  const engine = (kind: MemberKind) => {
+    const role = seatFor(playbook, kind);
+    return role && !role.member ? role.engine : "";
+  };
+  const who = (kind: MemberKind) =>
+    seatMember(playbook, kind, members)?.id ?? "";
+  return {
+    template: playbook.template,
+    writer_engine: engine("implementer"),
+    reviewer_engine: engine("reviewer"),
+    implementer_member: who("implementer"),
+    reviewer_member: who("reviewer"),
+    qa_member: code ? who("qa") : "",
+    planner_member: !code
+      ? ""
+      : seatFor(playbook, "planner")
+        ? who("planner")
+        : noPlanning,
+    pm_member: who("pm"),
+    max_rounds: String(playbook.max_rounds),
+    ...(code
+      ? {
+          deliver_to: "",
+          repo: playbook.repo ?? "",
+          branch_prefix: playbook.branch_prefix ?? "",
+          check: playbook.check ?? "",
+          prepare: playbook.prepare ?? [],
+          sign: playbook.sign ?? "",
+        }
+      : { deliver_to: playbook.deliver_to ?? "" }),
+  };
+}
 
 /** The member behind the role of a request's team with this name. */
 export function roleMember(

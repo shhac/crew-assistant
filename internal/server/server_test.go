@@ -174,6 +174,27 @@ func TestTheOwnerOrdersTheToDoListAndMessagesTheTeam(t *testing.T) {
 	}
 }
 
+func TestTheOwnerFillsARoleAndSetsWhereACodeTeamWorks(t *testing.T) {
+	s, call := ownerServer(t)
+	ctx := context.Background()
+	p, err := s.CreateProject(ctx, core.ProjectInput{Title: "Notes", Template: "draft", Brief: core.BriefInput{Goal: "Notes"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ada, _ := s.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
+	filled := call("PUT", "/api/projects/"+p.ID+"/team/implementer", `{"member":"`+ada.ID+`"}`)
+	if filled.Code != 200 || !strings.Contains(filled.Body.String(), `"member":"`+ada.ID+`"`) {
+		t.Fatal(filled.Code, filled.Body.String())
+	}
+	emptied := call("PUT", "/api/projects/"+p.ID+"/team/implementer", `{"member":""}`)
+	if emptied.Code != 200 || strings.Contains(emptied.Body.String(), ada.ID) {
+		t.Fatal(emptied.Code, emptied.Body.String())
+	}
+	if w := call("PUT", "/api/projects/"+p.ID+"/workspace", `{"repo":"","branch_prefix":"crew/","prepare":[],"sign":""}`); w.Code == 200 {
+		t.Fatal("a writing team was given a workspace")
+	}
+}
+
 func TestErrorsReachTheOwnerWithoutTheirInternalLabels(t *testing.T) {
 	for err, want := range map[error]string{
 		fmt.Errorf("this request has already finished: %w", core.ErrConflict): "This request has already finished",

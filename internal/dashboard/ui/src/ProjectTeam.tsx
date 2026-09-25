@@ -1,12 +1,23 @@
 import { useState, type FormEvent } from "react";
 import { FileSystemPicker } from "./FileSystemPicker";
-import { Folders } from "./ProjectFolders";
-import { memberHref } from "./router";
-import { isCode } from "./stages";
-import { engineLabel, engines, holds, kindsLabel, memberOf } from "./members";
+import { href, memberHref } from "./router";
+import { isCode } from "./landing";
+import {
+  engineLabel,
+  engines,
+  holds,
+  kindLabel,
+  kindsLabel,
+  memberOf,
+  noPlanning,
+  seatFor,
+  seatMember,
+  teamChoice,
+} from "./members";
 import { Avatar } from "./Avatar";
 import { ErrorNotice, useAction } from "./ui";
 import {
+  setSeat,
   setTeam,
   type Member,
   type MemberKind,
@@ -15,11 +26,18 @@ import {
   type Role,
 } from "./api";
 
-const signing: Record<string, string> = {
-  "": "Signed as your git config says",
-  always: "Always signed",
-  never: "Never signed",
-};
+/** What a place on the team is called: a writing team's implementer writes. */
+const seatLabel = (kind: string, code: boolean) =>
+  kind === "implementer" && !code ? "Writer" : kindLabel(kind);
+
+/**
+ * The roles a team has places for, in the order it works: a writing team
+ * neither plans nor runs QA, and any team can have a PM.
+ */
+const seatKinds = (code: boolean): MemberKind[] =>
+  code
+    ? ["planner", "implementer", "reviewer", "qa", "pm"]
+    : ["implementer", "reviewer", "pm"];
 
 export function TeamTab({
   project,
@@ -55,55 +73,170 @@ export function TeamTab({
               </button>
             </div>
             {playbook ? (
-              <TeamView playbook={playbook} members={members} />
+              <>
+                <Seats
+                  project={project}
+                  playbook={playbook}
+                  members={members}
+                  refresh={refresh}
+                />
+                <TeamView playbook={playbook} />
+              </>
             ) : (
               <p className="muted">No team yet, so nothing can be asked for.</p>
             )}
           </>
         )}
       </section>
-      <Folders project={project} refresh={refresh} />
     </div>
   );
 }
 
-function TeamView({
+/**
+ * Each role on the team and who fills it. Members are added to and removed
+ * from the owner's Team; here they are only given a role.
+ */
+function Seats({
+  project,
   playbook,
   members,
+  refresh,
 }: {
+  project: Project;
   playbook: Playbook;
   members: Member[];
+  refresh: () => Promise<void>;
 }) {
+  const code = isCode(playbook);
+  const { busy, error, run } = useAction();
+  async function fill(kind: MemberKind, id: string) {
+    await run(async () => {
+      await setSeat(project.id, kind, id);
+      await refresh();
+    });
+  }
+  return (
+    <>
+      <ul className="seats rows" aria-label="Roles">
+        {seatKinds(code).map((kind) => (
+          <Seat
+            key={kind}
+            kind={kind}
+            label={seatLabel(kind, code)}
+            playbook={playbook}
+            members={members}
+            busy={busy}
+            onFill={(id) => void fill(kind, id)}
+          />
+        ))}
+      </ul>
+      <ErrorNotice error={error} />
+      <p className="hint">
+        Add or remove people on <a href={href({ page: "team" })}>your team</a>.
+        Requests already under way keep the team they started with.
+      </p>
+    </>
+  );
+}
+
+/**
+ * One role: the member in it, the template's seat, or no one. Only planning
+ * can be left out of a team that has it, and no template has a PM.
+ */
+function Seat({
+  kind,
+  label,
+  playbook,
+  members,
+  busy,
+  onFill,
+}: {
+  kind: MemberKind;
+  label: string;
+  playbook: Playbook;
+  members: Member[];
+  busy: boolean;
+  onFill: (id: string) => void;
+}) {
+  const role = seatFor(playbook, kind);
+  const filled = seatMember(playbook, kind, members);
+  // Only a member who holds the kind can be given the role; one given it
+  // before its kinds changed keeps it until the owner changes it.
+  const eligible = members.filter((m) => holds(m, kind));
+  const kept = !!filled && !holds(filled, kind);
+  const options = filled && kept ? [...eligible, filled] : eligible;
+  const optional = kind === "planner";
+  const empty = kind === "pm" ? "No PM" : "Template default";
+  const value = filled?.id ?? (optional && !role ? noPlanning : "");
+  return (
+    <li className="seat">
+      <span className="seat-role">{label}</span>
+      <span className="seat-who">
+        {filled && role ? (
+          <RoleName role={role} members={members} />
+        ) : role ? (
+          <span className="muted">
+            Template default · {engineLabel(role.engine)}
+          </span>
+        ) : (
+          <span className="muted">{optional ? "No planning" : empty}</span>
+        )}
+        {filled && role && role.kinds.length > 1 && (
+          <span className="muted small"> · {seatSummary(role)}</span>
+        )}
+        {kept && (
+          <span className="muted small">
+            {" "}
+            · Kept here; no longer holds this role on your team
+          </span>
+        )}
+      </span>
+      <span className="seat-actions">
+        {options.length > 0 || optional ? (
+          <select
+            className="field"
+            aria-label={`Assign ${label}`}
+            value={value}
+            disabled={busy}
+            onChange={(e) => onFill(e.target.value)}
+          >
+            <option value="">{empty}</option>
+            {optional && <option value={noPlanning}>No planning</option>}
+            {options.map((m) => (
+              <option key={m.id} value={m.id} disabled={kept && m === filled}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="muted small">No one to assign</span>
+        )}
+        {role?.member && (
+          <button
+            type="button"
+            className="btn btn-quiet btn-sm"
+            disabled={busy}
+            onClick={() => onFill("")}
+          >
+            Unassign {label}
+          </button>
+        )}
+      </span>
+    </li>
+  );
+}
+
+function TeamView({ playbook }: { playbook: Playbook }) {
   const code = isCode(playbook);
   return (
     <dl className="facts">
-      {playbook.roles.map((role) => (
-        <div key={role.name} className="fact-row">
-          <dt>
-            <RoleName role={role} members={members} />
-          </dt>
-          <dd>{seatSummary(role)}</dd>
-        </div>
-      ))}
       {code && (
-        <>
-          <div className="fact-row">
-            <dt>QA runs</dt>
-            <dd>
-              <code>{playbook.check}</code>
-            </dd>
-          </div>
-          <div className="fact-row">
-            <dt>Works in</dt>
-            <dd>
-              A private copy of <code>{playbook.repo}</code>
-            </dd>
-          </div>
-          <div className="fact-row">
-            <dt>Commits</dt>
-            <dd>{signing[playbook.sign ?? ""]}</dd>
-          </div>
-        </>
+        <div className="fact-row">
+          <dt>QA runs</dt>
+          <dd>
+            <code>{playbook.check}</code>
+          </dd>
+        </div>
       )}
       {!code && (
         <div className="fact-row">
@@ -127,13 +260,9 @@ function TeamView({
   );
 }
 
-/** "Planner and implementer · Claude", leaving out kinds the name says. */
+/** "Planner and implementer · Claude": every role a seat holds. */
 function seatSummary(role: Role) {
-  const kinds = kindsLabel(role.kinds);
-  const named = kinds.toLowerCase() === role.name.toLowerCase();
-  return [named ? "" : kinds, engineLabel(role.engine)]
-    .filter(Boolean)
-    .join(" · ");
+  return [kindsLabel(role.kinds), engineLabel(role.engine)].join(" · ");
 }
 
 /**
@@ -152,35 +281,11 @@ function RoleName({ role, members }: { role: Role; members: Member[] }) {
   );
 }
 
-const firstEngine = (
-  roles: Role[] | undefined,
-  kind: string,
-  fallback: string,
-) => roles?.find((r) => holds(r, kind))?.engine ?? fallback;
-
-/** The member a slot was filled with, while that member is still on the team. */
-function chosenMember(
-  roles: Role[] | undefined,
-  kind: MemberKind,
-  members: Member[],
-) {
-  const id = roles?.find((r) => holds(r, kind))?.member;
-  return members.some((m) => m.id === id && holds(m, kind)) ? (id ?? "") : "";
-}
-
-/** Sent as the planner to leave planning out of a code team. */
-const noPlanning = "none";
-
 /**
- * Who plans for a code team: the member in the seat that plans, the
- * template's planner, or no one.
+ * The kind of team and how it works. Who fills each role is chosen beside
+ * it, and where the work happens is on the Config tab; both are kept as they
+ * are here.
  */
-function chosenPlanner(playbook: Playbook | undefined, members: Member[]) {
-  if (playbook?.template !== "code") return "";
-  if (!playbook.roles.some((r) => holds(r, "planner"))) return noPlanning;
-  return chosenMember(playbook.roles, "planner", members);
-}
-
 function TeamEditor({
   project,
   members,
@@ -193,31 +298,13 @@ function TeamEditor({
   refresh: () => Promise<void>;
 }) {
   const playbook = project.playbook;
+  const current = playbook && teamChoice(playbook, members);
   const folders = project.directories ?? [];
   const [template, setTemplate] = useState(playbook?.template ?? "draft");
   const code = template === "code";
-  const [repo, setRepo] = useState(playbook?.repo ?? folders[0] ?? "");
-  const [branchPrefix, setBranchPrefix] = useState(
-    playbook?.branch_prefix ?? "crew/",
-  );
   const [check, setCheck] = useState(playbook?.check ?? "");
-  const [prepare, setPrepare] = useState((playbook?.prepare ?? []).join(", "));
-  const [sign, setSign] = useState(playbook?.sign ?? "");
-  const [writer, setWriter] = useState(
-    firstEngine(playbook?.roles, "implementer", "claude"),
-  );
-  const [reviewer, setReviewer] = useState(
-    firstEngine(playbook?.roles, "reviewer", "codex"),
-  );
-  const [who, setWho] = useState<Record<MemberKind, string>>(() => ({
-    planner: chosenPlanner(playbook, members),
-    implementer: chosenMember(playbook?.roles, "implementer", members),
-    reviewer: chosenMember(playbook?.roles, "reviewer", members),
-    qa: chosenMember(playbook?.roles, "qa", members),
-    pm: chosenMember(playbook?.roles, "pm", members),
-  }));
-  const choose = (kind: MemberKind) => (id: string) =>
-    setWho((current) => ({ ...current, [kind]: id }));
+  const [writer, setWriter] = useState(current?.writer_engine || "claude");
+  const [reviewer, setReviewer] = useState(current?.reviewer_engine || "codex");
   const [rounds, setRounds] = useState(String(playbook?.max_rounds ?? 3));
   const [deliverTo, setDeliverTo] = useState(playbook?.deliver_to ?? "");
   const [picking, setPicking] = useState(false);
@@ -229,23 +316,20 @@ function TeamEditor({
         template,
         writer_engine: writer,
         reviewer_engine: reviewer,
-        implementer_member: who.implementer,
-        reviewer_member: who.reviewer,
-        qa_member: code ? who.qa : "",
-        planner_member: code ? who.planner : "",
-        pm_member: who.pm,
+        implementer_member: current?.implementer_member ?? "",
+        reviewer_member: current?.reviewer_member ?? "",
+        qa_member: code ? (current?.qa_member ?? "") : "",
+        planner_member: code ? (current?.planner_member ?? "") : "",
+        pm_member: current?.pm_member ?? "",
         max_rounds: rounds,
         ...(code
           ? {
               deliver_to: "",
-              repo,
-              branch_prefix: branchPrefix.trim(),
+              repo: current?.repo ?? "",
+              branch_prefix: current?.branch_prefix ?? "",
               check: check.trim(),
-              prepare: prepare
-                .split(/[,\n]/)
-                .map((p) => p.trim())
-                .filter(Boolean),
-              sign,
+              prepare: current?.prepare ?? [],
+              sign: current?.sign ?? "",
             }
           : { deliver_to: deliverTo }),
       });
@@ -272,53 +356,22 @@ function TeamEditor({
           </label>
         )}
         <div className="form-row">
-          {code && (
-            <TeamSlot
-              kind="planner"
-              label="Planner"
-              members={members}
-              who={who.planner}
-              onWho={choose("planner")}
-              none="No planning"
+          {!current?.implementer_member && (
+            <EngineSlot
+              label={code ? "Implementer" : "Writer"}
+              id="team-writer"
+              value={writer}
+              onChange={setWriter}
             />
           )}
-          <TeamSlot
-            kind="implementer"
-            label={code ? "Implementer" : "Writer"}
-            members={members}
-            who={who.implementer}
-            onWho={choose("implementer")}
-            engine={{ id: "team-writer", value: writer, onChange: setWriter }}
-          />
-          <TeamSlot
-            kind="reviewer"
-            label="Reviewer"
-            members={members}
-            who={who.reviewer}
-            onWho={choose("reviewer")}
-            engine={{
-              id: "team-reviewer",
-              value: reviewer,
-              onChange: setReviewer,
-            }}
-          />
-          {code && (
-            <TeamSlot
-              kind="qa"
-              label="QA"
-              members={members}
-              who={who.qa}
-              onWho={choose("qa")}
+          {!current?.reviewer_member && (
+            <EngineSlot
+              label="Reviewer"
+              id="team-reviewer"
+              value={reviewer}
+              onChange={setReviewer}
             />
           )}
-          <TeamSlot
-            kind="pm"
-            label="PM"
-            members={members}
-            who={who.pm}
-            onWho={choose("pm")}
-            empty="No PM"
-          />
           <label htmlFor="team-rounds">
             Rounds before asking you
             <input
@@ -334,68 +387,17 @@ function TeamEditor({
           </label>
         </div>
         {code ? (
-          <div className="form-row">
-            <label htmlFor="team-repo">
-              Repository
-              <select
-                id="team-repo"
-                className="field"
-                value={repo}
-                onChange={(e) => setRepo(e.target.value)}
-              >
-                {folders.map((folder) => (
-                  <option key={folder} value={folder}>
-                    {folder}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label htmlFor="team-check">
-              QA runs
-              <input
-                id="team-check"
-                className="field"
-                value={check}
-                placeholder="make check"
-                onChange={(e) => setCheck(e.target.value)}
-                required
-              />
-            </label>
-            <label htmlFor="team-prefix">
-              Branch prefix
-              <input
-                id="team-prefix"
-                className="field"
-                value={branchPrefix}
-                onChange={(e) => setBranchPrefix(e.target.value)}
-                required
-              />
-            </label>
-            <label htmlFor="team-prepare">
-              Ignored folders to copy in
-              <input
-                id="team-prepare"
-                className="field"
-                value={prepare}
-                placeholder="node_modules"
-                onChange={(e) => setPrepare(e.target.value)}
-              />
-              <span className="hint">Optional. Separate with commas.</span>
-            </label>
-            <label htmlFor="team-sign">
-              Sign commits
-              <select
-                id="team-sign"
-                className="field"
-                value={sign}
-                onChange={(e) => setSign(e.target.value)}
-              >
-                <option value="">As your git config says</option>
-                <option value="always">Always</option>
-                <option value="never">Never</option>
-              </select>
-            </label>
-          </div>
+          <label htmlFor="team-check">
+            QA runs
+            <input
+              id="team-check"
+              className="field"
+              value={check}
+              placeholder="make check"
+              onChange={(e) => setCheck(e.target.value)}
+              required
+            />
+          </label>
         ) : (
           <div className="control">
             Copy approved drafts to
@@ -458,92 +460,38 @@ function TeamEditor({
 }
 
 /**
- * One place on the team: who fills it, and the engine it runs on. A member
- * brings its own engine, so the engine is asked only of the template's role.
- * A place the team can do without offers leaving it out, as `none`; one the
- * template doesn't have says what having no one there means, as `empty`.
+ * The engine a template's role runs on. A member brings its own, so this is
+ * asked only of a role no member fills.
  */
-function TeamSlot({
-  kind,
+function EngineSlot({
   label,
-  members,
-  who,
-  onWho,
-  engine,
-  none,
-  empty,
-}: {
-  kind: MemberKind;
-  label: string;
-  members: Member[];
-  who: string;
-  onWho: (id: string) => void;
-  engine?: { id: string; value: string; onChange: (value: string) => void };
-  none?: string;
-  empty?: string;
-}) {
-  const options = members.filter((m) => holds(m, kind));
-  if (!options.length && !engine && !none) return null;
-  return (
-    <fieldset className="team-slot">
-      <legend>{label}</legend>
-      {(options.length > 0 || none) && (
-        <label htmlFor={`team-${kind}-member`}>
-          Who
-          <select
-            id={`team-${kind}-member`}
-            className="field"
-            value={who}
-            onChange={(e) => onWho(e.target.value)}
-          >
-            <option value="">{empty ?? "Template default"}</option>
-            {none && <option value={noPlanning}>{none}</option>}
-            {options.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      {engine && !who && (
-        <EngineSelect
-          id={engine.id}
-          label="Engine"
-          value={engine.value}
-          onChange={engine.onChange}
-        />
-      )}
-    </fieldset>
-  );
-}
-
-function EngineSelect({
   id,
-  label,
   value,
   onChange,
 }: {
-  id: string;
   label: string;
+  id: string;
   value: string;
   onChange: (value: string) => void;
 }) {
   return (
-    <label htmlFor={id}>
-      {label}
-      <select
-        id={id}
-        className="field"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {engines.map((engine) => (
-          <option key={engine.id} value={engine.id}>
-            {engine.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <fieldset className="team-slot">
+      <legend>{label}</legend>
+      <label htmlFor={id}>
+        Engine
+        <select
+          id={id}
+          className="field"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          {engines.map((engine) => (
+            <option key={engine.id} value={engine.id}>
+              {engine.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    </fieldset>
   );
 }

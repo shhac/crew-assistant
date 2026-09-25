@@ -6,7 +6,13 @@ import { href, projectHref } from "./router";
 import { Learnings } from "./MemberLearnings";
 import { memberProjects, memberSummary } from "./members";
 import { ErrorNotice, useAction } from "./ui";
-import { deleteMember, redrawMember, type Member, type State } from "./api";
+import {
+  deleteMember,
+  redrawMember,
+  type Member,
+  type Project,
+  type State,
+} from "./api";
 
 export function MemberPage({
   member,
@@ -45,7 +51,7 @@ export function MemberPage({
         </section>
       )}
       <Learnings member={member} state={state} refresh={refresh} />
-      <DeleteMember member={member} refresh={refresh} />
+      <DeleteMember member={member} projects={projects} refresh={refresh} />
     </div>
   );
 }
@@ -127,9 +133,11 @@ function MemberHead({
 
 function DeleteMember({
   member,
+  projects,
   refresh,
 }: {
   member: Member;
+  projects: Project[];
   refresh: () => Promise<void>;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -161,7 +169,11 @@ function DeleteMember({
           >
             Keep
           </button>
-          <span className="muted small">Project teams keep their copy.</span>
+          <span className="muted small">
+            {projects.length > 0 &&
+              `${member.name} leaves the team for ${projects.map((p) => p.title).join(", ")}; the template's role takes their place. `}
+            Requests already under way keep them.
+          </span>
         </div>
       ) : (
         <div className="actions">

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -324,4 +325,328 @@ func TestAReviewerAnsweringAPullRequestLearnsNothing(t *testing.T) {
 	if snap, _ = a.Core.Snapshot(ctx); len(snap.Members[0].Learnings) != 1 {
 		t.Fatal("the same turn outside a pull request should have been kept")
 	}
+}
+
+// A seat or the workspace changes only itself: every other role keeps the
+// copy the team has, even of a member changed since it was given its role.
+func TestChangingOneSeatOrTheWorkspaceKeepsEveryOtherRoleAsItIs(t *testing.T) {
+	a := testLoop(t)
+	ctx := context.Background()
+	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{t.TempDir(), t.TempDir()}, Brief: core.BriefInput{Goal: "Faster"}})
+	if err != nil || len(p.Directories) != 2 {
+		t.Fatalf("project %+v %v", p, err)
+	}
+	notes := p.Directories[1]
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude", Model: "opus", Instructions: "Small commits."})
+	rn, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Rune", Kinds: []string{core.RoleReviewer}, Engine: "codex"})
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check", Prepare: []string{"vendor"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SetLanding(ctx, p.ID, core.LandPolicy{Via: core.LandPush, Target: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	project, err := a.SetSeat(ctx, p.ID, core.RoleImplementer, ada.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project.Playbook.Repo != p.Directories[0] {
+		t.Fatalf("a code team should start on the first folder: %q", project.Playbook.Repo)
+	}
+	assigned := seatOf(*project.Playbook, core.RoleImplementer)
+	if assigned.Name != "Ada" || assigned.Member != ada.ID || assigned.Model != "opus" || !strings.HasSuffix(assigned.Instructions, "Small commits.") {
+		t.Fatalf("the implementer should be Ada: %+v", assigned)
+	}
+	if _, err = a.Core.SaveMember(ctx, ada.ID, core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "codex", Model: "gpt-6", Instructions: "Big commits."}); err != nil {
+		t.Fatal(err)
+	}
+	current := func() core.Playbook {
+		t.Helper()
+		snap, _ := a.Core.Snapshot(ctx)
+		got, _ := findProject(snap, p.ID)
+		return *got.Playbook
+	}
+	kept := func(step string) core.Playbook {
+		t.Helper()
+		got := current()
+		if !reflect.DeepEqual(seatOf(got, core.RoleImplementer), assigned) {
+			t.Fatalf("%s changed Ada's role: %+v", step, seatOf(got, core.RoleImplementer))
+		}
+		return got
+	}
+	if _, err = a.SetSeat(ctx, p.ID, core.RoleReviewer, rn.ID); err != nil {
+		t.Fatal(err)
+	}
+	code := core.Templates["code"]
+	if got := kept("assigning the reviewer"); seatOf(got, core.RoleReviewer).Member != rn.ID || !reflect.DeepEqual(seatOf(got, core.RoleQA), code.Roles[3]) || !reflect.DeepEqual(seatOf(got, core.RolePlanner), code.Roles[0]) {
+		t.Fatalf("roles %+v", got.Roles)
+	}
+	if _, err = a.SetWorkspace(ctx, p.ID, Workspace{Repo: notes, BranchPrefix: " paul/ ", Prepare: []string{"ui/node_modules"}, Sign: core.SignNever}); err != nil {
+		t.Fatal(err)
+	}
+	got := kept("saving the workspace")
+	if got.Repo != notes || got.BranchPrefix != "paul/" || !slices.Equal(got.Prepare, []string{"ui/node_modules"}) || got.Sign != core.SignNever {
+		t.Fatalf("workspace %+v", got)
+	}
+	if got.Check != "make check" || got.Land.Via != core.LandPush || seatOf(got, core.RoleReviewer).Member != rn.ID {
+		t.Fatalf("the workspace changed more than itself: %+v", got)
+	}
+	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make test", Implementer: ada.ID, Reviewer: rn.ID, Repo: notes, BranchPrefix: "paul/", Sign: core.SignNever}); err != nil {
+		t.Fatal(err)
+	}
+	if kept("saving the team again").Check != "make test" {
+		t.Fatal("the team was not saved")
+	}
+	if _, err = a.SetSeat(ctx, p.ID, core.RoleImplementer, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got = current(); !reflect.DeepEqual(seatOf(got, core.RoleImplementer), code.Roles[1]) || seatOf(got, core.RoleReviewer).Member != rn.ID {
+		t.Fatalf("unassigning should give back only the template's implementer: %+v", got.Roles)
+	}
+	for name, bad := range map[string]func() error{
+		"a reviewer as implementer": func() error { _, err := a.SetSeat(ctx, p.ID, core.RoleImplementer, rn.ID); return err },
+		"a member who is gone":      func() error { _, err := a.SetSeat(ctx, p.ID, core.RoleReviewer, "gone"); return err },
+		"leaving out the reviewer":  func() error { _, err := a.SetSeat(ctx, p.ID, core.RoleReviewer, NoPlanner); return err },
+		"an unlinked repository": func() error {
+			_, err := a.SetWorkspace(ctx, p.ID, Workspace{Repo: t.TempDir(), BranchPrefix: "paul/"})
+			return err
+		},
+	} {
+		if bad() == nil {
+			t.Errorf("accepted %s", name)
+		}
+	}
+}
+
+// Giving a role back to the template never leaves two roles with one name.
+func TestUnassigningNeverLeavesTwoRolesWithOneName(t *testing.T) {
+	a := testLoop(t)
+	ctx := context.Background()
+	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Notes", Brief: core.BriefInput{Goal: "Notes"}})
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
+	writer, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Writer", Kinds: []string{core.RoleReviewer}, Engine: "codex"})
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", Implementer: ada.ID, Reviewer: writer.ID}); err != nil {
+		t.Fatal(err)
+	}
+	project, err := a.SetSeat(ctx, p.ID, core.RoleImplementer, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	roles := project.Playbook.Roles
+	if roles[0].Name != "Writer 2" || roles[0].Member != "" || roles[1].Name != "Writer" || roles[1].Member != writer.ID {
+		t.Fatalf("roles %+v", roles)
+	}
+	// The other way round: the template's Writer gives way to the member.
+	if _, err = a.SetSeat(ctx, p.ID, core.RoleReviewer, ""); err != nil {
+		t.Fatal(err)
+	}
+	if project, err = a.SetSeat(ctx, p.ID, core.RoleReviewer, writer.ID); err != nil {
+		t.Fatal(err)
+	}
+	if roles = project.Playbook.Roles; roles[0].Name != "Writer 2" || roles[1].Name != "Writer" || roles[1].Member != writer.ID {
+		t.Fatalf("roles %+v", roles)
+	}
+}
+
+// A member who holds several kinds of role takes each in one seat, and
+// giving one back leaves the others where they are.
+func TestASeatHoldsEachRoleItsMemberIsGiven(t *testing.T) {
+	a := testLoop(t)
+	ctx := context.Background()
+	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{t.TempDir()}, Brief: core.BriefInput{Goal: "Faster"}})
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RolePlanner, core.RoleImplementer, core.RolePM}, Engine: "claude"})
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{core.RoleImplementer, core.RolePlanner, core.RolePM} {
+		if _, err := a.SetSeat(ctx, p.ID, kind, ada.ID); err != nil {
+			t.Fatal(kind, err)
+		}
+	}
+	names := func() []string {
+		snap, _ := a.Core.Snapshot(ctx)
+		got, _ := findProject(snap, p.ID)
+		var out []string
+		for _, r := range got.Playbook.Roles {
+			out = append(out, r.Name+":"+strings.Join(r.Kinds, "+"))
+		}
+		return out
+	}
+	if got := names(); !slices.Equal(got, []string{"Ada:implementer+planner+pm", "Reviewer:reviewer", "QA:qa"}) {
+		t.Fatalf("Ada should be one seat holding all three: %v", got)
+	}
+	if _, err := a.SetSeat(ctx, p.ID, core.RolePlanner, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SetSeat(ctx, p.ID, core.RolePM, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := names(); !slices.Equal(got, []string{"Ada:implementer", "Planner:planner", "Reviewer:reviewer", "QA:qa"}) {
+		t.Fatalf("the template's planner should be back and no one keeps the list: %v", got)
+	}
+	if _, err := a.SetSeat(ctx, p.ID, core.RolePlanner, NoPlanner); err != nil {
+		t.Fatal(err)
+	}
+	if got := names(); !slices.Equal(got, []string{"Ada:implementer", "Reviewer:reviewer", "QA:qa"}) {
+		t.Fatalf("planning should be left out: %v", got)
+	}
+	if _, err := a.SetSeat(ctx, p.ID, core.RolePlanner, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := names(); !slices.Contains(got, "Planner:planner") {
+		t.Fatalf("the template's planner should be back: %v", got)
+	}
+	writing, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Notes", Brief: core.BriefInput{Goal: "Notes"}})
+	if _, err := a.SetTeam(ctx, writing.ID, TeamChoice{Template: "draft"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SetSeat(ctx, writing.ID, core.RolePlanner, ada.ID); err == nil {
+		t.Fatal("a writing team was given a planner")
+	}
+}
+
+// A seat holding several roles is told how each is done here, the same way
+// whatever order its member was given them in, and forgets a role it gives
+// back.
+func TestASeatsInstructionsDoNotDependOnTheOrderItsRolesWereGiven(t *testing.T) {
+	a := testLoop(t)
+	ctx := context.Background()
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RolePlanner, core.RoleImplementer}, Engine: "claude", Instructions: "Small commits."})
+	code := core.Templates["code"]
+	planning, implementing := code.Roles[0].Instructions, code.Roles[1].Instructions
+	instructions := func(order ...string) string {
+		t.Helper()
+		p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: strings.Join(order, " then "), Directories: []string{t.TempDir()}, Brief: core.BriefInput{Goal: "Faster"}})
+		if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check"}); err != nil {
+			t.Fatal(err)
+		}
+		var project core.Project
+		var err error
+		for _, kind := range order {
+			if project, err = a.SetSeat(ctx, p.ID, kind, ada.ID); err != nil {
+				t.Fatal(kind, err)
+			}
+		}
+		return seatOf(*project.Playbook, core.RoleImplementer).Instructions
+	}
+	want := planning + "\n\n" + implementing + "\n\nSmall commits."
+	for _, order := range [][]string{{core.RolePlanner, core.RoleImplementer}, {core.RoleImplementer, core.RolePlanner}} {
+		if got := instructions(order...); got != want {
+			t.Errorf("%v: %q", order, got)
+		}
+	}
+	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Chosen whole", Directories: []string{t.TempDir()}, Brief: core.BriefInput{Goal: "Faster"}})
+	project, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check", Implementer: ada.ID, Planner: ada.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := seatOf(*project.Playbook, core.RoleImplementer).Instructions; got != want {
+		t.Errorf("chosen whole: %q", got)
+	}
+	if project, err = a.SetSeat(ctx, p.ID, core.RolePlanner, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := seatOf(*project.Playbook, core.RoleImplementer).Instructions; got != implementing+"\n\nSmall commits." {
+		t.Errorf("after giving back planning: %q", got)
+	}
+}
+
+// A template seat that gave way to a member's name keeps giving way when the
+// team is saved again.
+func TestSavingATeamKeepsATemplateSeatClearOfAMembersName(t *testing.T) {
+	a := testLoop(t)
+	ctx := context.Background()
+	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Notes", Brief: core.BriefInput{Goal: "Notes"}})
+	writer, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Writer", Kinds: []string{core.RoleReviewer}, Engine: "codex"})
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SetSeat(ctx, p.ID, core.RoleReviewer, writer.ID); err != nil {
+		t.Fatal(err)
+	}
+	// As the Team tab's Edit form sends it, with only the rounds changed.
+	project, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", WriterEngine: "claude", Reviewer: writer.ID, MaxRounds: "5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	roles := project.Playbook.Roles
+	if project.Playbook.MaxRounds != 5 || roles[0].Name != "Writer 2" || roles[0].Member != "" || roles[1].Name != "Writer" || roles[1].Member != writer.ID {
+		t.Fatalf("team %+v", project.Playbook)
+	}
+}
+
+// A member whose kinds change keeps the role the team gave it, through a
+// save of the whole team, but can't be given it afresh.
+func TestAMemberWhoseKindsChangedKeepsTheRoleTheTeamGaveIt(t *testing.T) {
+	a := testLoop(t)
+	ctx := context.Background()
+	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Notes", Brief: core.BriefInput{Goal: "Notes"}})
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft"}); err != nil {
+		t.Fatal(err)
+	}
+	project, err := a.SetSeat(ctx, p.ID, core.RoleImplementer, ada.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assigned := seatOf(*project.Playbook, core.RoleImplementer)
+	if _, err = a.Core.SaveMember(ctx, ada.ID, core.MemberInput{Name: "Ada", Kinds: []string{core.RoleReviewer}, Engine: "codex"}); err != nil {
+		t.Fatal(err)
+	}
+	if project, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", Implementer: ada.ID, MaxRounds: "4"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := seatOf(*project.Playbook, core.RoleImplementer); !reflect.DeepEqual(got, assigned) || project.Playbook.MaxRounds != 4 {
+		t.Fatalf("Ada should keep the team's copy of her role: %+v", project.Playbook)
+	}
+	if _, err = a.SetSeat(ctx, p.ID, core.RoleImplementer, ada.ID); err == nil {
+		t.Fatal("a member who no longer implements was given the role afresh")
+	}
+}
+
+// A seat that took a second role before seats were told about each, as
+// SetTeam used to leave it, forgets the role it gives back.
+func TestACombinedSeatFromBeforeGivesBackARoleCleanly(t *testing.T) {
+	a := testLoop(t)
+	ctx := context.Background()
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RolePlanner, core.RoleImplementer}, Engine: "claude", Instructions: "Small commits."})
+	code := core.Templates["code"]
+	planning, implementing := code.Roles[0].Instructions, code.Roles[1].Instructions
+	for kind, want := range map[string]core.Role{
+		core.RoleImplementer: {Name: "Ada", Kinds: []string{core.RolePlanner}, Instructions: planning + "\n\nSmall commits."},
+		core.RolePlanner:     {Name: "Ada", Kinds: []string{core.RoleImplementer}, Instructions: implementing + "\n\nSmall commits."},
+	} {
+		p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Gives back " + kind, Brief: core.BriefInput{Goal: "Faster"}})
+		team := code
+		team.Repo, team.Check = "/work/service", "make check"
+		// What SetTeam made of {Implementer: Ada, Planner: Ada}: the
+		// implementer's seat, with the planner's kind added to it.
+		team.Roles = []core.Role{
+			{Name: "Ada", Kinds: []string{core.RoleImplementer, core.RolePlanner}, Engine: "claude", Member: ada.ID, Instructions: implementing + "\n\nSmall commits."},
+			code.Roles[2],
+			code.Roles[3],
+		}
+		if _, err := a.Core.SetPlaybook(ctx, p.ID, team); err != nil {
+			t.Fatal(err)
+		}
+		project, err := a.SetSeat(ctx, p.ID, kind, "")
+		if err != nil {
+			t.Fatal(kind, err)
+		}
+		seat := project.Playbook.Roles[slices.IndexFunc(project.Playbook.Roles, func(r core.Role) bool { return r.Member == ada.ID })]
+		if !slices.Equal(seat.Kinds, want.Kinds) || seat.Instructions != want.Instructions {
+			t.Errorf("giving back %s left %+v", kind, seat)
+		}
+		if back := seatOf(*project.Playbook, kind); back.Member != "" || back.Instructions != code.Roles[slices.IndexFunc(code.Roles, func(r core.Role) bool { return r.Holds(kind) })].Instructions {
+			t.Errorf("the template's %s should be back: %+v", kind, back)
+		}
+	}
+}
+
+// seatOf is the seat on a team that holds a kind of role.
+func seatOf(playbook core.Playbook, kind string) core.Role {
+	i := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Holds(kind) })
+	if i < 0 {
+		return core.Role{}
+	}
+	return playbook.Roles[i]
 }

@@ -7,30 +7,26 @@ import {
   whatHappens,
 } from "./landing";
 import { ErrorNotice, useAction } from "./ui";
-import { setLanding, type Project } from "./api";
+import { setLanding, type Playbook, type Project } from "./api";
 
 /**
  * What landing an approved change means for this project. Only the owner and
  * the assistant can change it; nothing the team does can.
  */
-export function LandingTab({
+export function LandingSettings({
   project,
+  playbook,
   refresh,
 }: {
   project: Project;
+  playbook: Playbook;
   refresh: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
-  const land = project.playbook?.land;
-  if (!project.playbook)
-    return (
-      <section className="tab-panel card">
-        <p className="muted">Choose a team first.</p>
-      </section>
-    );
+  const land = playbook.land;
   if (editing)
     return (
-      <section className="tab-panel card">
+      <section className="tab-panel card" aria-label="Landing">
         <LandingEditor
           project={project}
           onDone={() => setEditing(false)}
@@ -40,7 +36,7 @@ export function LandingTab({
     );
   const via = land?.via || "branch";
   return (
-    <section className="tab-panel card">
+    <section className="tab-panel card" aria-label="Landing">
       <div className="panel-head">
         <h2>Landing</h2>
         <button
@@ -92,7 +88,7 @@ export function LandingTab({
       <div className="section">
         <p className="label">When a change lands</p>
         <ol className="happens">
-          {whatHappens(project.playbook).map((line) => (
+          {whatHappens(playbook).map((line) => (
             <li key={line}>{line}</li>
           ))}
         </ol>

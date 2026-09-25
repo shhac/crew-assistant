@@ -1238,7 +1238,9 @@ describe("the team", () => {
       await screen.findByRole("button", { name: "Delete member" }),
     );
     expect(writes()).toHaveLength(0);
-    expect(screen.getByText("Project teams keep their copy.")).toBeTruthy();
+    expect(
+      screen.getByText("Requests already under way keep them."),
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Keep" }));
     expect(screen.queryByRole("button", { name: "Delete Ada" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Delete member" }));
@@ -1251,6 +1253,20 @@ describe("the team", () => {
         options: expect.objectContaining({ method: "DELETE" }),
       }),
     ]);
+  });
+  it("warns which project teams a member leaves before deleting it", async () => {
+    state.members = [ada()];
+    state.projects = [staffed("p1"), staffed("p3", "completed")];
+    window.history.replaceState(null, "", "/#/team/m1");
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete member" }),
+    );
+    expect(
+      screen.getByText(
+        "Ada leaves the team for Launch note; the template's role takes their place. Requests already under way keep them.",
+      ),
+    ).toBeTruthy();
   });
   it("edits a member in place", async () => {
     state.members = [ada()];

@@ -127,6 +127,29 @@
   gap: 6px;
 }
 
+.seats {
+  margin: 12px 0;
+}
+
+.seat {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.seat-role {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.seat-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .team-slot {
   display: flex;
   flex-direction: column;

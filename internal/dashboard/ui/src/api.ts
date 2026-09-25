@@ -167,6 +167,12 @@ export interface TeamInput {
   prepare?: string[];
   sign?: string;
 }
+export interface WorkspaceInput {
+  repo: string;
+  branch_prefix: string;
+  prepare: string[];
+  sign: string;
+}
 export interface TaskInput {
   objective: string;
   criteria: string[];
@@ -560,6 +566,19 @@ export function updateBrief(projectID: string, input: BriefInput) {
 }
 export function setTeam(projectID: string, input: TeamInput) {
   return api<Project>(`${projectPath(projectID)}/team`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+/** Fills one role with a member, or with "" gives it back to the template. */
+export function setSeat(projectID: string, kind: MemberKind, member: string) {
+  return api<Project>(
+    `${projectPath(projectID)}/team/${encodeURIComponent(kind)}`,
+    { method: "PUT", body: JSON.stringify({ member }) },
+  );
+}
+export function setWorkspace(projectID: string, input: WorkspaceInput) {
+  return api<Project>(`${projectPath(projectID)}/workspace`, {
     method: "PUT",
     body: JSON.stringify(input),
   });

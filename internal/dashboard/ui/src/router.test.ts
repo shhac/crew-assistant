@@ -19,10 +19,10 @@ describe("addresses", () => {
       id: "p 1",
       tab: "board",
     });
-    expect(parseRoute("#/projects/p1/landing")).toEqual({
+    expect(parseRoute("#/projects/p1/config")).toEqual({
       page: "project",
       id: "p1",
-      tab: "landing",
+      tab: "config",
     });
     expect(parseRoute("#/projects/p1/nonsense")).toEqual({
       page: "project",
