@@ -1103,6 +1103,165 @@ describe("a request", () => {
   });
 });
 
+describe("a request's relations", () => {
+  const rune: Member = {
+    id: "m2",
+    name: "Rune",
+    kinds: ["reviewer"],
+    engine: "codex",
+    learnings: [],
+  };
+  const linkedTasks = () => [
+    started({
+      id: "t1",
+      objective: "Cache the lookups",
+      status: "writing",
+      stage: "implementing",
+      depends_on: ["a"],
+      blocks: ["b"],
+      relates_to: ["c"],
+      linked_by: {
+        "depends_on:a": { by: "owner", at: "2026-09-25T10:00:00Z" },
+        "relates_to:c": { by: "member:m2", at: "2026-09-25T10:00:00Z" },
+      },
+    }),
+    task({ id: "a", objective: "Index the table" }),
+    task({
+      id: "b",
+      objective: "Warm the cache",
+      depends_on: ["t1"],
+      waits_for: ["Cache the lookups"],
+      linked_by: { "depends_on:t1": { by: "pm", at: "2026-09-25T10:00:00Z" } },
+    }),
+    task({ id: "c", objective: "Measure the lookups", relates_to: ["t1"] }),
+    task({ id: "d", objective: "Drop the old index" }),
+    started({
+      id: "e",
+      objective: "Profile the service",
+      status: "landed",
+      stage: "done",
+    }),
+    task({ id: "x", project_id: "p2", objective: "Elsewhere" }),
+  ];
+  const relations = () => screen.getByRole("region", { name: "Relations" });
+  const open = () =>
+    show(
+      project(),
+      { tasks: linkedTasks(), members: [rune] },
+      { request: "t1" },
+    );
+
+  it("lists what it depends on, blocks and relates to, and who set each", () => {
+    open();
+    const group = (name: string) =>
+      within(within(relations()).getByRole("list", { name }))
+        .getAllByRole("listitem")
+        .map((li) => [
+          li.firstChild?.textContent,
+          li.querySelector(".small")?.textContent,
+        ]);
+    expect(group("Depends on")).toEqual([["Index the table", "Set by you"]]);
+    expect(group("Blocks")).toEqual([["Warm the cache", "Set by the PM"]]);
+    expect(group("Relates to")).toEqual([
+      ["Measure the lookups", "Set by Rune"],
+    ]);
+    expect(
+      within(relations())
+        .getByRole("link", { name: "Index the table" })
+        .getAttribute("href"),
+    ).toBe("#/projects/p1/requests/a");
+  });
+  it("unlinks a request, whoever set the link", async () => {
+    open();
+    fireEvent.click(
+      within(relations()).getByRole("button", {
+        name: "Remove “Warm the cache” from Blocks",
+      }),
+    );
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      { path: "/api/projects/p1/tasks/t1/links/b", method: "DELETE" },
+    ]);
+  });
+  it("links another request of the project that isn't linked yet, finished or not", async () => {
+    open();
+    const form = within(relations()).getByRole("form", {
+      name: "Add a relation",
+    });
+    const other = within(form).getByLabelText("Other request");
+    expect(
+      within(other)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual([
+      "Choose a request",
+      "Drop the old index",
+      "Profile the service",
+    ]);
+    expect(within(form).getByRole("button", { name: "Add" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    fireEvent.change(within(form).getByLabelText("Relation"), {
+      target: { value: "blocks" },
+    });
+    fireEvent.change(other, { target: { value: "d" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/tasks/t1/links",
+        method: "POST",
+        body: { relation: "blocks", task: "d" },
+      },
+    ]);
+  });
+  it("says why a link was refused, keeping the choice", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: "That would make a loop" }),
+      })),
+    );
+    open();
+    const form = within(relations()).getByRole("form", {
+      name: "Add a relation",
+    });
+    fireEvent.change(within(form).getByLabelText("Other request"), {
+      target: { value: "d" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Add" }));
+    expect((await within(relations()).findByRole("alert")).textContent).toBe(
+      "That would make a loop",
+    );
+    expect(within(form).getByLabelText("Other request")).toHaveProperty(
+      "value",
+      "d",
+    );
+  });
+  it("says when a request is linked to nothing", () => {
+    show(project(), { tasks: [task({})] }, { request: "t1" });
+    expect(
+      within(relations()).getByText("Not linked to any other request."),
+    ).toBeTruthy();
+    expect(
+      within(relations()).queryByRole("form", { name: "Add a relation" }),
+    ).toBeNull();
+  });
+  it("shows on its board card how many requests it holds back", () => {
+    open();
+    const implementing = screen.getByRole("listitem", { name: "Implementing" });
+    expect(within(implementing).getByText("Blocks 1")).toBeTruthy();
+    const todo = screen.getByRole("listitem", { name: "To do" });
+    expect(
+      within(todo).getByText("Waits for “Cache the lookups”"),
+    ).toBeTruthy();
+    expect(within(todo).queryByText(/^Blocks/)).toBeNull();
+  });
+});
+
 describe("the project's tabs", () => {
   it("saves a brief edit as a new version", async () => {
     show(project(), {}, { tab: "brief" });

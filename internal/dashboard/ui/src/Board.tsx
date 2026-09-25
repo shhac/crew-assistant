@@ -200,6 +200,7 @@ function BoardCard({
   children?: ReactNode;
 }) {
   const open = (task.messages ?? []).filter(isOpenMessage).length;
+  const blocks = task.blocks?.length ?? 0;
   const pm = pmLandingLine(task);
   return (
     <article className={`board-card${needsYou(task) ? " needs" : ""}`}>
@@ -222,11 +223,14 @@ function BoardCard({
         </p>
       )}
       {pm && <p className="board-card-meta muted small">{pm}</p>}
-      {open > 0 && (
+      {(open > 0 || blocks > 0) && (
         <p className="board-card-meta muted small">
-          <span>
-            <Icon name="Message" size={12} /> {open} waiting for a reply
-          </span>
+          {open > 0 && (
+            <span>
+              <Icon name="Message" size={12} /> {open} waiting for a reply
+            </span>
+          )}
+          {blocks > 0 && <span>Blocks {blocks}</span>}
         </p>
       )}
       {children}

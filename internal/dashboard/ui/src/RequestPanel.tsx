@@ -3,6 +3,7 @@ import { DecisionCard } from "./DecisionCard";
 import { Drafts } from "./Drafts";
 import { pmLandingLine } from "./landing";
 import { RequestDesign, RequestPlan } from "./RequestPlan";
+import { RequestRelations } from "./RequestRelations";
 import { TeamThread } from "./TeamThread";
 import {
   decisionFor,
@@ -167,6 +168,13 @@ export function RequestPanel({
               )}
             </section>
           )}
+          <RequestRelations
+            project={project}
+            task={task}
+            tasks={state.tasks}
+            members={state.members}
+            refresh={refresh}
+          />
         </div>
       )}
     </aside>

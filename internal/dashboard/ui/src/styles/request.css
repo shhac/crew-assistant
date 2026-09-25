@@ -204,3 +204,39 @@
     right: 0;
   }
 }
+
+.relations {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.relation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+}
+
+.relation > button {
+  margin-left: auto;
+}
+
+.relation-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.relation-add .field {
+  flex: 1 1 160px;
+  width: auto;
+}
+
+.relation-add .relation-kind {
+  flex: 0 0 auto;
+}

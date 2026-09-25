@@ -310,6 +310,12 @@ export interface DesignRequest {
   at?: string;
   answered_at?: string;
 }
+export type Relation = "depends_on" | "blocks" | "relates_to";
+export interface LinkMark {
+  /** "owner", "assistant", "pm", "member:<id>" or "role:<kind>". */
+  by: string;
+  at: string;
+}
 export interface Proposal {
   branch: string;
   number?: number;
@@ -343,8 +349,16 @@ export interface Task {
   design?: DesignRequest[];
   /** Ids of the tasks that must land before this one starts. */
   depends_on?: string[];
-  /** The objectives of unfinished dependencies, while it is queued. */
+  /** The objectives of its unfinished dependencies. */
   waits_for?: string[];
+  /** Ids of the tasks that depend on this one. */
+  blocks?: string[];
+  relates_to?: string[];
+  /**
+   * Who set each link, keyed "depends_on:<id>" or "relates_to:<id>". A link
+   * with no entry was set by the team before links were marked.
+   */
+  linked_by?: Record<string, LinkMark>;
   proposal?: Proposal;
   branch?: string;
   retry_at?: string;
@@ -722,6 +736,24 @@ export function messageTeam(
   return api<TeamMessage>(
     `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/messages`,
     { method: "POST", body: JSON.stringify({ to, text }) },
+  );
+}
+export function linkTasks(
+  projectID: string,
+  taskID: string,
+  relation: Relation,
+  other: string,
+) {
+  return api<Task>(
+    `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/links`,
+    { method: "POST", body: JSON.stringify({ relation, task: other }) },
+  );
+}
+/** Removes whatever links the two tasks, in either direction. */
+export function unlinkTasks(projectID: string, taskID: string, other: string) {
+  return api<Task>(
+    `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/links/${encodeURIComponent(other)}`,
+    { method: "DELETE" },
   );
 }
 export function stopTask(projectID: string, taskID: string) {
