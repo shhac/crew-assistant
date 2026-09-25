@@ -17,15 +17,16 @@ Two problems the owner hit on the live daemon:
   - then the one started longest ago, from a new `started_at` set when a task first leaves the to-do list, falling back to when it was asked for.
 
   Work waiting to retry is passed over while anything else can move. The owner's aim: once something leaves To do, keep its time on the wall as short as possible.
-- **A smaller state each turn.**
-  - Unfinished tasks keep what the assistant acts on: their latest two drafts and the latest reviews, clipped.
-  - Finished tasks come as the last twelve to finish, each by what was asked, how it ended and where it went.
-  - A new `read_task` tool brings one task in full: its plan, recent drafts, every review and its messages.
-  - On the owner's state the view went from about 113 KB to 65 KB.
+- **Each turn carries an overview.** The owner's rule: the assistant isn't meant to track each project's minutiae. If it knows implementation or QA details without a team member escalating to it, something has gone wrong.
+  - Each unfinished task comes as its stage, what it waits on, its round and any decision. No drafts, reviews, plans, criteria or team messages come with it.
+  - Finished tasks come as the last twelve to finish, by what was asked and how they ended. Projects come without their team's standing instructions.
+  - Open decisions stay in full, since they are what the team brought up.
+  - `read_task` brings one task in full when the owner asks about it.
+  - `ask_pm` puts a question to a project's PM, who answers from the list, each task's plan and what waits for what. Asked this way it changes nothing, and the question and answer go to the project's activity.
 - **A budget per model.**
   - A Claude reply states its model's context window; lib-agent-harness v0.3.5 reports it in `completion.Usage.ContextWindow`. The daemon keeps the latest window per engine and model (`model_windows`) and sizes each request to it: the window, less room for the reply and framing, at three bytes a token.
   - Until a model has stated a window, the old 128 KB stands. Codex's one-off runs state none, so a Codex model stays on the default.
-  - When a request is refused as too long, and the refusal states a window smaller than the request was sized for (say, a smaller model just chosen in Settings), the turn is sized to it and tried once more, compacting what it must.
+  - When a request is refused as too long, and the refusal states a window smaller than the request was sized for (say, a smaller model just chosen in Settings), the turn is sized to it and tried once more, compacting what it must. It isn't retried once the turn has done something, since that would be done twice.
 - **The version on startup.** The first line `serve` prints now leads with `"version"`.
 
 ## Compaction, and why it isn't the harness's here
