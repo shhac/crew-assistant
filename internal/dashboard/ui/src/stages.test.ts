@@ -9,6 +9,7 @@ import {
   projectKind,
   projectTasks,
   requestStep,
+  needsYou,
   requestTone,
   taskPlaybook,
   underWay,
@@ -186,6 +187,18 @@ describe("the board", () => {
   });
   it("colours a request by what it needs", () => {
     expect(requestTone(task({ status: "waiting" }))).toBe("needs");
+    // An answered task waits only for the loop, not for the owner.
+    expect(requestTone(task({ status: "waiting", answered: true }))).toBe(
+      "wait",
+    );
+    expect(needsYou(task({ status: "waiting", answered: true }))).toBe(false);
+    expect(needsYou(task({ status: "waiting" }))).toBe(true);
+    expect(
+      requestStep(
+        task({ status: "waiting", answered: true }),
+        decision("escalation"),
+      ),
+    ).toBe("Your answer is in; it carries on next");
     expect(requestTone(task({ status: "writing" }))).toBe("work");
     expect(requestTone(task({ status: "awaiting" }))).toBe("wait");
     expect(requestTone(task({ status: "landed" }))).toBe("done");

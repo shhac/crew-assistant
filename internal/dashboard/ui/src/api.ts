@@ -225,6 +225,8 @@ export interface Task {
   stage: Stage;
   /** The checker at work while the request is being checked. */
   checking?: string;
+  /** Waiting on a decision the owner has already made; it resumes next. */
+  answered?: boolean;
   detail?: string;
   roles?: Role[];
   playbook?: Playbook;

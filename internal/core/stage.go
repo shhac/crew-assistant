@@ -20,7 +20,11 @@ func deriveStages(v *Snapshot) {
 }
 
 func derive(v *Snapshot, t *Task) {
-	t.Stage, t.Checking = stageOf(v, *t), ""
+	t.Stage, t.Checking, t.Answered = stageOf(v, *t), "", false
+	if t.Status == TaskWaiting {
+		d := decision(v, t.DecisionID)
+		t.Answered = d != nil && d.Status != DecisionOpen
+	}
 	if t.Status != TaskReviewing && t.Status != TaskDeciding {
 		return
 	}

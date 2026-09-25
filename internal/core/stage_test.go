@@ -131,3 +131,24 @@ func TestTheToDoListIsReorderedOnlyWithinItsProject(t *testing.T) {
 		t.Fatalf("a repeated task was accepted: %v", err)
 	}
 }
+
+// Once the owner has answered, a waiting task only waits for the loop's next
+// step, so it must not keep saying it needs them.
+func TestAnAnsweredTaskNoLongerNeedsTheOwner(t *testing.T) {
+	v := &Snapshot{
+		Decisions: []Decision{{ID: "open", Status: DecisionOpen}, {ID: "done", Status: DecisionResolved}, {ID: "closed", Status: DecisionDismissed}},
+		Tasks: []Task{
+			{Status: TaskWaiting, DecisionID: "open"},
+			{Status: TaskWaiting, DecisionID: "done"},
+			{Status: TaskWaiting, DecisionID: "closed"},
+			{Status: TaskWaiting, DecisionID: "missing"},
+			{Status: TaskWriting, DecisionID: "done"},
+		},
+	}
+	deriveStages(v)
+	for i, want := range []bool{false, true, true, false, false} {
+		if v.Tasks[i].Answered != want {
+			t.Errorf("task %d (%s on %s): answered %v, want %v", i, v.Tasks[i].Status, v.Tasks[i].DecisionID, v.Tasks[i].Answered, want)
+		}
+	}
+}

@@ -24,6 +24,10 @@ type Task struct {
 	// Checking names the checker at work while the task is being checked,
 	// derived with Stage.
 	Checking string `json:"checking,omitempty"`
+	// Answered is a task waiting on a decision the owner has already made:
+	// the loop takes the answer at its next step, so it no longer needs
+	// the owner. Derived with Stage.
+	Answered bool   `json:"answered,omitempty"`
 	Detail   string `json:"detail,omitempty"`
 	Roles    []Role `json:"roles,omitempty"`
 	// Playbook is the team's setup as it was when the task started: its

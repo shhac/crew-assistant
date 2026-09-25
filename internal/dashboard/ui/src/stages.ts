@@ -20,7 +20,9 @@ export const finished = (task: Task) =>
   task.status === "landed" ||
   task.status === "stopped";
 
-export const needsYou = (task: Task) => task.status === "waiting";
+/** Waiting on the owner. An answered task only waits for the loop's next step. */
+export const needsYou = (task: Task) =>
+  task.status === "waiting" && !task.answered;
 
 const active = (task: Task) =>
   task.status === "writing" ||
@@ -185,6 +187,7 @@ export function requestStep(task: Task, decision?: Decision): string {
       return check ? `${round}QA running ${check}` : `${round}QA checking`;
     }
     case "waiting":
+      if (task.answered) return "Your answer is in; it carries on next";
       return decisionKind(decision).step(task);
     case "landing": {
       const target = task.playbook?.land?.target;
@@ -212,7 +215,8 @@ export function requestTone(task: Task): Tone {
   if (needsYou(task)) return "needs";
   if (active(task)) return "work";
   if (task.status === "landed" || task.status === "delivered") return "done";
-  if (task.status === "awaiting" || task.status === "queued") return "wait";
+  if (task.status === "awaiting" || task.status === "queued" || task.answered)
+    return "wait";
   return "";
 }
 
