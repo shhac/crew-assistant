@@ -3,7 +3,7 @@ import { FileSystemPicker } from "./FileSystemPicker";
 import { Folders } from "./ProjectFolders";
 import { memberHref } from "./router";
 import { isCode } from "./stages";
-import { engineLabel, engines, memberOf } from "./members";
+import { engineLabel, engines, holds, memberOf } from "./members";
 import { Avatar } from "./Avatar";
 import { ErrorNotice, useAction } from "./ui";
 import {
@@ -147,7 +147,7 @@ const firstEngine = (
   roles: Role[] | undefined,
   kind: string,
   fallback: string,
-) => roles?.find((r) => r.kind === kind)?.engine ?? fallback;
+) => roles?.find((r) => holds(r, kind))?.engine ?? fallback;
 
 /** The member a slot was filled with, while that member is still on the team. */
 function chosenMember(
@@ -155,9 +155,11 @@ function chosenMember(
   kind: MemberKind,
   members: Member[],
 ) {
-  const id = roles?.find((r) => r.kind === kind)?.member;
-  return members.some((m) => m.id === id && m.kind === kind) ? (id ?? "") : "";
+  const id = roles?.find((r) => holds(r, kind))?.member;
+  return members.some((m) => m.id === id && holds(m, kind)) ? (id ?? "") : "";
 }
+
+type SlotKind = Exclude<MemberKind, "planner">;
 
 function TeamEditor({
   project,
@@ -187,12 +189,12 @@ function TeamEditor({
   const [reviewer, setReviewer] = useState(
     firstEngine(playbook?.roles, "reviewer", "codex"),
   );
-  const [who, setWho] = useState<Record<MemberKind, string>>(() => ({
+  const [who, setWho] = useState<Record<SlotKind, string>>(() => ({
     implementer: chosenMember(playbook?.roles, "implementer", members),
     reviewer: chosenMember(playbook?.roles, "reviewer", members),
     qa: chosenMember(playbook?.roles, "qa", members),
   }));
-  const choose = (kind: MemberKind) => (id: string) =>
+  const choose = (kind: SlotKind) => (id: string) =>
     setWho((current) => ({ ...current, [kind]: id }));
   const [rounds, setRounds] = useState(String(playbook?.max_rounds ?? 3));
   const [deliverTo, setDeliverTo] = useState(playbook?.deliver_to ?? "");
@@ -432,7 +434,7 @@ function TeamSlot({
   onWho: (id: string) => void;
   engine?: { id: string; value: string; onChange: (value: string) => void };
 }) {
-  const options = members.filter((m) => m.kind === kind);
+  const options = members.filter((m) => holds(m, kind));
   if (!options.length && !engine) return null;
   return (
     <fieldset className="team-slot">

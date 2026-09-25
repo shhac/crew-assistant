@@ -868,7 +868,7 @@ describe("the team", () => {
   const ada = (): Member => ({
     id: "m1",
     name: "Ada",
-    kind: "implementer",
+    kinds: ["implementer"],
     engine: "claude",
     model: "opus",
     avatar_svg: '<svg xmlns="http://www.w3.org/2000/svg"/>',
@@ -892,7 +892,7 @@ describe("the team", () => {
       max_rounds: 3,
       deliver: "",
       roles: [
-        { name: "Ada", kind: "implementer", engine: "claude", member: "m1" },
+        { name: "Ada", kinds: ["implementer"], engine: "claude", member: "m1" },
       ],
     },
   });
@@ -917,7 +917,7 @@ describe("the team", () => {
         ...ada(),
         id: "m2",
         name: "Rune",
-        kind: "qa",
+        kinds: ["qa", "planner"],
         model: "",
         learnings: [],
       },
@@ -931,7 +931,7 @@ describe("the team", () => {
     expect(within(card).getByText("Implementer · Claude opus")).toBeTruthy();
     expect(within(card).getByText("In 2 projects · 2 learnings")).toBeTruthy();
     const rune = screen.getByRole("link", { name: /^Rune/ });
-    expect(within(rune).getByText("QA · Claude")).toBeTruthy();
+    expect(within(rune).getByText("Planner and QA · Claude")).toBeTruthy();
     expect(rune.textContent).not.toMatch(/project|learning/);
   });
   it("creates a member and opens it", async () => {
@@ -944,9 +944,14 @@ describe("the team", () => {
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: " Ada " },
     });
-    fireEvent.change(screen.getByLabelText("Kind"), {
-      target: { value: "reviewer" },
-    });
+    const roles = screen.getByRole("group", { name: "Roles" });
+    expect(within(roles).getByLabelText("Implementer")).toHaveProperty(
+      "checked",
+      true,
+    );
+    fireEvent.click(within(roles).getByLabelText("Implementer"));
+    fireEvent.click(within(roles).getByLabelText("Reviewer"));
+    fireEvent.click(within(roles).getByLabelText("Planner"));
     fireEvent.change(screen.getByLabelText("Engine"), {
       target: { value: "codex" },
     });
@@ -962,12 +967,38 @@ describe("the team", () => {
     expect(create.options?.method).toBe("POST");
     expect(JSON.parse(String(create.options?.body))).toEqual({
       name: "Ada",
-      kind: "reviewer",
+      kinds: ["planner", "reviewer"],
       engine: "codex",
       model: "gpt-6",
       effort: "",
       instructions: "Check the tests first.",
     });
+  });
+  it("refuses a member with no role, or with more than one kind of work", async () => {
+    window.history.replaceState(null, "", "/#/team");
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "New member" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Ada" },
+    });
+    const roles = screen.getByRole("group", { name: "Roles" });
+    const add = screen.getByRole("button", { name: "Add member" });
+    fireEvent.click(within(roles).getByLabelText("Reviewer"));
+    expect(
+      within(roles).getByText(
+        "Pick one of implementer, reviewer and QA, plus planning if you like.",
+      ),
+    ).toBeTruthy();
+    expect(add).toHaveProperty("disabled", true);
+    fireEvent.submit(screen.getByRole("form", { name: "New member" }));
+    fireEvent.click(within(roles).getByLabelText("Implementer"));
+    fireEvent.click(within(roles).getByLabelText("Reviewer"));
+    expect(within(roles).getByText("Pick at least one role.")).toBeTruthy();
+    expect(add).toHaveProperty("disabled", true);
+    fireEvent.click(within(roles).getByLabelText("Planner"));
+    expect(within(roles).queryByText(/^Pick/)).toBeNull();
+    expect(add).toHaveProperty("disabled", false);
+    expect(writes().filter((c) => c.path === "/api/members")).toEqual([]);
   });
   it("shows a refused save in the form", async () => {
     window.history.replaceState(null, "", "/#/team");
@@ -1213,7 +1244,7 @@ describe("the team", () => {
     expect(save.options?.method).toBe("PUT");
     expect(JSON.parse(String(save.options?.body))).toMatchObject({
       name: "Ada",
-      kind: "implementer",
+      kinds: ["implementer"],
       engine: "claude",
       model: "opus",
       effort: "high",

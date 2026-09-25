@@ -25,8 +25,8 @@ const writingTeam: Playbook = {
   template: "draft",
   medium: "documents",
   roles: [
-    { name: "Writer", kind: "implementer", engine: "claude" },
-    { name: "Reviewer", kind: "reviewer", engine: "codex" },
+    { name: "Writer", kinds: ["implementer"], engine: "claude" },
+    { name: "Reviewer", kinds: ["reviewer"], engine: "codex" },
   ],
   max_rounds: 3,
   deliver: "owner",
@@ -37,9 +37,9 @@ const codeTeam = (
   template: "code",
   medium: "git",
   roles: [
-    { name: "Implementer", kind: "implementer", engine: "claude" },
-    { name: "Reviewer", kind: "reviewer", engine: "codex" },
-    { name: "QA", kind: "qa", engine: "codex" },
+    { name: "Implementer", kinds: ["implementer"], engine: "claude" },
+    { name: "Reviewer", kinds: ["reviewer"], engine: "codex" },
+    { name: "QA", kinds: ["qa"], engine: "codex" },
   ],
   max_rounds: 3,
   deliver: "owner",
@@ -488,9 +488,9 @@ describe("a request", () => {
   });
   it("prompts by the kind of role, never lowercasing a member's name", () => {
     const roles = [
-      { name: "Ada", kind: "implementer", engine: "claude", member: "m1" },
-      { name: "Rune", kind: "reviewer", engine: "codex", member: "m2" },
-      { name: "QA", kind: "qa", engine: "codex" },
+      { name: "Ada", kinds: ["implementer"], engine: "claude", member: "m1" },
+      { name: "Rune", kinds: ["reviewer"], engine: "codex", member: "m2" },
+      { name: "QA", kinds: ["qa"], engine: "codex" },
     ];
     show(
       project(),
@@ -510,6 +510,53 @@ describe("a request", () => {
       "Ask the reviewer to check something",
     );
     expect(screen.getByRole("button", { name: "Send to Rune" })).toBeTruthy();
+  });
+  it("leaves out a seat that only plans, and names a seat that also plans by its work", () => {
+    const planner = { name: "Planner", kinds: ["planner"], engine: "claude" };
+    show(
+      project(),
+      {
+        tasks: [
+          started({
+            status: "planning",
+            stage: "planning",
+            checking: "Planner",
+            roles: [planner, ...codeTeam().roles],
+          }),
+        ],
+      },
+      { request: "t1" },
+    );
+    const options = () =>
+      within(screen.getByLabelText("To"))
+        .getAllByRole("option")
+        .map((o) => o.textContent);
+    expect(options()).toEqual(["Implementer", "Reviewer", "QA"]);
+    expect(screen.getByText("Goes into the first round.")).toBeTruthy();
+    cleanup();
+    const ada = {
+      name: "Ada",
+      kinds: ["implementer", "planner"],
+      engine: "claude",
+    };
+    show(
+      project(),
+      {
+        tasks: [
+          started({
+            status: "writing",
+            stage: "implementing",
+            roles: [ada, ...codeTeam().roles.slice(1)],
+          }),
+        ],
+      },
+      { request: "t1" },
+    );
+    expect(options()).toEqual(["Ada (implementer)", "Reviewer", "QA"]);
+    expect(screen.getByLabelText("Message").getAttribute("placeholder")).toBe(
+      "Tell the implementer what to change",
+    );
+    expect(screen.getByRole("button", { name: "Send to Ada" })).toBeTruthy();
   });
   it("keeps an answer to a decision that repeats a message to the implementer", () => {
     const told = started({
@@ -614,9 +661,7 @@ describe("a request", () => {
     const panel = screen.getByRole("complementary", {
       name: "Cache the lookups",
     });
-    const field = document.body.appendChild(
-      document.createElement("textarea"),
-    );
+    const field = document.body.appendChild(document.createElement("textarea"));
     try {
       field.focus();
       view.rerender(
@@ -744,10 +789,14 @@ describe("the project's tabs", () => {
     ).toBeTruthy();
     expect(screen.getByRole("region", { name: "Folders" })).toBeTruthy();
   });
-  const member = (id: string, name: string, kind: Member["kind"]): Member => ({
+  const member = (
+    id: string,
+    name: string,
+    ...kinds: Member["kinds"]
+  ): Member => ({
     id,
     name,
-    kind,
+    kinds,
     engine: "claude",
     avatar_svg: `<svg xmlns="http://www.w3.org/2000/svg"><title>${name}</title></svg>`,
     learnings: [],
@@ -762,9 +811,14 @@ describe("the project's tabs", () => {
       playbook: {
         ...codeTeam(),
         roles: [
-          { name: "Ada", kind: "implementer", engine: "claude", member: "m1" },
-          { name: "Reviewer", kind: "reviewer", engine: "codex" },
-          { name: "QA", kind: "qa", engine: "codex" },
+          {
+            name: "Ada",
+            kinds: ["implementer"],
+            engine: "claude",
+            member: "m1",
+          },
+          { name: "Reviewer", kinds: ["reviewer"], engine: "codex" },
+          { name: "QA", kinds: ["qa"], engine: "codex" },
         ],
       },
     });
@@ -919,7 +973,7 @@ describe("faces of the team at work", () => {
   const face = (id: string, name: string, image: string): Member => ({
     id,
     name,
-    kind: "implementer",
+    kinds: ["implementer"],
     engine: "claude",
     avatar: { image },
     learnings: [],
@@ -927,9 +981,9 @@ describe("faces of the team at work", () => {
   const ada = face("m1", "Ada", "a".repeat(32));
   const rune = face("m2", "Rune", "b".repeat(32));
   const roles = [
-    { name: "Ada", kind: "implementer", engine: "claude", member: "m1" },
-    { name: "Rune", kind: "reviewer", engine: "codex", member: "m2" },
-    { name: "QA", kind: "qa", engine: "codex" },
+    { name: "Ada", kinds: ["implementer"], engine: "claude", member: "m1" },
+    { name: "Rune", kinds: ["reviewer"], engine: "codex", member: "m2" },
+    { name: "QA", kinds: ["qa"], engine: "codex" },
   ];
   const staffed = (overrides: Partial<Task> = {}) =>
     task({ roles, playbook: { ...codeTeam(), roles }, ...overrides });

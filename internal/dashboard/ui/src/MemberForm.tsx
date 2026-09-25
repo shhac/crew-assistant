@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { engines, memberKinds } from "./members";
+import { engines, kindsProblem, memberKinds } from "./members";
 import { ErrorNotice, useAction } from "./ui";
 import { saveMember, type Member, type MemberKind } from "./api";
 
@@ -13,7 +13,16 @@ export function MemberForm({
   onCancel: () => void;
 }) {
   const [name, setName] = useState(member?.name ?? "");
-  const [kind, setKind] = useState<MemberKind>(member?.kind ?? "implementer");
+  const [kinds, setKinds] = useState<MemberKind[]>(
+    member?.kinds ?? ["implementer"],
+  );
+  const problem = kindsProblem(kinds);
+  const toggle = (kind: MemberKind, on: boolean) =>
+    setKinds((current) =>
+      memberKinds
+        .map((k) => k.id)
+        .filter((k) => (k === kind ? on : current.includes(k))),
+    );
   const [engine, setEngine] = useState(member?.engine ?? "claude");
   const [model, setModel] = useState(member?.model ?? "");
   const [effort, setEffort] = useState(member?.effort ?? "");
@@ -21,10 +30,11 @@ export function MemberForm({
   const { busy, error, run } = useAction();
   async function save(e: FormEvent) {
     e.preventDefault();
+    if (problem) return;
     await run(async () => {
       const saved = await saveMember(member?.id ?? "", {
         name: name.trim(),
-        kind,
+        kinds,
         engine,
         model: model.trim(),
         effort: effort.trim(),
@@ -51,26 +61,30 @@ export function MemberForm({
           required
         />
       </label>
+      <fieldset
+        className="member-kinds"
+        aria-describedby={problem ? "member-kinds-problem" : undefined}
+      >
+        <legend>Roles</legend>
+        <div className="member-kinds-choices">
+          {memberKinds.map((k) => (
+            <label key={k.id} className="check">
+              <input
+                type="checkbox"
+                checked={kinds.includes(k.id)}
+                onChange={(e) => toggle(k.id, e.target.checked)}
+              />
+              <span>{k.label}</span>
+            </label>
+          ))}
+        </div>
+        {problem && (
+          <p className="member-kinds-problem" id="member-kinds-problem">
+            {problem}
+          </p>
+        )}
+      </fieldset>
       <div className="form-row">
-        <label htmlFor="member-kind">
-          Kind
-          <select
-            id="member-kind"
-            className="field"
-            value={kind}
-            onChange={(e) =>
-              setKind(
-                memberKinds.find((k) => k.id === e.target.value)?.id ?? kind,
-              )
-            }
-          >
-            {memberKinds.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.label}
-              </option>
-            ))}
-          </select>
-        </label>
         <label htmlFor="member-engine">
           Engine
           <select
@@ -131,7 +145,7 @@ export function MemberForm({
         <button
           className="btn btn-primary"
           type="submit"
-          disabled={busy || !name.trim()}
+          disabled={busy || !name.trim() || !!problem}
         >
           {member ? "Save" : "Add member"}
         </button>

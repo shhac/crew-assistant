@@ -1,4 +1,3 @@
-import { taskPlaybook } from "./stages";
 import type { Member, MemberKind, Project, Role, Task } from "./api";
 
 export const engines = [
@@ -8,18 +7,55 @@ export const engines = [
 export const engineLabel = (id: string) =>
   engines.find((e) => e.id === id)?.label ?? id;
 
-export const memberKinds: { id: MemberKind; label: string }[] = [
-  { id: "implementer", label: "Implementer" },
-  { id: "reviewer", label: "Reviewer" },
-  { id: "qa", label: "QA" },
+/** In the order a team works; `word` is how a kind reads mid-sentence. */
+export const memberKinds: { id: MemberKind; label: string; word: string }[] = [
+  { id: "planner", label: "Planner", word: "planner" },
+  { id: "implementer", label: "Implementer", word: "implementer" },
+  { id: "reviewer", label: "Reviewer", word: "reviewer" },
+  { id: "qa", label: "QA", word: "QA" },
 ];
 export const kindLabel = (kind: string) =>
   memberKinds.find((k) => k.id === kind)?.label ?? kind;
+export const kindWord = (kind: string) =>
+  memberKinds.find((k) => k.id === kind)?.word ?? kind;
+
+/** Whether a seat or a member holds a kind of role. */
+export const holds = (who: { kinds?: readonly string[] }, kind: string) =>
+  !!who.kinds?.includes(kind);
+
+/** What a seat does once the work has started; "" for one that only plans. */
+export const workingKind = (role: Role) =>
+  role.kinds.find((k) => k !== "planner") ?? "";
+
+/** "Planner and implementer": the kinds held, in the order a team works. */
+export function kindsLabel(kinds: readonly string[]) {
+  const rank = (kind: string) => {
+    const i = memberKinds.findIndex((k) => k.id === kind);
+    return i < 0 ? memberKinds.length : i;
+  };
+  const [first, ...rest] = [...kinds].sort((a, b) => rank(a) - rank(b));
+  if (!first) return "";
+  const words = [kindLabel(first), ...rest.map(kindWord)];
+  if (words.length < 2) return words[0];
+  return `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
+}
+
+/**
+ * Why a member can't hold these kinds, as the server would refuse them:
+ * verdicts and messages name the seat, so it does one kind of work, and
+ * planning sits alongside.
+ */
+export function kindsProblem(kinds: readonly string[]) {
+  if (!kinds.length) return "Pick at least one role.";
+  if (kinds.filter((k) => k !== "planner").length > 1)
+    return "Pick one of implementer, reviewer and QA, plus planning if you like.";
+  return "";
+}
 
 /** "Implementer · Claude opus": what a member is and what it runs on. */
 export const memberSummary = (m: Member) =>
   [
-    kindLabel(m.kind),
+    kindsLabel(m.kinds),
     [engineLabel(m.engine), m.model].filter(Boolean).join(" "),
   ].join(" · ");
 
@@ -30,6 +66,10 @@ export const memberProjects = (member: Member, projects: Project[]) =>
       p.status !== "completed" &&
       p.playbook?.roles.some((r) => r.member === member.id),
   );
+
+/** A request keeps the team it started with after the project's changes. */
+export const taskPlaybook = (task?: Task, project?: Project) =>
+  task?.playbook ?? project?.playbook;
 
 /** A request's team: the one it started with, or else the project's. */
 export const taskRoles = (task: Task, project: Project): Role[] =>
@@ -52,13 +92,20 @@ export function roleMember(
 }
 
 /**
- * The member at work on a request now: the implementer while it writes,
- * the checker named while it is checked, and no one otherwise.
+ * The member at work on a request now: the planner while it plans, the
+ * implementer while it writes, the checker named while it is checked, and no
+ * one otherwise.
  */
 export function atWork(task: Task, members: Member[]) {
   if (task.status === "writing")
     return memberOf(
-      task.roles?.find((r) => r.kind === "implementer"),
+      task.roles?.find((r) => holds(r, "implementer")),
+      members,
+    );
+  if (task.status === "planning")
+    return memberOf(
+      task.roles?.find((r) => r.name === task.checking) ??
+        task.roles?.find((r) => holds(r, "planner")),
       members,
     );
   if (task.status === "reviewing" || task.status === "deciding")

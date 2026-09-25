@@ -1,5 +1,6 @@
 import { recordedTime } from "./ui";
 import { approveLabel, isCode } from "./landing";
+import { holds, taskPlaybook } from "./members";
 import {
   pendingDecisions,
   type Decision,
@@ -13,7 +14,7 @@ import {
 /** Colour roles: amber needs the owner, blue is under way, grey waits. */
 export type Tone = "needs" | "work" | "wait" | "block" | "done" | "";
 
-export { isCode };
+export { isCode, taskPlaybook };
 
 export const finished = (task: Task) =>
   task.status === "delivered" ||
@@ -25,6 +26,7 @@ export const needsYou = (task: Task) =>
   task.status === "waiting" && !task.answered;
 
 const active = (task: Task) =>
+  task.status === "planning" ||
   task.status === "writing" ||
   task.status === "reviewing" ||
   task.status === "deciding" ||
@@ -44,10 +46,6 @@ export const decisionFor = (task: Task, decisions: Decision[]) =>
 export const projectKind = (playbook?: Playbook) =>
   !playbook ? "Tracking only" : isCode(playbook) ? "Code" : "Writing";
 
-/** A request keeps the team it started with after the project's changes. */
-export const taskPlaybook = (task?: Task, project?: Project) =>
-  task?.playbook ?? project?.playbook;
-
 export const isOpenMessage = (m: TeamMessage) =>
   m.status === "waiting" || m.status === "working";
 
@@ -63,16 +61,30 @@ export interface Column {
 }
 
 /**
- * The board's columns. QA shows when the team has it, or when a request
- * that started with it is still open after the team changed.
+ * Whether the board needs a column for this kind of role: the team has it, or
+ * a request that started with it is still open after the team changed.
  */
+const hasColumn = (
+  project: Project,
+  tasks: Task[],
+  kind: string,
+  stage: Stage,
+) =>
+  !!project.playbook?.roles.some((r) => holds(r, kind)) ||
+  tasks.some(
+    (t) =>
+      !finished(t) &&
+      (t.stage === stage || !!t.roles?.some((r) => holds(r, kind))),
+  );
+
+/** The board's columns; planning and QA show only for teams that have them. */
 export function boardColumns(project: Project, tasks: Task[]): Column[] {
   const code = isCode(project.playbook);
-  const qa =
-    !!project.playbook?.roles.some((r) => r.kind === "qa") ||
-    tasks.some((t) => !finished(t) && t.roles?.some((r) => r.kind === "qa"));
+  const planning = hasColumn(project, tasks, "planner", "planning");
+  const qa = hasColumn(project, tasks, "qa", "qa");
   return [
     { stage: "todo", label: "To do" },
+    ...(planning ? [{ stage: "planning" as const, label: "Planning" }] : []),
     { stage: "implementing", label: code ? "Implementing" : "Writing" },
     { stage: "reviewing", label: "Reviewing" },
     ...(qa ? [{ stage: "qa" as const, label: "QA" }] : []),
@@ -82,7 +94,7 @@ export function boardColumns(project: Project, tasks: Task[]): Column[] {
 }
 
 export function roleName(task: Task, kind: string, fallback: string) {
-  return task.roles?.find((r) => r.kind === kind)?.name ?? fallback;
+  return task.roles?.find((r) => holds(r, kind))?.name ?? fallback;
 }
 
 export interface DecisionKindWords {
@@ -177,6 +189,8 @@ export function requestStep(task: Task, decision?: Decision): string {
   switch (task.status) {
     case "queued":
       return "Waiting to start";
+    case "planning":
+      return task.checking ? `${task.checking} planning` : "Planning";
     case "writing":
       return `${round}${roleName(task, "implementer", code ? "Implementer" : "Writer")} working`;
     case "reviewing":
@@ -240,6 +254,7 @@ export function projectGroup(own: Task[]): ProjectGroup {
 const groupOrder: Record<Task["status"], number> = {
   waiting: 0,
   landing: 1,
+  planning: 1,
   writing: 1,
   reviewing: 1,
   deciding: 1,

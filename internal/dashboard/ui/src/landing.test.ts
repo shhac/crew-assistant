@@ -13,8 +13,8 @@ const writing: Playbook = {
   template: "draft",
   medium: "documents",
   roles: [
-    { name: "Writer", kind: "implementer", engine: "claude" },
-    { name: "Reviewer", kind: "reviewer", engine: "codex" },
+    { name: "Writer", kinds: ["implementer"], engine: "claude" },
+    { name: "Reviewer", kinds: ["reviewer"], engine: "codex" },
   ],
   max_rounds: 3,
   deliver: "owner",
@@ -26,9 +26,9 @@ const code = (
   template: "code",
   medium: "git",
   roles: [
-    { name: "Implementer", kind: "implementer", engine: "claude" },
-    { name: "Reviewer", kind: "reviewer", engine: "codex" },
-    { name: "QA", kind: "qa", engine: "claude" },
+    { name: "Implementer", kinds: ["implementer"], engine: "claude" },
+    { name: "Reviewer", kinds: ["reviewer"], engine: "codex" },
+    { name: "QA", kinds: ["qa"], engine: "claude" },
   ],
   check: "make check",
   branch_prefix: "crew/",

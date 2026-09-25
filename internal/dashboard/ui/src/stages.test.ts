@@ -20,8 +20,8 @@ const writing: Playbook = {
   template: "draft",
   medium: "documents",
   roles: [
-    { name: "Writer", kind: "implementer", engine: "claude" },
-    { name: "Reviewer", kind: "reviewer", engine: "codex" },
+    { name: "Writer", kinds: ["implementer"], engine: "claude" },
+    { name: "Reviewer", kinds: ["reviewer"], engine: "codex" },
   ],
   max_rounds: 3,
   deliver: "owner",
@@ -33,9 +33,9 @@ const code = (
   template: "code",
   medium: "git",
   roles: [
-    { name: "Implementer", kind: "implementer", engine: "claude" },
-    { name: "Reviewer", kind: "reviewer", engine: "codex" },
-    { name: "QA", kind: "qa", engine: "claude" },
+    { name: "Implementer", kinds: ["implementer"], engine: "claude" },
+    { name: "Reviewer", kinds: ["reviewer"], engine: "codex" },
+    { name: "QA", kinds: ["qa"], engine: "claude" },
   ],
   check: "make check",
   branch_prefix: "crew/",
@@ -96,6 +96,34 @@ describe("the board", () => {
     expect(
       boardColumns(project(writing), [pinned]).some((c) => c.stage === "qa"),
     ).toBe(true);
+  });
+  it("shows planning when the team plans, or while a request still does", () => {
+    const planned = (): Playbook => ({
+      ...code(),
+      roles: [
+        { name: "Planner", kinds: ["planner"], engine: "claude" },
+        ...code().roles,
+      ],
+    });
+    expect(boardColumns(project(planned()), []).map((c) => c.label)).toEqual([
+      "To do",
+      "Planning",
+      "Implementing",
+      "Reviewing",
+      "QA",
+      "Ready to land",
+      "Landed",
+    ]);
+    const has = (tasks: Task[]) =>
+      boardColumns(project(code()), tasks).some((c) => c.stage === "planning");
+    expect(has([])).toBe(false);
+    expect(has([task({ status: "queued", roles: planned().roles })])).toBe(
+      true,
+    );
+    expect(has([task({ status: "waiting", stage: "planning" })])).toBe(true);
+    expect(
+      has([task({ status: "landed", stage: "done", roles: planned().roles })]),
+    ).toBe(false);
   });
   it("says what a request is doing in a few words", () => {
     const pb = code();
@@ -258,6 +286,18 @@ describe("the board", () => {
     expect(isOpenMessage(message("working"))).toBe(true);
     expect(isOpenMessage(message("answered"))).toBe(false);
   });
+  it("names the planner while a request plans", () => {
+    expect(
+      requestStep(
+        task({ status: "planning", stage: "planning", checking: "Ada" }),
+      ),
+    ).toBe("Ada planning");
+    expect(requestStep(task({ status: "planning", stage: "planning" }))).toBe(
+      "Planning",
+    );
+    expect(requestTone(task({ status: "planning" }))).toBe("work");
+    expect(underWay(task({ status: "planning" }))).toBe(true);
+  });
   it("ignores a hold whose time was never recorded", () => {
     expect(
       requestStep(
@@ -280,6 +320,7 @@ describe("projects", () => {
       projectGroup([task({ status: "queued" }), task({ status: "reviewing" })]),
     ).toBe("working");
     expect(projectGroup([task({ status: "awaiting" })])).toBe("waiting");
+    expect(projectGroup([task({ status: "planning" })])).toBe("working");
     expect(projectGroup([task({ status: "landed" })])).toBe("quiet");
     expect(
       leadRequest([

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { finished, isCode, taskPlaybook, verdictOutcome } from "./stages";
-import { roleMember, taskRoles } from "./members";
+import { kindWord, roleMember, taskRoles, workingKind } from "./members";
 import { Avatar } from "./Avatar";
 import { ErrorNotice, Pill, sinceLabel, useAction } from "./ui";
 import {
@@ -15,10 +15,11 @@ import {
 /** What a message to each kind of team member does. */
 function effect(role: Role | undefined, task: Task, waitingOn?: string) {
   if (!role) return "";
-  if (role.kind === "implementer") {
+  if (workingKind(role) === "implementer") {
     if (task.status === "landing")
       return "It's landing now. Message again once it has landed.";
     if (waitingOn === "failure") return "Goes into the round after you retry.";
+    if (!task.revisions?.length) return "Goes into the first round.";
     if (task.status === "waiting" || task.status === "awaiting")
       return "Sends it back for another round with your note.";
     return "Goes into the next round.";
@@ -33,10 +34,22 @@ function effect(role: Role | undefined, task: Task, waitingOn?: string) {
  * a member with a name of its own, which must not be lowercased.
  */
 function prompt(role: Role | undefined, code: boolean) {
-  if (role?.kind === "implementer")
+  const kind = role ? workingKind(role) : "";
+  if (kind === "implementer")
     return `Tell the ${code ? "implementer" : "writer"} what to change`;
-  if (role?.kind === "qa") return "Ask QA to check something";
+  if (kind === "qa") return "Ask QA to check something";
   return "Ask the reviewer to check something";
+}
+
+/**
+ * How a seat is offered in "To": by its name, and by the role a message
+ * reaches when the seat also plans, since planning isn't what it answers.
+ */
+function recipient(role: Role, code: boolean) {
+  if (role.kinds.length < 2) return role.name;
+  const kind = workingKind(role);
+  const word = kind === "implementer" && !code ? "writer" : kindWord(kind);
+  return `${role.name} (${word})`;
 }
 
 /**
@@ -58,11 +71,13 @@ export function TeamThread({
   refresh: () => Promise<void>;
 }) {
   const team = taskRoles(task, project);
-  const [to, setTo] = useState(team[0]?.name ?? "");
+  // A seat that only plans is done before the work starts; nothing reaches it.
+  const reachable = team.filter((r) => workingKind(r) !== "");
+  const [to, setTo] = useState(reachable[0]?.name ?? "");
   const [text, setText] = useState("");
   const { busy, error, run } = useAction();
   const messages = task.messages ?? [];
-  const role = team.find((r) => r.name === to);
+  const role = reachable.find((r) => r.name === to);
   const closed = finished(task);
   const code = isCode(taskPlaybook(task, project));
   async function send(e: FormEvent) {
@@ -73,7 +88,7 @@ export function TeamThread({
       await refresh();
     });
   }
-  if (!team.length) return null;
+  if (!reachable.length) return null;
   return (
     <section className="section thread" aria-label="Team">
       <h3>Message the team</h3>
@@ -105,9 +120,9 @@ export function TeamThread({
               value={to}
               onChange={(e) => setTo(e.target.value)}
             >
-              {team.map((r) => (
+              {reachable.map((r) => (
                 <option key={r.name} value={r.name}>
-                  {r.name}
+                  {recipient(r, code)}
                 </option>
               ))}
             </select>

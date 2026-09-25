@@ -42,7 +42,8 @@ export interface BriefInput {
 }
 export interface Role {
   name: string;
-  kind: "implementer" | "reviewer" | "qa" | (string & {});
+  /** At most one of implementer, reviewer and QA, and perhaps planner. */
+  kinds: (MemberKind | (string & {}))[];
   engine: string;
   model?: string;
   effort?: string;
@@ -50,7 +51,7 @@ export interface Role {
   /** The member this role was copied from, if any. */
   member?: string;
 }
-export type MemberKind = "implementer" | "reviewer" | "qa";
+export type MemberKind = "planner" | "implementer" | "reviewer" | "qa";
 export interface Learning {
   id: string;
   /** The situation it applies to, like a skill's description. */
@@ -69,7 +70,7 @@ export interface LearningInput {
 export interface Member extends Drawable {
   id: string;
   name: string;
-  kind: MemberKind;
+  kinds: MemberKind[];
   engine: string;
   model?: string;
   effort?: string;
@@ -79,7 +80,7 @@ export interface Member extends Drawable {
 }
 export interface MemberInput {
   name: string;
-  kind: MemberKind;
+  kinds: MemberKind[];
   engine: string;
   model: string;
   effort: string;
@@ -147,6 +148,8 @@ export interface TeamInput {
   implementer_member?: string;
   reviewer_member?: string;
   qa_member?: string;
+  /** "" keeps the template's planner, "none" leaves planning out. */
+  planner_member?: string;
   max_rounds: string;
   deliver_to: string;
   repo?: string;
@@ -161,6 +164,7 @@ export interface TaskInput {
 }
 export type TaskStatus =
   | "queued"
+  | "planning"
   | "writing"
   | "reviewing"
   | "deciding"
@@ -171,7 +175,14 @@ export type TaskStatus =
   | "landed"
   | "stopped";
 export type Stage =
-  "todo" | "implementing" | "reviewing" | "qa" | "ready" | "done" | "stopped";
+  | "todo"
+  | "planning"
+  | "implementing"
+  | "reviewing"
+  | "qa"
+  | "ready"
+  | "done"
+  | "stopped";
 export interface Revision {
   n: number;
   brief_version: number;
@@ -211,6 +222,17 @@ export interface TeamMessage {
   at?: string;
   answered_at?: string;
 }
+/** What the planner worked out before anything was written. */
+export interface Plan {
+  summary: string;
+  exists?: string[];
+  changes?: string[];
+  out_of_scope?: string[];
+  questions?: string[];
+  /** The seat that planned it. */
+  role: string;
+  at: string;
+}
 export interface Proposal {
   branch: string;
   number?: number;
@@ -223,7 +245,7 @@ export interface Task {
   criteria: string[] | null;
   status: TaskStatus;
   stage: Stage;
-  /** The checker at work while the request is being checked. */
+  /** The checker at work while it is checked, or the planner while it plans. */
   checking?: string;
   /** Waiting on a decision the owner has already made; it resumes next. */
   answered?: boolean;
@@ -235,6 +257,11 @@ export interface Task {
   direction?: string[];
   direction_pending?: number;
   messages?: TeamMessage[];
+  plan?: Plan;
+  /** Ids of the tasks that must land before this one starts. */
+  depends_on?: string[];
+  /** The objectives of unfinished dependencies, while it is queued. */
+  waits_for?: string[];
   proposal?: Proposal;
   branch?: string;
   retry_at?: string;
@@ -320,14 +347,10 @@ export interface Conversation extends Omit<ConversationEntry, "messages"> {
   messages: Message[];
 }
 export function listConversations() {
-  return api<{ conversations: ConversationEntry[] }>(
-    "/api/chat/conversations",
-  );
+  return api<{ conversations: ConversationEntry[] }>("/api/chat/conversations");
 }
 export function getConversation(id: string) {
-  return api<Conversation>(
-    `/api/chat/conversations/${encodeURIComponent(id)}`,
-  );
+  return api<Conversation>(`/api/chat/conversations/${encodeURIComponent(id)}`);
 }
 export function resumeConversation(id: string) {
   return api(`/api/chat/conversations/${encodeURIComponent(id)}/resume`, {

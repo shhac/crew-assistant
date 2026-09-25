@@ -140,3 +140,35 @@
   font-size: 13px;
   font-weight: 600;
 }
+
+/* The roles a member can hold */
+.member-kinds legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: var(--soft);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.member-kinds-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.form .member-kinds-choices label.check {
+  flex-direction: row;
+  align-items: center;
+  color: var(--text);
+  font-weight: 400;
+}
+
+.member-kinds-choices input {
+  margin: 0;
+}
+
+.member-kinds-problem {
+  margin-top: 6px;
+  color: var(--block);
+  font-size: 12px;
+}
