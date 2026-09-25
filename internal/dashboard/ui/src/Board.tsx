@@ -29,6 +29,12 @@ import {
 
 const shownDone = 6;
 
+/** What a queued request waits to land first, or "" when it waits for nothing. */
+const waitsLine = (task: Task) =>
+  task.waits_for?.length
+    ? `Waits for ${task.waits_for.map((w) => `“${w}”`).join(", ")}`
+    : "";
+
 export function Board({
   project,
   state,
@@ -245,37 +251,68 @@ function TodoColumn({
             onDrop={(e) => drop(e, i)}
           >
             <BoardCard task={t}>
-              {tasks.length > 1 && (
-                <div className="reorder">
-                  <span className="muted small">
-                    {i === 0 ? "Next" : `#${i + 1}`}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-quiet btn-icon btn-sm"
-                    aria-label={`Move “${t.objective}” up`}
-                    disabled={busy || i === 0}
-                    onClick={() => move(i, i - 1)}
-                  >
-                    <Icon name="Up" size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-quiet btn-icon btn-sm"
-                    aria-label={`Move “${t.objective}” down`}
-                    disabled={busy || i === tasks.length - 1}
-                    onClick={() => move(i, i + 1)}
-                  >
-                    <Icon name="Down" size={14} />
-                  </button>
-                </div>
-              )}
+              <Place
+                task={t}
+                index={i}
+                count={tasks.length}
+                busy={busy}
+                move={move}
+              />
             </BoardCard>
           </li>
         ))}
       </ol>
       <ErrorNotice error={error} />
     </>
+  );
+}
+
+/**
+ * Where a queued request stands: what it waits for, or else its place in
+ * line, with the buttons that move it.
+ */
+function Place({
+  task,
+  index,
+  count,
+  busy,
+  move,
+}: {
+  task: Task;
+  index: number;
+  count: number;
+  busy: boolean;
+  move: (from: number, to: number) => void;
+}) {
+  const place = index === 0 ? "Next" : `#${index + 1}`;
+  const hint = waitsLine(task) || (count > 1 ? place : "");
+  if (!hint) return null;
+  return (
+    <div className="reorder">
+      <span className="muted small">{hint}</span>
+      {count > 1 && (
+        <>
+          <button
+            type="button"
+            className="btn btn-quiet btn-icon btn-sm"
+            aria-label={`Move “${task.objective}” up`}
+            disabled={busy || index === 0}
+            onClick={() => move(index, index - 1)}
+          >
+            <Icon name="Up" size={14} />
+          </button>
+          <button
+            type="button"
+            className="btn btn-quiet btn-icon btn-sm"
+            aria-label={`Move “${task.objective}” down`}
+            disabled={busy || index === count - 1}
+            onClick={() => move(index, index + 1)}
+          >
+            <Icon name="Down" size={14} />
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 

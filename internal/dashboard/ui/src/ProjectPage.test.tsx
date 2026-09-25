@@ -188,6 +188,64 @@ describe("the board", () => {
     expect(within(column("QA")).queryAllByRole("link")).toHaveLength(0);
     expect(screen.getByText("1 needs you")).toBeTruthy();
   });
+  it("shows a request being planned in its own column, with its planner", () => {
+    const planner: Member = {
+      id: "m1",
+      name: "Ada",
+      kinds: ["planner", "implementer"],
+      engine: "claude",
+      avatar: { image: "a".repeat(32) },
+      learnings: [],
+    };
+    const roles = [
+      {
+        name: "Ada",
+        kinds: ["implementer", "planner"],
+        engine: "claude",
+        member: "m1",
+      },
+      ...codeTeam().roles.slice(1),
+    ];
+    show(project({ playbook: { ...codeTeam(), roles } }), {
+      members: [planner],
+      tasks: [
+        started({
+          roles,
+          status: "planning",
+          stage: "planning",
+          checking: "Ada",
+        }),
+      ],
+    });
+    const columns = screen
+      .getAllByRole("listitem")
+      .filter((c) => c.classList.contains("board-column"))
+      .map((c) => c.getAttribute("aria-label"));
+    expect(columns.slice(0, 3)).toEqual(["To do", "Planning", "Implementing"]);
+    const planning = screen.getByRole("listitem", { name: "Planning" });
+    expect(within(planning).getByText("Ada planning")).toBeTruthy();
+    expect(planning.querySelector("img")?.getAttribute("src")).toBe(
+      `/api/avatars/${"a".repeat(32)}/small`,
+    );
+  });
+  it("says what a queued request waits for in place of its place in line", () => {
+    show(project(), {
+      tasks: [
+        task({ id: "a", objective: "A", waits_for: ["Cache the lookups"] }),
+        task({ id: "b", objective: "B" }),
+        task({ id: "c", objective: "C", waits_for: ["X", "Y"] }),
+      ],
+    });
+    const todo = screen.getByRole("listitem", { name: "To do" });
+    expect(
+      [...todo.querySelectorAll(".reorder > span")].map((s) => s.textContent),
+    ).toEqual(["Waits for “Cache the lookups”", "#2", "Waits for “X”, “Y”"]);
+    expect(screen.queryByRole("listitem", { name: "Planning" })).toBeNull();
+    cleanup();
+    show(project(), { tasks: [task({ waits_for: ["Cache the index"] })] });
+    expect(screen.getByText("Waits for “Cache the index”")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Move/ })).toBeNull();
+  });
   it("reorders the to-do list in the order work starts in", async () => {
     show(project(), {
       tasks: [

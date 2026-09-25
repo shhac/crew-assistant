@@ -6,6 +6,7 @@ describe("activity presentation", () => {
     expect(activityLabel("memory.created")).toBe("Memory");
     expect(activityLabel("decision.opened")).toBe("Asked you");
     expect(activityLabel("task.landed")).toBe("Landed");
+    expect(activityLabel("task.planned")).toBe("Planned");
     expect(activityLabel("memory.corrected")).toBe("Memory");
     expect(activityLabel("some.future_kind")).toBe("Update");
     expect(activityLabel("some.future_kind")).not.toContain("future");
@@ -107,6 +108,7 @@ describe("activity presentation", () => {
       "task.deciding",
       "task.started",
       "task.queued",
+      "task.planned",
       "task.reordered",
       "task.landing",
       "task.awaiting",
