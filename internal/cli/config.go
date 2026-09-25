@@ -27,7 +27,31 @@ func configCommand(o *options) *cobra.Command {
 			return built.RunE(c, args)
 		}
 	}
+	cmd.AddCommand(&cobra.Command{Use: "path", Short: "Show where the config file is", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error { return o.emit(map[string]string{"path": o.configPath}) }})
+	cmd.AddCommand(&cobra.Command{Use: "show", Short: "Show the whole config", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load(o.configPath)
+		if err != nil {
+			return err
+		}
+		return o.emit(cfg)
+	}})
+	cmd.AddCommand(&cobra.Command{Use: "validate", Short: "Check the config file", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		if _, err := config.Load(o.configPath); err != nil {
+			return err
+		}
+		return o.emit(map[string]bool{"valid": true})
+	}})
 	return cmd
+}
+
+// configProblems are the keys in the config file that have no effect, said
+// where the owner will see them.
+func configProblems(path string) []string {
+	var problems []string
+	for _, k := range config.UnknownKeys(path) {
+		problems = append(problems, k.String())
+	}
+	return problems
 }
 
 // configKeys are the settings `config get/set/unset` reach, each named by its
@@ -79,20 +103,15 @@ func configKeys(o *options) []libcli.ConfigKey {
 		libcli.JSONKey[config.Config, []string](b, "linear.team_ids", "The Linear teams to import from, as a JSON array", func(c *config.Config) *[]string { return &c.Linear.TeamIDs }, nil),
 		libcli.JSONKey[config.Config, []config.Connection](b, "connections", "The agent CLIs the assistant may query, as a JSON array", func(c *config.Config) *[]config.Connection { return &c.Connections }, nil),
 	}
-	for _, name := range []string{"codex", "claude"} {
-		engine := func(c *config.Config) *config.CLIEngine {
-			if name == "codex" {
-				return &c.Engines.Codex
-			}
-			return &c.Engines.Claude
-		}
+	for _, name := range config.CLIEngineNames {
+		engine := func(c *config.Config) *config.CLIEngine { return c.Engines.CLIRef(name) }
 		prefix := "engines." + name + "."
 		keys = append(keys,
 			libcli.StringKey(b, prefix+"bin", "The "+name+" executable; empty is "+name+" on PATH", func(c *config.Config) *string { return &engine(c).Bin }, nil),
 			libcli.PathKey(b, prefix+"home", "The "+name+" login home; empty is the default", func(c *config.Config) *string { return &engine(c).Home }),
 			libcli.OptionalIntKey(b, prefix+"usage_floor.5h_percent", "The share of the 5-hour window team roles leave unused; 0 turns it off", func(c *config.Config) **int { return &engine(c).UsageFloor.FiveHourPercent }, 0, 100),
 			libcli.OptionalIntKey(b, prefix+"usage_floor.1w_percent", "The share of the weekly window team roles leave unused; 0 turns it off", func(c *config.Config) **int { return &engine(c).UsageFloor.WeekPercent }, 0, 100),
-			libcli.OneOfKey(b, prefix+"on_unknown_usage", "Whether team roles carry on or wait while usage can't be read", func(c *config.Config) *string { return &engine(c).OnUnknownUsage }, []string{"allow", "pause"}),
+			libcli.OneOfKey(b, prefix+"on_unknown_usage", "Whether team roles carry on or wait while usage can't be read", func(c *config.Config) *string { return &engine(c).OnUnknownUsage }, []string{config.OnUnknownUsageAllow, config.OnUnknownUsagePause}),
 		)
 	}
 	return keys

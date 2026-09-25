@@ -31,13 +31,7 @@ func registerServe(root *cobra.Command, o *options) {
 	var port int
 	var demo, open, noDispatch bool
 	cmd := &cobra.Command{Use: "serve", Short: "Run the assistant daemon and embedded dashboard", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		// A demo leaves the owner's file as it is; it only reads it.
-		if !demo {
-			if _, err := config.Upgrade(o.configPath); err != nil {
-				return err
-			}
-		}
-		cfg, err := config.Load(o.configPath)
+		cfg, err := loadServeConfig(o.configPath, demo)
 		if err != nil {
 			return err
 		}
@@ -233,12 +227,13 @@ func openDashboard(o *options, printOnly bool) error {
 	return nil
 }
 
-// configProblems are the keys in the config file that have no effect, said
-// where the owner will see them.
-func configProblems(path string) []string {
-	var problems []string
-	for _, k := range config.UnknownKeys(path) {
-		problems = append(problems, k.String())
+// loadServeConfig reads the config the daemon starts with, first rewriting
+// a file in an earlier layout once. A demo leaves the owner's file as it is.
+func loadServeConfig(path string, demo bool) (config.Config, error) {
+	if !demo {
+		if _, err := config.Upgrade(path); err != nil {
+			return config.Config{}, err
+		}
 	}
-	return problems
+	return config.Load(path)
 }

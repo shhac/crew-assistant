@@ -47,7 +47,7 @@ func registerCompletions(root *cobra.Command, o *options) {
 	_ = serve.RegisterFlagCompletionFunc("tailscale-port", completeStatic(values["dashboard.tailscale_port"]))
 	_ = serve.RegisterFlagCompletionFunc("http", completeStatic(nil))
 	login, _, _ := root.Find([]string{"model", "login"})
-	_ = login.RegisterFlagCompletionFunc("engine", completeStatic([]string{"codex", "claude"}))
+	_ = login.RegisterFlagCompletionFunc("engine", completeStatic(config.CLIEngineNames))
 }
 
 func completeStatic(values []string) cobra.CompletionFunc {

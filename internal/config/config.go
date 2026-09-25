@@ -2,21 +2,14 @@
 package config
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
-
-	"github.com/shhac/lib-agent-cli/creds"
 )
 
 const Namespace = "app.paulie.crew-assistant"
@@ -43,44 +36,6 @@ type Chat struct {
 // effort to choose.
 type LoadingPhrases struct {
 	Enabled bool `json:"enabled"`
-}
-
-// approvedSmallModels are the only models loading captions and next-message
-// suggestions may use, one per CLI engine. Luna runs at low effort; Haiku 4.5
-// has no effort setting, so none is sent for it.
-var approvedSmallModels = map[string]struct{ model, effort string }{
-	"codex":  {"gpt-6-luna", "low"},
-	"claude": {"haiku", ""},
-}
-
-// SmallModels lists the approved small models to try in order: the
-// assistant's own CLI engine first, then the other one. Each uses that CLI's
-// configured login. An API assistant has no CLI of its own to start from, so it
-// gets none rather than a guessed engine.
-func (c Config) SmallModels() ([]Harness, error) {
-	var order []string
-	switch c.Model.Engine {
-	case "codex":
-		order = []string{"codex", "claude"}
-	case "claude":
-		order = []string{"claude", "codex"}
-	default:
-		return nil, fmt.Errorf("no approved small model for the %s engine", c.Model.Engine)
-	}
-	models := make([]Harness, 0, len(order))
-	for _, engine := range order {
-		approved := approvedSmallModels[engine]
-		m := c.Harness(engine, approved.model, approved.effort)
-		m.MaxTokens = 128
-		models = append(models, m)
-	}
-	return models, nil
-}
-
-// ApprovedSmallModel reports whether engine/model is one of the approved pair.
-func ApprovedSmallModel(engine, model string) bool {
-	approved, ok := approvedSmallModels[engine]
-	return ok && approved.model == model
 }
 
 // Themes are the dashboard's appearance: the system's choice, light or dark.
@@ -121,15 +76,6 @@ type Dashboard struct {
 	AllowedUsers  []string `json:"allowed_users"`
 }
 
-// Model is the assistant's own model choice; the engine it names is reached
-// as Engines says.
-type Model struct {
-	Engine    string `json:"engine"`
-	Model     string `json:"model"`
-	Effort    string `json:"effort"`
-	MaxTokens int    `json:"max_tokens"`
-}
-
 type Slack struct {
 	BotTokenEnv string `json:"bot_token_env"`
 	AppTokenEnv string `json:"app_token_env"`
@@ -167,10 +113,6 @@ func Default() Config {
 	}
 }
 
-func defaultModel() Model {
-	return Model{Engine: "codex", Model: "gpt-6-astra", Effort: "high", MaxTokens: 4096}
-}
-
 // DefaultCodexHome is app-owned state, independent of an ambient CODEX_HOME.
 func DefaultCodexHome() string {
 	root := os.Getenv("XDG_STATE_HOME")
@@ -203,147 +145,6 @@ func Paths() (FilePaths, error) {
 		stateRoot = filepath.Join(home, ".local", "state")
 	}
 	return FilePaths{Config: filepath.Join(configRoot, Namespace, "config.json"), State: filepath.Join(stateRoot, Namespace, "state.db")}, nil
-}
-
-// Load reads the config file, in the current layout or an earlier one. Keys
-// it doesn't know are kept in the file and reported by UnknownKeys, never an
-// error: a file written by a newer version still loads.
-func Load(path string) (Config, error) {
-	c := Default()
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return c, nil
-	}
-	if err != nil {
-		return c, err
-	}
-	if data, err = ConvertLegacyJSON(data); err != nil {
-		return c, fmt.Errorf("decode config: %w", err)
-	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	if err = dec.Decode(&c); err != nil {
-		return c, fmt.Errorf("decode config: %w", err)
-	}
-	if err = dec.Decode(new(any)); err != io.EOF {
-		return c, errors.New("config must contain one JSON object")
-	}
-	c.Assistant.Theme = NormalizeTheme(c.Assistant.Theme)
-	return c, c.Validate()
-}
-
-// Save writes c over the config file, keeping what it doesn't model: notes
-// and keys from a newer version. It holds the file's lock, so the daemon, the
-// CLI and the dashboard never write over each other, and it finishes moving
-// a file in an earlier layout to this one first, so no earlier key outlives
-// the save.
-func Save(path string, c Config) error {
-	if err := c.Validate(); err != nil {
-		return err
-	}
-	s := Document(path)
-	return s.WithLock(func() error {
-		if _, err := upgradeLocked(path); err != nil {
-			return err
-		}
-		return s.Save(c)
-	})
-}
-
-// Upgrade rewrites a config file in an earlier layout into the current one,
-// once, under the file's lock, keeping everything else in it. It reports
-// whether it rewrote anything.
-func Upgrade(path string) (bool, error) {
-	changed := false
-	err := Document(path).WithLock(func() (err error) {
-		changed, err = upgradeLocked(path)
-		return err
-	})
-	return changed, err
-}
-
-func upgradeLocked(path string) (bool, error) {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return false, fmt.Errorf("decode config: %w", err)
-	}
-	if !convertLegacy(doc) {
-		return false, nil
-	}
-	return true, writeFile(path, doc)
-}
-
-// UnknownKeys are the keys in the config file the current layout doesn't
-// have, each with where it moved when it was renamed.
-func UnknownKeys(path string) []UnknownKey {
-	var out []UnknownKey
-	for _, k := range Document(path).UnknownKeys(Config{}) {
-		to, renamed := RenamedKey(k.Path)
-		out = append(out, UnknownKey{Path: k.Path, Value: k.Value, Renamed: renamed, To: to})
-	}
-	return out
-}
-
-// UnknownKey is a key the config file holds that the current layout doesn't.
-type UnknownKey struct {
-	Path, Value string
-	// Renamed says it is an earlier layout's key; To is where it went, or
-	// "" when it was dropped.
-	Renamed bool
-	To      string
-}
-
-// String says what became of the key, for the owner to act on.
-func (k UnknownKey) String() string {
-	switch {
-	case k.Renamed && k.To == "":
-		return k.Path + " is no longer a setting; remove it with crew-assistant config unset " + k.Path
-	case k.Renamed:
-		return k.Path + " is now " + k.To
-	}
-	return k.Path + " is not a setting this version knows, so it has no effect; remove it with crew-assistant config unset " + k.Path
-}
-
-// Document is the config file as a document, for reading and removing keys
-// by path, including ones this version doesn't know.
-func Document(path string) creds.Store { return creds.Store{Path: path, Overlay: true} }
-
-func writeFile(path string, v any) error {
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".config-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if _, err = f.Write(data); err != nil {
-		f.Close()
-		return err
-	}
-	if err = f.Chmod(0600); err != nil {
-		f.Close()
-		return err
-	}
-	if err = f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), path)
 }
 
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -406,43 +207,6 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
-}
-
-// EngineNames are the engines the assistant can run on.
-var EngineNames = []string{"codex", "claude", "openai-compatible"}
-
-// Efforts are the reasoning efforts a model may be asked for; empty is the
-// model's own default.
-var Efforts = []string{"", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
-
-// Validate checks the model choice. The selected engine checks provider model
-// capabilities before inference rather than guessing from model name prefixes.
-func (m Model) Validate() error {
-	if !slices.Contains(EngineNames, m.Engine) {
-		return errors.New("engine must be codex, claude or openai-compatible")
-	}
-	if !slices.Contains(Efforts, m.Effort) {
-		return errors.New("effort must be empty, none, minimal, low, medium, high, xhigh, max or ultra")
-	}
-	if m.MaxTokens < 128 || m.MaxTokens > 131072 {
-		return errors.New("max_tokens must be between 128 and 131072")
-	}
-	return nil
-}
-
-func validateEndpoint(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return errors.New("use an absolute URL without credentials, query or fragment")
-	}
-	if u.Scheme == "https" {
-		return nil
-	}
-	ip := net.ParseIP(u.Hostname())
-	if u.Scheme == "http" && (u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback())) {
-		return nil
-	}
-	return errors.New("HTTPS is required except on loopback")
 }
 
 func validateConnections(cs []Connection) error {

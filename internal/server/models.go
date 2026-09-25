@@ -60,14 +60,14 @@ func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
 			return
 		}
 		if preview := r.URL.Query().Get("engine"); preview != "" {
-			if preview != "codex" && preview != "claude" {
+			if _, ok := cfg.Engines.CLI(preview); !ok {
 				http.Error(w, "unknown model engine", http.StatusBadRequest)
 				return
 			}
 			selected = cfg.Harness(preview, selected.Model, selected.Effort)
 			result.Engine = preview
 		}
-		if selected.Engine != "codex" && selected.Engine != "claude" {
+		if _, ok := cfg.Engines.CLI(selected.Engine); !ok {
 			result.Detail = "Use advanced settings for this provider's model. The saved selection is unchanged."
 			respond(w, 200, result)
 			return
@@ -75,8 +75,10 @@ func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
 		mu.Lock()
 		entry, found := cache[selected]
 		if !found || time.Now().After(entry.expires) {
-			found := app.EngineConfig(selected)
-			options, err := discover(r.Context(), engine.Config{Engine: found.Engine, CodexHome: found.CodexHome, CodexBin: found.CodexBin, ClaudeHome: found.ClaudeHome, ClaudeBin: found.ClaudeBin})
+			// Only the CLI and its login decide what is offered, which is
+			// also what the cache is keyed by.
+			ec := app.EngineConfig(selected)
+			options, err := discover(r.Context(), engine.Config{Engine: ec.Engine, CodexHome: ec.CodexHome, CodexBin: ec.CodexBin, ClaudeHome: ec.ClaudeHome, ClaudeBin: ec.ClaudeBin})
 			entry = cached{value: options, expires: time.Now().Add(time.Minute)}
 			if err != nil {
 				entry.detail = "Could not discover models. Check the selected CLI login and installation, then retry. Your saved selection is unchanged."

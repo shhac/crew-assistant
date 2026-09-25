@@ -11,15 +11,15 @@ type engineDefaults struct {
 // show in place of the blank.
 func configDefaults() map[string]any {
 	engines := map[string]engineDefaults{}
-	for _, name := range []string{"codex", "claude"} {
-		bin, home := config.Engines{}.Binary(name)
+	for _, name := range config.CLIEngineNames {
+		bin, home := config.DefaultBinary(name)
 		engines[name] = engineDefaults{bin, home}
 	}
 	baseURL, _ := config.Engines{}.Endpoint()
 	return map[string]any{
 		"engines":          engines,
 		"usage_floor":      config.DefaultUsageFloor,
-		"on_unknown_usage": "allow",
+		"on_unknown_usage": config.OnUnknownUsageAllow,
 		"openai_base_url":  baseURL,
 	}
 }

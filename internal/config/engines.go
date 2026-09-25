@@ -1,8 +1,11 @@
 package config
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"path/filepath"
 	"strings"
 )
@@ -50,57 +53,75 @@ type HTTPEngine struct {
 // the owner hasn't set one.
 const DefaultUsageFloor = 10
 
+// What team roles do while an engine's usage can't be read.
+const (
+	OnUnknownUsageAllow = "allow"
+	OnUnknownUsagePause = "pause"
+)
+
+// CLIEngineNames are the engines reached through a native CLI and its login.
+var CLIEngineNames = []string{"codex", "claude"}
+
 const (
 	defaultBaseURL   = "https://api.openai.com/v1"
 	defaultAPIKeyEnv = "OPENAI_API_KEY"
 )
 
-// CLI is the configured CLI for engine, and whether engine is one.
-func (e Engines) CLI(engine string) (CLIEngine, bool) {
+// CLIRef is the settings of engine's CLI, nil when engine isn't one.
+func (e *Engines) CLIRef(engine string) *CLIEngine {
 	switch engine {
 	case "codex":
-		return e.Codex, true
+		return &e.Codex
 	case "claude":
-		return e.Claude, true
+		return &e.Claude
 	}
-	return CLIEngine{}, false
+	return nil
+}
+
+// CLI is the configured CLI for engine, and whether engine is one.
+func (e Engines) CLI(engine string) (CLIEngine, bool) {
+	cli := e.CLIRef(engine)
+	if cli == nil {
+		return CLIEngine{}, false
+	}
+	return *cli, true
+}
+
+// DefaultBinary is what a blank bin and home mean for engine.
+func DefaultBinary(engine string) (binary, home string) {
+	switch engine {
+	case "codex":
+		return engine, DefaultCodexHome()
+	case "claude":
+		return engine, DefaultClaudeHome()
+	}
+	return engine, ""
 }
 
 // Binary is the executable an engine runs as and the login home it uses,
 // with the defaults filled in.
 func (e Engines) Binary(engine string) (binary, home string) {
 	cli, _ := e.CLI(engine)
-	binary, home = cli.Bin, cli.Home
-	if binary == "" {
-		binary = engine
-	}
-	if home == "" {
-		switch engine {
-		case "codex":
-			home = DefaultCodexHome()
-		case "claude":
-			home = DefaultClaudeHome()
-		}
-	}
-	return binary, home
+	binary, home = DefaultBinary(engine)
+	return cmp.Or(cli.Bin, binary), cmp.Or(cli.Home, home)
 }
 
 // Floors are the share of an engine's 5-hour and weekly windows roles leave
-// unused, with the defaults filled in; supported is false for an engine
-// whose usage can't be read locally.
-func (e Engines) Floors(engine string) (fiveHour, week int, supported bool) {
+// unused, with the defaults filled in. An engine whose usage can't be read
+// locally has none.
+func (e Engines) Floors(engine string) (fiveHour, week int) {
 	cli, ok := e.CLI(engine)
 	if !ok {
-		return 0, 0, false
+		return 0, 0
 	}
-	return percentOr(cli.UsageFloor.FiveHourPercent), percentOr(cli.UsageFloor.WeekPercent), true
+	return percentOr(cli.UsageFloor.FiveHourPercent), percentOr(cli.UsageFloor.WeekPercent)
 }
 
 // PauseOnUnknownUsage says whether roles on engine wait while its usage
 // can't be read, rather than carry on.
 func (e Engines) PauseOnUnknownUsage(engine string) bool {
 	cli, _ := e.CLI(engine)
-	return cli.OnUnknownUsage == "pause"
+	return cli.OnUnknownUsage == OnUnknownUsagePause
 }
 
 // Endpoint is the OpenAI-compatible endpoint and the environment variable
@@ -150,23 +171,9 @@ func (c Config) AssistantHarness() Harness {
 }
 
 func (e Engines) validate() error {
-	for _, name := range []string{"codex", "claude"} {
-		cli, _ := e.CLI(name)
-		if cli.Home != "" && (!filepath.IsAbs(cli.Home) || strings.ContainsRune(cli.Home, '\x00')) {
-			return fmt.Errorf("engines.%s.home must be an absolute directory path", name)
-		}
-		if strings.ContainsRune(cli.Bin, '\x00') {
-			return fmt.Errorf("engines.%s.bin must be a command name or path", name)
-		}
-		for window, p := range map[string]*int{"5h_percent": cli.UsageFloor.FiveHourPercent, "1w_percent": cli.UsageFloor.WeekPercent} {
-			if p != nil && (*p < 0 || *p > 100) {
-				return fmt.Errorf("engines.%s.usage_floor.%s must be between 0 and 100; 0 turns it off", name, window)
-			}
-		}
-		switch cli.OnUnknownUsage {
-		case "", "allow", "pause":
-		default:
-			return fmt.Errorf("engines.%s.on_unknown_usage must be allow or pause", name)
+	for _, name := range CLIEngineNames {
+		if err := e.CLIRef(name).validate("engines." + name); err != nil {
+			return err
 		}
 	}
 	if e.OpenAICompatible.BaseURL != "" {
@@ -178,4 +185,41 @@ func (e Engines) validate() error {
 		return errors.New("engines.openai-compatible.api_key_env must be an environment variable name")
 	}
 	return nil
+}
+
+func (cli *CLIEngine) validate(prefix string) error {
+	if cli.Home != "" && (!filepath.IsAbs(cli.Home) || strings.ContainsRune(cli.Home, '\x00')) {
+		return fmt.Errorf("%s.home must be an absolute directory path", prefix)
+	}
+	if strings.ContainsRune(cli.Bin, '\x00') {
+		return fmt.Errorf("%s.bin must be a command name or path", prefix)
+	}
+	for _, floor := range []struct {
+		window  string
+		percent *int
+	}{{"5h_percent", cli.UsageFloor.FiveHourPercent}, {"1w_percent", cli.UsageFloor.WeekPercent}} {
+		if floor.percent != nil && (*floor.percent < 0 || *floor.percent > 100) {
+			return fmt.Errorf("%s.usage_floor.%s must be between 0 and 100; 0 turns it off", prefix, floor.window)
+		}
+	}
+	switch cli.OnUnknownUsage {
+	case "", OnUnknownUsageAllow, OnUnknownUsagePause:
+		return nil
+	}
+	return fmt.Errorf("%s.on_unknown_usage must be allow or pause", prefix)
+}
+
+func validateEndpoint(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("use an absolute URL without credentials, query or fragment")
+	}
+	if u.Scheme == "https" {
+		return nil
+	}
+	ip := net.ParseIP(u.Hostname())
+	if u.Scheme == "http" && (u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback())) {
+		return nil
+	}
+	return errors.New("HTTPS is required except on loopback")
 }

@@ -113,7 +113,7 @@ func TestTheDaemonTakesOnAChangedConfigFile(t *testing.T) {
 	if changed, err := a.ReloadConfig(); err != nil || !changed {
 		t.Fatalf("changed %v, %v", changed, err)
 	}
-	if _, week, _ := a.Config().Engines.Floors("claude"); week != 2 {
+	if _, week := a.Config().Engines.Floors("claude"); week != 2 {
 		t.Fatalf("weekly floor %d", week)
 	}
 	if changed, err := a.ReloadConfig(); err != nil || changed {

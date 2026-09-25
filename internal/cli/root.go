@@ -3,7 +3,6 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -19,7 +17,6 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
-	"github.com/shhac/crew-assistant/internal/engine"
 	libcli "github.com/shhac/lib-agent-cli/cli"
 	_ "github.com/shhac/lib-agent-cli/yaml"
 	output "github.com/shhac/lib-agent-output"
@@ -93,99 +90,7 @@ func NewRoot(version string) *cobra.Command {
 			return o.emit(v)
 		}})
 	}
-	cfgcmd := configCommand(o)
-	cfgcmd.AddCommand(&cobra.Command{Use: "path", Short: "Show where the config file is", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error { return o.emit(map[string]string{"path": o.configPath}) }})
-	cfgcmd.AddCommand(&cobra.Command{Use: "show", Short: "Show the whole config", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load(o.configPath)
-		if err != nil {
-			return err
-		}
-		return o.emit(cfg)
-	}})
-	cfgcmd.AddCommand(&cobra.Command{Use: "validate", Short: "Check the config file", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := config.Load(o.configPath)
-		if err != nil {
-			return err
-		}
-		return o.emit(map[string]bool{"valid": true})
-	}})
-	root.AddCommand(cfgcmd)
-	doctor := &cobra.Command{Use: "doctor", Short: "Check configuration and credential availability without calling providers", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load(o.configPath)
-		if err != nil {
-			return err
-		}
-		problems := configProblems(o.configPath)
-		checks := []map[string]any{{"name": "config", "ok": true}, {"name": "config keys", "ok": len(problems) == 0, "problems": problems}, {"name": "model", "ok": cfg.Model.Model != "", "engine": cfg.Model.Engine, "model": cfg.Model.Model, "effort": cfg.Model.Effort}}
-		for _, connection := range cfg.Connections {
-			_, lookupErr := exec.LookPath(connection.Tool)
-			hint := "Account credentials are managed by this CLI; choose its existing profiles in Settings."
-			if connection.Tool == "agent-notion" {
-				hint = "Uses the CLI default account and native authentication; no profile is needed."
-			}
-			checks = append(checks, map[string]any{"name": connection.Name + " CLI executable", "tool": connection.Tool, "ok": lookupErr == nil, "queries_supported": true, "profiles": connection.Profiles, "hint": hint})
-		}
-		refs := []string{}
-		if cfg.Slack.OwnerUserID != "" {
-			refs = append(refs, cfg.Slack.BotTokenEnv, cfg.Slack.AppTokenEnv)
-		}
-		if cfg.LegacyLinearImportEnabled() {
-			refs = append(refs, cfg.Linear.APIKeyEnv)
-		}
-		codexBin, codexHome := cfg.Engines.Binary("codex")
-		claudeBin, claudeHome := cfg.Engines.Binary("claude")
-		if cfg.Model.Engine == "codex" {
-			isolationErr := engine.ValidateCodexHome(codexHome)
-			isolationHint := "Run crew-assistant model login to sign into the configured engines.codex.home."
-			if isolationErr != nil {
-				isolationHint = isolationErr.Error()
-			}
-			checks = append(checks, map[string]any{"name": "codex instruction isolation", "ok": isolationErr == nil, "hint": isolationHint})
-			binary, lookupErr := exec.LookPath(codexBin)
-			checks = append(checks, map[string]any{"name": "codex executable", "ok": lookupErr == nil, "hint": "install Codex or set engines.codex.bin"})
-			if lookupErr == nil {
-				ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Second)
-				probe := exec.CommandContext(ctx, binary, "login", "status")
-				// Match the inference transport: use Codex's stored login, not
-				// unrelated provider keys inherited from the daemon environment.
-				probe.Env, err = engine.CodexEnvironment(codexHome)
-				if err != nil {
-					cancel()
-					return err
-				}
-				probe.Stdout, probe.Stderr = io.Discard, io.Discard
-				loginErr := probe.Run()
-				cancel()
-				checks = append(checks, map[string]any{"name": "codex login", "ok": loginErr == nil, "hint": "run crew-assistant model login; no inference was invoked"})
-			}
-		} else if cfg.Model.Engine == "claude" {
-			binary, lookupErr := exec.LookPath(claudeBin)
-			checks = append(checks, map[string]any{"name": "claude executable", "ok": lookupErr == nil, "hint": "Install Claude CLI to use its existing subscription login."})
-			if lookupErr == nil {
-				ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Second)
-				probe := exec.CommandContext(ctx, binary, "auth", "status")
-				probe.Env, err = engine.ClaudeEnvironment(claudeHome)
-				if err != nil {
-					cancel()
-					return err
-				}
-				probe.Stdout, probe.Stderr = io.Discard, io.Discard
-				loginErr := probe.Run()
-				cancel()
-				checks = append(checks, map[string]any{"name": "claude login", "ok": loginErr == nil, "hint": "Sign in once with crew-assistant model login; workers using this CLI home share the login."})
-			}
-		} else {
-			_, apiKeyEnv := cfg.Engines.Endpoint()
-			refs = append(refs, apiKeyEnv)
-		}
-		checks = append(checks, roleSandboxChecks(cmd.Context(), cfg, o.statePath)...)
-		for _, ref := range refs {
-			if ref != "" {
-				checks = append(checks, map[string]any{"name": ref, "ok": os.Getenv(ref) != "", "hint": "set in the daemon environment if using this integration"})
-			}
-		}
-		return o.emit(map[string]any{"checks": checks})
-	}}
+	root.AddCommand(configCommand(o))
 	operations := &cobra.Command{Use: "operations", Short: "Inspect interrupted operations without replaying them"}
 	operations.AddCommand(&cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		v, err := o.request("GET", "/api/state", nil)
@@ -206,7 +111,7 @@ func NewRoot(version string) *cobra.Command {
 		return o.emit(v)
 	}})
 	root.AddCommand(operations)
-	root.AddCommand(doctor)
+	registerDoctor(root, o)
 	registerServe(root, o)
 	registerDashboard(root, o)
 	registerModel(root, o)

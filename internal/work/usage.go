@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/quota"
 )
@@ -60,9 +61,9 @@ func (lp *Loop) UsageWait(ctx context.Context, engine string) (time.Time, string
 // has less left than the owner's floor; zero when it may run now.
 func (lp *Loop) usageWait(ctx context.Context, r core.Role) (time.Time, string) {
 	cfg := lp.Config()
-	fiveHour, week, supported := cfg.Engines.Floors(r.Engine)
+	fiveHour, week := cfg.Engines.Floors(r.Engine)
 	floors := quota.Floors{FiveHour: fiveHour, Week: week}
-	if !supported || floors.Off() {
+	if floors.Off() {
 		return time.Time{}, ""
 	}
 	h := cfg.Harness(r.Engine, r.Model, r.Effort)
@@ -87,7 +88,7 @@ func heldFor(t core.Task) string {
 	if t.HeldFor != "" {
 		return t.HeldFor
 	}
-	for _, engine := range []string{"claude", "codex"} {
+	for _, engine := range config.CLIEngineNames {
 		if strings.HasPrefix(t.Detail, "Waiting for "+engineName(engine)+" usage to reset") {
 			return engine
 		}
