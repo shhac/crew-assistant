@@ -49,18 +49,16 @@ type chatSpec struct {
 	Binary, Home string
 	Instructions string
 	StateDir     string
-	// Tool runs one of the assistant's tools for the model and gives what the
-	// model is told, and whether that is a failure.
-	Tool func(ctx context.Context, name string, args json.RawMessage) (string, bool)
+	// Tool runs one of the assistant's tools for the model.
+	Tool func(ctx context.Context, name string, args json.RawMessage) session.ToolResult
 	// Context is the assistant's current context, asked for when the
-	// conversation is new ("started") or its history was just compacted.
-	Context func(ctx context.Context, reason string) (string, error)
+	// conversation is new or its history was just compacted.
+	Context func(ctx context.Context, reason session.ContextReason) (string, error)
 }
 
-// chatOpener opens a session, resuming ref when it can. resumed says whether
-// it did, and fresh why a new conversation was started instead. It returns
-// errNoChatSession when a session can't be run here at all.
-type chatOpener func(ctx context.Context, spec chatSpec, ref *session.Ref) (model chatModel, resumed bool, fresh string, err error)
+// chatOpener opens a session, resuming ref when it can, and says how. It
+// returns errNoChatSession when a session can't be run here at all.
+type chatOpener func(ctx context.Context, spec chatSpec, ref *session.Ref) (chatModel, session.Opened, error)
 
 // errNoChatSession says the chat can't run on a model session here, so it
 // runs turn by turn, as it did before sessions.
@@ -74,14 +72,15 @@ type liveChat struct {
 	turn  *sessionTurn
 }
 
-// sessionTurn is what the tool handler needs of the turn in progress.
+// sessionTurn is what the tool handler needs of the turn in progress. Its
+// counts are kept under chatSessions.mu: a call can still be finishing when
+// its turn has been stopped.
 type sessionTurn struct {
 	id        string
 	messageID string
 	calls     int
 	limit     int
 	cfg       engine.Config
-	onTool    func(context.Context, engine.ToolEvent) error
 	actions   []engine.Action
 }
 
@@ -95,7 +94,7 @@ type chatSessions struct {
 // runSessionTurn runs a chat turn on the conversation's model session, opening
 // or resuming it first. errNoChatSession means it can't, and the turn should
 // run the stateless way.
-func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.Config, onTool func(context.Context, engine.ToolEvent) error) (engine.Result, error) {
+func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.Config) (engine.Result, error) {
 	if a.sessions.open == nil || (ec.Engine != "claude" && ec.Engine != "codex") {
 		return engine.Result{}, errNoChatSession
 	}
@@ -130,7 +129,7 @@ func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.
 			return engine.Result{}, err
 		}
 	}
-	state := &sessionTurn{id: turn.ID, messageID: turn.UserMessageID, limit: max(cfg.Limits.MaxModelTurns, 1) * 16, cfg: ec, onTool: onTool}
+	state := &sessionTurn{id: turn.ID, messageID: turn.UserMessageID, limit: max(cfg.Limits.MaxModelTurns, 1) * 16, cfg: ec}
 	a.sessions.mu.Lock()
 	live.turn = state
 	a.sessions.mu.Unlock()
@@ -144,9 +143,7 @@ func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.
 	rec.Ref, _ = json.Marshal(live.model.Ref())
 	rec.SeenAt = started
 	usage := sessionUsage(result, rec)
-	if usage.ContextWindow > 0 {
-		_ = a.Core.RecordModelWindow(context.WithoutCancel(ctx), ec.Engine, ec.Model, usage.ContextWindow)
-	}
+	a.recordWindow(ctx, ec, usage)
 	if err := a.Core.SaveChatSession(context.WithoutCancel(ctx), conversation, &rec); err != nil && !errors.Is(err, core.ErrConflict) {
 		runErr = errors.Join(runErr, err)
 	}
@@ -180,14 +177,14 @@ func (a *App) openChat(ctx context.Context, key string, record *core.ChatSession
 			ref = &stored
 		}
 	}
-	model, resumed, why, err := a.sessions.open(ctx, spec, ref)
+	model, opened, err := a.sessions.open(ctx, spec, ref)
 	if err != nil {
 		return nil, rec, false, err
 	}
 	switch {
-	case resumed:
+	case opened.Resumed:
 		rec.Opened = core.SessionResumed
-	case ref != nil && why != "":
+	case ref != nil && opened.Fresh != "":
 		rec = core.ChatSession{Opened: core.SessionRebuilt, StartedAt: time.Now().UTC()}
 	default:
 		rec = core.ChatSession{Opened: core.SessionFresh, StartedAt: time.Now().UTC()}
@@ -197,7 +194,7 @@ func (a *App) openChat(ctx context.Context, key string, record *core.ChatSession
 	a.sessions.mu.Lock()
 	a.sessions.live = live
 	a.sessions.mu.Unlock()
-	return live, rec, !resumed, nil
+	return live, rec, !opened.Resumed, nil
 }
 
 // closeChat closes the open session, if any. Its conversation stays saved in
@@ -260,50 +257,42 @@ func chatKey(conversation string, ec engine.Config, instructions string) string 
 // sessionTool runs a tool the model called, with the same checks and the
 // same account of it on the dashboard as a turn run the stateless way. The
 // model is never told an error's own words: they can carry remote data.
-func (a *App) sessionTool(ctx context.Context, name string, args json.RawMessage) (string, bool) {
+func (a *App) sessionTool(ctx context.Context, name string, args json.RawMessage) session.ToolResult {
+	declined := session.ToolResult{Content: engine.ToolDeclined, IsError: true}
+	if err := engine.CheckToolCall(name, args); err != nil {
+		return session.ToolResult{Content: err.Error(), IsError: true}
+	}
 	a.sessions.mu.Lock()
 	turn := a.sessions.live.currentTurn()
+	allowed := turn != nil && turn.calls < turn.limit
+	if turn != nil {
+		turn.calls++
+	}
 	a.sessions.mu.Unlock()
 	if turn == nil {
-		return engine.ToolDeclined, true
+		return declined
 	}
-	if err := engine.CheckToolCall(name, args); err != nil {
-		return err.Error(), true
-	}
-	turn.calls++
-	if turn.calls > turn.limit {
-		return "This reply has used as many actions as one reply may. Finish it now with what you have.", true
+	if !allowed {
+		return session.ToolResult{Content: "This reply has used as many actions as one reply may. Finish it now with what you have.", IsError: true}
 	}
 	// Each action leads to another model request, which counts against the
 	// day's allowance.
 	if turn.cfg.BeforeRequest != nil {
 		if err := turn.cfg.BeforeRequest(ctx); err != nil {
-			return "The day's allowance of model requests is spent. Finish this reply without further actions.", true
+			return session.ToolResult{Content: "The day's allowance of model requests is spent. Finish this reply without further actions.", IsError: true}
 		}
 	}
-	id := chatID()
-	if turn.onTool != nil {
-		if err := turn.onTool(ctx, engine.ToolEvent{ID: id, Tool: name, Status: "running"}); err != nil {
-			return engine.ToolDeclined, true
-		}
+	output, action, err := engine.RunTool(ctx, a, turn.cfg.OnTool, chatID(), name, args)
+	a.sessions.mu.Lock()
+	current := a.sessions.live.currentTurn() == turn
+	if current {
+		turn.actions = append(turn.actions, action)
 	}
-	value, err := a.Execute(ctx, name, args)
-	status := "completed"
-	if err != nil {
-		status = "failed"
+	a.sessions.mu.Unlock()
+	if err != nil || !current {
+		return declined
 	}
-	if turn.onTool != nil {
-		_ = turn.onTool(ctx, engine.ToolEvent{ID: id, Tool: name, Status: status})
-	}
-	turn.actions = append(turn.actions, engine.Action{Name: name, Success: err == nil})
-	if err != nil {
-		return engine.ToolDeclined, true
-	}
-	out, err := json.Marshal(value)
-	if err != nil {
-		return engine.ToolDeclined, true
-	}
-	return string(out), false
+	return session.ToolResult{Content: output, IsError: !action.Success}
 }
 
 func (l *liveChat) currentTurn() *sessionTurn {
@@ -317,7 +306,7 @@ func (l *liveChat) currentTurn() *sessionTurn {
 // or was just compacted: the overview, and for a new one also the
 // conversation's summary and latest exchanges, so it carries on where the
 // conversation was.
-func (a *App) sessionContext(ctx context.Context, reason string) (string, error) {
+func (a *App) sessionContext(ctx context.Context, reason session.ContextReason) (string, error) {
 	a.sessions.mu.Lock()
 	current := ""
 	if turn := a.sessions.live.currentTurn(); turn != nil {
@@ -328,7 +317,7 @@ func (a *App) sessionContext(ctx context.Context, reason string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	if reason != "started" {
+	if reason != session.ContextStarted {
 		return string(state), nil
 	}
 	if n := len(history); n > 12 {

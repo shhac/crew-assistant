@@ -213,7 +213,7 @@ func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Resul
 	}
 	// On a model session the CLI keeps the conversation and compacts it
 	// itself; the turn-by-turn way below sends everything each time.
-	if result, err := a.runSessionTurn(ctx, turn, ec, ec.OnTool); !errors.Is(err, errNoChatSession) {
+	if result, err := a.runSessionTurn(ctx, turn, ec); !errors.Is(err, errNoChatSession) {
 		return result, err
 	}
 	if err := a.compactChatHistory(ctx, turn.UserMessageID, ec); err != nil {

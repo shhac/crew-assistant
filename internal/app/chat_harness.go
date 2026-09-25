@@ -17,22 +17,22 @@ import (
 // this binary as the bridge. Sessions live as long as life, the chat queue's
 // run, not as long as any one turn.
 func harnessChatOpener(life context.Context) chatOpener {
-	return func(ctx context.Context, spec chatSpec, ref *session.Ref) (chatModel, bool, string, error) {
+	return func(ctx context.Context, spec chatSpec, ref *session.Ref) (chatModel, session.Opened, error) {
 		o, err := chatSessionOptions(spec)
 		if err != nil {
-			return nil, false, "", err
+			return nil, session.Opened{}, err
 		}
 		s, opened, err := session.Open(life, o, ref)
 		var capability *session.CapabilityError
 		if errors.As(err, &capability) {
 			// This CLI or platform can't run a restricted session; the chat
 			// runs turn by turn instead.
-			return nil, false, "", errors.Join(errNoChatSession, err)
+			return nil, session.Opened{}, errors.Join(errNoChatSession, err)
 		}
 		if err != nil {
-			return nil, false, "", err
+			return nil, session.Opened{}, err
 		}
-		return &harnessChat{s: s, life: life}, opened.Resumed, opened.Fresh, nil
+		return &harnessChat{s: s, life: life}, opened, nil
 	}
 }
 
@@ -59,8 +59,7 @@ func chatSessionOptions(spec chatSpec) (session.Options, error) {
 		defs = append(defs, session.ToolDefinition{Name: t.Function.Name, Description: t.Function.Description, Schema: t.Function.Parameters})
 	}
 	handler := session.ToolHandlerFunc(func(ctx context.Context, call session.ToolCall) (session.ToolResult, error) {
-		content, failed := spec.Tool(ctx, call.Name, call.Arguments)
-		return session.ToolResult{Content: content, IsError: failed}, nil
+		return spec.Tool(ctx, call.Name, call.Arguments), nil
 	})
 	return session.Options{
 		Engine:       session.Engine(spec.Config.Engine),
@@ -80,9 +79,7 @@ func chatSessionOptions(spec chatSpec) (session.Options, error) {
 			// read_state and read_task answer with whole records.
 			MaxResultBytes: 256 << 10,
 		}},
-		Context: func(ctx context.Context, reason session.ContextReason) (string, error) {
-			return spec.Context(ctx, string(reason))
-		},
+		Context: spec.Context,
 	}, nil
 }
 

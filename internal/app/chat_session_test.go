@@ -27,7 +27,8 @@ type fakeChat struct {
 func (f *fakeChat) Turn(ctx context.Context, text string, onEvent func(session.Event)) (session.Result, error) {
 	f.sent = append(f.sent, text)
 	if f.call != "" {
-		f.told, f.failed = f.spec.Tool(ctx, f.call, json.RawMessage(`{}`))
+		result := f.spec.Tool(ctx, f.call, json.RawMessage(`{}`))
+		f.told, f.failed = result.Content, result.IsError
 		f.call = ""
 	}
 	window := int64(200000)
@@ -46,7 +47,7 @@ type openings struct {
 	resume func(*session.Ref) (bool, string)
 }
 
-func (o *openings) open(_ context.Context, spec chatSpec, ref *session.Ref) (chatModel, bool, string, error) {
+func (o *openings) open(_ context.Context, spec chatSpec, ref *session.Ref) (chatModel, session.Opened, error) {
 	o.refs = append(o.refs, ref)
 	resumed, fresh := false, ""
 	if ref != nil && o.resume != nil {
@@ -58,7 +59,7 @@ func (o *openings) open(_ context.Context, spec chatSpec, ref *session.Ref) (cha
 	}
 	chat := &fakeChat{spec: spec, id: id}
 	o.chats = append(o.chats, chat)
-	return chat, resumed, fresh, nil
+	return chat, session.Opened{Resumed: resumed, Fresh: fresh}, nil
 }
 
 func sessionApp(t *testing.T) (*App, *openings) {
@@ -98,7 +99,7 @@ func TestTheChatRunsOnOneSessionAndIsToldOnlyWhatChanged(t *testing.T) {
 	if len(o.chats) != 1 || o.refs[0] != nil || o.chats[0].sent[0] != "Hello" {
 		t.Fatalf("a new conversation should start fresh and be sent the message alone: %+v", o.chats)
 	}
-	overview, err := o.chats[0].spec.Context(ctx, "started")
+	overview, err := o.chats[0].spec.Context(ctx, session.ContextStarted)
 	if err != nil || !strings.Contains(overview, `"state"`) {
 		t.Fatalf("a new conversation's context should be the overview: %q %v", overview, err)
 	}
@@ -160,8 +161,13 @@ func TestASessionToolRunsLikeAnyOtherAndNeverShowsItsError(t *testing.T) {
 	}
 	o.chats[0].call = "stop_task"
 	runTurn(t, a, "Stop nothing")
-	if !o.chats[0].failed || o.chats[0].told != engine.ToolDeclined {
+	if !o.chats[0].failed || !strings.Contains(o.chats[0].told, engine.ToolDeclined) {
 		t.Fatalf("a failed action should be declined without its error: %q", o.chats[0].told)
+	}
+	// A call that arrives once its turn is over is declined, and changes
+	// nothing that turn reported.
+	if late := o.chats[0].spec.Tool(context.Background(), "read_state", json.RawMessage(`{}`)); !late.IsError || late.Content != engine.ToolDeclined {
+		t.Fatalf("a call after its turn was answered: %+v", late)
 	}
 	o.chats[0].call = "rm_rf"
 	runTurn(t, a, "Unknown")
@@ -172,8 +178,8 @@ func TestASessionToolRunsLikeAnyOtherAndNeverShowsItsError(t *testing.T) {
 
 func TestTheChatRunsTurnByTurnWithoutASession(t *testing.T) {
 	a, o := sessionApp(t)
-	a.sessions.open = func(context.Context, chatSpec, *session.Ref) (chatModel, bool, string, error) {
-		return nil, false, "", errNoChatSession
+	a.sessions.open = func(context.Context, chatSpec, *session.Ref) (chatModel, session.Opened, error) {
+		return nil, session.Opened{}, errNoChatSession
 	}
 	called := false
 	a.chatInvoker = func(context.Context, engine.Config, engine.Request, engine.ToolExecutor) (engine.Result, error) {

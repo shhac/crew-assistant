@@ -243,32 +243,12 @@ func (e *Engine) Chat(ctx context.Context, req Request) (Result, error) {
 			if err := ctx.Err(); err != nil {
 				return result, err
 			}
-			if e.cfg.OnTool != nil {
-				if err := e.cfg.OnTool(ctx, ToolEvent{ID: call.ID, Tool: call.Function.Name, Status: "running"}); err != nil {
-					return result, err
-				}
+			output, action, err := RunTool(ctx, e.executor, e.cfg.OnTool, call.ID, call.Function.Name, args)
+			if err != nil {
+				return result, err
 			}
-			value, execErr := e.executor.Execute(ctx, call.Function.Name, args)
-			if e.cfg.OnTool != nil {
-				status := "completed"
-				if execErr != nil {
-					status = "failed"
-				}
-				if err := e.cfg.OnTool(ctx, ToolEvent{ID: call.ID, Tool: call.Function.Name, Status: status}); err != nil {
-					return result, err
-				}
-			}
-			// Error strings from integrations can contain remote data. Do not reflect them
-			// into the model. The authorized operator can inspect the action audit separately.
-			if execErr != nil {
-				value = map[string]string{"error": ToolDeclined}
-			}
-			result.Actions = append(result.Actions, Action{Name: call.Function.Name, Success: execErr == nil})
-			output, marshalErr := json.Marshal(value)
-			if marshalErr != nil {
-				return result, errors.New("tool returned an invalid result")
-			}
-			messages = append(messages, Message{Role: "tool", ToolCallID: call.ID, Content: string(output)})
+			result.Actions = append(result.Actions, action)
+			messages = append(messages, Message{Role: "tool", ToolCallID: call.ID, Content: output})
 		}
 	}
 	return result, ErrTurnLimit
@@ -408,6 +388,39 @@ Describe projects by name, with Markdown links using #/projects/<id> from state;
 // from integrations can contain remote data, so none of them reach it; the
 // owner can inspect the action audit separately.
 const ToolDeclined = "Action declined or failed. Read current state before choosing another action; do not retry an uncertain external effect."
+
+// RunTool runs one tool call for the model. The dashboard is told it is
+// running and how it ended, and the model gets the result as JSON, or
+// ToolDeclined when it failed. err is only a failure to tell the dashboard, or
+// a result that isn't JSON; what to do then is the caller's decision.
+func RunTool(ctx context.Context, executor ToolExecutor, onTool func(context.Context, ToolEvent) error, id, name string, args json.RawMessage) (string, Action, error) {
+	if onTool != nil {
+		if err := onTool(ctx, ToolEvent{ID: id, Tool: name, Status: "running"}); err != nil {
+			return "", Action{}, err
+		}
+	}
+	value, execErr := executor.Execute(ctx, name, args)
+	action := Action{Name: name, Success: execErr == nil}
+	if onTool != nil {
+		status := "completed"
+		if execErr != nil {
+			status = "failed"
+		}
+		if err := onTool(ctx, ToolEvent{ID: id, Tool: name, Status: status}); err != nil {
+			return "", action, err
+		}
+	}
+	// Error strings from integrations can contain remote data. Do not reflect them
+	// into the model. The authorized operator can inspect the action audit separately.
+	if execErr != nil {
+		value = map[string]string{"error": ToolDeclined}
+	}
+	output, err := json.Marshal(value)
+	if err != nil {
+		return "", action, errors.New("tool returned an invalid result")
+	}
+	return string(output), action, nil
+}
 
 // CheckToolCall admits a call to a tool the assistant was offered, with
 // arguments that are a JSON object.
