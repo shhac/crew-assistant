@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/shhac/crew-assistant/internal/core"
-	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // approve records the owner's approval of the latest revision and moves the
@@ -16,6 +15,8 @@ func (lp *Loop) approve(ctx context.Context, t core.Task) error {
 		if len(t.Revisions) > 0 {
 			t.Approved = t.Revisions[len(t.Revisions)-1].N
 		}
+		// The owner's approval replaces whatever the PM decided.
+		t.LandDecision, t.LandingFailures = nil, nil
 		t.Status, t.DecisionID, t.ResumeStatus, t.Detail = core.TaskLanding, "", "", "Landing"
 		return "Landing " + t.Objective, nil
 	})
@@ -119,16 +120,13 @@ func (lp *Loop) askForDelivery(ctx context.Context, p core.Project, t core.Task,
 	if l != nil {
 		return lp.catchUpRound(ctx, t, c, *l)
 	}
-	if approvalStands(t) || !taskPlaybook(p, t).Land.AsksFirst() || proposed(t) {
+	if approvalHolds(p, t) || !asksFirst(p, t) || proposed(t) {
 		return lp.resumeLanding(ctx, t)
 	}
-	_, err = lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionDelivery, core.DecisionInput{
-		Title:          approvalTitle(t, taskPlaybook(p, t)),
-		Context:        text.Clip(r.Summary, 600) + "\n\n" + m.deliveryNote(t),
-		Recommendation: choiceApprove,
-		Choices:        []string{choiceApprove, choiceChanges},
-	})
-	return err
+	if pmDecides(p, t) {
+		return lp.pmLanding(ctx, p, t, r, m)
+	}
+	return lp.askOwnerToLand(ctx, p, t, r, m, core.DecisionInput{})
 }
 
 // approvalTitle says what approving does.

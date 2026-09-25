@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from "react";
 import {
+  approvalText,
   landingWays,
   mergeMethod,
+  pmCanDecide,
   reversibility,
   wayFor,
   whatHappens,
@@ -74,11 +76,7 @@ export function LandingSettings({
         </div>
         <div className="fact-row">
           <dt>Before it lands</dt>
-          <dd>
-            {land?.approve === "none"
-              ? "It lands once the checks pass"
-              : "You approve each change"}
-          </dd>
+          <dd>{approvalText(land)}</dd>
         </div>
         <div className="fact-row">
           <dt>To undo</dt>
@@ -117,7 +115,20 @@ function LandingEditor({
     land?.via === "pull-request" ? mergeMethod(land) : "squash",
   );
   const [target, setTarget] = useState(land?.target || "main");
-  const [approve, setApprove] = useState(land?.approve || "before");
+  const [chosenApprove, setApprove] = useState(land?.approve || "before");
+  // Only a push can leave landing to the PM; any other way asks the owner.
+  const approve =
+    chosenApprove === "pm" && !pmCanDecide(via) ? "before" : chosenApprove;
+  const hasPM = !!project.playbook?.roles.some((r) => r.kinds.includes("pm"));
+  const approveHint = !pmCanDecide(via)
+    ? via === "pull-request"
+      ? "The PM can't decide here: GitHub's reviews decide when a pull request merges."
+      : "The PM can't decide here: a new branch lands nothing."
+    : approve !== "pm"
+      ? ""
+      : hasPM
+        ? "Once the reviewers and QA pass a change, nothing waits on you and what it depends on has landed, the PM lands or holds it and says why. It lands a change as one commit or keeps the team's commits, and cleans up the branch. You can still land or stop it yourself."
+        : "The team has no PM yet, so you're asked until it has one.";
   const [means, setMeans] = useState(land?.means ?? "");
   const { busy, error, run } = useAction();
   async function save(e: FormEvent) {
@@ -204,7 +215,9 @@ function LandingEditor({
           >
             <option value="before">Ask me first</option>
             <option value="none">Land once the checks pass</option>
+            {pmCanDecide(via) && <option value="pm">The PM decides</option>}
           </select>
+          {approveHint && <span className="hint">{approveHint}</span>}
         </label>
       </div>
       <label htmlFor="land-means">

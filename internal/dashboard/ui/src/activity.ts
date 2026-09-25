@@ -36,6 +36,7 @@ const labels: Record<string, string> = {
   "task.ordered": "Order",
   "pm.asked": "PM asked",
   "task.planned": "Planned",
+  "task.pm_landing": "PM decided",
   "task.queued": "Asked",
   "task.reordered": "To do",
   "task.reviewing": "Checks",

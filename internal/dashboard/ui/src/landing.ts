@@ -1,4 +1,4 @@
-import type { LandPolicy, Playbook } from "./api";
+import type { LandPolicy, Playbook, Task } from "./api";
 
 /** Whether a team works on code; landing only has meaning for code. */
 export const isCode = (playbook?: Playbook) => playbook?.medium === "git";
@@ -87,5 +87,46 @@ export function whatHappens(playbook?: Playbook): string[] {
     return playbook?.deliver_to
       ? [`The draft is copied into ${playbook.deliver_to}.`]
       : ["The draft stays here, marked approved."];
-  return landingWay(playbook.land).happens(playbook.land ?? {}, playbook);
+  const steps = landingWay(playbook.land).happens(
+    playbook.land ?? {},
+    playbook,
+  );
+  return pmDecides(playbook.land)
+    ? [
+        "Once the reviewers and QA pass it, nothing waits on you and what it depends on has landed, the PM lands it or holds it, and says why.",
+        ...steps,
+        "The PM chooses whether it lands as one commit or keeps the team's own commits, and the task's branch is cleaned up after.",
+      ]
+    : steps;
+}
+
+/**
+ * Whether the PM can be given the decision to land: only a push lands
+ * straight on the target. A pull request merges as GitHub's reviews say, and
+ * a new branch lands nothing.
+ */
+export const pmCanDecide = (via?: string) => via === "push";
+
+/** Whether the project's PM decides what lands. */
+export const pmDecides = (land?: LandPolicy) =>
+  land?.approve === "pm" && pmCanDecide(land.via);
+
+/** Who approves a change before it lands, in words. */
+export function approvalText(land?: LandPolicy): string {
+  if (pmDecides(land)) return "The PM decides, once it's signed off";
+  return land?.approve === "none"
+    ? "It lands once the checks pass"
+    : "You approve each change";
+}
+
+/** What the PM decided about landing a task's change, or "". */
+export function pmLandingLine(task: Task): string {
+  const decided = task.land_decision;
+  if (!decided || decided.by !== "pm") return "";
+  if (!decided.land) return `Held by the PM: ${decided.reason}`;
+  const how =
+    decided.method === "fast-forward" ? "keeping its commits" : "as one commit";
+  return task.status === "landed"
+    ? `Landed by the PM ${how}: ${decided.reason}`
+    : `The PM is landing it ${how}: ${decided.reason}`;
 }

@@ -164,3 +164,37 @@ func TestCatchingUpAfterARewriteKeepsOnlyTheTasksOwnChange(t *testing.T) {
 		t.Fatal("the replay marker was left behind")
 	}
 }
+
+// A landed task's branch is removed from the clone, even while checked out,
+// but only while it still holds exactly what landed.
+func TestALandedBranchIsCleanedUpOnlyAtWhatLanded(t *testing.T) {
+	source := ownerRepo(t)
+	r, err := Open(ctx, t.TempDir(), source, nil, SignNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, err := r.Begin(ctx, "crew-task/a", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(r.Workspace(), "a.go"), "package main // a\n")
+	draft, _, err := r.Snapshot(ctx, base, base, "draft 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.DropBranch(ctx, "crew-task/a", base); err == nil {
+		t.Fatal("a branch that moved past what landed was dropped")
+	}
+	if err = r.DropBranch(ctx, "crew-task/a", draft); err != nil {
+		t.Fatal(err)
+	}
+	if out := git(t, r.Workspace(), "branch", "--list", "crew-task/a"); out != "" {
+		t.Fatalf("the branch is still there: %q", out)
+	}
+	if git(t, r.Workspace(), "rev-parse", "HEAD") != draft {
+		t.Fatal("the clone was not left at what landed")
+	}
+	if git(t, source, "rev-parse", "main") != base {
+		t.Fatal("the owner's repository was touched")
+	}
+}

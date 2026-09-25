@@ -99,9 +99,14 @@ func (pushWay) line(ctx context.Context, m gitMedium, t core.Task) (*line, error
 }
 
 // deliver lands the change as one commit, so the target's history reads one
-// commit per change rather than every draft the team made on the way.
+// commit per change rather than every draft the team made on the way. A PM
+// that chose to keep the task's commits has the target fast-forwarded onto
+// them as they are instead. Neither is ever forced.
 func (pushWay) deliver(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (string, error) {
 	target := m.playbook.Land.Target
+	if keepsCommits(t) {
+		return target, m.repo.PushFastForward(ctx, t.Branch, r.Ref, target)
+	}
 	_, err := m.repo.PushSquashed(ctx, t.Branch, r.Ref, target, landingMessage(t, r))
 	return target, err
 }

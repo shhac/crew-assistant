@@ -1652,6 +1652,126 @@ describe("the project's tabs", () => {
       },
     ]);
   });
+  it("offers the PM the decision to land only for a push", async () => {
+    const withPM = codeTeam();
+    withPM.roles = [
+      ...withPM.roles,
+      { name: "Pim", kinds: ["pm"], engine: "claude" },
+    ];
+    show(project({ playbook: withPM }), {}, { tab: "config" });
+    const landing = screen.getByRole("region", { name: "Landing" });
+    expect(within(landing).getByText("You approve each change")).toBeTruthy();
+    fireEvent.click(within(landing).getByRole("button", { name: "Edit" }));
+    const approve = () =>
+      screen.getByLabelText(/^Before it lands/) as HTMLSelectElement;
+    const options = () => [...approve().options].map((o) => o.value);
+    expect(options()).toEqual(["before", "none", "pm"]);
+    fireEvent.change(approve(), { target: { value: "pm" } });
+    expect(screen.getByText(/the PM lands or holds it/)).toBeTruthy();
+    // A pull request or a branch never leaves it to the PM, and says why.
+    fireEvent.change(screen.getByLabelText("Lands as"), {
+      target: { value: "pull-request" },
+    });
+    expect(options()).toEqual(["before", "none"]);
+    expect(approve().value).toBe("before");
+    expect(screen.getByText(/GitHub's reviews decide/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Lands as"), {
+      target: { value: "branch" },
+    });
+    expect(options()).toEqual(["before", "none"]);
+    expect(screen.getByText(/a new branch lands nothing/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Lands as"), {
+      target: { value: "push" },
+    });
+    expect(approve().value).toBe("pm");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()[0].body).toMatchObject({ via: "push", approve: "pm" });
+  });
+  it("shows on the board and the request that the PM landed or held a change", () => {
+    const decided = (land: boolean) => ({
+      by: "pm",
+      land,
+      reason: land ? "nothing waits on it" : "the API change lands first",
+      revision: 1,
+      at: "2026-09-21T10:00:00Z",
+    });
+    show(
+      project({
+        playbook: codeTeam({ via: "push", target: "main", approve: "pm" }),
+      }),
+      {
+        tasks: [
+          started({
+            id: "t1",
+            objective: "Held one",
+            status: "waiting",
+            stage: "ready",
+            land_decision: decided(false),
+          }),
+          started({
+            id: "t2",
+            objective: "Landed one",
+            status: "landed",
+            stage: "done",
+            land_decision: decided(true),
+          }),
+        ],
+      },
+    );
+    expect(
+      screen.getByText("Held by the PM: the API change lands first"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Landed by the PM as one commit: nothing waits on it/),
+    ).toBeTruthy();
+    cleanup();
+    show(
+      project(),
+      {
+        tasks: [
+          started({
+            status: "landed",
+            stage: "done",
+            land_decision: decided(true),
+          }),
+        ],
+      },
+      { request: "t1" },
+    );
+    expect(
+      screen.getAllByText(/Landed by the PM as one commit: nothing waits on it/)
+        .length,
+    ).toBeGreaterThan(0);
+  });
+  it("lets the owner land a signed-off change still waiting on the PM", async () => {
+    show(
+      project({
+        playbook: codeTeam({ via: "push", target: "main", approve: "pm" }),
+      }),
+      {
+        tasks: [
+          started({ status: "deciding", stage: "qa", pm_deciding: true }),
+        ],
+      },
+      { request: "t1" },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Land on main" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      { path: "/api/projects/p1/tasks/t1/land", method: "POST", body: {} },
+    ]);
+    cleanup();
+    // One the checks haven't signed off offers no such thing.
+    show(
+      project({
+        playbook: codeTeam({ via: "push", target: "main", approve: "pm" }),
+      }),
+      { tasks: [started({ status: "deciding", stage: "qa" })] },
+      { request: "t1" },
+    );
+    expect(screen.queryByRole("button", { name: "Land on main" })).toBeNull();
+  });
   it("shows what happened, with each step of work only on request", () => {
     show(
       project(),

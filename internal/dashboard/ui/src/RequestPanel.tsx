@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { DecisionCard } from "./DecisionCard";
 import { Drafts } from "./Drafts";
+import { pmLandingLine } from "./landing";
 import { RequestDesign, RequestPlan } from "./RequestPlan";
 import { TeamThread } from "./TeamThread";
 import {
@@ -116,6 +117,9 @@ export function RequestPanel({
                 <span className="muted small">{task.detail}</span>
               )}
             </p>
+            {pmLandingLine(task) && (
+              <p className="muted small">{pmLandingLine(task)}</p>
+            )}
             <RequestActions project={project} task={task} refresh={refresh} />
           </header>
           {decision && (
@@ -182,9 +186,11 @@ function RequestActions({
   const landing = useAction();
   const land = project.playbook?.land;
   const landsLater =
-    task.status === "delivered" &&
-    isCode(project.playbook) &&
-    (land?.via === "push" || land?.via === "pull-request");
+    (task.status === "delivered" &&
+      isCode(project.playbook) &&
+      (land?.via === "push" || land?.via === "pull-request")) ||
+    // A signed-off change waiting on the PM can be landed by the owner.
+    !!task.pm_deciding;
   if (finished(task) && !landsLater) return null;
   return (
     <div className="actions">

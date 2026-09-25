@@ -145,7 +145,18 @@ export interface LandPolicy {
   target?: string;
   method?: string;
   github?: string;
-  approve?: "before" | "none" | (string & {});
+  /** pm lets the team's PM decide what lands; push only. */
+  approve?: "before" | "none" | "pm" | (string & {});
+}
+/** The PM's decision to land or hold a task's change, and why. */
+export interface LandDecision {
+  by: string;
+  land: boolean;
+  /** squash (one commit) or fast-forward (the task's own commits). */
+  method?: "squash" | "fast-forward" | (string & {});
+  reason: string;
+  revision: number;
+  at: string;
 }
 export interface LandingInput {
   means: string;
@@ -340,6 +351,9 @@ export interface Task {
   verdicts: Verdict[] | null;
   decision_id?: string;
   delivered_to?: string;
+  land_decision?: LandDecision;
+  /** Signed off and waiting only on the PM's decision; the owner may land it. */
+  pm_deciding?: boolean;
   created_at?: string;
   updated_at?: string;
 }

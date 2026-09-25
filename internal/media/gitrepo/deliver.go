@@ -150,6 +150,26 @@ func (r Repo) PushSquashed(ctx context.Context, taskBranch, commit, target, mess
 	return squash, r.pushTo(ctx, squash, target)
 }
 
+// DropBranch deletes a task branch from the clone once its change has
+// landed, only while it is still at commit: a branch that moved since holds
+// work that has not landed, and is kept. A clone left on the branch is
+// detached at commit first. The owner's repository is never touched.
+func (r Repo) DropBranch(ctx context.Context, branch, commit string) error {
+	if err := validBranch(ctx, r.Workspace(), branch); err != nil {
+		return err
+	}
+	if tip, err := run(ctx, r.Workspace(), "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil || strings.TrimSpace(tip) != commit {
+		return fmt.Errorf("%s is no longer at what landed; it is kept", branch)
+	}
+	if current, err := CurrentBranch(ctx, r.Workspace()); err == nil && current == branch {
+		if _, err = run(ctx, r.Workspace(), "checkout", "--quiet", "--force", "--detach", commit); err != nil {
+			return err
+		}
+	}
+	_, err := run(ctx, r.Workspace(), "update-ref", "-m", "crew-assistant: landed", "-d", "refs/heads/"+branch, commit)
+	return err
+}
+
 // Mentions reports whether any commit in ref's history has marker in its
 // message, such as the trailer a squashed landing leaves.
 func (r Repo) Mentions(ctx context.Context, ref, marker string) (bool, error) {

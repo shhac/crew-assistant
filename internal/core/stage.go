@@ -22,6 +22,7 @@ func deriveStages(v *Snapshot) {
 
 func derive(v *Snapshot, t *Task) {
 	t.Stage, t.Checking, t.WithDesigner, t.Answered, t.WaitsFor = stageOf(v, *t), "", false, false, nil
+	t.PMDeciding = pmDeciding(v, *t)
 	if t.Status == TaskQueued {
 		t.WaitsFor = waitsFor(v, *t)
 	}

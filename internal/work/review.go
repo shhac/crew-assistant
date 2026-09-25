@@ -139,6 +139,9 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 		return err
 	default:
 		_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+			// Checks failing on a change the PM approved, merged with what
+			// landed since, fail that landing.
+			landingFailure(t, "The checks failed on it merged with what landed since: "+reviewDigest(changes))
 			t.NextRound()
 			t.Status, t.Detail = core.TaskWriting, ""
 			return fmt.Sprintf("Round %d of %s: revising after review", t.Round, t.Objective), nil

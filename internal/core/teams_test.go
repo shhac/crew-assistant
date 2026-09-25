@@ -148,6 +148,11 @@ func TestLandingPoliciesSayOnlyWhatTheWayNeeds(t *testing.T) {
 		{LandPolicy{Via: LandBranch, Target: "main"}, false},
 		{LandPolicy{Via: "carrier-pigeon"}, false},
 		{LandPolicy{Approve: "sometimes"}, false},
+		// Only a push can leave landing to the PM.
+		{LandPolicy{Via: LandPush, Target: "main", Approve: ApprovePM}, true},
+		{LandPolicy{Via: LandPullRequest, Target: "main", GitHub: "shhac/crew-assistant", Approve: ApprovePM}, false},
+		{LandPolicy{Via: LandBranch, Approve: ApprovePM}, false},
+		{LandPolicy{Approve: ApprovePM}, false},
 	} {
 		code.Land = tc.land
 		if err := code.Validate(); (err == nil) != tc.ok {

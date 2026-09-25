@@ -9,6 +9,9 @@ describe("activity presentation", () => {
     expect(activityLabel("task.planned")).toBe("Planned");
     expect(activityLabel("task.ordered")).toBe("Order");
     expect(activityLabel("pm.asked")).toBe("PM asked");
+    // What the PM decided about landing is shown, not folded away.
+    expect(activityLabel("task.pm_landing")).toBe("PM decided");
+    expect(isRoutineActivity("task.pm_landing")).toBe(false);
     expect(activityLabel("memory.corrected")).toBe("Memory");
     expect(activityLabel("some.future_kind")).toBe("Update");
     expect(activityLabel("some.future_kind")).not.toContain("future");

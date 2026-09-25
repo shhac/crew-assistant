@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  approvalText,
   approveLabel,
   landsBy,
   mergeMethod,
+  pmCanDecide,
+  pmLandingLine,
   reversibility,
   wayFor,
   whatHappens,
 } from "./landing";
-import type { Playbook } from "./api";
+import type { Playbook, Task } from "./api";
 
 const writing: Playbook = {
   template: "draft",
@@ -85,5 +88,70 @@ describe("landing", () => {
     expect(wayFor("branch")?.method("squash")).toBe("");
     expect(mergeMethod({ method: "merge" })).toBe("merge");
     expect(mergeMethod(undefined)).toBe("squash");
+  });
+
+  it("lets the PM decide only where a push lands the change", () => {
+    expect(pmCanDecide("push")).toBe(true);
+    expect(pmCanDecide("pull-request")).toBe(false);
+    expect(pmCanDecide("branch")).toBe(false);
+    expect(approvalText({ via: "push", target: "main" })).toBe(
+      "You approve each change",
+    );
+    expect(approvalText({ via: "push", target: "main", approve: "none" })).toBe(
+      "It lands once the checks pass",
+    );
+    expect(approvalText({ via: "push", target: "main", approve: "pm" })).toBe(
+      "The PM decides, once it's signed off",
+    );
+    // A policy the server would refuse never reads as the PM's.
+    expect(
+      approvalText({ via: "pull-request", target: "main", approve: "pm" }),
+    ).toBe("You approve each change");
+    const byPM = whatHappens(
+      code({ via: "push", target: "main", approve: "pm" }),
+    );
+    expect(byPM[0]).toContain("the PM lands it or holds it");
+    expect(byPM[1]).toContain("main moves forward");
+    expect(byPM.at(-1)).toContain("one commit or keeps the team's own commits");
+    expect(byPM.at(-1)).toContain("branch is cleaned up");
+    expect(whatHappens(code())[0]).toContain("main moves forward");
+  });
+
+  it("says what the PM decided about a change", () => {
+    const task = (status: Task["status"], land: boolean): Task => ({
+      id: "t1",
+      project_id: "p1",
+      objective: "Cache",
+      criteria: null,
+      status,
+      stage: "done",
+      round: 1,
+      revisions: null,
+      verdicts: null,
+      land_decision: {
+        by: "pm",
+        land,
+        reason: "ready first",
+        revision: 2,
+        at: "",
+      },
+    });
+    expect(pmLandingLine(task("landed", true))).toBe(
+      "Landed by the PM as one commit: ready first",
+    );
+    expect(pmLandingLine(task("landing", true))).toBe(
+      "The PM is landing it as one commit: ready first",
+    );
+    const kept = task("landed", true);
+    kept.land_decision = { ...kept.land_decision!, method: "fast-forward" };
+    expect(pmLandingLine(kept)).toBe(
+      "Landed by the PM keeping its commits: ready first",
+    );
+    expect(pmLandingLine(task("waiting", false))).toBe(
+      "Held by the PM: ready first",
+    );
+    expect(
+      pmLandingLine({ ...task("landed", true), land_decision: undefined }),
+    ).toBe("");
   });
 });

@@ -36,8 +36,11 @@ type Task struct {
 	// WaitsFor names the unfinished tasks this one depends on, derived with
 	// Stage, so the board can say what it waits for.
 	WaitsFor []string `json:"waits_for,omitempty"`
-	Detail   string   `json:"detail,omitempty"`
-	Roles    []Role   `json:"roles,omitempty"`
+	// PMDeciding is a signed-off change waiting only on the PM's decision
+	// to land, which the owner may take ahead of it. Derived with Stage.
+	PMDeciding bool   `json:"pm_deciding,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+	Roles      []Role `json:"roles,omitempty"`
 	// Playbook is the team's setup as it was when the task started: its
 	// medium and, for code, the repository, check and branch prefix.
 	Playbook  *Playbook `json:"playbook,omitempty"`
@@ -99,6 +102,13 @@ type Task struct {
 	// Approved is the revision the owner approved to land. A revision that
 	// only merged it cleanly with landed work keeps that approval.
 	Approved int `json:"approved,omitempty"`
+	// LandDecision is the PM's latest decision to land or hold the change,
+	// on a project where the PM decides; see landing.go.
+	LandDecision *LandDecision `json:"land_decision,omitempty"`
+	// LandingFailures are why landings the PM approved failed since the
+	// change last landed or the owner stepped in: past a few, the owner
+	// decides instead.
+	LandingFailures []string `json:"landing_failures,omitempty"`
 	// Proposal is the pull request a task lands through, and the branch the
 	// project owns for it.
 	Proposal  *Proposal `json:"proposal,omitempty"`

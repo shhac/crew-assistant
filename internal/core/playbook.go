@@ -120,7 +120,8 @@ type LandPolicy struct {
 	// GitHub is the owner/name repository a pull request is opened on.
 	GitHub string `json:"github,omitempty"`
 	// Approve is ApproveBefore (the owner approves before landing, or before a
-	// pull request opens) or ApproveNone.
+	// pull request opens), ApproveNone, or ApprovePM (the team's PM decides
+	// whether a signed-off change lands; push only).
 	Approve string `json:"approve,omitempty"`
 }
 
@@ -130,6 +131,11 @@ const (
 	LandPullRequest = "pull-request"
 	ApproveBefore   = "before"
 	ApproveNone     = "none"
+	// ApprovePM lets the team's PM, not the owner, decide whether a change
+	// every checker passed lands. Only a push, which lands straight on the
+	// target and nowhere else, offers it: a pull request is governed by
+	// GitHub's reviews, and a branch moves nothing.
+	ApprovePM = "pm"
 )
 
 // Way is how a change lands, defaulting to a new branch.
@@ -148,8 +154,12 @@ func (l LandPolicy) MergeMethod() string {
 	return l.Method
 }
 
-// AsksFirst reports whether the owner approves before a change lands.
+// AsksFirst reports whether someone, the owner or the PM, approves before a
+// change lands.
 func (l LandPolicy) AsksFirst() bool { return l.Approve != ApproveNone }
+
+// ByPM reports whether the team's PM decides whether a change lands.
+func (l LandPolicy) ByPM() bool { return l.Approve == ApprovePM && l.Way() == LandPush }
 
 var githubRepo = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
 
@@ -157,8 +167,11 @@ func (l LandPolicy) validate() error {
 	if len(l.Means) > 2000 {
 		return errors.New("what landing means must fit in 2000 characters")
 	}
-	if l.Approve != "" && l.Approve != ApproveBefore && l.Approve != ApproveNone {
-		return errors.New("approve must be before or none")
+	if l.Approve != "" && l.Approve != ApproveBefore && l.Approve != ApproveNone && l.Approve != ApprovePM {
+		return errors.New("approve must be before, none or pm")
+	}
+	if l.Approve == ApprovePM && l.Way() != LandPush {
+		return errors.New("the PM can decide only for changes that land by push: a pull request is merged as GitHub's reviews say, and a new branch lands nothing")
 	}
 	switch l.Way() {
 	case LandBranch:

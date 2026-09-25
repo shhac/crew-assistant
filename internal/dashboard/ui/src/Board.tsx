@@ -5,6 +5,7 @@ import {
   type ReactNode,
 } from "react";
 import { projectHref, requestHref } from "./router";
+import { pmLandingLine } from "./landing";
 import { atWork } from "./members";
 import {
   boardColumns,
@@ -105,6 +106,7 @@ export function Board({
                     {t.objective}
                     <span className="muted small">
                       {requestStep(t)}
+                      {pmLandingLine(t) && ` · ${pmLandingLine(t)}`}
                       {ref && (
                         <>
                           {" · "}
@@ -178,6 +180,7 @@ function BoardCard({
   children?: ReactNode;
 }) {
   const open = (task.messages ?? []).filter(isOpenMessage).length;
+  const pm = pmLandingLine(task);
   return (
     <article className={`board-card${needsYou(task) ? " needs" : ""}`}>
       <a
@@ -198,6 +201,7 @@ function BoardCard({
           )}
         </p>
       )}
+      {pm && <p className="board-card-meta muted small">{pm}</p>}
       {open > 0 && (
         <p className="board-card-meta muted small">
           <span>

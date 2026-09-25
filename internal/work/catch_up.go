@@ -69,6 +69,7 @@ func (lp *Loop) catchUpRound(ctx context.Context, t core.Task, c catcher, l line
 	}
 	// A conflict is the implementer's to resolve, in a round of its own.
 	_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		landingFailure(t, "Catching up conflicted: "+l.What)
 		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", "Catching up: "+l.What
 		return t.Objective + " is catching up: " + l.What, nil
 	})

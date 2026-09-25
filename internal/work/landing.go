@@ -15,7 +15,7 @@ import (
 // a new branch, a fast-forward push onto the target, or the delivery folder.
 // It never forces anything: a moved target sends the task back to catch up.
 func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium) error {
-	if taskPlaybook(p, t).Land.AsksFirst() && !approvalStands(t) && !proposed(t) {
+	if asksFirst(p, t) && !approvalHolds(p, t) && !proposed(t) {
 		return lp.setStatus(ctx, t.ID, core.TaskDeciding, "Checks are in")
 	}
 	playbook := taskPlaybook(p, t)
@@ -33,7 +33,7 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 			return lp.landingFailed(ctx, t, r, err)
 		}
 		if done {
-			return lp.recordLanded(ctx, t, r, playbook.Land.Target, "it was already there")
+			return lp.cleanUp(ctx, t, r, m, lp.recordLanded(ctx, t, r, playbook.Land.Target, "it was already there"))
 		}
 	}
 	c, l, err := lag(ctx, m, t)
@@ -52,7 +52,7 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 	if err != nil {
 		return lp.landingFailed(ctx, t, r, err)
 	}
-	return lp.recordLanded(ctx, t, r, target, "")
+	return lp.cleanUp(ctx, t, r, m, lp.recordLanded(ctx, t, r, target, ""))
 }
 
 // proposed reports a task whose pull request is open: updates to it go out
@@ -61,7 +61,7 @@ func proposed(t core.Task) bool { return t.Proposal != nil && t.Proposal.Number 
 
 func (lp *Loop) recordLanded(ctx context.Context, t core.Task, r core.Revision, target, note string) error {
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
-		t.Status, t.DecisionID, t.DeliveredTo, t.CatchUps = core.TaskDelivered, "", target, 0
+		t.Status, t.DecisionID, t.DeliveredTo, t.CatchUps, t.LandingFailures = core.TaskDelivered, "", target, 0, nil
 		// Where it went is said by the stage; the detail keeps only a note.
 		t.Detail = note
 		if r.Ref != "" {
@@ -69,6 +69,10 @@ func (lp *Loop) recordLanded(ctx context.Context, t core.Task, r core.Revision, 
 		}
 		if t.Playbook != nil && t.Playbook.Land.Way() != core.LandBranch {
 			t.Status = core.TaskLanded
+			// Said only now that it is there, however the landing went.
+			if pmApproved(*t) {
+				return fmt.Sprintf("The PM landed %s on %s %s: %s", t.Objective, target, t.LandDecision.How(), t.LandDecision.Reason), nil
+			}
 			return fmt.Sprintf("%s landed on %s", t.Objective, target), nil
 		}
 		if target != "" {
@@ -127,6 +131,13 @@ func (lp *Loop) LandTask(ctx context.Context, projectID, taskID string) (core.Ta
 	t, ok := findTask(snap, projectID, taskID)
 	if !ok {
 		return core.Task{}, core.ErrNotFound
+	}
+	// A signed-off change waiting on the PM's decision lands on the owner's
+	// say-so instead, through the same landing.
+	if t.Status == core.TaskDeciding {
+		landing, err := lp.Core.LandAheadOfPM(ctx, projectID, taskID)
+		lp.Nudge()
+		return landing, err
 	}
 	if t.Status != core.TaskDelivered || len(t.Revisions) == 0 || t.Playbook == nil {
 		return core.Task{}, fmt.Errorf("only a delivered change can be landed later: %w", core.ErrConflict)

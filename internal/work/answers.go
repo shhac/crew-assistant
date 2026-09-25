@@ -106,6 +106,7 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 			}
 			// The owner's retry starts the count of catch-ups afresh.
 			t.Failures, t.RetryAt, t.DecisionID, t.Detail, t.CatchUps = 0, time.Time{}, "", "Trying again", 0
+			t.LandingFailures = nil
 			return "Trying " + t.Objective + " again", nil
 		})
 		return err
@@ -113,6 +114,8 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 	// Anything else is direction for another round: the owner asked for
 	// changes, answered a reviewer's question or wants one more attempt.
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		// The owner stepped in: landings the PM approved count afresh.
+		t.LandingFailures = nil
 		if d.Kind == core.DecisionQuestion || (!chose(choiceAnotherRound) && !chose(choiceChanges)) {
 			t.AddDirection(&d, answer)
 		}

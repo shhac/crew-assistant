@@ -39,6 +39,10 @@ type scriptedRunner struct {
 	// pm answers the PM's looks at the to-do list in order; after them, an
 	// answer that changes nothing.
 	pm []string
+	// pmLand answers the PM's decisions to land in order; after them, land.
+	// onPMLand runs before each, to change the world meanwhile.
+	pmLand   []string
+	onPMLand func()
 }
 
 const (
@@ -68,6 +72,16 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 		reply := plainDesign
 		if len(r.designs) > 0 {
 			reply, r.designs = r.designs[0], r.designs[1:]
+		}
+		return roles.Result{Text: reply}, nil
+	}
+	if !spec.Write && strings.Contains(spec.Prompt, "Decide whether this change lands") {
+		if r.onPMLand != nil {
+			r.onPMLand()
+		}
+		reply := `{"land": true, "reason": "it is signed off and nothing waits on it"}`
+		if len(r.pmLand) > 0 {
+			reply, r.pmLand = r.pmLand[0], r.pmLand[1:]
 		}
 		return roles.Result{Text: reply}, nil
 	}
