@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -196,16 +195,4 @@ func (a *App) archiveContext(ctx context.Context, checkpoint engine.ContextCheck
 		return err
 	}
 	return errors.Join(parent.Sync(), parent.Close())
-}
-func (a *App) chatRetryStatus(ctx context.Context, id string, e engine.RetryEvent) error {
-	text := ""
-	switch e.Status {
-	case "waiting":
-		text = fmt.Sprintf("Model provider is busy. Retry %d of %d scheduled.", e.Attempt, e.MaxRetries)
-	case "retrying":
-		text = fmt.Sprintf("Retrying the model request (%d of %d)…", e.Attempt, e.MaxRetries)
-	case "exhausted":
-		text = "Model provider recovery stopped; saved actions are preserved."
-	}
-	return a.Core.SetChatModelStatus(ctx, id, text, e.RetryAt)
 }

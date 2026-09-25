@@ -33,7 +33,7 @@ func (a *App) Execute(ctx context.Context, name string, raw json.RawMessage) (an
 		if err := args(raw, &struct{}{}); err != nil {
 			return nil, err
 		}
-		state, _, err := a.context(ctx)
+		state, _, err := a.chatContext(ctx, "")
 		if err != nil {
 			return nil, err
 		}

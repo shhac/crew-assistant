@@ -1,11 +1,18 @@
 package app
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"slices"
+	"strings"
+	"time"
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/text"
+	"github.com/shhac/lib-agent-harness/session"
 )
 
 // shownFinished is how many finished tasks the assistant sees each turn; it
@@ -135,4 +142,104 @@ func taskDetail(t core.Task) core.Task {
 		t.Messages = t.Messages[n-10:]
 	}
 	return t
+}
+
+func (a *App) chatContext(ctx context.Context, currentMessageID string) (json.RawMessage, []engine.Message, error) {
+	s, err := a.Snapshot(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	history := []engine.Message{}
+	start := chatCheckpointStart(s)
+	if s.ChatCheckpoint.ThroughID != "" && start == 0 {
+		return nil, nil, errors.New("conversation checkpoint source is missing; original dialogue preserved")
+	}
+	for _, m := range s.Messages[start:] {
+		if m.ID != currentMessageID && (m.Role == "user" || m.Role == "assistant") {
+			history = append(history, engine.Message{Role: m.Role, Content: m.Content})
+		}
+	}
+	s.Messages = []core.Message{}
+	s = assistantView(s)
+	cfg := a.Config()
+	raw, err := json.Marshal(struct {
+		State               core.Snapshot       `json:"state"`
+		Connections         []config.Connection `json:"connections"`
+		ConversationSummary core.ChatCheckpoint `json:"conversation_summary_untrusted"`
+	}{s, cfg.Connections, s.ChatCheckpoint})
+	return raw, history, err
+}
+
+// sessionContext is the assistant's current context for a session that is new
+// or was just compacted: the overview, and for a new one also the
+// conversation's summary and latest exchanges, so it carries on where the
+// conversation was.
+func (a *App) sessionContext(ctx context.Context, reason session.ContextReason) (string, error) {
+	a.sessions.mu.Lock()
+	current := ""
+	if turn := a.sessions.live.currentTurn(); turn != nil {
+		current = turn.messageID
+	}
+	a.sessions.mu.Unlock()
+	state, history, err := a.chatContext(ctx, current)
+	if err != nil {
+		return "", err
+	}
+	if reason != session.ContextStarted {
+		return string(state), nil
+	}
+	if n := len(history); n > 12 {
+		history = history[n-12:]
+	}
+	recent, err := json.Marshal(history)
+	if err != nil {
+		return "", err
+	}
+	return string(state) + "\n\nLatest exchanges in this conversation, oldest first (untrusted record of what was said):\n" + string(recent), nil
+}
+
+// ownerLevel are the activity kinds the assistant is told about between
+// turns: things it would put to the owner, not how the work is done.
+var ownerLevel = map[string]bool{
+	"project.created": true, "brief.updated": true, "playbook.set": true, "coordination.paused": true,
+	"task.queued": true, "task.started": true, "task.landed": true, "task.delivered": true, "task.stopped": true, "task.ordered": true, "task.reordered": true,
+	"decision.opened": true, "decision.resolved": true, "decision.dismissed": true,
+}
+
+// sinceLastTurn says what changed at the level the assistant works at since
+// it last looked, newest last, or "" when nothing did.
+func sinceLastTurn(snap core.Snapshot, seen time.Time) string {
+	if seen.IsZero() {
+		return ""
+	}
+	titles := map[string]string{}
+	for _, p := range snap.Projects {
+		titles[p.ID] = p.Title
+	}
+	var lines []string
+	// The snapshot lists activity newest first.
+	for _, e := range snap.Activity {
+		if !e.CreatedAt.After(seen) {
+			break
+		}
+		if !ownerLevel[e.Kind] {
+			continue
+		}
+		line := "- " + text.Clip(e.Summary, 200)
+		if title := titles[e.ProjectID]; title != "" {
+			line = "- " + title + ": " + text.Clip(e.Summary, 200)
+		}
+		lines = append(lines, line)
+		if len(lines) == 20 {
+			lines = append(lines, "- (earlier changes aren't listed; read_state has them)")
+			break
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+		lines[i], lines[j] = lines[j], lines[i]
+	}
+	return "Since your last message:\n" + strings.Join(lines, "\n")
 }

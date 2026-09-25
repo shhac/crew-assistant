@@ -261,3 +261,16 @@ func (a *App) assistantConfig(ctx context.Context, cfg config.Config) engine.Con
 	}
 	return ec
 }
+
+func (a *App) chatRetryStatus(ctx context.Context, id string, e engine.RetryEvent) error {
+	text := ""
+	switch e.Status {
+	case "waiting":
+		text = fmt.Sprintf("Model provider is busy. Retry %d of %d scheduled.", e.Attempt, e.MaxRetries)
+	case "retrying":
+		text = fmt.Sprintf("Retrying the model request (%d of %d)…", e.Attempt, e.MaxRetries)
+	case "exhausted":
+		text = "Model provider recovery stopped; saved actions are preserved."
+	}
+	return a.Core.SetChatModelStatus(ctx, id, text, e.RetryAt)
+}

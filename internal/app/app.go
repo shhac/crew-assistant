@@ -6,10 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/shhac/crew-assistant/internal/avatars"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/shhac/crew-assistant/internal/avatars"
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
@@ -160,32 +161,4 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 		s.Members[i].Drawing, s.Members[i].DrawError = d.busy, d.failure
 	}
 	return s, nil
-}
-func (a *App) context(ctx context.Context) (json.RawMessage, []engine.Message, error) {
-	return a.chatContext(ctx, "")
-}
-func (a *App) chatContext(ctx context.Context, currentMessageID string) (json.RawMessage, []engine.Message, error) {
-	s, err := a.Snapshot(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	history := []engine.Message{}
-	start := chatCheckpointStart(s)
-	if s.ChatCheckpoint.ThroughID != "" && start == 0 {
-		return nil, nil, errors.New("conversation checkpoint source is missing; original dialogue preserved")
-	}
-	for _, m := range s.Messages[start:] {
-		if m.ID != currentMessageID && (m.Role == "user" || m.Role == "assistant") {
-			history = append(history, engine.Message{Role: m.Role, Content: m.Content})
-		}
-	}
-	s.Messages = []core.Message{}
-	s = assistantView(s)
-	cfg := a.Config()
-	raw, err := json.Marshal(struct {
-		State               core.Snapshot       `json:"state"`
-		Connections         []config.Connection `json:"connections"`
-		ConversationSummary core.ChatCheckpoint `json:"conversation_summary_untrusted"`
-	}{s, cfg.Connections, s.ChatCheckpoint})
-	return raw, history, err
 }
