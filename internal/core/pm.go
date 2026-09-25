@@ -46,14 +46,16 @@ func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (s
 			if t == nil || t.ProjectID != projectID {
 				continue
 			}
-			deps, err := dependencies(v, Task{ID: t.ID, ProjectID: t.ProjectID}, in.Depends[id])
-			if err != nil || slices.Equal(deps, t.DependsOn) {
+			deps := possibleDependencies(v, *t, in.Depends[id])
+			// A list the PM got entirely wrong changes nothing, rather than
+			// releasing the task.
+			if (len(deps) == 0 && len(in.Depends[id]) > 0) || slices.Equal(deps, t.DependsOn) {
 				continue
 			}
 			t.DependsOn = deps
 			changed = append(changed, "what “"+t.Objective+"” waits for")
 		}
-		if order := s.pmOrder(v, p, in.Order); order != nil {
+		if order := pmOrder(v, p, in.Order); order != nil {
 			if _, err := reorder(v, projectID, order); err == nil {
 				p.OrderedBy, p.OrderedAt = OrderedByPM, now
 				changed = append(changed, "the order")
@@ -67,7 +69,6 @@ func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (s
 			summary += ": " + note
 		}
 		record(v, now, projectID, "task.ordered", summary)
-		deriveStages(v)
 		return nil
 	})
 	return strings.Join(changed, ", "), err
@@ -77,47 +78,56 @@ func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (s
 // exactly the queued tasks and change something. When the owner or the
 // assistant ordered the list, their order holds for the tasks that were
 // there then; the PM only places tasks queued since.
-func (s *Service) pmOrder(v *Snapshot, p *Project, order []string) []string {
-	var current []string
-	for _, t := range v.Tasks {
-		if t.ProjectID == p.ID && t.Status == TaskQueued {
-			current = append(current, t.ID)
-		}
-	}
-	if len(order) != len(current) || slices.Equal(order, current) {
+func pmOrder(v *Snapshot, p *Project, order []string) []string {
+	current := queuedOf(v, p.ID)
+	if !sameTasks(order, current) || slices.Equal(order, current) {
 		return nil
-	}
-	for _, id := range order {
-		if !slices.Contains(current, id) {
-			return nil
-		}
 	}
 	if p.OrderedBy != OrderedByOwner && p.OrderedBy != OrderedByAssistant {
 		return order
 	}
-	var kept []string
-	for _, id := range current {
-		if !task(v, id).CreatedAt.After(p.OrderedAt) {
-			kept = append(kept, id)
-		}
-	}
-	if len(kept) == len(current) {
-		return nil
-	}
-	out := make([]string, 0, len(order))
-	next := 0
-	for _, id := range order {
-		if slices.Contains(kept, id) {
-			out = append(out, kept[next])
-			next++
-			continue
-		}
-		out = append(out, id)
-	}
+	kept := slices.DeleteFunc(slices.Clone(current), func(id string) bool {
+		return task(v, id).CreatedAt.After(p.OrderedAt)
+	})
+	out := keepOrder(order, kept)
 	if slices.Equal(out, current) {
 		return nil
 	}
 	return out
+}
+
+// keepOrder places kept tasks in their own order wherever order puts any
+// of them, leaving the other tasks where order put them.
+func keepOrder(order, kept []string) []string {
+	out := make([]string, 0, len(order))
+	next := 0
+	for _, id := range order {
+		if slices.Contains(kept, id) {
+			id = kept[next]
+			next++
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+// queuedOf is a project's queued tasks, in the order they start in.
+func queuedOf(v *Snapshot, projectID string) []string {
+	var out []string
+	for _, t := range v.Tasks {
+		if t.ProjectID == projectID && t.Status == TaskQueued {
+			out = append(out, t.ID)
+		}
+	}
+	return out
+}
+
+// sameTasks reports whether two lists name the same tasks, each once.
+func sameTasks(a, b []string) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(a, b) && len(slices.Compact(a)) == len(b)
 }
 
 // PMSeat is the seat on a project's team that keeps its to-do list.

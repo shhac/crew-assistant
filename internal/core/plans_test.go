@@ -172,7 +172,8 @@ func TestAPlanMovesTheTaskOnAndNeverMakesALoop(t *testing.T) {
 		t.Base, t.Branch = "abc", "crew-task/c"
 		return "", nil
 	})
-	back, outcome, _ := s.RecordPlan(testContext, c.ID, Plan{Summary: "C builds on A"}, []string{a.ID})
+	// One impossible id among the planner's doesn't lose the rest.
+	back, outcome, _ := s.RecordPlan(testContext, c.ID, Plan{Summary: "C builds on A"}, []string{"not-a-task", c.ID, a.ID})
 	if outcome != PlanWaits || back.Status != TaskQueued || back.Plan != nil || back.Base != "" || back.Branch != "" || len(back.WaitsFor) != 1 {
 		t.Fatalf("a task that waits goes back to the queue to plan again later: %+v %s", back, outcome)
 	}

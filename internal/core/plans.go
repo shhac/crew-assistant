@@ -83,6 +83,19 @@ func dependencies(v *Snapshot, t Task, ids []string) ([]string, error) {
 	return out, nil
 }
 
+// possibleDependencies is what a role says a task waits for, less any task
+// dependencies would refuse: a role naming one impossible task keeps the
+// rest of its list, so the task still waits for what it can.
+func possibleDependencies(v *Snapshot, t Task, ids []string) []string {
+	var out []string
+	for _, id := range ids {
+		if deps, err := dependencies(v, t, append(slices.Clone(out), id)); err == nil {
+			out = deps
+		}
+	}
+	return out
+}
+
 // reaches reports whether from depends on to, directly or through others.
 func reaches(v *Snapshot, from, to string, seen map[string]bool) bool {
 	if from == to {
@@ -121,11 +134,7 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 		if t.Status != TaskPlanning {
 			return fmt.Errorf("the task is no longer planning: %w", ErrConflict)
 		}
-		deps, err := dependencies(v, *t, append(append([]string(nil), t.DependsOn...), dependsOn...))
-		if err != nil {
-			// A planner naming an impossible dependency does not stop the task.
-			deps = t.DependsOn
-		}
+		deps := possibleDependencies(v, *t, append(slices.Clone(t.DependsOn), dependsOn...))
 		now := s.now().UTC()
 		t.DependsOn, t.UpdatedAt = deps, now
 		plan.At = now

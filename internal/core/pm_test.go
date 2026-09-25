@@ -80,11 +80,21 @@ func TestThePMOrdersTheListAndSetsWhatWaitsForWhat(t *testing.T) {
 	if waiting := task(&snap, a.ID); !slices.Equal(waiting.DependsOn, []string{b.ID}) {
 		t.Fatalf("a waits for %v", waiting.DependsOn)
 	}
-	// A loop, a list missing a task, or another project's task is ignored.
+	// A loop, or a list missing a task, is ignored.
 	if changed, _ := s.ApplyPM(testContext, p.ID, PMAnswer{Order: []string{a.ID}, Depends: map[string][]string{b.ID: {a.ID}}}); changed != "" {
 		t.Fatalf("a bad answer changed %s", changed)
 	}
-	if got, _ := queuedOrder(t, s, p.ID); !slices.Equal(got, []string{"b", "a"}) {
+	// An impossible id beside a good one keeps the good one; an empty list
+	// releases the task.
+	c, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "c"})
+	if _, err := s.ApplyPM(testContext, p.ID, PMAnswer{Depends: map[string][]string{c.ID: {"not-a-task", b.ID}, a.ID: {}}}); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ = s.Snapshot(testContext)
+	if !slices.Equal(task(&snap, c.ID).DependsOn, []string{b.ID}) || len(task(&snap, a.ID).DependsOn) != 0 {
+		t.Fatalf("c waits for %v, a for %v", task(&snap, c.ID).DependsOn, task(&snap, a.ID).DependsOn)
+	}
+	if got, _ := queuedOrder(t, s, p.ID); !slices.Equal(got, []string{"b", "a", "c"}) {
 		t.Fatalf("order %v", got)
 	}
 }
@@ -103,6 +113,10 @@ func TestTheOwnersOrderStandsOverThePM(t *testing.T) {
 	}
 	s.now = func() time.Time { return start.Add(time.Hour) }
 	c, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "c"})
+	// A reply naming one task for every place changes nothing.
+	if changed, err := s.ApplyPM(testContext, p.ID, PMAnswer{Order: []string{a.ID, a.ID, a.ID}}); err != nil || changed != "" {
+		t.Fatalf("a repeated task changed %q: %v", changed, err)
+	}
 	// The PM may place the new task, but not swap the owner's two.
 	if _, err := s.ApplyPM(testContext, p.ID, PMAnswer{Order: []string{c.ID, a.ID, b.ID}}); err != nil {
 		t.Fatal(err)
