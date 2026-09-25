@@ -298,6 +298,15 @@ func (lp *Loop) supersedeStaleApprovals(ctx context.Context, projectID string) e
 		if err = lp.catchUpRound(ctx, t, c, *l); err != nil {
 			return err
 		}
+		// A catch-up that failed leaves the task on this approval, to retry;
+		// dismissing it then would read as the owner closing the task.
+		after, err := lp.Core.Snapshot(ctx)
+		if err != nil {
+			return err
+		}
+		if now, ok := findTask(after, projectID, t.ID); ok && now.DecisionID == d.ID {
+			continue
+		}
 		if _, err = lp.Core.DismissDecision(ctx, d.ID, "Out of date: "+l.What+". It is catching up and will ask again."); err != nil && !errors.Is(err, core.ErrConflict) {
 			return err
 		}
