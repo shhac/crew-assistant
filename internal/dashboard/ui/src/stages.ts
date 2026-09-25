@@ -1,6 +1,6 @@
 import { recordedTime } from "./ui";
 import { approveLabel, isCode } from "./landing";
-import { holds, taskPlaybook } from "./members";
+import { holds, pmSeat, taskPlaybook } from "./members";
 import {
   pendingDecisions,
   type Decision,
@@ -95,6 +95,25 @@ export function boardColumns(project: Project, tasks: Task[]): Column[] {
 
 export function roleName(task: Task, kind: string, fallback: string) {
   return task.roles?.find((r) => holds(r, kind))?.name ?? fallback;
+}
+
+/**
+ * Who set the order of the to-do list, or the PM about to look at it; "" for
+ * a list with no order to speak of.
+ */
+export function orderLine(project: Project, queued: number) {
+  if (!queued) return "";
+  const pm = pmSeat(project);
+  if (project.pm_due && pm) return `${pm.name} is looking at the order`;
+  switch (project.ordered_by) {
+    case "owner":
+      return "Ordered by you";
+    case "assistant":
+      return "Ordered by the assistant";
+    case "pm":
+      return `Ordered by ${pm?.name ?? "the PM"}`;
+  }
+  return queued > 1 ? "In the order asked for" : "";
 }
 
 export interface DecisionKindWords {

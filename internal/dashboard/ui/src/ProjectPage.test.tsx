@@ -247,6 +247,34 @@ describe("the board", () => {
     expect(screen.getByText("Waits for “Cache the index”")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Move/ })).toBeNull();
   });
+  it("says quietly who set the to-do order, or that the PM is looking at it", () => {
+    const two = [
+      task({ id: "a", objective: "A" }),
+      task({ id: "b", objective: "B" }),
+    ];
+    const todo = () => screen.getByRole("listitem", { name: "To do" });
+    const line = () => todo().querySelector(".todo-order")?.textContent;
+    show(project({ ordered_by: "owner" }), { tasks: two });
+    expect(line()).toBe("Ordered by you");
+    cleanup();
+    const pia: Role = {
+      name: "Pia",
+      kinds: ["pm"],
+      engine: "claude",
+      member: "m4",
+    };
+    const kept = { ...codeTeam(), roles: [...codeTeam().roles, pia] };
+    show(project({ playbook: kept, ordered_by: "pm" }), { tasks: two });
+    expect(line()).toBe("Ordered by Pia");
+    cleanup();
+    show(project({ playbook: kept, ordered_by: "pm", pm_due: true }), {
+      tasks: two,
+    });
+    expect(line()).toBe("Pia is looking at the order");
+    cleanup();
+    show(project(), { tasks: [task({})] });
+    expect(line()).toBeUndefined();
+  });
   it("reorders the to-do list in the order work starts in", async () => {
     show(project(), {
       tasks: [

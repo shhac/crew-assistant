@@ -10,6 +10,7 @@ import {
   projectTasks,
   requestStep,
   needsYou,
+  orderLine,
   requestTone,
   taskPlaybook,
   underWay,
@@ -271,6 +272,34 @@ describe("the board", () => {
     expect(other.badge).toBe("Decision");
     expect(other.answering).toBe("offered");
     expect(decisionKind(undefined).step(task({}))).toBe("Waiting for you");
+  });
+  it("says who set the to-do order, or that the PM is looking at it", () => {
+    const pia = { name: "Pia", kinds: ["pm"], engine: "claude" };
+    const kept = {
+      ...project(code()),
+      playbook: { ...code(), roles: [...code().roles, pia] },
+    };
+    expect(orderLine(project(code()), 0)).toBe("");
+    expect(orderLine(project(code()), 1)).toBe("");
+    expect(orderLine(project(code()), 2)).toBe("In the order asked for");
+    expect(orderLine({ ...project(code()), ordered_by: "owner" }, 1)).toBe(
+      "Ordered by you",
+    );
+    expect(orderLine({ ...project(code()), ordered_by: "assistant" }, 2)).toBe(
+      "Ordered by the assistant",
+    );
+    expect(orderLine({ ...kept, ordered_by: "pm" }, 2)).toBe("Ordered by Pia");
+    expect(orderLine({ ...project(code()), ordered_by: "pm" }, 2)).toBe(
+      "Ordered by the PM",
+    );
+    expect(orderLine({ ...kept, ordered_by: "owner", pm_due: true }, 1)).toBe(
+      "Pia is looking at the order",
+    );
+    // Without a PM on the team, nobody is about to look.
+    expect(
+      orderLine({ ...project(code()), ordered_by: "owner", pm_due: true }, 2),
+    ).toBe("Ordered by you");
+    expect(orderLine({ ...kept, pm_due: true }, 0)).toBe("");
   });
   it("treats a message as open until it is answered", () => {
     const message = (status: "waiting" | "working" | "answered") => ({

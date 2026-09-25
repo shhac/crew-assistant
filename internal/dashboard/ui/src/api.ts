@@ -133,6 +133,13 @@ export interface Project {
   scratch_directory?: string;
   source_id?: string;
   source_description?: string;
+  /** Who last set the to-do order. */
+  ordered_by?: "owner" | "assistant" | "pm" | (string & {});
+  ordered_at?: string;
+  /** The team's PM is to look at the to-do list next. */
+  pm_due?: boolean;
+  /** What the owner told the PM, for its next look. */
+  pm_direction?: string;
   updated_at?: string;
 }
 export interface ProjectInput {

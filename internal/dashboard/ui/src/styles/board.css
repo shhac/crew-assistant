@@ -149,6 +149,10 @@
   margin-right: auto;
 }
 
+.todo-order {
+  padding: 0 4px;
+}
+
 .todo li[draggable="true"] {
   cursor: grab;
 }

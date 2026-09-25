@@ -11,6 +11,7 @@ import {
   decisionFor,
   isOpenMessage,
   needsYou,
+  orderLine,
   projectTasks,
   requestStep,
 } from "./stages";
@@ -234,8 +235,10 @@ function TodoColumn({
     setDragging("");
     if (from >= 0) move(from, to);
   };
+  const ordered = orderLine(project, tasks.length);
   return (
     <>
+      {ordered && <p className="todo-order muted small">{ordered}</p>}
       <ol className="board-cards todo">
         {tasks.map((t, i) => (
           <li

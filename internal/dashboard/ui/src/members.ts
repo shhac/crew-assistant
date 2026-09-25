@@ -62,6 +62,10 @@ export function kindsProblem(kinds: readonly string[]) {
   return "";
 }
 
+/** The seat that keeps a project's to-do list in order, if it has one. */
+export const pmSeat = (project: Project) =>
+  project.playbook?.roles.find((r) => holds(r, "pm"));
+
 /** "Implementer · Claude opus": what a member is and what it runs on. */
 export const memberSummary = (m: Member) =>
   [
