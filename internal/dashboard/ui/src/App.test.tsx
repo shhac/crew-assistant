@@ -255,8 +255,10 @@ describe("the shell", () => {
         within(nav).getByRole("listitem", { name: "Claude: not signed in" }),
       ).toBeTruthy();
       // The request takes focus once as it opens; only then is the owner
-      // typing, and a usage refresh must leave that alone.
-      await waitFor(() =>
+      // typing, and a usage refresh must leave that alone. With intervals
+      // faked, Testing Library's own waits never poll again, so these use
+      // Vitest's, which move the fake clock as they wait.
+      await vi.waitFor(() =>
         expect(panel.contains(document.activeElement)).toBe(true),
       );
       const field = screen.getByLabelText("Message Iris");
@@ -266,16 +268,16 @@ describe("the shell", () => {
       left = 17;
       // The dashboard's own refresh doesn't look at usage again.
       vi.advanceTimersByTime(5000);
-      await waitFor(() =>
+      await vi.waitFor(() =>
         expect(
           calls.filter((c) => c.path === "/api/state").length,
         ).toBeGreaterThan(1),
       );
       expect(calls.filter((c) => c.path === "/api/usage").length).toBe(looked);
       vi.advanceTimersByTime(5 * 60_000);
-      expect(
-        await within(nav).findByRole("listitem", { name: "Codex: 17% left" }),
-      ).toBeTruthy();
+      await vi.waitFor(() =>
+        within(nav).getByRole("listitem", { name: "Codex: 17% left" }),
+      );
       expect(document.activeElement).toBe(field);
       expect(field).toHaveProperty("value", "Also mention pric");
       expect(panel.isConnected).toBe(true);
