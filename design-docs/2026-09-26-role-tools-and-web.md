@@ -1,6 +1,6 @@
 # Role tools and the researcher's web search
 
-2026-09-26. Built for v0.21.0, on lib-agent-harness `bb8e110` (after v0.4.1; untagged).
+2026-09-26. Built for v0.21.0, on lib-agent-harness v0.5.0.
 
 ## Why
 
@@ -24,4 +24,4 @@ The owner asked two things. Every role should be able to see the project's other
 
 - **A way to prove Codex offers its web tool.** Codex may offer it only when the login's provider supports web search. The harness couldn't confirm this without a real model call, so the first real research turn should be watched.
 - **Shorter prompts.** The researcher's and the PM's prompts still list the other unfinished tasks. Trimming them to related tasks plus a count waits until the tools prove themselves.
-- **A harness tag.** crew-assistant is pinned to the harness commit, and v0.5.0 is to be tagged before crew-assistant is released.
+

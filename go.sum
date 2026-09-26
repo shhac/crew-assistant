@@ -42,6 +42,8 @@ github.com/shhac/lib-agent-harness v0.4.1 h1:vr7tkCq4K3rRII+BEpE6JlJdCBU+uep0otQ
 github.com/shhac/lib-agent-harness v0.4.1/go.mod h1:T1HWREtCnXLMzr68WCEifmSFNrSNZp9TRd8JRrjfjek=
 github.com/shhac/lib-agent-harness v0.4.2-0.20260925230639-bb8e11094d89 h1:ksH+CYI8P1I8sq4suk6n9jWmOT56jBhH//wiMIsQ/WE=
 github.com/shhac/lib-agent-harness v0.4.2-0.20260925230639-bb8e11094d89/go.mod h1:T1HWREtCnXLMzr68WCEifmSFNrSNZp9TRd8JRrjfjek=
+github.com/shhac/lib-agent-harness v0.5.0 h1:ST5TaU16qWjuGLVwFa6tMJa24d7bbLhfdoDRSusVueI=
+github.com/shhac/lib-agent-harness v0.5.0/go.mod h1:T1HWREtCnXLMzr68WCEifmSFNrSNZp9TRd8JRrjfjek=
 github.com/shhac/lib-agent-keyring v0.1.1 h1:cAwFr0UzlQ0xsgO0zY607lmwhvSamPN6Tp1DCNJO7hg=
 github.com/shhac/lib-agent-keyring v0.1.1/go.mod h1:nTk+YfRDc2dc8Nghd1o9w4c40xU8Pqx/UgToN0yGvZ8=
 github.com/shhac/lib-agent-mcp v0.23.1 h1:7VSbZcLPtOUUeef95Wanv7hL0rZAPxerqfwoF8vcSQ0=
