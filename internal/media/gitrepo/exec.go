@@ -100,3 +100,21 @@ func gitEnvironment() []string {
 		"LC_ALL=C",
 	)
 }
+
+// ChangedFiles counts the files in dir's working tree that differ from its
+// last commit, new ones included: how far a round of work has got.
+func ChangedFiles(ctx context.Context, dir string) (int, error) {
+	out, err := run(ctx, dir, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, entry := range strings.Split(out, "\x00") {
+		// A rename names its source after it, as an entry of its own
+		// without the two status letters.
+		if len(entry) > 3 && entry[2] == ' ' {
+			n++
+		}
+	}
+	return n, nil
+}

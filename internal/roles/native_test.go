@@ -161,3 +161,24 @@ func TestATurnsToolsAreHostedForThatTurnOnly(t *testing.T) {
 		t.Fatalf("a turn without tools got %+v", seen.Sandbox)
 	}
 }
+
+type recordingObserver struct{ calls []string }
+
+func (o *recordingObserver) Started()          { o.calls = append(o.calls, "started") }
+func (o *recordingObserver) Saw(session.Event) { o.calls = append(o.calls, "saw") }
+func (o *recordingObserver) Ended()            { o.calls = append(o.calls, "ended") }
+
+// A turn is watched from before its session opens, so opening counts as
+// picked up, until after it is released.
+func TestAnObserverHearsTheWholeTurn(t *testing.T) {
+	s := &fakeSession{}
+	o := &recordingObserver{}
+	spec := codexRound
+	spec.Observer = o
+	if _, err := native(s, true).Run(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	if len(o.calls) < 2 || o.calls[0] != "started" || o.calls[len(o.calls)-1] != "ended" || !slices.Contains(s.calls, "release") {
+		t.Fatalf("observer %v, session %v", o.calls, s.calls)
+	}
+}

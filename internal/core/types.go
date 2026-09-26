@@ -187,7 +187,10 @@ type Snapshot struct {
 	Paused            bool               `json:"paused"`
 	// Stopping says the daemon is finishing the work in progress before it
 	// stops; nothing new starts. It is the running daemon's, never stored.
-	Stopping   bool           `json:"stopping,omitempty"`
+	Stopping bool `json:"stopping,omitempty"`
+	// Turns are the roles at work right now, as the running daemon sees
+	// them; never stored.
+	Turns      []Turn         `json:"turns,omitempty"`
 	Wakes      []Wake         `json:"wakes,omitempty"`
 	ModelCalls map[string]int `json:"-"`
 	// ModelWindows are the context windows, in tokens, the providers have

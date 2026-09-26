@@ -50,6 +50,7 @@ type Loop struct {
 	githubURL func(repo string) string
 	prSeen    sync.Map
 	loopWake  chan struct{}
+	turns     turnRegister
 }
 
 func New(s *core.Service, cfg func() config.Config, demo bool) *Loop {
@@ -238,6 +239,7 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 	}
 	kind := turnKind(t, r)
 	lp.withTools(&spec, lp.toolsFor(t, kind, r.Member))
+	spec.Observer = lp.watchTurn(t, kind, r, workDir, write)
 	// Research is the one step that looks outward; nothing its shell runs
 	// reaches the network either way.
 	spec.Web = kind == core.RoleResearcher

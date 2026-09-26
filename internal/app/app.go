@@ -163,6 +163,9 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 	}
 	cfg := a.Config()
 	s.Stopping = a.Stopping()
+	if a.Work != nil {
+		s.Turns = a.Work.Turns()
+	}
 	s.Integrations = []core.Integration{{ID: "model", Name: "Assistant model", Status: "not_configured", Detail: "Choose a model in Settings"}, {ID: "slack", Name: "Slack bot messaging", Status: "not_configured", Detail: "Sends and receives owner direct messages. Configure owner identity and Socket Mode credentials"}}
 	if cfg.Model.Model != "" {
 		s.Integrations[0].Status = "configured"

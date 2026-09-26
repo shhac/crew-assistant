@@ -45,6 +45,16 @@ type Spec struct {
 	// looking up the project's other tasks, answered by Handler.
 	Tools   []session.ToolDefinition
 	Handler session.ToolHandler
+	// Observer hears how the turn goes while it runs, or nil.
+	Observer Observer
+}
+
+// Observer hears a turn from when it starts to when it ends, with what its
+// session reports along the way, so whoever waits on it can see it is alive.
+type Observer interface {
+	Started()
+	Saw(session.Event)
+	Ended()
 }
 
 // ToolBridge is the argument a model's CLI starts this binary with to reach
@@ -114,6 +124,10 @@ func (h harnessSession) StartTurn(ctx context.Context, in session.Input) (turn, 
 }
 
 func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
+	if spec.Observer != nil {
+		spec.Observer.Started()
+		defer spec.Observer.Ended()
+	}
 	opener := n.open
 	if opener == nil {
 		opener = open
@@ -147,7 +161,10 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 		return Result{}, err
 	}
 	go func() {
-		for range turn.Events() {
+		for e := range turn.Events() {
+			if spec.Observer != nil {
+				spec.Observer.Saw(e)
+			}
 		}
 	}()
 	result, err := turn.Wait(ctx)

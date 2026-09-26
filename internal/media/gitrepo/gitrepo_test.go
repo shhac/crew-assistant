@@ -680,3 +680,25 @@ func TestCommitsAreSignedAsTheOwnersGitConfigSaysUnlessTheProjectDecides(t *test
 		t.Fatalf("a failed signature should say signing is why: %v", err)
 	}
 }
+
+// A round's progress counts every file that differs from the last commit:
+// changed, new, deleted and renamed, each once.
+func TestChangedFilesCountsEachChangedFileOnce(t *testing.T) {
+	dir := t.TempDir()
+	git(t, dir, "init", "-q", "-b", "main")
+	for _, name := range []string{"a.go", "b.go", "c.go", "d.go"} {
+		write(t, filepath.Join(dir, name), "package x\n// "+name+"\n")
+	}
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-q", "-m", "start")
+	if n, err := ChangedFiles(context.Background(), dir); err != nil || n != 0 {
+		t.Fatalf("clean tree: %d, %v", n, err)
+	}
+	write(t, filepath.Join(dir, "a.go"), "package x\n// changed\n")
+	write(t, filepath.Join(dir, "new", "e.go"), "package x\n")
+	os.Remove(filepath.Join(dir, "b.go"))
+	git(t, dir, "mv", "c.go", "renamed.go")
+	if n, err := ChangedFiles(context.Background(), dir); err != nil || n != 4 {
+		t.Fatalf("changed %d, %v", n, err)
+	}
+}
