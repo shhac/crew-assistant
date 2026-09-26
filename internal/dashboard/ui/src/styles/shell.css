@@ -150,6 +150,52 @@
   font-weight: 500;
 }
 
+.usage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.usage-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 6px;
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+
+.usage-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.usage-name {
+  font-weight: 500;
+}
+
+.usage-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.usage-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--done);
+}
+
+.usage-row.tone-needs .usage-bar > span,
+.usage-row.tone-block .usage-bar > span {
+  background: currentColor;
+}
+
 .workspace {
   min-width: 0;
 }

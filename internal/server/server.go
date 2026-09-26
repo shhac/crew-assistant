@@ -32,6 +32,8 @@ func New(a *app.App, auth *Auth) http.Handler {
 			Demo bool `json:"demo"`
 		}{s, a.Demo})
 	})
+	// Read-only and bounded: the logins are inspected, never used or changed.
+	mux.HandleFunc("GET /api/usage", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, a.Usage(r.Context())) })
 	mux.HandleFunc("POST /api/operations/{id}/acknowledge", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Note string `json:"note"`

@@ -641,6 +641,33 @@ const projectPath = (projectID: string) =>
 export function getState() {
   return api<State>("/api/state");
 }
+export type UsageLevel = "unknown" | "ok" | "low" | "exhausted";
+/** One of an engine's usage windows, as its CLI measured it. */
+export interface UsageWindow {
+  name: string;
+  left_percent: number;
+  /** The owner's floor for this window; below it team work is held. */
+  floor_percent: number;
+  /** Only when the CLI said. */
+  resets_at?: string;
+  level: UsageLevel;
+}
+/** What one engine's login reports it has left. */
+export interface EngineUsage {
+  engine: string;
+  level: UsageLevel;
+  windows: UsageWindow[];
+  /** When a low or exhausted level eases, when the CLI said. */
+  resets_at?: string;
+  using_overage?: boolean;
+  /** Why nothing was measured, in plain words. */
+  missing?: string;
+  /** When captions and suggestions try the engine again after its rate limit. */
+  rate_limited_until?: string;
+}
+export function getUsage() {
+  return api<EngineUsage[]>("/api/usage");
+}
 export function setPaused(paused: boolean) {
   return api("/api/control", {
     method: "POST",

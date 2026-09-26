@@ -10,6 +10,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/lib-agent-harness/completion"
 )
 
 type smallCompletion func(context.Context, engine.Config, []engine.Message, []engine.Tool) (engine.Message, engine.Usage, error)
@@ -19,16 +20,20 @@ type smallDiscovery func(context.Context, engine.Config) ([]engine.ModelOption, 
 // approved small models: the assistant's own CLI first, then the other one.
 // Each attempt is bounded and never retried, and an engine that just failed
 // rests for a while, so an uninstalled, signed-out or exhausted CLI costs
-// nothing on the next message.
+// nothing on the next message. An engine whose login last reported nothing
+// left isn't tried either, as the sidebar shows it.
 type smallModels struct {
 	discover smallDiscovery
 	complete smallCompletion
-	workDir  func() string // Resolved per call; the service may be absent.
-	attempt  time.Duration // Bound on one engine's discovery and reply.
-	rest     time.Duration // How long a failed engine is skipped.
-	now      func() time.Time
-	mu       sync.Mutex
-	resting  map[string]restingEngine
+	// outOfUsage says the login last reported nothing left, without reading
+	// it again; nil knows of no reading.
+	outOfUsage func(config.Harness) bool
+	workDir    func() string // Resolved per call; the service may be absent.
+	attempt    time.Duration // Bound on one engine's discovery and reply.
+	rest       time.Duration // How long a failed engine is skipped.
+	now        func() time.Time
+	mu         sync.Mutex
+	resting    map[string]restingEngine
 }
 
 // restingEngine keeps why an engine failed, so a skip during its rest reports
@@ -90,6 +95,10 @@ func (s *smallModels) ask(ctx context.Context, models []config.Harness, prompt [
 		}
 		if cause := s.restingCause(m.Engine); cause != nil {
 			failure.attempts = append(failure.attempts, fmt.Errorf("the %s CLI is skipped after a recent failure: %w", m.Engine, cause))
+			continue
+		}
+		if s.outOfUsage != nil && s.outOfUsage(m) {
+			failure.attempts = append(failure.attempts, fmt.Errorf("the %s CLI is skipped: its login reports no usage left", m.Engine))
 			continue
 		}
 		reply, err := s.try(ctx, m, prompt, reserve)
@@ -155,6 +164,19 @@ func (s *smallModels) restingCause(engineName string) error {
 		return r.cause
 	}
 	return nil
+}
+
+// rateLimitedUntil is when an engine that refused for its rate limit is tried
+// again; zero when it isn't resting for that.
+func (s *smallModels) rateLimitedUntil(engineName string) time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r := s.resting[engineName]
+	var refused *completion.RequestError
+	if s.now().Before(r.until) && errors.As(r.cause, &refused) && refused.Kind == completion.ErrorRateLimited {
+		return r.until
+	}
+	return time.Time{}
 }
 
 func (s *smallModels) setResting(engineName string, r restingEngine) {

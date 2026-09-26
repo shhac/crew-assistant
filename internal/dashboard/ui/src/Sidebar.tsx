@@ -2,6 +2,7 @@ import { href, projectHref, type Route } from "./router";
 import { projectGroup, projectTasks } from "./stages";
 import { Avatar, hasFace } from "./Avatar";
 import { ErrorNotice, Icon } from "./ui";
+import { UsageStatus } from "./UsageStatus";
 import type { State } from "./api";
 
 const dotTone = {
@@ -168,6 +169,7 @@ export function Sidebar({
           {status.label}
         </p>
         {status.hint && <p className="hint">{status.hint}</p>}
+        <UsageStatus />
         <button
           type="button"
           className="btn btn-sm"

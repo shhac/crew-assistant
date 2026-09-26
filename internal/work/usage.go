@@ -57,6 +57,56 @@ func (lp *Loop) UsageWait(ctx context.Context, engine string) (time.Time, string
 	return lp.usageWait(ctx, core.Role{Engine: engine})
 }
 
+// Usage is what an engine's login reports it has left, read through the
+// meter team work is held by, so the two never disagree. It answers within
+// wait: a slower reading goes on to fill the meter, and meanwhile the last
+// one is used, or none.
+func (lp *Loop) Usage(ctx context.Context, engine string, wait time.Duration) quota.Remaining {
+	h := lp.Config().Harness(engine, "", "")
+	read := make(chan quota.Reading, 1)
+	go func() { read <- lp.meter.Observe(context.WithoutCancel(ctx), h) }()
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	var r quota.Reading
+	select {
+	case r = <-read:
+	case <-timer.C:
+		if last, ok := lp.meter.Cached(h); ok {
+			r = last
+		} else {
+			r.Err = context.DeadlineExceeded
+		}
+	case <-ctx.Done():
+		r.Err = ctx.Err()
+	}
+	return lp.describeUsage(engine, h, r)
+}
+
+// LastUsage is Usage from the last reading alone, starting no look, as
+// while the daemon stops; false when there is no reading.
+func (lp *Loop) LastUsage(engine string) (quota.Remaining, bool) {
+	h := lp.Config().Harness(engine, "", "")
+	r, ok := lp.meter.Cached(h)
+	return lp.describeUsage(engine, h, r), ok
+}
+
+func (lp *Loop) describeUsage(engine string, h config.Harness, r quota.Reading) quota.Remaining {
+	fiveHour, week := lp.Config().Engines.Floors(engine)
+	out := quota.Describe(r, h, quota.Floors{FiveHour: fiveHour, Week: week}, time.Now())
+	// With nothing measured now, a login last measured spent is still
+	// taken as spent, as the small models take it.
+	if len(out.Windows) == 0 && lp.meter.Spent(h) {
+		out.Level, out.Missing = quota.LevelExhausted, "out of usage when last checked; "+out.Missing
+	}
+	return out
+}
+
+// OutOfUsage says the model's login was out of usage when last measured.
+// Asking never waits: a login due a look again gets one in the background.
+func (lp *Loop) OutOfUsage(h config.Harness) bool {
+	return lp.meter.OutOfUsage(h)
+}
+
 // usageWait is when the role may run again, and why, while its subscription
 // has less left than the owner's floor; zero when it may run now.
 func (lp *Loop) usageWait(ctx context.Context, r core.Role) (time.Time, string) {

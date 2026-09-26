@@ -158,7 +158,7 @@ func TestRefreshDoesNotRetainFailedTelemetry(t *testing.T) {
 	}
 	meter.mu.Lock()
 	for key, e := range meter.entries {
-		e.fetched = time.Now().Add(-2 * CacheAge)
+		e.last.At = time.Now().Add(-2 * CacheAge)
 		meter.entries[key] = e
 	}
 	meter.mu.Unlock()

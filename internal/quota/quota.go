@@ -9,8 +9,10 @@ package quota
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -34,27 +36,47 @@ func IdentityFor(h config.Harness) Identity {
 	return Identity{Engine: h.Engine, Binary: h.Bin, Home: h.Home}
 }
 
-type entry struct {
-	quota   session.QuotaSnapshot
-	fetched time.Time
+// Reading is one look at a login's usage: what it reported, and what kept it
+// from reporting more.
+type Reading struct {
+	Quota session.QuotaSnapshot
+	// LoggedIn is nil when the CLI didn't say.
+	LoggedIn *bool
+	// Err is why the look failed, perhaps only in part.
+	Err error
+	At  time.Time
 }
 
 // Meter caches native account telemetry. Inspect is injectable; tests must
 // never reach a real CLI login.
 type Meter struct {
-	mu      sync.Mutex
-	Inspect func(context.Context, session.Options) (session.Inspection, error)
-	entries map[Identity]entry
+	inspecting sync.Mutex // One CLI inspection at a time.
+	mu         sync.Mutex // Guards entries, never held during an inspection.
+	Inspect    func(context.Context, session.Options) (session.Inspection, error)
+	entries    map[Identity]entry
+}
+
+type entry struct {
+	last Reading
+	// measured is the newest valid observation of each window, by id. Only
+	// a later one of the same window can say it has usage again; a failed
+	// look, or one of another pool, can't.
+	measured   map[string]session.QuotaWindow
+	rechecking bool
 }
 
 // Read returns the cached or freshly observed allowance for a worker model.
 func (m *Meter) Read(ctx context.Context, h config.Harness) session.QuotaSnapshot {
+	return m.Observe(ctx, h).Quota
+}
+
+// Observe returns the cached or a fresh reading of a worker model's login.
+func (m *Meter) Observe(ctx context.Context, h config.Harness) Reading {
 	key := IdentityFor(h)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	now := time.Now()
-	if e, ok := m.entries[key]; ok && now.Sub(e.fetched) < CacheAge {
-		return e.quota
+	m.inspecting.Lock()
+	defer m.inspecting.Unlock()
+	if r, ok := m.Cached(h); ok && time.Since(r.At) < CacheAge {
+		return r
 	}
 	inspect := m.Inspect
 	if inspect == nil {
@@ -64,22 +86,102 @@ func (m *Meter) Read(ctx context.Context, h config.Harness) session.QuotaSnapsho
 	defer cancel()
 	// Account inspection may fail while quota succeeds. Keep usable quota even
 	// when Inspect returns a partial error; never interpret an error as zero use.
-	result, _ := inspect(bounded, session.Options{Engine: session.Engine(key.Engine), Binary: key.Binary, Home: key.Home})
-	if ctx.Err() == nil {
-		if m.entries == nil {
-			m.entries = make(map[Identity]entry)
+	result, err := inspect(bounded, session.Options{Engine: session.Engine(key.Engine), Binary: key.Binary, Home: key.Home})
+	if err != nil {
+		// The harness says only that the CLI couldn't start; say why when
+		// it isn't there at all.
+		if _, missing := exec.LookPath(key.Binary); missing != nil {
+			err = errors.Join(err, missing)
 		}
-		m.entries[key] = entry{result.Quota, time.Now()}
 	}
-	return result.Quota
+	r := Reading{Quota: result.Quota, LoggedIn: result.Account.LoggedIn, Err: err, At: time.Now()}
+	if ctx.Err() == nil {
+		m.update(key, func(e *entry) {
+			e.last = r
+			for _, w := range r.Quota.Windows {
+				if w.Invalidated || !validPercent(w) {
+					continue
+				}
+				if e.measured == nil {
+					e.measured = make(map[string]session.QuotaWindow)
+				}
+				e.measured[w.ID] = w
+			}
+		})
+	}
+	return r
+}
+
+func (m *Meter) update(key Identity, change func(*entry)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.entries == nil {
+		m.entries = make(map[Identity]entry)
+	}
+	e := m.entries[key]
+	change(&e)
+	m.entries[key] = e
+}
+
+// Cached is the last reading of a worker model's login, however old. It
+// never inspects and never waits on an inspection under way.
+func (m *Meter) Cached(h config.Harness) (Reading, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.entries[IdentityFor(h)]
+	return e.last, ok && !e.last.At.IsZero()
+}
+
+// Spent is OutOfUsage without ever starting a look.
+func (m *Meter) Spent(h config.Harness) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.entries[IdentityFor(h)].spent(h)
+}
+
+func (e entry) spent(h config.Harness) bool {
+	var q session.QuotaSnapshot
+	for _, w := range e.measured {
+		q.Windows = append(q.Windows, w)
+	}
+	return Exhausted(q, h)
+}
+
+// OutOfUsage says a window that governs the model had nothing left when it
+// was last measured. Neither time, a reset time passing, a failed look nor
+// a reading of another pool clears that; only a reading that measures usage
+// left in that window does. It never waits: when the login was last looked at Recheck ago
+// or more, it starts one bounded look in the background.
+func (m *Meter) OutOfUsage(h config.Harness) bool {
+	key := IdentityFor(h)
+	m.mu.Lock()
+	e := m.entries[key]
+	out := e.spent(h)
+	due := out && !e.rechecking && time.Since(e.last.At) >= Recheck
+	if due {
+		e.rechecking = true
+		m.entries[key] = e
+	}
+	m.mu.Unlock()
+	if due {
+		go func() {
+			defer m.update(key, func(e *entry) { e.rechecking = false })
+			m.Observe(context.Background(), h)
+		}()
+	}
+	return out
 }
 
 // Forget drops cached telemetry so the next admission observes the account
-// again. Used when policy changes and by tests.
+// again. Used when policy changes and by tests. What was last measured is
+// kept: only a new measurement says a spent login has usage again.
 func (m *Meter) Forget() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.entries = nil
+	for key, e := range m.entries {
+		e.last = Reading{}
+		m.entries[key] = e
+	}
 }
 
 // Floors are the share of each window roles leave unused, in percent: the
@@ -125,7 +227,7 @@ func Evaluate(q session.QuotaSnapshot, h config.Harness, floors Floors, now time
 			continue
 		}
 		seen = true
-		if w.IsStale(now, 2*CacheAge) || w.UsedPercent == nil || math.IsNaN(*w.UsedPercent) || math.IsInf(*w.UsedPercent, 0) || *w.UsedPercent < 0 || (w.ResetsAt != nil && !w.ResetsAt.After(now)) {
+		if !usable(w, now) {
 			missing = true
 			continue
 		}
@@ -142,6 +244,16 @@ func Evaluate(q session.QuotaSnapshot, h config.Harness, floors Floors, now time
 		}
 	}
 	return Verdict{Known: seen && !missing, Detail: fmt.Sprintf("%s has %.0f%% left in its tightest window", h.Engine, least)}
+}
+
+// usable says a window's own observation is fresh, valid and not yet past
+// its reset.
+func usable(w session.QuotaWindow, now time.Time) bool {
+	return !w.IsStale(now, 2*CacheAge) && validPercent(w) && (w.ResetsAt == nil || w.ResetsAt.After(now))
+}
+
+func validPercent(w session.QuotaWindow) bool {
+	return w.UsedPercent != nil && !math.IsNaN(*w.UsedPercent) && !math.IsInf(*w.UsedPercent, 0) && *w.UsedPercent >= 0
 }
 
 // Applies ignores unrelated pools (for example Codex code reviews, or Claude

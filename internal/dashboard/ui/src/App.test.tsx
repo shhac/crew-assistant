@@ -196,6 +196,116 @@ describe("the shell", () => {
       vi.useRealTimers();
     }
   });
+  it("refreshes usage on its own, keeping an open request and the chat's focus and draft", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval"] });
+    try {
+      let left = 42;
+      respond = (path) => ({
+        body:
+          path === "/api/state"
+            ? state
+            : path === "/api/usage"
+              ? [
+                  {
+                    engine: "codex",
+                    level: "ok",
+                    windows: [
+                      {
+                        name: "5-hour",
+                        left_percent: left,
+                        floor_percent: 10,
+                        level: "ok",
+                      },
+                    ],
+                  },
+                  {
+                    engine: "claude",
+                    level: "unknown",
+                    windows: [],
+                    missing: "not signed in",
+                  },
+                ]
+              : {},
+      });
+      state.projects = [project];
+      state.tasks = [
+        {
+          id: "t1",
+          project_id: "p1",
+          objective: "Draft the note",
+          criteria: [],
+          status: "writing",
+          stage: "implementing",
+          round: 1,
+          revisions: [],
+          verdicts: [],
+          created_at: "2026-09-21T10:00:00Z",
+        },
+      ];
+      window.history.replaceState(null, "", "/#/projects/p1/requests/t1");
+      render(<App />);
+      const panel = await screen.findByRole("complementary", {
+        name: "Draft the note",
+      });
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      expect(
+        await within(nav).findByRole("listitem", { name: "Codex: 42% left" }),
+      ).toBeTruthy();
+      expect(
+        within(nav).getByRole("listitem", { name: "Claude: not signed in" }),
+      ).toBeTruthy();
+      // The request takes focus once as it opens; only then is the owner
+      // typing, and a usage refresh must leave that alone.
+      await waitFor(() =>
+        expect(panel.contains(document.activeElement)).toBe(true),
+      );
+      const field = screen.getByLabelText("Message Iris");
+      field.focus();
+      fireEvent.change(field, { target: { value: "Also mention pric" } });
+      const looked = calls.filter((c) => c.path === "/api/usage").length;
+      left = 17;
+      // The dashboard's own refresh doesn't look at usage again.
+      vi.advanceTimersByTime(5000);
+      await waitFor(() =>
+        expect(
+          calls.filter((c) => c.path === "/api/state").length,
+        ).toBeGreaterThan(1),
+      );
+      expect(calls.filter((c) => c.path === "/api/usage").length).toBe(looked);
+      vi.advanceTimersByTime(5 * 60_000);
+      expect(
+        await within(nav).findByRole("listitem", { name: "Codex: 17% left" }),
+      ).toBeTruthy();
+      expect(document.activeElement).toBe(field);
+      expect(field).toHaveProperty("value", "Also mention pric");
+      expect(panel.isConnected).toBe(true);
+      expect(window.location.hash).toBe("#/projects/p1/requests/t1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("stays usable when usage can't be checked", async () => {
+    respond = (path) =>
+      path === "/api/usage"
+        ? { status: 500, body: { error: "inspect failed" } }
+        : { body: path === "/api/state" ? state : {} };
+    render(<App />);
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+    expect(
+      await within(nav).findByText("Usage couldn't be checked."),
+    ).toBeTruthy();
+    expect(within(nav).getByText("Running")).toBeTruthy();
+    fireEvent.click(
+      within(nav).getByRole("button", { name: "Pause all teams" }),
+    );
+    await waitFor(() =>
+      expect(writes().some((c) => c.path === "/api/control")).toBe(true),
+    );
+    expect(within(nav).getByRole("link", { name: /^Projects/ })).toBeTruthy();
+    const field = screen.getByLabelText("Message Iris");
+    fireEvent.change(field, { target: { value: "Still here" } });
+    expect(field).toHaveProperty("value", "Still here");
+  });
   it("keeps an open request while the chat runs a command and browses past conversations", async () => {
     state.projects = [project];
     state.tasks = [
