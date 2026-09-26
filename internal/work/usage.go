@@ -101,10 +101,25 @@ func (lp *Loop) describeUsage(engine string, h config.Harness, r quota.Reading) 
 	return out
 }
 
-// OutOfUsage says the model's login was out of usage when last measured.
-// Asking never waits: a login due a look again gets one in the background.
+// OutOfUsage says the engine's login was out of usage when last measured,
+// by the same engine-wide windows the sidebar shows, so the two agree: a
+// pool only one model draws on counts for neither. Asking never waits: a
+// login due a look again gets one in the background.
 func (lp *Loop) OutOfUsage(h config.Harness) bool {
-	return lp.meter.OutOfUsage(h)
+	return lp.meter.OutOfUsage(engineWide(h))
+}
+
+// RecheckUsage reads the engine's login again in the background after one
+// of its models refused a request. A CLI's refusal doesn't say whether the
+// account ran out, but its usage does, so a refusal for that shows as out of
+// usage in the sidebar and to the fallback alike.
+func (lp *Loop) RecheckUsage(h config.Harness) {
+	go lp.meter.Observe(context.Background(), engineWide(h))
+}
+
+// engineWide is the engine's login without a model, as the sidebar reads it.
+func engineWide(h config.Harness) config.Harness {
+	return config.Harness{Engine: h.Engine, Bin: h.Bin, Home: h.Home}
 }
 
 // usageWait is when the role may run again, and why, while its subscription

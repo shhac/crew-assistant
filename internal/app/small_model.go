@@ -28,12 +28,15 @@ type smallModels struct {
 	// outOfUsage says the login last reported nothing left, without reading
 	// it again; nil knows of no reading.
 	outOfUsage func(config.Harness) bool
-	workDir    func() string // Resolved per call; the service may be absent.
-	attempt    time.Duration // Bound on one engine's discovery and reply.
-	rest       time.Duration // How long a failed engine is skipped.
-	now        func() time.Time
-	mu         sync.Mutex
-	resting    map[string]restingEngine
+	// recheck reads a login's usage again after its model refused a
+	// request; nil reads nothing.
+	recheck func(config.Harness)
+	workDir func() string // Resolved per call; the service may be absent.
+	attempt time.Duration // Bound on one engine's discovery and reply.
+	rest    time.Duration // How long a failed engine is skipped.
+	now     func() time.Time
+	mu      sync.Mutex
+	resting map[string]restingEngine
 }
 
 // restingEngine keeps why an engine failed, so a skip during its rest reports
@@ -111,6 +114,9 @@ func (s *smallModels) ask(ctx context.Context, models []config.Harness, prompt [
 			return reply, nil
 		}
 		s.setResting(m.Engine, restingEngine{until: s.now().Add(s.rest), cause: err})
+		if s.recheck != nil {
+			s.recheck(m)
+		}
 		failure.attempts = append(failure.attempts, err)
 	}
 	return engine.Message{}, failure

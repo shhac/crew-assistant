@@ -76,7 +76,7 @@ func New(s *core.Service, cfg config.Config, path string, opts Options) *App {
 	a := &App{Diagnostics: opts.Diagnostics, connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: opts.Demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), summarize: engine.Complete, stop: lifecycle.Now(context.Background()), statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
 	a.Work = work.New(s, a.Config, opts.Demo)
 	a.Work.Diagnostics = opts.Diagnostics
-	a.small.outOfUsage = a.Work.OutOfUsage
+	a.small.outOfUsage, a.small.recheck = a.Work.OutOfUsage, a.Work.RecheckUsage
 	if opts.DrawWithCodex && !opts.Demo {
 		a.Painter = codexPainter{a}
 	}

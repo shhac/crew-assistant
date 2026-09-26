@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -117,5 +118,52 @@ func TestUsageIsBoundedAndNeverSpendsALook(t *testing.T) {
 	defer mu.Unlock()
 	if reads != 1 {
 		t.Fatalf("OutOfUsage or a cached reading inspected the login: %d reads", reads)
+	}
+}
+
+// A pool only one model draws on, such as Claude's weekly Opus allowance,
+// counts for neither the sidebar nor the small models, so the two never
+// disagree; an engine-wide window counts for both.
+func TestTheSidebarAndTheSmallModelsReadOneRule(t *testing.T) {
+	now := time.Now()
+	used, minutes, resets := 100.0, int64(10080), now.Add(time.Hour)
+	observation := session.Observation{Quality: session.Measured, ObservedAt: now}
+	window := func(id string) session.QuotaWindow {
+		scope, _ := strings.CutPrefix(id, "model:")
+		return session.QuotaWindow{Observation: observation, ID: id, Scope: scope, UsedPercent: &used, WindowMinutes: &minutes, ResetsAt: &resets}
+	}
+	for id, spent := range map[string]bool{"seven_day_opus": false, "model:Haiku": false, "seven_day": true} {
+		a := testLoop(t)
+		a.meter = &quota.Meter{Inspect: func(context.Context, session.Options) (session.Inspection, error) {
+			return session.Inspection{Quota: session.QuotaSnapshot{Observation: observation, Complete: true, Windows: []session.QuotaWindow{window(id)}}}, nil
+		}}
+		sidebar := a.Usage(context.Background(), "claude", time.Second).Level == quota.LevelExhausted
+		fallback := a.OutOfUsage(a.Config().Harness("claude", "haiku", ""))
+		if sidebar != spent || fallback != spent {
+			t.Errorf("%s spent: sidebar says %v, the small models %v; want %v", id, sidebar, fallback, spent)
+		}
+	}
+}
+
+// A refused small-model request has the login read again, so running out
+// shows wherever usage does.
+func TestARefusalHasTheLoginReadAgain(t *testing.T) {
+	a := testLoop(t)
+	looked := make(chan string, 1)
+	a.meter = &quota.Meter{Inspect: func(_ context.Context, o session.Options) (session.Inspection, error) {
+		looked <- string(o.Engine)
+		return spentReading(o.Engine), nil
+	}}
+	a.RecheckUsage(a.Config().Harness("claude", "haiku", ""))
+	select {
+	case engine := <-looked:
+		if engine != "claude" {
+			t.Fatalf("read %s", engine)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the login wasn't read again")
+	}
+	if !a.OutOfUsage(a.Config().Harness("claude", "haiku", "")) {
+		t.Fatal("the new reading didn't count")
 	}
 }
