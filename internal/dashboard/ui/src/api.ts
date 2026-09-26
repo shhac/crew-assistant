@@ -251,6 +251,8 @@ export interface Revision {
   files: string[] | null;
   ref?: string;
   clean_merge_of?: number;
+  /** "owner" for a draft the owner made by hand. */
+  by?: string;
   summary?: string;
   at?: string;
 }

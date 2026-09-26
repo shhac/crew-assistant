@@ -706,6 +706,39 @@ describe("a request", () => {
       },
     ]);
   });
+  it("says a draft the owner made by hand is theirs", () => {
+    const task = started({
+      status: "reviewing",
+      stage: "reviewing",
+      revisions: [
+        {
+          n: 1,
+          brief_version: 2,
+          files: ["cache.go"],
+          ref: "abc1234def",
+          summary: "Added a cache.",
+        },
+        {
+          n: 2,
+          brief_version: 2,
+          files: ["cache.go"],
+          ref: "def5678abc",
+          summary: "Tidied the cache by hand.",
+          by: "owner",
+        },
+      ],
+      verdicts: [],
+    });
+    show(project(), { tasks: [task] }, { request: "t1" });
+    const panel = screen.getByRole("complementary", {
+      name: "Cache the lookups",
+    });
+    for (const draft of panel.querySelectorAll("details.draft")) {
+      (draft as HTMLDetailsElement).open = true;
+    }
+    expect(within(panel).getByText("You, by hand:")).toBeTruthy();
+    expect(within(panel).getByText("Tidied the cache by hand.")).toBeTruthy();
+  });
   it("asks before pushing an update that changes what runs, in its own words", async () => {
     const update: Decision = {
       ...delivery,

@@ -109,12 +109,18 @@ function DraftDetail({
       {revision.summary && (
         <p>
           {/* A clean catch-up merge is crew-assistant's own, not the team's. */}
-          {!revision.clean_merge_of && (
+          {revision.by === "owner" ? (
             <>
-              <strong>
-                {roleName(task, "implementer", "Implementer")}
-              </strong>{" "}
+              <strong>You, by hand:</strong>{" "}
             </>
+          ) : (
+            !revision.clean_merge_of && (
+              <>
+                <strong>
+                  {roleName(task, "implementer", "Implementer")}
+                </strong>{" "}
+              </>
+            )
           )}
           {revision.summary}
         </p>
