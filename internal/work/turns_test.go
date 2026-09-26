@@ -38,21 +38,23 @@ func TestARunningTurnCountsWhatItDoes(t *testing.T) {
 }
 
 // A turn that writes counts the files it has changed as it goes; files
-// written before it began don't count.
+// left as they were before it began don't count.
 func TestAWritingTurnCountsItsChangedFiles(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "old.md"), []byte("before"), 0o600)
-	old := time.Now().Add(-time.Hour)
-	os.Chtimes(filepath.Join(dir, "old.md"), old, old)
-	a := testLoop(t)
-	watch := a.watchTurn(core.Task{ID: "task-one"}, core.RoleImplementer, core.Role{}, dir, true)
-	watch.Started()
-	defer watch.Ended()
+	os.WriteFile(filepath.Join(dir, "kept.md"), []byte("before"), 0o600)
+	before := fileTimes(dir)
 	os.WriteFile(filepath.Join(dir, "new.md"), []byte("after"), 0o600)
 	os.MkdirAll(filepath.Join(dir, "sub"), 0o700)
 	os.WriteFile(filepath.Join(dir, "sub", "also.md"), []byte("after"), 0o600)
-	n, err := changedFiles(t.Context(), dir, a.Turns()[0].StartedAt)
-	if err != nil || n != 2 {
+	later := time.Now().Add(time.Hour)
+	os.Chtimes(filepath.Join(dir, "old.md"), later, later)
+	n, err := changedFiles(t.Context(), dir, before)
+	if err != nil || n != 3 {
 		t.Fatalf("changed %d, %v", n, err)
 	}
+	a := testLoop(t)
+	watch := a.watchTurn(core.Task{ID: "task-one"}, core.RoleImplementer, core.Role{}, dir, true)
+	watch.Started()
+	watch.Ended()
 }

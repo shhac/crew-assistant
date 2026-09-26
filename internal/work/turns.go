@@ -30,9 +30,11 @@ type turnRegister struct {
 type liveTurn struct {
 	reg  *turnRegister
 	turn core.Turn
-	// workDir is counted for changed files while the turn writes.
+	// workDir is counted for changed files while the turn writes, against
+	// how its files stood when the turn began.
 	workDir string
 	writes  bool
+	before  map[string]time.Time
 	// tools are the tools running now, by item.
 	tools map[string]string
 	done  chan struct{}
@@ -67,6 +69,7 @@ func (l *liveTurn) Started() {
 	l.reg.running[l] = struct{}{}
 	l.reg.mu.Unlock()
 	if l.writes {
+		l.before = fileTimes(l.workDir)
 		go l.countFiles()
 	}
 }
@@ -126,7 +129,7 @@ func (l *liveTurn) countFiles() {
 	defer tick.Stop()
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), countFilesEvery)
-		n, err := changedFiles(ctx, l.workDir, l.turn.StartedAt)
+		n, err := changedFiles(ctx, l.workDir, l.before)
 		cancel()
 		if err == nil {
 			l.reg.mu.Lock()
@@ -143,20 +146,33 @@ func (l *liveTurn) countFiles() {
 
 // changedFiles is how many files in dir differ from where the turn began:
 // what git says has changed in a repository's working tree, or otherwise
-// the files written since.
-func changedFiles(ctx context.Context, dir string, since time.Time) (int, error) {
+// the files new or rewritten since before was taken. File times are compared
+// with themselves rather than the clock, which a filesystem may stamp
+// coarsely enough to put a fresh write before the turn began.
+func changedFiles(ctx context.Context, dir string, before map[string]time.Time) (int, error) {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		return gitrepo.ChangedFiles(ctx, dir)
 	}
 	n := 0
-	err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		if info, err := d.Info(); err == nil && info.ModTime().After(since) {
+	for path, at := range fileTimes(dir) {
+		if was, ok := before[path]; !ok || !at.Equal(was) {
 			n++
+		}
+	}
+	return n, nil
+}
+
+// fileTimes is when each file under dir was last written.
+func fileTimes(dir string) map[string]time.Time {
+	out := map[string]time.Time{}
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			out[path] = info.ModTime()
 		}
 		return nil
 	})
-	return n, err
+	return out
 }
