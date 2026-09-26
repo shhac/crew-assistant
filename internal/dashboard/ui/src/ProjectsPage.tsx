@@ -121,12 +121,14 @@ function ProjectRow({ project, state }: { project: Project; state: State }) {
           {lead ? (
             <>
               {needsYou(lead) && (
-                <Pill tone="needs">{requestStep(lead, decision)}</Pill>
+                <Pill tone="needs">
+                  {requestStep(lead, decision, state.turns)}
+                </Pill>
               )}
               <span>
                 {needsYou(lead)
                   ? lead.objective
-                  : `${lead.objective}: ${requestStep(lead, decision)}`}
+                  : `${lead.objective}: ${requestStep(lead, decision, state.turns)}`}
               </span>
             </>
           ) : (

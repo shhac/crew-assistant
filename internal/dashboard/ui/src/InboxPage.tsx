@@ -18,6 +18,7 @@ import {
   type Project,
   type State,
   type Task,
+  type Turn,
 } from "./api";
 
 const shownInProgress = 6;
@@ -115,6 +116,7 @@ export function InboxPage({
                 key={t.id}
                 task={t}
                 project={project(t.project_id)}
+                turns={state.turns}
               />
             ))}
           </ul>
@@ -145,7 +147,15 @@ export function InboxPage({
   );
 }
 
-function ProgressRow({ task, project }: { task: Task; project?: Project }) {
+function ProgressRow({
+  task,
+  project,
+  turns,
+}: {
+  task: Task;
+  project?: Project;
+  turns: Turn[];
+}) {
   return (
     <li>
       <a className="progress-row" href={requestHref(task.project_id, task.id)}>
@@ -157,7 +167,9 @@ function ProgressRow({ task, project }: { task: Task; project?: Project }) {
           <span className="progress-title">{task.objective}</span>
           <span className="muted small">{project?.title}</span>
         </span>
-        <span className="progress-step">{requestStep(task)}</span>
+        <span className="progress-step">
+          {requestStep(task, undefined, turns)}
+        </span>
         <span className="muted small progress-since">
           {sinceLabel(task.updated_at)}
         </span>
