@@ -170,16 +170,18 @@ describe("the shell", () => {
       ];
       window.history.replaceState(null, "", "/#/projects/p1/requests/t1");
       render(<App />);
-      const panel = await screen.findByRole("complementary", {
-        name: "Draft the note",
-      });
+      // With intervals faked, Testing Library's own waits never poll again,
+      // so the waits here are Vitest's, which move the fake clock.
+      const panel = await vi.waitFor(() =>
+        screen.getByRole("complementary", { name: "Draft the note" }),
+      );
       const field = screen.getByLabelText("Message Iris");
       field.focus();
       fireEvent.change(field, { target: { value: "Also mention pric" } });
       const fetched = calls.filter((c) => c.path === "/api/state").length;
       state = { ...state, tasks: [{ ...state.tasks[0], detail: "Writing" }] };
       vi.advanceTimersByTime(5000);
-      await waitFor(() => expect(screen.getByText("Writing")).toBeTruthy());
+      await vi.waitFor(() => expect(screen.getByText("Writing")).toBeTruthy());
       expect(
         calls.filter((c) => c.path === "/api/state").length,
       ).toBeGreaterThan(fetched);
@@ -244,20 +246,20 @@ describe("the shell", () => {
       ];
       window.history.replaceState(null, "", "/#/projects/p1/requests/t1");
       render(<App />);
-      const panel = await screen.findByRole("complementary", {
-        name: "Draft the note",
-      });
+      // With intervals faked, Testing Library's own waits never poll again,
+      // so every wait here is Vitest's, which moves the fake clock.
+      const panel = await vi.waitFor(() =>
+        screen.getByRole("complementary", { name: "Draft the note" }),
+      );
       const nav = screen.getByRole("navigation", { name: "Main" });
-      expect(
-        await within(nav).findByRole("listitem", { name: "Codex: 42% left" }),
-      ).toBeTruthy();
+      await vi.waitFor(() =>
+        within(nav).getByRole("listitem", { name: "Codex: 42% left" }),
+      );
       expect(
         within(nav).getByRole("listitem", { name: "Claude: not signed in" }),
       ).toBeTruthy();
       // The request takes focus once as it opens; only then is the owner
-      // typing, and a usage refresh must leave that alone. With intervals
-      // faked, Testing Library's own waits never poll again, so these use
-      // Vitest's, which move the fake clock as they wait.
+      // typing, and a usage refresh must leave that alone.
       await vi.waitFor(() =>
         expect(panel.contains(document.activeElement)).toBe(true),
       );
