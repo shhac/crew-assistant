@@ -283,6 +283,58 @@ describe("the board", () => {
     expect(isOpenMessage(message("working"))).toBe(true);
     expect(isOpenMessage(message("answered"))).toBe(false);
   });
+  it("says a role is at work only while its turn runs, and who has the request otherwise", () => {
+    const turn = {
+      project_id: "p",
+      task_id: "t",
+      role: "implementer" as const,
+      seat: "Ada",
+      started_at: "",
+      last_activity_at: "",
+      tool_calls: 0,
+      edits: 0,
+      output_tokens: 0,
+    };
+    const ada = {
+      name: "Ada",
+      kinds: ["implementer"],
+      engine: "claude",
+      member: "m1",
+    };
+    const writing = task({ status: "writing", round: 2, roles: [ada] });
+    expect(requestStep(writing, undefined, [turn])).toBe(
+      "Round 2 · Ada working",
+    );
+    expect(requestStep(writing, undefined, [])).toBe("Round 2 · With Ada");
+    // Without the turns, as on pages that don't know them, the words stay.
+    expect(requestStep(writing)).toBe("Round 2 · Ada working");
+    const pb = code();
+    const reviewing = task({
+      status: "reviewing",
+      stage: "reviewing",
+      playbook: pb,
+      roles: pb.roles,
+      checking: "Reviewer",
+    });
+    expect(requestStep(reviewing, undefined, [])).toBe("With the reviewer");
+    expect(
+      requestStep({ ...reviewing, stage: "qa", checking: "QA" }, undefined, []),
+    ).toBe("With QA");
+    expect(
+      requestStep(
+        task({ status: "researching", stage: "researching" }),
+        undefined,
+        [],
+      ),
+    ).toBe("With the researcher");
+    expect(
+      requestStep(
+        task({ status: "designing", stage: "designing", checking: "Dee" }),
+        undefined,
+        [],
+      ),
+    ).toBe("With Dee for design input");
+  });
   it("names the designer while a request is with it, and keeps it at work", () => {
     const dee = { name: "Dee", kinds: ["designer"], engine: "claude" };
     const withDee = task({

@@ -185,7 +185,9 @@ describe("the board", () => {
         .map((a) => a.textContent),
     ).toEqual(["First", "Second"]);
     expect(
-      within(column("Implementing")).getByText("Round 2 · Implementer working"),
+      within(column("Implementing")).getByText(
+        "Round 2 · With the implementer",
+      ),
     ).toBeTruthy();
     const ready = screen.getByRole("region", { name: "Ready to land" });
     expect(within(ready).getByText("Waiting for your approval")).toBeTruthy();
@@ -252,7 +254,7 @@ describe("the board", () => {
       "Implementing",
     ]);
     const researching = screen.getByRole("listitem", { name: "Researching" });
-    expect(within(researching).getByText("Ada researching")).toBeTruthy();
+    expect(within(researching).getByText("With Ada")).toBeTruthy();
     expect(researching.querySelector("img")?.getAttribute("src")).toBe(
       `/api/avatars/${"a".repeat(32)}/small`,
     );
@@ -1314,6 +1316,9 @@ describe("whether a role is at work", () => {
       "Working · 12m · 37 calls · 5 files · active 8s ago",
     );
     expect(
+      card("Cache the lookups").querySelector(".board-card-step")?.textContent,
+    ).toBe("Ada working");
+    expect(
       line(screen.getByRole("complementary", { name: "Cache the lookups" })),
     ).toBe(
       "Working · 12m · 37 tool calls · 5 files changed · active 8s ago · now: Bash",
@@ -1349,8 +1354,12 @@ describe("whether a role is at work", () => {
       return line(card("Cache the lookups"));
     };
     expect(waiting({})).toBe("Waiting for Ada to pick this up");
+    const step = (objective: string) =>
+      card(objective).querySelector(".board-card-step")?.textContent;
+    expect(step("Cache the lookups")).toBe("With Ada");
+    expect(step("Tidy the logs")).toBe("With the reviewer");
     expect(line(card("Tidy the logs"))).toBe(
-      "Waiting for Reviewer to pick this up",
+      "Waiting for the reviewer to pick this up",
     );
     expect(waiting({ paused: true })).toBe(
       "Waiting for Ada to pick this up · teams are paused",

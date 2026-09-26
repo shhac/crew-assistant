@@ -6,7 +6,7 @@ import { decisionFor, isOpenMessage, needsYou, requestStep } from "./stages";
 import { TaskActivity } from "./TaskActivity";
 import { Avatar } from "./Avatar";
 import { Icon, Pill } from "./ui";
-import type { Decision, Member, State, Task } from "./api";
+import type { Decision, Member, State, Task, Turn } from "./api";
 
 export function CardList({ tasks, state }: { tasks: Task[]; state: State }) {
   return (
@@ -17,6 +17,7 @@ export function CardList({ tasks, state }: { tasks: Task[]; state: State }) {
             task={t}
             decision={decisionFor(t, state.decisions)}
             worker={atWork(t, state.members)}
+            turns={state.turns}
             activity={<TaskActivity task={t} state={state} />}
           />
         </li>
@@ -29,6 +30,7 @@ export function BoardCard({
   task,
   decision,
   worker,
+  turns,
   activity,
   children,
 }: {
@@ -36,6 +38,8 @@ export function BoardCard({
   decision?: Decision;
   /** The member at work on it now, if a member is. */
   worker?: Member;
+  /** The turns running now, when known, so the step says who is at work. */
+  turns?: Turn[];
   activity?: ReactNode;
   children?: ReactNode;
 }) {
@@ -55,10 +59,10 @@ export function BoardCard({
           {worker && <Avatar of={worker} size={20} />}
           {needsYou(task) ? (
             <Pill tone="needs" dot>
-              {requestStep(task, decision)}
+              {requestStep(task, decision, turns)}
             </Pill>
           ) : (
-            requestStep(task, decision)
+            requestStep(task, decision, turns)
           )}
         </p>
       )}

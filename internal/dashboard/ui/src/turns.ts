@@ -1,6 +1,6 @@
 import { counted, recordedTime } from "./ui";
 import { roleAtWork } from "./members";
-import { needsYou } from "./stages";
+import { needsYou, seatWords } from "./stages";
 import type { Role, Stage, State, Task, Turn } from "./api";
 
 /** Past this long without a word from its session, a turn may have stalled. */
@@ -98,5 +98,6 @@ export function waitingLine(task: Task, state: State, now: number) {
     return "";
   const role = roleAtWork(task);
   const reason = waitReason(task, role, state, now);
-  return `Waiting for ${role?.name ?? "the team"} to pick this up${reason ? ` · ${reason}` : ""}`;
+  const who = role ? seatWords(task, role.name) : "the team";
+  return `Waiting for ${who} to pick this up${reason ? ` · ${reason}` : ""}`;
 }

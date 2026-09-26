@@ -8,6 +8,7 @@ import {
   type Project,
   type Task,
   type TeamMessage,
+  type Turn,
 } from "./api";
 
 /** Colour roles: amber needs the owner, blue is under way, grey waits. */
@@ -182,24 +183,56 @@ const held = (task: Task) => {
   return !!until && until.valueOf() > Date.now();
 };
 
-/** What a request is doing now, in a few words. */
-export function requestStep(task: Task, decision?: Decision): string {
+/**
+ * How a seat reads after "With" or "Waiting for": a member by its name, and
+ * a template's seat by its role, as "the implementer" or "QA".
+ */
+export function seatWords(task: Task, name: string) {
+  if (task.roles?.find((r) => r.name === name)?.member) return name;
+  return name === name.toUpperCase() ? name : `the ${name.toLowerCase()}`;
+}
+
+/**
+ * What a request is doing now, in a few words. Given the turns running, a
+ * request with a role says it is at work only while that role's turn runs,
+ * and "With …" otherwise.
+ */
+export function requestStep(
+  task: Task,
+  decision?: Decision,
+  turns?: Turn[],
+): string {
   if (held(task) && task.detail) return task.detail;
   const round = task.round > 1 ? `Round ${task.round} · ` : "";
   const code = isCode(task.playbook);
+  const idle = !!turns && !turns.some((t) => t.task_id === task.id);
+  const withSeat = (name: string) => `${round}With ${seatWords(task, name)}`;
   switch (task.status) {
     case "queued":
       return "Waiting to start";
-    case "researching":
+    case "researching": {
+      if (idle)
+        return `With ${seatWords(task, task.checking || roleName(task, "researcher", "Researcher"))}`;
       return task.checking ? `${task.checking} researching` : "Researching";
+    }
     case "designing":
       return `With ${task.checking || roleName(task, "designer", "the designer")} for design input`;
-    case "writing":
-      return `${round}${roleName(task, "implementer", code ? "Implementer" : "Writer")} working`;
+    case "writing": {
+      const writer = roleName(
+        task,
+        "implementer",
+        code ? "Implementer" : "Writer",
+      );
+      return idle ? withSeat(writer) : `${round}${writer} working`;
+    }
     case "reviewing":
     case "deciding": {
-      if (task.stage !== "qa")
-        return `${round}${task.checking || roleName(task, "reviewer", "Reviewer")} reviewing`;
+      if (task.stage !== "qa") {
+        const reviewer =
+          task.checking || roleName(task, "reviewer", "Reviewer");
+        return idle ? withSeat(reviewer) : `${round}${reviewer} reviewing`;
+      }
+      if (idle) return withSeat(task.checking || roleName(task, "qa", "QA"));
       const check = task.playbook?.check;
       return check ? `${round}QA running ${check}` : `${round}QA checking`;
     }
