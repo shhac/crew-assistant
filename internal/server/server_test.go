@@ -301,3 +301,26 @@ func TestTheOwnerLinksTasks(t *testing.T) {
 		t.Fatal("unlinked twice", w.Code)
 	}
 }
+
+// A task's place is readable from the dashboard's API, and only a code
+// task's draft can be changed by hand.
+func TestATasksPlaceAndDraftsByHand(t *testing.T) {
+	_, call := ownerServer(t)
+	var project core.Project
+	w := call("POST", "/api/projects", `{"title":"Export","brief":{"goal":"CSV","criteria":["Valid CSV"]},"template":"draft"}`)
+	_ = json.Unmarshal(w.Body.Bytes(), &project)
+	var task core.Task
+	w = call("POST", "/api/projects/"+project.ID+"/tasks", `{"objective":"Write it","criteria":[]}`)
+	_ = json.Unmarshal(w.Body.Bytes(), &task)
+	w = call("GET", "/api/projects/"+project.ID+"/tasks/"+task.ID+"/place", "")
+	var place map[string]any
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &place) != nil || place["workspace"] == "" || place["running"] != false {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := call("GET", "/api/projects/other/tasks/"+task.ID+"/place", ""); w.Code != 404 {
+		t.Fatal("a task was found under another project", w.Code)
+	}
+	if w := call("POST", "/api/projects/"+project.ID+"/tasks/"+task.ID+"/drafts", `{"ref":"main","note":"","approve":false}`); w.Code != 400 || !strings.Contains(w.Body.String(), "code task") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}

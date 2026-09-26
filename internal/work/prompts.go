@@ -51,6 +51,9 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string) string {
 	case last == 0:
 		b.WriteString("\nWrite the deliverable as one or more files in the current working directory. Markdown is preferred for prose.\n")
 	default:
+		if t.Revisions[last-1].By == core.DraftByOwner {
+			fmt.Fprintf(&b, "\nThe owner changed draft %d by hand: %s Build on their change rather than undoing it.\n", last, t.Revisions[last-1].Summary)
+		}
 		if code {
 			fmt.Fprintf(&b, "\nThe repository holds your previous attempt (draft %d). %s Improve it in place. The checks said:\n", last, repoInstructions)
 		} else {
@@ -133,6 +136,7 @@ Use "question" only if the check cannot run at all for a reason the implementer 
 		b.WriteString(planText(t))
 		b.WriteString(designText(t))
 		fmt.Fprintf(&b, "\nThis repository holds a proposed change for this task: the commits between %s and HEAD (run `git diff %s..HEAD` and read whatever else you need). %s Do not modify anything.\n", t.Base, t.Base, repoInstructions)
+		b.WriteString(byHandNote(r))
 		if playbook != nil && playbook.Check != "" {
 			fmt.Fprintf(&b, "QA runs `%s` separately, so you need not run it or report on it.\n", playbook.Check)
 		}
@@ -153,6 +157,7 @@ func reviewerPrompt(p core.Project, t core.Task, r core.Revision) string {
 	b.WriteString(planText(t))
 	b.WriteString(designText(t))
 	fmt.Fprintf(&b, "\nThe current directory holds draft %d: %s.\nRead every file. Do not modify anything.\n", r.N, strings.Join(r.Files, ", "))
+	b.WriteString(byHandNote(r))
 	b.WriteString(`
 Judge the draft strictly against the goal, audience, constraints and every criterion above. Use:
 - "pass" only when every criterion is met and nothing important is wrong;
@@ -297,4 +302,12 @@ Plan this task before anything is written. Read what you need to, and change not
 	}
 	b.WriteString("\nReply with only this JSON object:\n" + plan)
 	return b.String()
+}
+
+// byHandNote tells a reviewer a draft is the owner's own change.
+func byHandNote(r core.Revision) string {
+	if r.By != core.DraftByOwner {
+		return ""
+	}
+	return fmt.Sprintf("The owner made this draft by hand (%s). Review it as you would any other: the owner wants to know what's wrong with it too.\n", r.Summary)
 }

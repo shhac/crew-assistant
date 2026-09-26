@@ -185,6 +185,9 @@ type Revision struct {
 	Ref     string    `json:"ref,omitempty"`
 	Summary string    `json:"summary,omitempty"`
 	At      time.Time `json:"at"`
+	// By is who made the revision when the team didn't: DraftByOwner for a
+	// change the owner made by hand.
+	By string `json:"by,omitempty"`
 }
 
 // Verdict is one reviewer's judgement of one revision.

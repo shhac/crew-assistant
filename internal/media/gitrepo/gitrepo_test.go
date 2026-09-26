@@ -702,3 +702,37 @@ func TestChangedFilesCountsEachChangedFileOnce(t *testing.T) {
 		t.Fatalf("changed %d, %v", n, err)
 	}
 }
+
+// Checking a draft out never moves a branch past commits of the owner's the
+// draft lacks, unless forced, and never the branch the owner is on.
+func TestCheckoutDraftKeepsTheOwnersWork(t *testing.T) {
+	ctx := context.Background()
+	clone := t.TempDir()
+	git(t, clone, "init", "-q", "-b", "main")
+	write(t, filepath.Join(clone, "a.go"), "package x\n")
+	git(t, clone, "add", ".")
+	git(t, clone, "commit", "-q", "-m", "draft")
+	draft := git(t, clone, "rev-parse", "HEAD")
+	owner := t.TempDir()
+	git(t, owner, "init", "-q", "-b", "main")
+	git(t, owner, "commit", "-q", "--allow-empty", "-m", "start")
+
+	if err := CheckoutDraft(ctx, owner, clone, draft, "crew-task/one", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := git(t, owner, "rev-parse", "crew-task/one"); got != draft {
+		t.Fatalf("branch at %s", got)
+	}
+	git(t, owner, "checkout", "-q", "crew-task/one")
+	git(t, owner, "commit", "-q", "--allow-empty", "-m", "mine")
+	git(t, owner, "checkout", "-q", "main")
+	if err := CheckoutDraft(ctx, owner, clone, draft, "crew-task/one", false); !errors.Is(err, ErrOwnersWork) {
+		t.Fatalf("moved past the owner's commit: %v", err)
+	}
+	if err := CheckoutDraft(ctx, owner, clone, draft, "crew-task/one", true); err != nil {
+		t.Fatalf("forced: %v", err)
+	}
+	if err := CheckoutDraft(ctx, owner, clone, draft, "main", true); err == nil {
+		t.Fatal("moved the branch the owner is on")
+	}
+}

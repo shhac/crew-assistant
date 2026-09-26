@@ -94,6 +94,30 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		}
 		respond(w, 201, v)
 	})
+	mux.HandleFunc("GET /api/projects/{id}/tasks/{task}/place", func(w http.ResponseWriter, r *http.Request) {
+		v, err := a.Work.Place(r.Context(), r.PathValue("id"), r.PathValue("task"))
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/drafts", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Ref     string `json:"ref"`
+			Note    string `json:"note"`
+			Approve bool   `json:"approve"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.AdoptDraft(r.Context(), r.PathValue("id"), r.PathValue("task"), in.Ref, in.Note, in.Approve)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/links", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Relation string `json:"relation"`
