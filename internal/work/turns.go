@@ -28,16 +28,32 @@ type turnRegister struct {
 }
 
 type liveTurn struct {
-	reg  *turnRegister
+	reg *turnRegister
+	// who is the turn as it was set up; each run starts its counts afresh
+	// from it, since a turn that has to ask again runs twice.
+	who  core.Turn
 	turn core.Turn
-	// workDir is counted for changed files while the turn writes, against
-	// how its files stood when the turn began.
+	// workDir is counted for changed files while the turn writes.
 	workDir string
 	writes  bool
-	before  map[string]time.Time
-	// tools are the tools running now, by item.
-	tools map[string]string
+	count   func(context.Context) (int, error)
+	// tools are the tools running now, in the order they started.
+	tools []runningTool
 	done  chan struct{}
+}
+
+type runningTool struct{ item, name string }
+
+// has says a role is at work on the task right now.
+func (r *turnRegister) has(taskID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for t := range r.running {
+		if t.turn.TaskID == taskID {
+			return true
+		}
+	}
+	return false
 }
 
 // Turns are the roles at work right now, longest-running first.
@@ -55,21 +71,24 @@ func (lp *Loop) Turns() []core.Turn {
 
 // watchTurn is how a role's turn on t reports itself while it runs.
 func (lp *Loop) watchTurn(t core.Task, kind string, r core.Role, workDir string, writes bool) roles.Observer {
-	return &liveTurn{reg: &lp.turns, workDir: workDir, writes: writes, turn: core.Turn{ProjectID: t.ProjectID, TaskID: t.ID, Role: kind, Seat: r.Name, Member: r.Member}}
+	return &liveTurn{reg: &lp.turns, workDir: workDir, writes: writes, who: core.Turn{ProjectID: t.ProjectID, TaskID: t.ID, Role: kind, Seat: r.Name, Member: r.Member}}
 }
 
 func (l *liveTurn) Started() {
+	if l.writes {
+		l.count = counter(l.workDir)
+	}
 	now := time.Now().UTC()
 	l.reg.mu.Lock()
 	if l.reg.running == nil {
 		l.reg.running = map[*liveTurn]struct{}{}
 	}
+	l.turn = l.who
 	l.turn.StartedAt, l.turn.LastActivityAt = now, now
-	l.tools, l.done = map[string]string{}, make(chan struct{})
+	l.tools, l.done = nil, make(chan struct{})
 	l.reg.running[l] = struct{}{}
 	l.reg.mu.Unlock()
 	if l.writes {
-		l.before = fileTimes(l.workDir)
 		go l.countFiles()
 	}
 }
@@ -87,13 +106,13 @@ func (l *liveTurn) Saw(e session.Event) {
 		if edits(e.Tool) {
 			l.turn.Edits++
 		}
-		l.tools[e.ItemID] = e.Tool
+		l.tools = append(l.tools, runningTool{e.ItemID, e.Tool})
 		l.turn.Tool = e.Tool
 	case "tool_completed":
-		delete(l.tools, e.ItemID)
+		l.tools = slices.DeleteFunc(l.tools, func(t runningTool) bool { return t.item == e.ItemID })
 		l.turn.Tool = ""
-		for _, tool := range l.tools {
-			l.turn.Tool = tool
+		if n := len(l.tools); n > 0 {
+			l.turn.Tool = l.tools[n-1].name
 		}
 	case "usage":
 		// Each model response reports its own; the turn's final figure
@@ -129,7 +148,7 @@ func (l *liveTurn) countFiles() {
 	defer tick.Stop()
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), countFilesEvery)
-		n, err := changedFiles(ctx, l.workDir, l.before)
+		n, err := l.count(ctx)
 		cancel()
 		if err == nil {
 			l.reg.mu.Lock()
@@ -144,22 +163,29 @@ func (l *liveTurn) countFiles() {
 	}
 }
 
-// changedFiles is how many files in dir differ from where the turn began:
-// what git says has changed in a repository's working tree, or otherwise
-// the files new or rewritten since before was taken. File times are compared
-// with themselves rather than the clock, which a filesystem may stamp
-// coarsely enough to put a fresh write before the turn began.
-func changedFiles(ctx context.Context, dir string, before map[string]time.Time) (int, error) {
+// counter counts how many files in dir differ from where a turn began: what
+// git says has changed in a repository's working tree, or otherwise the
+// files new or rewritten since.
+func counter(dir string) func(context.Context) (int, error) {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		return gitrepo.ChangedFiles(ctx, dir)
+		return func(ctx context.Context) (int, error) { return gitrepo.ChangedFiles(ctx, dir) }
 	}
+	before := fileTimes(dir)
+	return func(context.Context) (int, error) { return changedFiles(dir, before), nil }
+}
+
+// changedFiles is how many files in dir are new or rewritten since before.
+// File times are compared with themselves rather than the clock, which a
+// filesystem may stamp coarsely enough to put a fresh write before the turn
+// began.
+func changedFiles(dir string, before map[string]time.Time) int {
 	n := 0
 	for path, at := range fileTimes(dir) {
 		if was, ok := before[path]; !ok || !at.Equal(was) {
 			n++
 		}
 	}
-	return n, nil
+	return n
 }
 
 // fileTimes is when each file under dir was last written.

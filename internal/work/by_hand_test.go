@@ -108,11 +108,41 @@ func TestAChangeByHandIsRefusedWhenItCantCount(t *testing.T) {
 		t.Fatal("a missing ref was taken")
 	}
 	ownerGit(t, source, "checkout", "-q", "main")
-	watch := a.watchTurn(task, core.RoleImplementer, core.Role{}, t.TempDir(), false)
-	watch.Started()
-	defer watch.Ended()
+	a.claim(task.ID)
+	defer a.release(task.ID)
 	if _, err := a.AdoptDraft(ctx, p.ID, task.ID, "main", "", false); err == nil || !strings.Contains(err.Error(), "at work") {
-		t.Fatalf("taken while a role worked: %v", err)
+		t.Fatalf("taken while a step held the task: %v", err)
+	}
+}
+
+// A change by hand handed over while the implementer works is refused for
+// the whole of the step, not just the model's turn, so the two drafts never
+// share a number and the owner's is never replaced unseen.
+func TestAChangeByHandWaitsForTheStepInProgress(t *testing.T) {
+	source := ownerRepo(t)
+	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{revise, pass, pass, pass}}}
+	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
+	a.runner = runner
+	ctx := context.Background()
+	p := codeProject(t, a, source)
+	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add Feature"})
+	var refused error
+	runner.onEdit = func(dir string, n int) bool {
+		if n == 2 {
+			_, refused = a.AdoptDraft(ctx, p.ID, task.ID, "main", "", false)
+		}
+		return true
+	}
+	task = settleCode(t, a, task.ID)
+	if refused == nil || !strings.Contains(refused.Error(), "at work") {
+		t.Fatalf("an adopt mid-step went through: %v", refused)
+	}
+	seen := map[int]bool{}
+	for _, r := range task.Revisions {
+		if seen[r.N] {
+			t.Fatalf("two drafts numbered %d", r.N)
+		}
+		seen[r.N] = true
 	}
 }
 

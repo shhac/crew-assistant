@@ -51,7 +51,19 @@ type Loop struct {
 	prSeen    sync.Map
 	loopWake  chan struct{}
 	turns     turnRegister
+	// claims are the tasks a step or the owner is changing right now; each
+	// holds its task for the whole change, so neither builds on a draft the
+	// other is replacing.
+	claims sync.Map
 }
+
+// claim holds a task for a change, and says whether it could.
+func (lp *Loop) claim(taskID string) bool {
+	_, held := lp.claims.LoadOrStore(taskID, struct{}{})
+	return !held
+}
+
+func (lp *Loop) release(taskID string) { lp.claims.Delete(taskID) }
 
 func New(s *core.Service, cfg func() config.Config, demo bool) *Loop {
 	return &Loop{Core: s, Config: cfg, Demo: demo, runner: roles.Native{}, meter: &quota.Meter{}, github: github.New(), githubURL: github.URL, loopWake: make(chan struct{}, 1)}
@@ -126,6 +138,11 @@ func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 	if !ok {
 		return false, nil
 	}
+	// The owner is handing it a draft; it is looked at again once they have.
+	if !lp.claim(t.ID) {
+		return false, nil
+	}
+	defer lp.release(t.ID)
 	if t.RetryAt.After(time.Now()) {
 		return false, nil
 	}

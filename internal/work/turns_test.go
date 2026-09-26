@@ -49,12 +49,31 @@ func TestAWritingTurnCountsItsChangedFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "sub", "also.md"), []byte("after"), 0o600)
 	later := time.Now().Add(time.Hour)
 	os.Chtimes(filepath.Join(dir, "old.md"), later, later)
-	n, err := changedFiles(t.Context(), dir, before)
-	if err != nil || n != 3 {
-		t.Fatalf("changed %d, %v", n, err)
+	if n := changedFiles(dir, before); n != 3 {
+		t.Fatalf("changed %d", n)
 	}
 	a := testLoop(t)
 	watch := a.watchTurn(core.Task{ID: "task-one"}, core.RoleImplementer, core.Role{}, dir, true)
 	watch.Started()
 	watch.Ended()
+}
+
+// A turn that runs twice, as one asked again does, counts each run afresh.
+func TestARunAgainCountsAfresh(t *testing.T) {
+	a := testLoop(t)
+	watch := a.watchTurn(core.Task{ID: "task-one"}, core.RoleReviewer, core.Role{}, t.TempDir(), false)
+	watch.Started()
+	watch.Saw(session.Event{Kind: "tool_started", ItemID: "1", Tool: "Bash"})
+	watch.Ended()
+	watch.Started()
+	defer watch.Ended()
+	if got := a.Turns(); len(got) != 1 || got[0].ToolCalls != 0 || got[0].Tool != "" {
+		t.Fatalf("the second run carried the first's counts: %+v", got)
+	}
+	watch.Saw(session.Event{Kind: "tool_started", ItemID: "2", Tool: "Read"})
+	watch.Saw(session.Event{Kind: "tool_started", ItemID: "3", Tool: "Grep"})
+	watch.Saw(session.Event{Kind: "tool_completed", ItemID: "3"})
+	if got := a.Turns()[0].Tool; got != "Read" {
+		t.Fatalf("running now: %s", got)
+	}
 }

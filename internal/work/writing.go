@@ -132,6 +132,11 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 		return lp.roleFailed(ctx, t, writer, fmt.Errorf("the work could not be recorded: %w", err))
 	}
 	_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
+		// A draft recorded meanwhile, such as the owner's by hand, is newer
+		// than the one this round built on, and this one never replaces it.
+		if len(t.Revisions) != n-1 {
+			return "", fmt.Errorf("draft %d was recorded while the implementer worked: %w", len(t.Revisions), core.ErrConflict)
+		}
 		revision.BriefVersion, revision.Summary, revision.At = p.Brief.Version, text.Clip(reply, 2000), time.Now().UTC()
 		t.Revisions = append(t.Revisions, revision)
 		t.AnswerDirection(seen, n, reply, revision.At)

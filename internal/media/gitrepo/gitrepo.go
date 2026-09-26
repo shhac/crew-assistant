@@ -230,7 +230,13 @@ func (r Repo) Fetch(ctx context.Context, branch string) (string, error) {
 
 // Contains reports whether commit is already part of tip's history.
 func (r Repo) Contains(ctx context.Context, tip, commit string) (bool, error) {
-	_, err := run(ctx, r.Workspace(), "merge-base", "--is-ancestor", commit, tip)
+	return isAncestor(ctx, r.Workspace(), commit, tip)
+}
+
+// isAncestor says whether commit is part of tip's history in the repository
+// at dir, telling "no" from git failing to say.
+func isAncestor(ctx context.Context, dir, commit, tip string) (bool, error) {
+	_, err := run(ctx, dir, "merge-base", "--is-ancestor", commit, tip)
 	var status *gitError
 	switch {
 	case err == nil:

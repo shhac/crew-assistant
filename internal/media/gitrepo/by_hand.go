@@ -8,15 +8,16 @@ import (
 )
 
 // Adopt brings the commit ref names in the owner's repository into the
-// clone and returns it. It touches no working tree, since other tasks share
-// the clone: the task's next step checks it out. A ref keeps the commit in
-// the clone until the task's branch holds it.
-func (r Repo) Adopt(ctx context.Context, ref string) (string, error) {
+// clone for a task and returns it. It touches no working tree, since other
+// tasks share the clone: the task's next step checks it out. One ref per
+// task keeps the latest such commit in the clone, whether or not it was
+// taken.
+func (r Repo) Adopt(ctx context.Context, taskID, ref string) (string, error) {
 	commit, err := resolve(ctx, r.source, ref)
 	if err != nil {
 		return "", err
 	}
-	if _, err := run(ctx, r.Workspace(), append(fetchQuietly, "--no-write-fetch-head", r.source, "+"+commit+":refs/crew-assistant/adopted/"+commit)...); err != nil {
+	if _, err := run(ctx, r.Workspace(), append(fetchQuietly, "--no-write-fetch-head", r.source, "+"+commit+":refs/crew-assistant/adopted/"+taskID)...); err != nil {
 		return "", err
 	}
 	return commit, nil
@@ -42,8 +43,12 @@ func CheckoutDraft(ctx context.Context, dir, clone, commit, branch string, force
 	if _, err := run(ctx, dir, append(fetchQuietly, "--no-write-fetch-head", clone, commit)...); err != nil {
 		return err
 	}
-	if tip, err := run(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil && !force {
-		if _, err := run(ctx, dir, "merge-base", "--is-ancestor", strings.TrimSpace(tip), commit); err != nil {
+	if tip, err := BranchTip(ctx, dir, branch); err == nil && !force {
+		behind, err := isAncestor(ctx, dir, tip, commit)
+		if err != nil {
+			return err
+		}
+		if !behind {
 			return fmt.Errorf("%s: %w; use --force to replace it", branch, ErrOwnersWork)
 		}
 	}

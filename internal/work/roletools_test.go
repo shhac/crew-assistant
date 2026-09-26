@@ -120,7 +120,7 @@ func TestEachRoleGetsItsTools(t *testing.T) {
 		for _, d := range spec.Tools {
 			names = append(names, d.Name)
 		}
-		if spec.Web != want.web || strings.Join(names, " ") != strings.Join(want.tools, " ") || !strings.Contains(spec.Instructions, "list_tasks") {
+		if spec.Web != want.web || strings.Join(names, " ") != strings.Join(want.tools, " ") || !strings.Contains(spec.Instructions, "list_tasks") || spec.Observer == nil {
 			t.Errorf("%s: web %v tools %v", status, spec.Web, names)
 		}
 		link := spec.Tools[2].Description

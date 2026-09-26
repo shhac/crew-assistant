@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,24 +76,23 @@ func registerTask(root *cobra.Command, o *options) {
 		if place.Repo == "" || place.Draft == nil || place.Draft.Ref == "" {
 			return errors.New("only a code task with a draft can be checked out")
 		}
-		if branch == "" {
-			branch = place.Branch
-		}
+		into := cmp.Or(branch, place.Branch)
 		ctx := cmd.Context()
-		if err := gitrepo.CheckoutDraft(ctx, place.Repo, place.Workspace, place.Draft.Ref, branch, force); err != nil {
+		if err := gitrepo.CheckoutDraft(ctx, place.Repo, place.Workspace, place.Draft.Ref, into, force); err != nil {
 			return err
 		}
-		out := map[string]any{"repo": place.Repo, "branch": branch, "commit": place.Draft.Ref, "draft": place.Draft.N}
+		out := map[string]any{"repo": place.Repo, "branch": into, "commit": place.Draft.Ref, "draft": place.Draft.N}
 		if worktree != "" {
-			if worktree, err = filepath.Abs(worktree); err != nil {
+			dir, err := filepath.Abs(worktree)
+			if err != nil {
 				return err
 			}
-			if err := gitrepo.AddWorktree(ctx, place.Repo, worktree, branch); err != nil {
+			if err := gitrepo.AddWorktree(ctx, place.Repo, dir, into); err != nil {
 				return err
 			}
-			out["worktree"] = worktree
+			out["worktree"] = dir
 		}
-		out["next"] = fmt.Sprintf("Commit your change on %s, then run crew-assistant task adopt %s", branch, short(place.TaskID))
+		out["next"] = fmt.Sprintf("Commit your change on %s, then run crew-assistant task adopt %s", into, short(place.TaskID))
 		return o.emit(out)
 	}}
 	checkout.Flags().StringVar(&worktree, "worktree", "", "Also check the branch out in a new worktree at this directory")

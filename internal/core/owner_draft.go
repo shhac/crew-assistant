@@ -40,9 +40,7 @@ func (s *Service) AdoptDraft(ctx context.Context, taskID string, r Revision, app
 		}
 		now := s.now().UTC()
 		if d := decision(v, t.DecisionID); d != nil && d.Status == DecisionOpen {
-			d.Status, d.Disposition, d.ResolvedAt = DecisionDismissed, DispositionDismissed, &now
-			d.ResolutionReason = "The owner changed the draft by hand"
-			record(v, now, d.ProjectID, "decision.dismissed", d.Title+": "+d.ResolutionReason)
+			dismiss(v, d, now, "The owner changed the draft by hand")
 		}
 		r.N, r.BriefVersion, r.By, r.At = t.Revisions[len(t.Revisions)-1].N+1, p.Brief.Version, DraftByOwner, now
 		t.Revisions = append(t.Revisions, r)

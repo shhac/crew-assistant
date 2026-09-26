@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 )
 
 // ChooseDecision records the owner picking one of a decision's own choices.
@@ -56,10 +57,7 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 		d.ResolvedAt = &now
 		d.Disposition = disposition
 		if disposition == DispositionDismissed {
-			d.Status = DecisionDismissed
-			d.ResolutionReason = reason
-			d.Answer = ""
-			record(v, now, d.ProjectID, "decision.dismissed", d.Title+": "+reason)
+			dismiss(v, d, now, reason)
 		} else {
 			d.Status = DecisionResolved
 			d.Answer = answer
@@ -75,4 +73,11 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 		return nil
 	})
 	return out, err
+}
+
+// dismiss closes d as obsolete, with why.
+func dismiss(v *Snapshot, d *Decision, now time.Time, reason string) {
+	d.Status, d.Disposition, d.ResolvedAt = DecisionDismissed, DispositionDismissed, &now
+	d.ResolutionReason, d.Answer = reason, ""
+	record(v, now, d.ProjectID, "decision.dismissed", d.Title+": "+reason)
 }
