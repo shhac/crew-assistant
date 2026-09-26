@@ -1,7 +1,9 @@
+import { href } from "./router";
 import { section, type Config } from "./api";
 
-// The only small models loading messages and suggestions may use. Haiku 4.5
-// has no effort setting, so none is sent for it.
+// The small models loading messages and suggestions use unless the owner
+// chooses another in Models. Haiku 4.5 has no effort setting, so none is
+// sent for it.
 const smallModels = {
   codex: { label: "Codex", detail: "gpt-6-luna, low effort" },
   claude: { label: "Claude", detail: "haiku" },
@@ -16,8 +18,11 @@ export function ChatSettings({
 }) {
   const chat = section(config.chat);
   const phrases = section(chat.loading_phrases);
-  const assistant = section(config.model);
-  const engine = String(assistant.engine || "codex");
+  const seat = section(config.assistant).seat;
+  const seated = config.assistants?.find((a) => a.id === seat);
+  const engine = seated?.model.engine || "codex";
+  const chosen = section(section(config.models).suggestions);
+  const chosenEngine = chosen.engine === "claude" ? "claude" : "codex";
   const local = engine === "codex" || engine === "claude";
   const enabled = phrases.enabled !== false;
   const own = smallModels[engine === "claude" ? "claude" : "codex"];
@@ -44,9 +49,16 @@ export function ChatSettings({
         your daily model calls.
       </p>
       <p className="hint">
-        {local
-          ? `Loading messages and next-message suggestions use your ${own.label} login (${own.detail}), or your ${other.label} login (${other.detail}) if that isn't working. No other model is used.`
-          : "The assistant uses an API, so loading messages are a fixed line and cost nothing extra."}
+        {chosen.engine === "openai-compatible"
+          ? `Loading messages and next-message suggestions use ${String(chosen.model)} on your API, billed per call. No other model is used. `
+          : chosen.engine
+            ? `Loading messages and next-message suggestions use ${String(chosen.model)} on your ${smallModels[chosenEngine].label} login. No other model is used. `
+            : local
+              ? `Loading messages and next-message suggestions use your ${own.label} login (${own.detail}), or your ${other.label} login (${other.detail}) if that isn't working. No other model is used. `
+              : "The assistant uses an API, so loading messages are a fixed line and cost nothing extra. "}
+        <a href={href({ page: "settings", section: "models" })}>
+          Choose the model
+        </a>
       </p>
     </div>
   );

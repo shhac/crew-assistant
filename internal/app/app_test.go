@@ -16,13 +16,21 @@ import (
 	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
+// seated is the seated assistant's profile in c, to change in a test; c
+// gets a copy of its profiles of its own first, so the app's config is left
+// alone until it is updated.
+func seated(c *config.Config) *config.AssistantProfile {
+	*c = c.CloneAssistants()
+	return c.ProfileRef(c.Assistant.Seat)
+}
+
 func testApp(t *testing.T) *App {
 	t.Helper()
 	cfg := config.Default()
-	cfg.Model.Engine = "openai-compatible"
-	cfg.Model.Effort = ""
-	cfg.Model.Model = ""
-	cfg.Assistant.Name = "Quill"
+	seated(&cfg).Model.Engine = "openai-compatible"
+	seated(&cfg).Model.Effort = ""
+	seated(&cfg).Model.Model = ""
+	seated(&cfg).Name = "Quill"
 	cfg.Engines.OpenAICompatible.APIKeyEnv = ""
 	s, err := core.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -58,7 +66,7 @@ func TestChatModelUsesConfiguredNameAndPersistsToolEffects(t *testing.T) {
 	defer remote.Close()
 	cfg := a.Config()
 	cfg.Engines.OpenAICompatible.BaseURL = remote.URL + "/v1"
-	cfg.Model.Model = "fixture-model"
+	seated(&cfg).Model.Model = "fixture-model"
 	if err := a.UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
 	}

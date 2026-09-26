@@ -43,7 +43,7 @@ func TestChatQueueRoutesAuthenticateValidateAndRetryIdempotently(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w
 	}
-	drawing := []struct{ method, path, body string }{{"POST", "/api/members/m/avatar", `{"look":"Violet bob"}`}, {"POST", "/api/assistant/avatar", `{"look":"Silver hair"}`}}
+	drawing := []struct{ method, path, body string }{{"POST", "/api/members/m/avatar", `{"look":"Violet bob"}`}, {"POST", "/api/assistants/milo/avatar", `{"look":"Silver hair"}`}}
 	for _, route := range append([]struct{ method, path, body string }{{"POST", "/api/chat/messages", `{"id":"one","message":"Hello"}`}, {"GET", "/api/chat/turns", ""}, {"DELETE", "/api/chat/messages/one", ""}}, drawing...) {
 		if w := call(route.method, route.path, route.body, false, true); w.Code != 401 {
 			t.Fatal(route, w.Code, w.Body.String())
@@ -222,8 +222,9 @@ func TestChatSuggestionRouteRefusesStaleRequestsAndReportsUnavailableModels(t *t
 	if w := call(`{"after":"reply"}`, true); w.Code != 409 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	cfg.Model.Engine = "openai-compatible"
-	cfg.Model.Model = "local"
+	cfg = cfg.CloneAssistants()
+	cfg.Assistants[0].Model.Engine = "openai-compatible"
+	cfg.Assistants[0].Model.Model = "local"
 	if err := a.UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
 	}

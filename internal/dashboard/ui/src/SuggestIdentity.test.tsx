@@ -7,7 +7,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { AssistantSetup } from "./AssistantSetup";
+import { SuggestIdentity } from "./SuggestIdentity";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { useState } from "react";
 import type { Connection } from "./ConnectionsSettings";
@@ -41,16 +41,18 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-it("keeps a proposed identity unchanged until the owner applies it", async () => {
-  const applied = vi.fn(async () => {});
-  response = (path) =>
-    path.endsWith("/apply")
-      ? recommendation
-      : { messages: [], questions: [], recommendation };
+it("fills in the form with a suggestion and saves nothing itself", async () => {
+  const used = vi.fn();
   render(
-    <AssistantSetup currentName="Iris" demo={false} onApplied={applied} />,
+    <SuggestIdentity
+      subject="assistant"
+      askerName="Iris"
+      demo={false}
+      onUse={used}
+    />,
   );
   const button = await screen.findByRole("button", { name: "Use this" });
+  expect(requests.map((r) => r.path)).toEqual(["/api/setup/assistant"]);
   expect(
     screen.getByRole("heading", {
       level: 2,
@@ -59,12 +61,9 @@ it("keeps a proposed identity unchanged until the owner applies it", async () =>
   ).toBeTruthy();
   expect(
     screen.getByText(
-      "Answer a question or two, and the assistant suggests a name, a personality and an avatar.",
+      "Answer a question or two, and your assistant suggests a name, a personality and a look for the new assistant.",
     ),
   ).toBeTruthy();
-  expect(
-    screen.getAllByText(/Nothing changes until you use it\./),
-  ).toHaveLength(1);
   expect(screen.getByRole("heading", { level: 3, name: "Rowan" })).toBeTruthy();
   expect(screen.getByText("Calm, direct, and thoughtful.")).toBeTruthy();
   expect(
@@ -74,24 +73,69 @@ it("keeps a proposed identity unchanged until the owner applies it", async () =>
   expect(screen.getByRole("status").textContent).toBe(
     "Nothing changes until you use it.",
   );
-  expect(applied).not.toHaveBeenCalled();
-  expect(requests.some((r) => r.path.endsWith("/apply"))).toBe(false);
+  expect(used).not.toHaveBeenCalled();
   fireEvent.click(button);
-  expect(await screen.findByRole("button", { name: "In use" })).toHaveProperty(
-    "disabled",
-    true,
+  expect(used).toHaveBeenCalledWith(recommendation);
+  expect(screen.getByRole("status").textContent).toBe(
+    "Filled in. Nothing is saved until you add them.",
   );
-  expect(screen.getByRole("status").textContent).toBe("Saved.");
-  expect(applied).toHaveBeenCalledTimes(1);
+  expect(requests.map((r) => r.path)).toEqual(["/api/setup/assistant"]);
+});
+it("keeps a member's suggestions apart from an assistant's", async () => {
+  response = () => ({ messages: [], questions: [] });
+  render(
+    <SuggestIdentity
+      subject="member"
+      askerName="Iris"
+      demo={false}
+      onUse={vi.fn()}
+    />,
+  );
   expect(
-    JSON.parse(
-      requests.find((r) => r.path.endsWith("/apply"))!.options!.body as string,
+    await screen.findByText(
+      "Answer a question or two, and your assistant suggests a name, a personality and a look for the new member.",
     ),
-  ).toEqual({ recommendation_id: "proposal-1", accepted: true });
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Start" }));
+  await waitFor(() =>
+    expect(requests.map((r) => r.path)).toEqual([
+      "/api/setup/member",
+      "/api/setup/member/interview",
+    ]),
+  );
+});
+it("starts over", async () => {
+  response = (path) =>
+    path.endsWith("/interview") || requests.length === 1
+      ? {
+          messages: [{ role: "assistant", content: "How should they sound?" }],
+          questions: [],
+          recommendation,
+        }
+      : { deleted: true };
+  render(
+    <SuggestIdentity
+      subject="member"
+      askerName="Iris"
+      demo={false}
+      onUse={vi.fn()}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Start over" }));
+  expect(await screen.findByRole("button", { name: "Start" })).toBeTruthy();
+  expect(screen.queryByText("How should they sound?")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Use this" })).toBeNull();
+  const reset = requests.find((r) => r.options?.method === "DELETE");
+  expect(reset?.path).toBe("/api/setup/member");
 });
 it("previews the avatar the server drew, and at tab-icon size", async () => {
   render(
-    <AssistantSetup currentName="Iris" demo={false} onApplied={vi.fn()} />,
+    <SuggestIdentity
+      subject="assistant"
+      askerName="Iris"
+      demo={false}
+      onUse={vi.fn()}
+    />,
   );
   await screen.findByRole("heading", { level: 3, name: "Rowan" });
   const url = `data:image/svg+xml,${encodeURIComponent(recommendation.avatar_svg)}`;
@@ -105,7 +149,7 @@ it("previews the avatar the server drew, and at tab-icon size", async () => {
   expect(screen.getByText("As the tab icon")).toBeTruthy();
   expect(document.querySelector(".setup-proposal svg")).toBeNull();
 });
-it("says how the proposal will look and that Codex draws it once used", async () => {
+it("says how the proposal will look and that Codex draws it once added", async () => {
   response = () => ({
     messages: [],
     questions: [],
@@ -118,31 +162,19 @@ it("says how the proposal will look and that Codex draws it once used", async ()
     },
   });
   render(
-    <AssistantSetup currentName="Iris" demo={false} onApplied={vi.fn()} />,
+    <SuggestIdentity
+      subject="member"
+      askerName="Iris"
+      demo={false}
+      onUse={vi.fn()}
+    />,
   );
   expect(
-    await screen.findByText("How I'll look: Short silver hair, calm eyes"),
+    await screen.findByText("How they'll look: Short silver hair, calm eyes"),
   ).toBeTruthy();
-  expect(screen.getByText("Codex draws this once you use it.")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Use this" }));
-  await screen.findByRole("button", { name: "In use" });
-  expect(screen.queryByText("Codex draws this once you use it.")).toBeNull();
-});
-it("restores a previously applied recommendation without offering to apply it again", async () => {
-  response = () => ({
-    messages: [],
-    questions: [],
-    recommendation: { ...recommendation, applied: true },
-  });
-  render(
-    <AssistantSetup currentName="Rowan" demo={false} onApplied={vi.fn()} />,
-  );
-  expect(await screen.findByRole("button", { name: "In use" })).toHaveProperty(
-    "disabled",
-    true,
-  );
-  expect(screen.queryByText("Nothing changes until you use it.")).toBeNull();
-  expect(screen.getByText("Saved.")).toBeTruthy();
+  expect(screen.getByText("Codex draws this once they're added.")).toBeTruthy();
+  // A member's face is never the tab icon.
+  expect(screen.queryByText("As the tab icon")).toBeNull();
 });
 it("keeps named account bindings distinct and enables Notion with its CLI default", async () => {
   response = (path) =>
@@ -221,7 +253,12 @@ it("starts a suggestion, then sends a trimmed answer without submitting a form",
         }
       : { messages: [], questions: [] };
   render(
-    <AssistantSetup currentName="Iris" demo={false} onApplied={vi.fn()} />,
+    <SuggestIdentity
+      subject="assistant"
+      askerName="Iris"
+      demo={false}
+      onUse={vi.fn()}
+    />,
   );
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -257,7 +294,9 @@ it("starts a suggestion, then sends a trimmed answer without submitting a form",
 });
 it("offers no suggestion in the demo", async () => {
   response = () => ({ messages: [], questions: [], recommendation });
-  render(<AssistantSetup currentName="Iris" demo onApplied={vi.fn()} />);
+  render(
+    <SuggestIdentity subject="member" askerName="Iris" demo onUse={vi.fn()} />,
+  );
   expect(screen.getByText("Not available in the demo.")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Start" })).toHaveProperty(
     "disabled",
@@ -266,5 +305,5 @@ it("offers no suggestion in the demo", async () => {
   expect(
     await screen.findByRole("button", { name: "Use this" }),
   ).toHaveProperty("disabled", true);
-  expect(requests.every((r) => r.path === "/api/setup")).toBe(true);
+  expect(requests.every((r) => r.path === "/api/setup/member")).toBe(true);
 });

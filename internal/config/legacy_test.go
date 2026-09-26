@@ -84,8 +84,11 @@ func TestAKeyFromAnEarlierLayoutSaysWhereItWent(t *testing.T) {
 	if to, ok := RenamedKey("model.codex_home"); !ok || to != "engines.codex.home" {
 		t.Fatal(to, ok)
 	}
-	if _, ok := RenamedKey("model.engine"); ok {
+	if _, ok := RenamedKey("assistant.theme"); ok {
 		t.Fatal("a current key reported as renamed")
+	}
+	if to, ok := RenamedKey("model.engine"); !ok || to != "assistants[<seat>].model.engine" {
+		t.Fatal(to, ok)
 	}
 	for key, want := range map[UnknownKey]string{
 		{Path: "model.codex_home", Renamed: true, To: "engines.codex.home"}: "model.codex_home is now engines.codex.home",
@@ -119,11 +122,11 @@ func TestDefaultsAndAllowAreNotWrittenDown(t *testing.T) {
 	if _, ok := doc["engines"]; ok {
 		t.Fatalf("defaults were written down: %v", doc["engines"])
 	}
-	if model := doc["model"].(map[string]any); len(model) != 1 {
-		t.Fatalf("old keys left: %v", model)
+	if _, ok := doc["model"]; ok {
+		t.Fatalf("old keys left: %v", doc["model"])
 	}
-	untouched := map[string]any{"model": map[string]any{"engine": "codex"}}
-	if convertLegacy(untouched) || len(untouched) != 1 {
+	untouched := map[string]any{"assistants": []any{}, "limits": map[string]any{"max_model_turns": 4.0}}
+	if convertLegacy(untouched) || len(untouched) != 2 {
 		t.Fatalf("a current file changed: %v", untouched)
 	}
 }

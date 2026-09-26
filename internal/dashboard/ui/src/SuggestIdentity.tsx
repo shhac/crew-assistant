@@ -2,28 +2,55 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Panel } from "./SettingsPanel";
 import { Avatar, hasFace } from "./Avatar";
 import { ErrorNotice } from "./ui";
-import { api, errorText, type AvatarSpec, type Config, type Face } from "./api";
-interface Recommendation extends Face {
+import { api, errorText, type AvatarSpec, type Face } from "./api";
+
+/** Who a suggestion is for. */
+export type SetupSubject = "assistant" | "member";
+
+/** A suggested name, personality and look, to fill in a form with. */
+export interface Suggestion extends Face {
   id: string;
   name: string;
   personality: string;
   avatar: AvatarSpec;
   rationale: string;
-  applied?: boolean;
 }
 interface SetupState {
   messages: { role: string; content: string }[];
-  recommendation?: Recommendation;
+  recommendation?: Suggestion;
   questions: string[];
 }
-export function AssistantSetup({
-  currentName,
-  onApplied,
+
+const setupPath = (subject: SetupSubject) => `/api/setup/${subject}`;
+
+/** Starts a subject's suggestions afresh, as once who it suggested is added. */
+export function resetSuggestion(subject: SetupSubject) {
+  return api(setupPath(subject), { method: "DELETE" });
+}
+
+const intro: Record<SetupSubject, string> = {
+  assistant:
+    "Answer a question or two, and your assistant suggests a name, a personality and a look for the new assistant.",
+  member:
+    "Answer a question or two, and your assistant suggests a name, a personality and a look for the new member.",
+};
+
+/**
+ * "Suggest a name and personality" for someone new on the team. Using a
+ * suggestion fills in the form beside it; nothing is saved until the owner
+ * adds them.
+ */
+export function SuggestIdentity({
+  subject,
+  askerName,
   demo,
+  onUse,
 }: {
-  currentName: string;
-  onApplied: (assistant: NonNullable<Config["assistant"]>) => Promise<void>;
+  subject: SetupSubject;
+  /** Who makes the suggestion: the assistant in the seat. */
+  askerName: string;
   demo: boolean;
+  onUse: (suggestion: Suggestion) => void;
 }) {
   const [state, setState] = useState<SetupState>({
     messages: [],
@@ -31,13 +58,12 @@ export function AssistantSetup({
   });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [applying, setApplying] = useState(false);
   const [error, setError] = useState("");
-  const [applied, setApplied] = useState(false);
+  const [used, setUsed] = useState("");
   const log = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let active = true;
-    api<SetupState>("/api/setup")
+    api<SetupState>(setupPath(subject))
       .then((value) => {
         if (active)
           setState({
@@ -52,7 +78,7 @@ export function AssistantSetup({
     return () => {
       active = false;
     };
-  }, []);
+  }, [subject]);
   useEffect(() => {
     if (log.current) log.current.scrollTop = log.current.scrollHeight;
   }, [state.messages.length, busy]);
@@ -61,9 +87,8 @@ export function AssistantSetup({
     if (busy || demo) return;
     setBusy(true);
     setError("");
-    setApplied(false);
     try {
-      const next = await api<SetupState>("/api/setup/interview", {
+      const next = await api<SetupState>(`${setupPath(subject)}/interview`, {
         method: "POST",
         body: JSON.stringify({ message: message.trim() }),
       });
@@ -79,37 +104,21 @@ export function AssistantSetup({
       setBusy(false);
     }
   }
-  async function apply() {
-    if (!state.recommendation) return;
-    setApplying(true);
+  async function startOver() {
     setError("");
     try {
-      const assistant = await api<NonNullable<Config["assistant"]>>(
-        "/api/setup/apply",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            recommendation_id: state.recommendation.id,
-            accepted: true,
-          }),
-        },
-      );
-      await onApplied(assistant);
-      setApplied(true);
+      await resetSuggestion(subject);
+      setState({ messages: [], questions: [] });
+      setUsed("");
     } catch (e) {
       setError(errorText(e));
-    } finally {
-      setApplying(false);
     }
   }
   const proposal = state.recommendation;
-  const isApplied = applied || proposal?.applied === true;
+  const isUsed = !!proposal && used === proposal.id;
   return (
-    <Panel title="Suggest a name and personality" id="setup-title">
-      <p className="soft">
-        Answer a question or two, and the assistant suggests a name, a
-        personality and an avatar.
-      </p>
+    <Panel title="Suggest a name and personality" id={`suggest-${subject}`}>
+      <p className="soft">{intro[subject]}</p>
       <ErrorNotice error={error} />
       {demo && <p className="muted small">Not available in the demo.</p>}
       {state.messages.length > 0 && (
@@ -125,7 +134,7 @@ export function AssistantSetup({
               className={m.role === "user" ? "setup-you" : "setup-them"}
             >
               <span className="label">
-                {m.role === "user" ? "You" : currentName || "Assistant"}
+                {m.role === "user" ? "You" : askerName || "Assistant"}
               </span>
               {m.content}
             </p>
@@ -151,10 +160,10 @@ export function AssistantSetup({
       )}
       {state.messages.length > 0 && (
         <div className="form">
-          <label htmlFor="setup-answer">
+          <label htmlFor={`setup-answer-${subject}`}>
             Your answer
             <textarea
-              id="setup-answer"
+              id={`setup-answer-${subject}`}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               rows={2}
@@ -172,6 +181,14 @@ export function AssistantSetup({
             >
               Send
             </button>
+            <button
+              type="button"
+              className="btn btn-quiet"
+              disabled={busy}
+              onClick={() => void startOver()}
+            >
+              Start over
+            </button>
           </div>
         </div>
       )}
@@ -181,7 +198,7 @@ export function AssistantSetup({
             <Avatar of={proposal} size={96} />
             <div className="setup-proposal-name">
               <h3>{proposal.name}</h3>
-              {hasFace(proposal) && (
+              {subject === "assistant" && hasFace(proposal) && (
                 <p className="setup-favicon muted small">
                   <Avatar of={proposal} size={16} />
                   As the tab icon
@@ -190,24 +207,29 @@ export function AssistantSetup({
             </div>
           </div>
           {proposal.avatar.look && (
-            <p className="soft small">How I'll look: {proposal.avatar.look}</p>
+            <p className="soft small">
+              How they'll look: {proposal.avatar.look}
+            </p>
           )}
-          {!isApplied && (
-            <p className="muted small">Codex draws this once you use it.</p>
-          )}
+          <p className="muted small">Codex draws this once they're added.</p>
           <p>{proposal.personality}</p>
           <p className="muted small">{proposal.rationale}</p>
           <div className="actions">
             <button
               type="button"
               className="btn btn-primary"
-              disabled={applying || busy || isApplied || demo}
-              onClick={() => void apply()}
+              disabled={busy || demo}
+              onClick={() => {
+                onUse(proposal);
+                setUsed(proposal.id);
+              }}
             >
-              {isApplied ? "In use" : "Use this"}
+              Use this
             </button>
             <span className="muted small" role="status">
-              {isApplied ? "Saved." : "Nothing changes until you use it."}
+              {isUsed
+                ? "Filled in. Nothing is saved until you add them."
+                : "Nothing changes until you use it."}
             </span>
           </div>
         </div>

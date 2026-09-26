@@ -94,7 +94,10 @@ export function MemoryView({
     <div className="page memory">
       <header className="page-header">
         <h1>Memory</h1>
-        <p className="muted">What the assistant remembers between chats.</p>
+        <p className="muted">
+          What the assistant remembers between chats. What it knows about you,
+          every assistant shares; what one keeps about itself stays its own.
+        </p>
       </header>
       <form className="memory-add card" onSubmit={add}>
         <label className="sr-only" htmlFor="memory">
@@ -190,11 +193,13 @@ export function MemoryView({
                       <div className="memory-text">
                         <p>{m.content}</p>
                         <p className="muted small">
-                          {m.source === "owner"
-                            ? "From you"
-                            : m.source === "assistant"
-                              ? "From the assistant"
-                              : "Source unknown"}
+                          {m.assistant
+                            ? `${state.assistants.find((a) => a.id === m.assistant)?.name ?? "An assistant"}, about itself; only it reads this`
+                            : m.source === "owner"
+                              ? "From you"
+                              : m.source === "assistant"
+                                ? "From the assistant"
+                                : "Source unknown"}
                           {dateLabel(m.updated_at) &&
                             ` · ${dateLabel(m.updated_at)}`}
                           {m.supersedes && " · corrected"}

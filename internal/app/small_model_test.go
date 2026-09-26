@@ -104,7 +104,7 @@ func (f *fakeCLIs) calls() int {
 func smallModelsFor(t *testing.T, engineName string) []config.Harness {
 	t.Helper()
 	cfg := config.Default()
-	cfg.Model.Engine = engineName
+	seated(&cfg).Model.Engine = engineName
 	models, err := cfg.SmallModels()
 	if err != nil {
 		t.Fatal(err)
@@ -251,13 +251,68 @@ func TestSmallModelsReportWhenNeitherLoginOffersItsApprovedModel(t *testing.T) {
 	}
 }
 
-func TestSmallModelsNeverSendAnUnapprovedModel(t *testing.T) {
+func TestSmallModelsNeverReachAnUnknownEngine(t *testing.T) {
 	f := newFakeCLIs(t)
 	s := f.models()
 	cfg := config.Default()
-	astra, opus := cfg.AssistantHarness(), cfg.Harness("claude", "opus", "")
-	if _, err := s.ask(context.Background(), []config.Harness{astra, opus}, nil, nil); err == nil || f.calls() != 0 {
+	unknown := cfg.Harness("gemini", "flash", "")
+	if _, err := s.ask(context.Background(), []config.Harness{unknown}, nil, nil); err == nil || f.calls() != 0 {
 		t.Fatal(err, f.calls())
+	}
+}
+
+// A model on the API is the owner's choice too: it is asked as named, with
+// nothing to discover, and bounded as every small job is.
+func TestSmallModelsAskTheOwnersAPIModel(t *testing.T) {
+	f := newFakeCLIs(t)
+	cfg := config.Default()
+	cfg.Engines.OpenAICompatible = config.HTTPEngine{BaseURL: "http://127.0.0.1:9/v1", APIKeyEnv: "SMALL_TEST_KEY"}
+	cfg.Models.Suggestions = config.SmallModel{Engine: "openai-compatible", Model: "local-small", Effort: "low"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	models, err := cfg.SmallModels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.models().ask(context.Background(), models, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.discovered) != 0 || len(f.completed) != 1 {
+		t.Fatalf("discovered %v, completed %d", f.discovered, len(f.completed))
+	}
+	c := f.completed[0]
+	if c.Engine != "openai-compatible" || c.Model != "local-small" || c.Effort != "low" || c.Endpoint != "http://127.0.0.1:9/v1/chat/completions" || c.APIKeyEnv != "SMALL_TEST_KEY" {
+		t.Fatalf("%+v", c)
+	}
+	if c.MaxOutputTokens != 128 || c.MaxContextBytes != 8192 || c.Retry == nil || c.Retry.MaxRetries != 0 {
+		t.Fatalf("an API small job is not bounded: %+v", c)
+	}
+}
+
+// A model the owner chose in Settings is the one asked, at its effort, and
+// no approved small model stands in for it.
+func TestSmallModelsAskTheOwnersChoice(t *testing.T) {
+	f := newFakeCLIs(t)
+	cfg := config.Default()
+	cfg.Models.Suggestions = config.SmallModel{Engine: "codex", Model: "gpt-6-astra", Effort: "high"}
+	models, err := cfg.SmallModels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.models().ask(context.Background(), models, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.completed) != 1 || f.completed[0].Engine != "codex" || f.completed[0].Model != "gpt-6-astra" || f.completed[0].Effort != "high" {
+		t.Fatalf("%+v", f.completed)
+	}
+	// When the login doesn't offer it, nothing else is tried.
+	f = newFakeCLIs(t)
+	f.offered["codex"] = f.offered["codex"][1:]
+	_, err = f.models().ask(context.Background(), models, nil, nil)
+	var failure *smallModelFailure
+	if !errors.As(err, &failure) || !failure.notOffered() || len(f.completed) != 0 {
+		t.Fatal(err, f.completed)
 	}
 }
 

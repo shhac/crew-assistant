@@ -1,11 +1,35 @@
 {
   "//": "crew-assistant's settings. Copy to ~/.config/app.paulie.crew-assistant/config.json, or run crew-assistant init and change it with crew-assistant config set. Keys may be left out; they take the defaults shown here.",
-  "model": {
-    "//": "The assistant's own model. Team members choose theirs on the Team tab.",
-    "engine": "codex",
-    "model": "gpt-6-astra",
-    "effort": "high",
-    "max_tokens": 4096
+  "assistant": {
+    "//": "seat is the id of the assistant you work with, from assistants; choose it in Settings. theme is the dashboard's appearance: system, light or dark.",
+    "seat": "milo",
+    "theme": "system"
+  },
+  "assistants": [
+    {
+      "id": "milo",
+      "name": "Milo",
+      "personality": "Calm, concise and proactive. Bring clear recommendations and evidence; handle the chasing.",
+      "avatar": {
+        "shape": "orb",
+        "background": "#16211e",
+        "accent": "#a8c5a8"
+      },
+      "model": {
+        "engine": "codex",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "max_tokens": 4096
+      }
+    }
+  ],
+  "models": {
+    "suggestions": {
+      "//": "The model that suggests your next message and writes loading lines. Leave engine, model and effort empty for the small models: Luna on Codex, Haiku on Claude.",
+      "engine": "",
+      "model": "",
+      "effort": ""
+    }
   },
   "engines": {
     "//": "How to reach each engine, shared by the assistant, team roles, small models and the usage meter.",
@@ -44,11 +68,6 @@
     "loading_phrases": {
       "enabled": true
     }
-  },
-  "assistant": {
-    "name": "Milo",
-    "personality": "Calm, concise and proactive. Bring clear recommendations and evidence; handle the chasing.",
-    "theme": "system"
   },
   "dashboard": {
     "//": "tailscale serve shares the dashboard on your tailnet with the logins in allowed_users.",

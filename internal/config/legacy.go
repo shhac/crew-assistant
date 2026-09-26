@@ -10,8 +10,17 @@ import (
 // dashboard written before still works and a report of an unknown key can
 // say where it moved. The model section's moves and the dropped keys are
 // carried out from this table; the usage limits change meaning as well as
-// place, so convertRoleUsage does those.
+// place, so convertRoleUsage does those, and the assistant's own settings
+// become a profile together, so convertProfile does those.
 var renamedKeys = map[string]string{
+	"assistant.name":              profileKey + ".name",
+	"assistant.personality":       profileKey + ".personality",
+	"assistant.avatar":            profileKey + ".avatar",
+	"model":                       profileKey + ".model, and its CLI and endpoint settings engines.<engine>",
+	"model.engine":                profileKey + ".model.engine",
+	"model.model":                 profileKey + ".model.model",
+	"model.effort":                profileKey + ".model.effort",
+	"model.max_tokens":            profileKey + ".model.max_tokens",
 	"model.codex_bin":             "engines.codex.bin",
 	"model.codex_home":            "engines.codex.home",
 	"model.claude_bin":            "engines.claude.bin",
@@ -36,7 +45,57 @@ func convertLegacy(doc map[string]any) bool {
 	engine := defaultAPIEngine(doc)
 	moved := moveRenamedKeys(doc)
 	usage := convertRoleUsage(doc)
-	return engine || moved || usage
+	profile := convertProfile(doc)
+	// A model section whose settings all moved away is gone too.
+	if model, ok := doc["model"].(map[string]any); ok && len(model) == 0 {
+		delete(doc, "model")
+	}
+	return engine || moved || usage || profile
+}
+
+// profileKey is where the seated assistant's settings went: its profile.
+const profileKey = "assistants[<seat>]"
+
+// convertProfile makes the assistant of a layout from before profiles, its
+// name, personality and avatar and the model section's choice, into the
+// first profile, and seats it. What the file left out is the default. Its id
+// comes from its name, so converting the same file again gives the same one.
+func convertProfile(doc map[string]any) bool {
+	if _, current := doc["assistants"]; current {
+		return false
+	}
+	assistant, _ := doc["assistant"].(map[string]any)
+	model, _ := doc["model"].(map[string]any)
+	old, oldModel := map[string]any{}, map[string]any{}
+	for _, key := range []string{"name", "personality", "avatar"} {
+		if value, ok := assistant[key]; ok {
+			old[key] = value
+			delete(assistant, key)
+		}
+	}
+	for _, key := range []string{"engine", "model", "effort", "max_tokens"} {
+		if value, ok := model[key]; ok {
+			oldModel[key] = value
+			delete(model, key)
+		}
+	}
+	if len(old) == 0 && len(oldModel) == 0 {
+		return false
+	}
+	var profile map[string]any
+	raw, _ := json.Marshal(DefaultProfile())
+	_ = json.Unmarshal(raw, &profile)
+	for key, value := range old {
+		profile[key] = value
+	}
+	for key, value := range oldModel {
+		profile["model"].(map[string]any)[key] = value
+	}
+	name, _ := profile["name"].(string)
+	profile["id"] = ProfileID(name)
+	doc["assistants"] = []any{profile}
+	section(doc, "assistant")["seat"] = profile["id"]
+	return true
 }
 
 // defaultAPIEngine reads a model section with no engine as an API
@@ -44,7 +103,7 @@ func convertLegacy(doc map[string]any) bool {
 // and billing path. It has to run before the section's settings move away.
 func defaultAPIEngine(doc map[string]any) bool {
 	model, ok := doc["model"].(map[string]any)
-	if !ok {
+	if _, current := doc["assistants"]; !ok || current {
 		return false
 	}
 	if _, explicit := model["engine"]; explicit {
@@ -66,7 +125,7 @@ func defaultAPIEngine(doc map[string]any) bool {
 func moveRenamedKeys(doc map[string]any) bool {
 	changed := false
 	for from, to := range renamedKeys {
-		if from == "limits.role_usage" {
+		if from == "limits.role_usage" || strings.HasPrefix(to, profileKey) {
 			continue
 		}
 		value, ok := removePath(doc, from)

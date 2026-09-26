@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -17,8 +18,9 @@ type smallCompletion func(context.Context, engine.Config, []engine.Message, []en
 type smallDiscovery func(context.Context, engine.Config) ([]engine.ModelOption, error)
 
 // smallModels answers loading captions and next-message suggestions with the
-// approved small models: the assistant's own CLI first, then the other one.
-// Each attempt is bounded and never retried, and an engine that just failed
+// models config.SmallModels lists: the model the owner chose in Settings, or
+// else the approved small models, the assistant's own CLI first, then the
+// other one. Each attempt is bounded and never retried, and an engine that just failed
 // rests for a while, so an uninstalled, signed-out or exhausted CLI costs
 // nothing on the next message. An engine whose login last reported nothing
 // left isn't tried either, as the sidebar shows it.
@@ -91,9 +93,10 @@ func (f *smallModelFailure) notOffered() bool {
 func (s *smallModels) ask(ctx context.Context, models []config.Harness, prompt []engine.Message, reserve func(context.Context) error) (engine.Message, error) {
 	failure := &smallModelFailure{}
 	for _, m := range models {
-		// Only the approved pair is ever sent, whatever the caller passed.
-		if !config.ApprovedSmallModel(m.Engine, m.Model) {
-			failure.attempts = append(failure.attempts, fmt.Errorf("%s on %s is not an approved small model", m.Model, m.Engine))
+		// Only an engine the config knows is ever reached, whatever the
+		// caller passed.
+		if !slices.Contains(config.EngineNames, m.Engine) {
+			failure.attempts = append(failure.attempts, fmt.Errorf("%s is not an engine", m.Engine))
 			continue
 		}
 		if cause := s.restingCause(m.Engine); cause != nil {
@@ -139,6 +142,12 @@ func (s *smallModels) try(ctx context.Context, m config.Harness, prompt []engine
 func (s *smallModels) verify(ctx context.Context, m config.Harness, reserve func(context.Context) error) (engine.Config, error) {
 	ec := EngineConfig(m)
 	ec.Effort, ec.WorkDirRoot, ec.MaxOutputTokens, ec.MaxContextBytes, ec.Timeout, ec.Retry, ec.BeforeRequest = "", s.workDir(), 128, 8192, s.attempt, &engine.RetryPolicy{MaxRetries: 0}, reserve
+	// An API lists nothing to check against; the owner named the model, and
+	// the endpoint refuses one it doesn't serve.
+	if !slices.Contains(config.CLIEngineNames, m.Engine) {
+		ec.Effort = m.Effort
+		return ec, nil
+	}
 	models, err := s.discover(ctx, ec)
 	if err != nil {
 		return engine.Config{}, err

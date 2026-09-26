@@ -218,8 +218,7 @@ func TestAConfigInTheEarlierLayoutStillSaves(t *testing.T) {
 	if json.Unmarshal(w.Body.Bytes(), &c) != nil {
 		t.Fatal(w.Body.String())
 	}
-	model := c["model"].(map[string]any)
-	model["claude_home"] = "/synthetic/claude"
+	c["model"] = map[string]any{"claude_home": "/synthetic/claude"}
 	delete(c, "engines")
 	c["limits"].(map[string]any)["role_usage"] = map[string]any{"claude_max_used_percent": 95, "on_unavailable": "pause"}
 	body, _ := json.Marshal(c)
@@ -258,7 +257,7 @@ func TestAStoppingDaemonRefusesNewModelWork(t *testing.T) {
 	if err := a.Run(lifecycle.Stop{Graceful: stopped, Force: context.Background()}, true); err != nil {
 		t.Fatal(err)
 	}
-	w := call("POST", "/api/setup/interview", `{"message":"Hello"}`)
+	w := call("POST", "/api/setup/member/interview", `{"message":"Hello"}`)
 	if w.Code != 503 || !strings.Contains(w.Body.String(), "Crew-assistant is stopping") {
 		t.Fatal(w.Code, w.Body.String())
 	}

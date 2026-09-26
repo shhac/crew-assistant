@@ -102,11 +102,8 @@ func TestNewWorkIsRefusedWhileStopping(t *testing.T) {
 	stopTaking()
 	a.setStop(lifecycle.Stop{Graceful: stopped, Force: context.Background()})
 	ctx := context.Background()
-	if _, err := a.InterviewIdentity(ctx, "Hello"); !errors.Is(err, ErrStopping) {
+	if _, err := a.InterviewIdentity(ctx, SetupAssistant, "Hello"); !errors.Is(err, ErrStopping) {
 		t.Errorf("interview: %v", err)
-	}
-	if _, err := a.ApplyIdentity(ctx, "proposal", true); !errors.Is(err, ErrStopping) {
-		t.Errorf("apply: %v", err)
 	}
 	if _, err := a.SuggestNextMessage(ctx, "reply"); !errors.Is(err, ErrStopping) {
 		t.Errorf("suggestion: %v", err)

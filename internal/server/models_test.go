@@ -33,7 +33,7 @@ func TestModelEndpointUsesSavedProfileAndCaches(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 			t.Fatal(err)
 		}
-		if !result.Available || result.Profile != "assistant" || result.Current.Model != cfg.Model.Model || result.Default.Model != config.Default().Model.Model || len(result.Models) != 1 {
+		if !result.Available || result.Profile != "assistant" || result.Current.Model != cfg.AssistantHarness().Model || result.Default.Model != config.DefaultProfile().Model.Model || len(result.Models) != 1 {
 			t.Fatal(w.Body.String())
 		}
 	}
@@ -59,7 +59,7 @@ func TestModelEndpointFailureDoesNotInventModels(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Available || len(result.Models) != 0 || result.Current.Model != cfg.Model.Model || strings.Contains(w.Body.String(), "secret-provider") {
+	if result.Available || len(result.Models) != 0 || result.Current.Model != cfg.AssistantHarness().Model || strings.Contains(w.Body.String(), "secret-provider") {
 		t.Fatal(w.Body.String())
 	}
 }
@@ -93,7 +93,7 @@ func TestModelEndpointCanPreviewClaudeBeforeSavingEngine(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Engine != "claude" || !result.Available || a.Config().Model.Engine != "codex" {
+	if result.Engine != "claude" || !result.Available || a.Config().AssistantHarness().Engine != "codex" {
 		t.Fatal(w.Body.String())
 	}
 }

@@ -26,6 +26,14 @@ func Load(path string) (Config, error) {
 	if data, err = ConvertLegacyJSON(data); err != nil {
 		return c, fmt.Errorf("decode config: %w", err)
 	}
+	// Saved assistants replace the default one, and its seat, rather than
+	// being read over them field by field.
+	var saved struct {
+		Assistants json.RawMessage `json:"assistants"`
+	}
+	if json.Unmarshal(data, &saved) == nil && saved.Assistants != nil {
+		c.Assistants, c.Assistant.Seat = nil, ""
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	if err = dec.Decode(&c); err != nil {
 		return c, fmt.Errorf("decode config: %w", err)

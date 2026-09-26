@@ -37,6 +37,10 @@ type Role struct {
 // team works.
 var roleKinds = []string{RolePM, RoleResearcher, RoleDesigner, RoleImplementer, RoleReviewer, RoleQA}
 
+// IsRoleKind reports whether kind is a kind of role, which a member can't
+// be named.
+func IsRoleKind(kind string) bool { return slices.Contains(roleKinds, kind) }
+
 // working reports whether a kind of role does the work once it has started,
 // rather than researching it, advising on its design or keeping the list.
 func working(kind string) bool {

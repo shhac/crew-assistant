@@ -37,8 +37,8 @@ func registerCompletions(root *cobra.Command, o *options) {
 			return completionValues(nil, prefix)
 		case strings.HasSuffix(args[0], ".home"):
 			return nil, cobra.ShellCompDirectiveFilterDirs
-		case args[0] == "model.model":
-			return completionValues(configuredModels(o), prefix)
+		case args[0] == "assistant.seat":
+			return completionValues(configuredAssistants(o), prefix)
 		}
 		return completionValues(values[args[0]], prefix)
 	}
@@ -72,10 +72,16 @@ func completionValues(values []string, prefix string) ([]string, cobra.ShellComp
 	return matches, cobra.ShellCompDirectiveNoFileComp
 }
 
-func configuredModels(o *options) []string {
+// configuredAssistants are the ids of the assistants that could take the
+// seat.
+func configuredAssistants(o *options) []string {
 	cfg, err := config.Load(o.configPath)
 	if err != nil {
 		return nil
 	}
-	return []string{cfg.Model.Model}
+	var ids []string
+	for _, p := range cfg.Assistants {
+		ids = append(ids, p.ID)
+	}
+	return ids
 }

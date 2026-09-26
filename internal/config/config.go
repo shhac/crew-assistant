@@ -3,7 +3,6 @@ package config
 
 import (
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,10 +17,13 @@ const DefaultAssistantName = "Milo"
 type Config struct {
 	Chat      Chat      `json:"chat"`
 	Assistant Assistant `json:"assistant"`
-	Dashboard Dashboard `json:"dashboard"`
-	// Model is the assistant's own model; Engines are how every model is
-	// reached.
-	Model       Model        `json:"model"`
+	// Assistants are the assistant profiles the owner keeps on their team;
+	// Assistant.Seat says which of them is the assistant.
+	Assistants []AssistantProfile `json:"assistants"`
+	Dashboard  Dashboard          `json:"dashboard"`
+	// Models are the models for the daemon's own small jobs; Engines are how
+	// every model is reached.
+	Models      Models       `json:"models"`
 	Engines     Engines      `json:"engines"`
 	Slack       Slack        `json:"slack"`
 	Linear      Linear       `json:"linear"`
@@ -32,8 +34,7 @@ type Chat struct {
 	LoadingPhrases LoadingPhrases `json:"loading_phrases"`
 }
 
-// LoadingPhrases always use the approved small models; there is no model or
-// effort to choose.
+// LoadingPhrases use the model Models.Suggestions chooses.
 type LoadingPhrases struct {
 	Enabled bool `json:"enabled"`
 }
@@ -56,11 +57,12 @@ func NormalizeTheme(theme string) string {
 	return theme
 }
 
+// Assistant is who sits in the assistant's seat, and how the dashboard looks.
 type Assistant struct {
-	Name        string `json:"name"`
-	Personality string `json:"personality"`
-	Theme       string `json:"theme"`
-	Avatar      Avatar `json:"avatar"`
+	// Seat is the id of the assistant profile the owner works with; empty
+	// is no one, and chat waits until the owner chooses one.
+	Seat  string `json:"seat"`
+	Theme string `json:"theme"`
 }
 type Connection struct {
 	ImportAssignments bool     `json:"import_assignments"`
@@ -102,9 +104,9 @@ type FilePaths struct {
 func Default() Config {
 	return Config{
 		Chat:        Chat{LoadingPhrases: LoadingPhrases{Enabled: true}},
-		Assistant:   Assistant{Name: DefaultAssistantName, Personality: "Calm, concise and proactive. Bring clear recommendations and evidence; handle the chasing.", Theme: ThemeSystem, Avatar: Avatar{Shape: "orb", Background: "#16211e", Accent: "#a8c5a8"}},
+		Assistant:   Assistant{Seat: DefaultProfile().ID, Theme: ThemeSystem},
+		Assistants:  []AssistantProfile{DefaultProfile()},
 		Dashboard:   Dashboard{Addr: "127.0.0.1:8340", Tailscale: "off", TailscalePort: 8443, AllowedUsers: []string{}},
-		Model:       defaultModel(),
 		Engines:     Engines{OpenAICompatible: HTTPEngine{BaseURL: defaultBaseURL, APIKeyEnv: defaultAPIKeyEnv}},
 		Connections: []Connection{},
 		Slack:       Slack{BotTokenEnv: "SLACK_BOT_TOKEN", AppTokenEnv: "SLACK_APP_TOKEN"},
@@ -150,19 +152,19 @@ func Paths() (FilePaths, error) {
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func (c Config) Validate() error {
-	if strings.TrimSpace(c.Assistant.Name) == "" || len(c.Assistant.Name) > 80 {
-		return errors.New("assistant.name must contain 1–80 characters")
-	}
-	if len(c.Assistant.Personality) > 4000 {
-		return errors.New("assistant.personality must not exceed 4000 characters")
-	}
 	switch c.Assistant.Theme {
 	case ThemeSystem, ThemeLight, ThemeDark:
 	default:
 		return errors.New("assistant.theme must be system, light or dark")
 	}
-	if err := c.Assistant.Avatar.Validate(); err != nil {
-		return fmt.Errorf("assistant.avatar: %w", err)
+	if err := validateProfiles(c.Assistants); err != nil {
+		return err
+	}
+	if _, ok := c.Profile(c.Assistant.Seat); c.Assistant.Seat != "" && !ok {
+		return errors.New("assistant.seat must be the id of one of the assistants, or empty")
+	}
+	if err := c.Models.validate(); err != nil {
+		return err
 	}
 	if err := validateConnections(c.Connections); err != nil {
 		return err
@@ -193,9 +195,6 @@ func (c Config) Validate() error {
 	}
 	if c.Limits.MaxModelTurns < 1 || c.Limits.MaxModelTurns > 32 {
 		return errors.New("limits.max_model_turns must be between 1 and 32")
-	}
-	if err := c.Model.Validate(); err != nil {
-		return fmt.Errorf("model: %w", err)
 	}
 	if err := c.Engines.validate(); err != nil {
 		return err

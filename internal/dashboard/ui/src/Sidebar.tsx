@@ -59,7 +59,7 @@ export function Sidebar({
   const current = (page: Route["page"]) =>
     route.page === page ||
     (page === "projects" && route.page === "project") ||
-    (page === "team" && route.page === "member")
+    (page === "team" && (route.page === "member" || route.page === "assistant"))
       ? "page"
       : undefined;
   return (

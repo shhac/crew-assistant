@@ -57,6 +57,29 @@
   flex-wrap: nowrap;
 }
 
+/* Choosing who sits in the assistant's seat */
+.seat-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.seat-choice {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+
+.seat-choice:has(input:checked) {
+  border-color: var(--accent);
+}
+
 /* A face beside how it should look, to draw it again */
 .face-edit {
   display: flex;

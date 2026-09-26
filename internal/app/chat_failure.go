@@ -26,6 +26,8 @@ func chatFailureReason(err error) string {
 	detail := strings.ToLower(err.Error())
 	reason := "The assistant could not finish this message."
 	switch {
+	case errors.Is(err, ErrNoAssistant):
+		reason = "Choose your assistant in Settings before sending another message."
 	case errors.Is(err, engine.ErrNotConfigured):
 		reason = "Choose an assistant model in Settings before sending another message."
 	case strings.Contains(detail, "daily model call allowance"):

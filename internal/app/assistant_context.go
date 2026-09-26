@@ -66,8 +66,18 @@ func assistantView(s core.Snapshot) core.Snapshot {
 		}
 	}
 	s.Wakes = wakes
-	// How the assistant looks is for the owner's screen, not its turns.
-	s.Assistant.Avatar, s.Assistant.AvatarSVG = config.Avatar{}, ""
+	// How the assistant looks is for the owner's screen, not its turns, and
+	// the other assistant profiles are none of its business.
+	s.Assistant.Avatar, s.Assistant.AvatarSVG, s.Assistants = config.Avatar{}, "", nil
+	// Memories about the owner are every assistant's; what another assistant
+	// kept about itself is its own.
+	memories := make([]core.Memory, 0, len(s.Memories))
+	for _, m := range s.Memories {
+		if m.Assistant == "" || m.Assistant == s.Assistant.ID {
+			memories = append(memories, m)
+		}
+	}
+	s.Memories = memories
 	members := make([]core.Member, len(s.Members))
 	for i, m := range s.Members {
 		m.Avatar, m.AvatarSVG, m.Instructions = config.Avatar{}, "", text.Clip(m.Instructions, 300)

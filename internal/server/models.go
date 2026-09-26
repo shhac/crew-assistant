@@ -52,7 +52,7 @@ func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
 		cfg := a.Config()
 		// The cache is keyed by the CLI and login too, so changing either
 		// discovers again.
-		selected, defaults := cfg.AssistantHarness(), config.Default().Model
+		selected, defaults := cfg.AssistantHarness(), config.DefaultProfile().Model
 		result := modelCatalog{Profile: profile, Engine: selected.Engine, Models: []engine.ModelOption{}, Current: modelSelection{selected.Model, selected.Effort}, Default: modelSelection{defaults.Model, defaults.Effort}}
 		if a.Demo {
 			result.Detail = "Model discovery is unavailable in the demo."

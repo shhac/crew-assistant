@@ -74,6 +74,29 @@ func TestConfigGetSetUnsetOnAFileInTheEarlierLayout(t *testing.T) {
 	}
 }
 
+// The seat takes only an assistant there is, and an earlier layout's
+// assistant is the one in it.
+func TestTheSeatNamesAnAssistant(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(file, []byte(`{"assistant":{"name":"Juniper"},"model":{"engine":"claude","model":"opus","effort":"","max_tokens":4096}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := runConfig(t, dir, "get", "assistant.seat"); err != nil || got["value"] != "juniper" {
+		t.Fatalf("%v %v", got, err)
+	}
+	if _, err := runConfig(t, dir, "set", "assistant.seat", "nobody"); err == nil {
+		t.Fatal("a seat for no one was accepted")
+	}
+	if _, err := runConfig(t, dir, "set", "assistant.seat", ""); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(file)
+	if err != nil || cfg.Assistant.Seat != "" || len(cfg.Assistants) != 1 || cfg.Assistants[0].Model.Model != "opus" {
+		t.Fatalf("%+v %v", cfg, err)
+	}
+}
+
 // Each engine's keys write to that engine and leave the other as it was.
 func TestEngineKeysLandOnTheirEngine(t *testing.T) {
 	for _, name := range []string{"codex", "claude"} {

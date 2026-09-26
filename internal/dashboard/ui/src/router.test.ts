@@ -10,6 +10,14 @@ describe("addresses", () => {
     expect(parseRoute("#/memory")).toEqual({ page: "memory" });
     expect(parseRoute("#/team")).toEqual({ page: "team" });
     expect(parseRoute("#/team/m%201")).toEqual({ page: "member", id: "m 1" });
+    expect(parseRoute("#/team/assistant/a%201")).toEqual({
+      page: "assistant",
+      id: "a 1",
+    });
+    expect(parseRoute("#/team/assistant")).toEqual({ page: "team" });
+    expect(href({ page: "assistant", id: "a 1" })).toBe(
+      "#/team/assistant/a%201",
+    );
     expect(parseRoute("#/settings/model")).toEqual({
       page: "settings",
       section: "model",

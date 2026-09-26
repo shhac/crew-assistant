@@ -54,7 +54,7 @@ ready:
 	if err = json.Unmarshal(raw, &changed); err != nil {
 		t.Fatal(err)
 	}
-	changed.Assistant.Name = "Demo-only name"
+	changed.Assistants[0].Name = "Demo-only name"
 	if _, err = o.request("PUT", "/api/config", changed); err != nil {
 		t.Fatal(err)
 	}

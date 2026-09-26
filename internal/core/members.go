@@ -27,6 +27,7 @@ type Member struct {
 	Effort       string        `json:"effort,omitempty"`
 	Instructions string        `json:"instructions,omitempty"`
 	Description  string        `json:"description,omitempty"`
+	Personality  string        `json:"personality,omitempty"`
 	Avatar       config.Avatar `json:"avatar"`
 	// AvatarSVG is filled in when the state is read, and the drawing status
 	// by the app, which does the drawing; neither is stored.
@@ -47,8 +48,13 @@ type MemberInput struct {
 	Effort       string         `json:"effort"`
 	Instructions string         `json:"instructions"`
 	Description  string         `json:"description"`
+	Personality  string         `json:"personality"`
 	Avatar       *config.Avatar `json:"avatar,omitempty"`
 }
+
+// MaxPersonality is the most characters a personality holds, a member's as
+// an assistant's.
+const MaxPersonality = 4000
 
 // MaxMemberDescription is the most characters a member's description holds:
 // who they are, in the owner's words, drawn into every picture of them.
@@ -138,6 +144,9 @@ func (in MemberInput) validate(v *Snapshot, id string) error {
 	if len([]rune(strings.TrimSpace(in.Description))) > MaxMemberDescription {
 		return fmt.Errorf("a description must be at most %d characters", MaxMemberDescription)
 	}
+	if len(in.Personality) > MaxPersonality {
+		return fmt.Errorf("a personality must be at most %d characters", MaxPersonality)
+	}
 	if in.Avatar != nil {
 		if err := in.Avatar.Normalized().Validate(); err != nil {
 			return fmt.Errorf("avatar: %w", err)
@@ -165,11 +174,15 @@ func (s *Service) SaveMember(ctx context.Context, id string, in MemberInput) (Me
 		}
 		m.Name, m.Kinds, m.Engine = strings.TrimSpace(in.Name), in.kinds(), in.Engine
 		m.Model, m.Effort, m.Instructions = strings.TrimSpace(in.Model), strings.TrimSpace(in.Effort), strings.TrimSpace(in.Instructions)
-		m.Description = strings.TrimSpace(in.Description)
-		// A drawn picture is changed only by drawing again.
+		m.Description, m.Personality = strings.TrimSpace(in.Description), strings.TrimSpace(in.Personality)
+		// A drawn picture is changed only by drawing again; a new member
+		// keeps the look it is to be drawn with.
 		if in.Avatar != nil {
 			next := in.Avatar.Normalized()
-			next.Image, next.Look = m.Avatar.Image, m.Avatar.Look
+			next.Image = m.Avatar.Image
+			if id != "" {
+				next.Look = m.Avatar.Look
+			}
 			m.Avatar = next
 		}
 		out = *m

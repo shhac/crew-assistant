@@ -1,4 +1,5 @@
 import type {
+  AssistantProfile,
   Member,
   MemberKind,
   Playbook,
@@ -81,6 +82,17 @@ export const memberSummary = (m: Member) =>
     kindsLabel(m.kinds),
     [engineLabel(m.engine), m.model].filter(Boolean).join(" "),
   ].join(" · ");
+
+/** "Codex gpt-6-astra": what an assistant runs on. */
+export const assistantSummary = (a: AssistantProfile) =>
+  [
+    a.model.engine === "openai-compatible"
+      ? "An API"
+      : engineLabel(a.model.engine),
+    a.model.model,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
 /** The open projects whose team has this member in a role. */
 export const memberProjects = (member: Member, projects: Project[]) =>

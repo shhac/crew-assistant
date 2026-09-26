@@ -66,11 +66,11 @@ func TestLoadingCaptionOutputBounds(t *testing.T) {
 
 func TestLoadingCaptionSkipsAPIAssistantsAndDisabledCaptions(t *testing.T) {
 	for _, change := range []func(*App){
-		func(a *App) { a.cfg.Model.Engine = "openai-compatible" },
+		func(a *App) { seated(&a.cfg).Model.Engine = "openai-compatible" },
 		func(a *App) { a.cfg.Chat.LoadingPhrases.Enabled = false },
 	} {
 		a := testApp(t)
-		a.cfg.Model = config.Default().Model
+		seated(&a.cfg).Model = config.DefaultProfile().Model
 		change(a)
 		f := newFakeCLIs(t)
 		a.small = f.models()
@@ -83,7 +83,7 @@ func TestLoadingCaptionSkipsAPIAssistantsAndDisabledCaptions(t *testing.T) {
 
 func TestLoadingCaptionWithBothCLIsFailingLeavesTheTurnAlone(t *testing.T) {
 	a := testApp(t)
-	a.cfg.Model = config.Default().Model
+	seated(&a.cfg).Model = config.DefaultProfile().Model
 	f := newFakeCLIs(t)
 	f.discoverErr["codex"] = errors.New("codex: not installed")
 	f.replyErr["claude"] = errors.New("usage limit reached")
@@ -115,7 +115,7 @@ func TestLoadingCaptionWithBothCLIsFailingLeavesTheTurnAlone(t *testing.T) {
 
 func TestCancelledTurnSkipsLoadingWork(t *testing.T) {
 	a := testApp(t)
-	a.cfg.Model = config.Default().Model
+	seated(&a.cfg).Model = config.DefaultProfile().Model
 	f := newFakeCLIs(t)
 	a.small = f.models()
 	ctx, cancel := context.WithCancel(context.Background())

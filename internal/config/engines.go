@@ -154,9 +154,13 @@ type Harness struct {
 	APIKeyEnv string
 }
 
-// Harness is model and effort on engine, reached through this config.
+// Harness is model and effort on engine, reached through this config. It
+// may use as many tokens as the seated assistant's replies may.
 func (c Config) Harness(engine, model, effort string) Harness {
-	h := Harness{Engine: engine, Model: model, Effort: effort, MaxTokens: c.Model.MaxTokens}
+	h := Harness{Engine: engine, Model: model, Effort: effort, MaxTokens: defaultModel().MaxTokens}
+	if seated, ok := c.Seated(); ok {
+		h.MaxTokens = seated.Model.MaxTokens
+	}
 	if _, ok := c.Engines.CLI(engine); ok {
 		h.Bin, h.Home = c.Engines.Binary(engine)
 		return h
@@ -165,9 +169,21 @@ func (c Config) Harness(engine, model, effort string) Harness {
 	return h
 }
 
-// AssistantHarness is the assistant's own model.
+// ProfileHarness is an assistant profile's own model.
+func (c Config) ProfileHarness(p AssistantProfile) Harness {
+	h := c.Harness(p.Model.Engine, p.Model.Model, p.Model.Effort)
+	h.MaxTokens = p.Model.MaxTokens
+	return h
+}
+
+// AssistantHarness is the seated assistant's own model; with no one in the
+// seat it names no engine.
 func (c Config) AssistantHarness() Harness {
-	return c.Harness(c.Model.Engine, c.Model.Model, c.Model.Effort)
+	seated, ok := c.Seated()
+	if !ok {
+		return Harness{}
+	}
+	return c.ProfileHarness(seated)
 }
 
 func (e Engines) validate() error {

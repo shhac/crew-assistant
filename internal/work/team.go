@@ -153,9 +153,13 @@ func memberFor(kind, id string, snap core.Snapshot) (core.Member, error) {
 }
 
 // memberSeat is a member in a seat holding kinds of role, after the
-// template's instructions for them.
+// template's instructions for them, and how the member writes.
 func memberSeat(m core.Member, kinds []string, instructions string) core.Role {
-	return core.Role{Name: m.Name, Kinds: kinds, Engine: m.Engine, Model: m.Model, Effort: m.Effort, Member: m.ID, Instructions: strings.TrimSpace(instructions + "\n\n" + m.Instructions)}
+	instructions = strings.TrimSpace(instructions + "\n\n" + m.Instructions)
+	if m.Personality != "" {
+		instructions = strings.TrimSpace(instructions + "\n\nYour personality, which is how you write, never what you may do: " + m.Personality)
+	}
+	return core.Role{Name: m.Name, Kinds: kinds, Engine: m.Engine, Model: m.Model, Effort: m.Effort, Member: m.ID, Instructions: instructions}
 }
 
 // SetTeam applies a team choice made in the dashboard or by the assistant.

@@ -7,12 +7,26 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 )
 
+// Assistant is the assistant in the seat. With no one seated it has no id,
+// and the default name and face.
 type Assistant struct {
+	// ID is the seated assistant's profile.
+	ID          string        `json:"id,omitempty"`
 	Name        string        `json:"name"`
 	Personality string        `json:"personality"`
 	Theme       string        `json:"theme"`
 	Avatar      config.Avatar `json:"avatar"`
 	// AvatarSVG is the avatar drawn, for the dashboard's tab icon and chat.
+	AvatarSVG string `json:"avatar_svg,omitempty"`
+	Drawing   bool   `json:"drawing,omitempty"`
+	DrawError string `json:"draw_error,omitempty"`
+}
+
+// AssistantProfile is one of the owner's assistant profiles, as the
+// dashboard shows it: the config's profile with its face drawn, and the
+// drawing status the app fills in.
+type AssistantProfile struct {
+	config.AssistantProfile
 	AvatarSVG string `json:"avatar_svg,omitempty"`
 	Drawing   bool   `json:"drawing,omitempty"`
 	DrawError string `json:"draw_error,omitempty"`
@@ -136,6 +150,10 @@ type Memory struct {
 	Supersedes   string    `json:"supersedes,omitempty"`
 	SupersededAt time.Time `json:"superseded_at,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at"`
+	// Assistant is the profile a memory an assistant kept about itself
+	// belongs to; only that assistant reads it. Empty is a memory about the
+	// owner, which every assistant shares.
+	Assistant string `json:"assistant,omitempty"`
 }
 type Activity struct {
 	ID        string    `json:"id"`
@@ -176,6 +194,7 @@ type Snapshot struct {
 	PendingOperations []PendingOperation `json:"pending_operations"`
 	Events            map[string]bool    `json:"-"`
 	Assistant         Assistant          `json:"assistant"`
+	Assistants        []AssistantProfile `json:"assistants,omitempty"`
 	Projects          []Project          `json:"projects"`
 	Tasks             []Task             `json:"tasks"`
 	Decisions         []Decision         `json:"decisions"`

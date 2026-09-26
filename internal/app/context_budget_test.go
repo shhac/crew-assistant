@@ -53,7 +53,7 @@ func TestATurnTooLongForANewlyChosenModelIsSizedToItAndTriedOnce(t *testing.T) {
 		return result, err, budgets
 	}
 	small := engine.Usage{ContextWindow: 30000}
-	if result, err, budgets := run(engine.Result{Usage: small}, engine.Result{Message: "Fits now"}); err != nil || result.Message != "Fits now" || len(budgets) != 2 || budgets[1] != contextBudget(30000, a.Config().Model.MaxTokens) {
+	if result, err, budgets := run(engine.Result{Usage: small}, engine.Result{Message: "Fits now"}); err != nil || result.Message != "Fits now" || len(budgets) != 2 || budgets[1] != contextBudget(30000, a.Config().AssistantHarness().MaxTokens) {
 		t.Fatalf("result %+v, %v, budgets %v", result, err, budgets)
 	}
 	for name, first := range map[string]engine.Result{

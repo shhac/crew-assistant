@@ -119,6 +119,9 @@ it("chooses a new member's model from the models its engine offers", async () =>
   fireEvent.change(screen.getByLabelText(/^Description/), {
     target: { value: " Tall, silver-haired, fond of tidy diffs. " },
   });
+  fireEvent.change(screen.getByLabelText(/^Personality/), {
+    target: { value: " Dry wit, short sentences. " },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Add member" }));
   await waitFor(() => expect(onSaved).toHaveBeenCalled());
   expect(saved()).toEqual({
@@ -131,7 +134,46 @@ it("chooses a new member's model from the models its engine offers", async () =>
       effort: "",
       instructions: "",
       description: "Tall, silver-haired, fond of tidy diffs.",
+      personality: "Dry wit, short sentences.",
     },
+  });
+});
+
+it("fills a new member in from a suggestion, and has its look drawn", async () => {
+  const onSaved = vi.fn();
+  const suggestion = {
+    id: "s1",
+    name: "Moss",
+    personality: "Careful and kind.",
+    rationale: "Fits a reviewer.",
+    avatar: {
+      background: "#101010",
+      marks: [{ d: "M1 1", color: "#ffffff", stroke_width: 0 }],
+      look: "Round glasses",
+    },
+  };
+  const view = render(<MemberForm onSaved={onSaved} onCancel={() => {}} />);
+  view.rerender(
+    <MemberForm
+      suggestion={suggestion}
+      onSaved={onSaved}
+      onCancel={() => {}}
+    />,
+  );
+  expect(screen.getByLabelText("Name")).toHaveProperty("value", "Moss");
+  expect(screen.getByLabelText(/^Personality/)).toHaveProperty(
+    "value",
+    "Careful and kind.",
+  );
+  expect(
+    screen.getByText("Codex draws them once they're added: Round glasses"),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+  await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  expect(saved().body).toMatchObject({
+    name: "Moss",
+    personality: "Careful and kind.",
+    avatar: suggestion.avatar,
   });
 });
 
@@ -143,6 +185,7 @@ const rune = (): Member => ({
   model: "claude-legacy-7",
   effort: "high",
   description: "Quiet and exact.",
+  personality: "Terse.",
   learnings: [],
 });
 
@@ -194,6 +237,7 @@ it("keeps a member's saved model that the engine no longer lists", async () => {
       effort: "high",
       instructions: "",
       description: "Quiet, exact, wears a green cap.",
+      personality: "Terse.",
     },
   });
 });

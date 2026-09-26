@@ -13,6 +13,7 @@ export type Route =
   | { page: "project"; id: string; tab: ProjectTab; request?: string }
   | { page: "team" }
   | { page: "member"; id: string }
+  | { page: "assistant"; id: string }
   | { page: "memory" }
   | { page: "settings"; section?: string };
 
@@ -37,6 +38,10 @@ export function parseRoute(hash: string): Route {
       return { page: "project", id, tab };
     }
     case "team": {
+      if (parts[1] === "assistant") {
+        const id = parts[2] && decode(parts[2]);
+        return id ? { page: "assistant", id } : { page: "team" };
+      }
       const id = parts[1] && decode(parts[1]);
       return id ? { page: "member", id } : { page: "team" };
     }
@@ -58,6 +63,8 @@ export function href(route: Route): string {
       return "#/team";
     case "member":
       return memberHref(route.id);
+    case "assistant":
+      return assistantHref(route.id);
     case "memory":
       return "#/memory";
     case "settings":
@@ -78,3 +85,6 @@ export const requestHref = (projectID: string, taskID: string) =>
   href({ page: "project", id: projectID, tab: "board", request: taskID });
 
 export const memberHref = (id: string) => `#/team/${encodeURIComponent(id)}`;
+
+export const assistantHref = (id: string) =>
+  `#/team/assistant/${encodeURIComponent(id)}`;

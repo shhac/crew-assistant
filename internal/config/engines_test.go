@@ -27,7 +27,7 @@ func TestEnginesFillTheirDefaults(t *testing.T) {
 		t.Fatalf("endpoint %s %s", url, env)
 	}
 	c.Engines.Codex.Home = "/elsewhere"
-	if h := c.Harness("codex", "gpt", "low"); h.Bin != "codex" || h.Home != "/elsewhere" || h.Model != "gpt" || h.MaxTokens != c.Model.MaxTokens {
+	if h := c.Harness("codex", "gpt", "low"); h.Bin != "codex" || h.Home != "/elsewhere" || h.Model != "gpt" || h.MaxTokens != c.Assistants[0].Model.MaxTokens {
 		t.Fatalf("harness %+v", h)
 	}
 }

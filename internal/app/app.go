@@ -167,10 +167,12 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 	if a.Work != nil {
 		s.Turns = a.Work.Turns()
 	}
-	s.Integrations = []core.Integration{{ID: "model", Name: "Assistant model", Status: "not_configured", Detail: "Choose a model in Settings"}, {ID: "slack", Name: "Slack bot messaging", Status: "not_configured", Detail: "Sends and receives owner direct messages. Configure owner identity and Socket Mode credentials"}}
-	if cfg.Model.Model != "" {
+	s.Integrations = []core.Integration{{ID: "model", Name: "Assistant model", Status: "not_configured", Detail: "Choose your assistant in Settings"}, {ID: "slack", Name: "Slack bot messaging", Status: "not_configured", Detail: "Sends and receives owner direct messages. Configure owner identity and Socket Mode credentials"}}
+	if seated, ok := cfg.Seated(); ok && seated.Model.Model != "" {
 		s.Integrations[0].Status = "configured"
-		s.Integrations[0].Detail = strings.Join([]string{cfg.Model.Engine, cfg.Model.Model, cfg.Model.Effort}, " / ")
+		s.Integrations[0].Detail = strings.Join([]string{seated.Model.Engine, seated.Model.Model, seated.Model.Effort}, " / ")
+	} else if ok {
+		s.Integrations[0].Detail = "Choose " + seated.Name + "'s model on the Team page"
 	}
 	ignoreLive := map[string]bool{}
 	if cfg.LegacyLinearImportEnabled() {
@@ -204,8 +206,14 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 			s.Integrations[i] = live
 		}
 	}
-	d := a.drawing[drawingAssistant]
-	s.Assistant.Drawing, s.Assistant.DrawError = d.busy, d.failure
+	if s.Assistant.ID != "" {
+		d := a.drawing[drawingKey(s.Assistant.ID)]
+		s.Assistant.Drawing, s.Assistant.DrawError = d.busy, d.failure
+	}
+	for i := range s.Assistants {
+		d := a.drawing[drawingKey(s.Assistants[i].ID)]
+		s.Assistants[i].Drawing, s.Assistants[i].DrawError = d.busy, d.failure
+	}
 	for i := range s.Members {
 		d := a.drawing[s.Members[i].ID]
 		s.Members[i].Drawing, s.Members[i].DrawError = d.busy, d.failure

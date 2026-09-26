@@ -6,8 +6,8 @@ import (
 	"slices"
 )
 
-// Model is the assistant's own model choice; the engine it names is reached
-// as Engines says.
+// Model is an assistant profile's model choice; the engine it names is
+// reached as Engines says.
 type Model struct {
 	Engine    string `json:"engine"`
 	Model     string `json:"model"`
@@ -41,27 +41,72 @@ func (m Model) Validate() error {
 	return nil
 }
 
-// approvedSmallModels are the only models loading captions and next-message
-// suggestions may use, one per CLI engine. Luna runs at low effort; Haiku 4.5
+// Models are the models the daemon uses for its own small jobs, apart from
+// the assistant's conversation.
+type Models struct {
+	// Suggestions writes suggested next messages and loading lines.
+	Suggestions SmallModel `json:"suggestions"`
+}
+
+// SmallModel is any model for a small job, on a CLI login or the API. An
+// empty engine is the approved small models, which is the default. Each
+// call is bounded the same way whatever the engine: a short reply, a small
+// context and no retries.
+type SmallModel struct {
+	Engine string `json:"engine"`
+	Model  string `json:"model"`
+	Effort string `json:"effort"`
+}
+
+func (m Models) validate() error {
+	s := m.Suggestions
+	if s.Engine == "" {
+		if s.Model != "" || s.Effort != "" {
+			return errors.New("models.suggestions: choose an engine for the model, or leave all three empty for the small models")
+		}
+		return nil
+	}
+	if !slices.Contains(EngineNames, s.Engine) {
+		return errors.New("models.suggestions.engine must be codex, claude, openai-compatible or empty")
+	}
+	if s.Model == "" || len(s.Model) > 80 {
+		return errors.New("models.suggestions.model must contain 1–80 characters")
+	}
+	if !slices.Contains(Efforts, s.Effort) {
+		return errors.New("models.suggestions.effort must be empty, none, minimal, low, medium, high, xhigh, max or ultra")
+	}
+	return nil
+}
+
+// approvedSmallModels are what small jobs use unless the owner chooses a
+// model for them, one per CLI engine. Luna runs at low effort; Haiku 4.5
 // has no effort setting, so none is sent for it.
 var approvedSmallModels = map[string]struct{ model, effort string }{
 	"codex":  {"gpt-6-luna", "low"},
 	"claude": {"haiku", ""},
 }
 
-// SmallModels lists the approved small models to try in order: the
-// assistant's own CLI engine first, then the other one. Each uses that CLI's
-// configured login. An API assistant has no CLI of its own to start from, so it
-// gets none rather than a guessed engine.
+// SmallModels lists the models to try in order for a small job. A model the
+// owner chose is the only one. Otherwise they are the approved small models:
+// the seated assistant's CLI engine first, then the other one, or Codex
+// first while no one is seated. Each uses that CLI's configured login. An
+// API assistant has no CLI of its own to start from, so it gets none rather
+// than a guessed engine.
 func (c Config) SmallModels() ([]Harness, error) {
-	var order []string
-	switch c.Model.Engine {
-	case "codex":
-		order = []string{"codex", "claude"}
-	case "claude":
-		order = []string{"claude", "codex"}
-	default:
-		return nil, fmt.Errorf("no approved small model for the %s engine", c.Model.Engine)
+	if chosen := c.Models.Suggestions; chosen.Engine != "" {
+		m := c.Harness(chosen.Engine, chosen.Model, chosen.Effort)
+		m.MaxTokens = 128
+		return []Harness{m}, nil
+	}
+	order := []string{"codex", "claude"}
+	if seated, ok := c.Seated(); ok {
+		switch seated.Model.Engine {
+		case "codex":
+		case "claude":
+			order = []string{"claude", "codex"}
+		default:
+			return nil, fmt.Errorf("no approved small model for the %s engine", seated.Model.Engine)
+		}
 	}
 	models := make([]Harness, 0, len(order))
 	for _, engine := range order {
@@ -73,7 +118,8 @@ func (c Config) SmallModels() ([]Harness, error) {
 	return models, nil
 }
 
-// ApprovedSmallModel reports whether engine/model is one of the approved pair.
+// ApprovedSmallModel reports whether engine/model is one of the approved
+// small models, the default for small jobs.
 func ApprovedSmallModel(engine, model string) bool {
 	approved, ok := approvedSmallModels[engine]
 	return ok && approved.model == model

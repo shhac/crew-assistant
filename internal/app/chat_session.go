@@ -103,7 +103,7 @@ func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.
 		return engine.Result{}, err
 	}
 	cfg := a.Config()
-	instructions := engine.Instructions(cfg.Assistant.Name, cfg.Assistant.Personality) + sessionNote
+	instructions := engine.Instructions(ec.AssistantName, ec.Personality) + sessionNote
 	binary, home := cfg.Engines.Binary(ec.Engine)
 	spec := chatSpec{Config: ec, Binary: binary, Home: home, Instructions: instructions, StateDir: a.Core.StateDirectory(), Tool: a.sessionTool, Context: a.sessionContext}
 	live, rec, fresh, err := a.openChat(ctx, chatKey(conversation, ec, instructions), record, spec)

@@ -35,8 +35,8 @@ func settledReply(t *testing.T, a *App, id, message, reply string) string {
 func suggestionApp(t *testing.T, engineName string) (*App, *fakeCLIs) {
 	t.Helper()
 	a := testApp(t)
-	a.cfg.Model = config.Default().Model
-	a.cfg.Model.Engine = engineName
+	seated(&a.cfg).Model = config.DefaultProfile().Model
+	seated(&a.cfg).Model.Engine = engineName
 	f := newFakeCLIs(t)
 	f.reply = `"What should I plant first?"`
 	a.small = f.models()

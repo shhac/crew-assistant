@@ -54,19 +54,7 @@ func registerMembers(mux *http.ServeMux, a *app.App) {
 		}
 		respond(w, 202, map[string]bool{"drawing": true})
 	})
-	mux.HandleFunc("POST /api/assistant/avatar", func(w http.ResponseWriter, r *http.Request) {
-		var in struct {
-			Look string `json:"look"`
-		}
-		if decode(w, r, &in) != nil {
-			return
-		}
-		if err := a.DrawAssistant(r.Context(), in.Look); err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 202, map[string]bool{"drawing": true})
-	})
+	registerAssistants(mux, a)
 	// Avatars are named by a hash of the picture, so a name never shows a
 	// different picture and the browser may keep it.
 	mux.HandleFunc("GET /api/avatars/{id}/{size}", func(w http.ResponseWriter, r *http.Request) {

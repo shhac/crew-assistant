@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
@@ -21,9 +22,9 @@ func setupModel(t *testing.T, a *App, handler http.HandlerFunc) *httptest.Server
 	server := testutil.NewServer(t, handler)
 	t.Cleanup(server.Close)
 	cfg := a.Config()
-	cfg.Model.Engine = "openai-compatible"
-	cfg.Model.Model = "fixture-model"
-	cfg.Model.Effort = ""
+	seated(&cfg).Model.Engine = "openai-compatible"
+	seated(&cfg).Model.Model = "fixture-model"
+	seated(&cfg).Model.Effort = ""
 	cfg.Engines.OpenAICompatible.APIKeyEnv = ""
 	cfg.Engines.OpenAICompatible.BaseURL = server.URL + "/v1"
 	if err := a.UpdateConfig(cfg); err != nil {
@@ -45,19 +46,21 @@ func fixtureProposal() map[string]any {
 	return map[string]any{"name": "Juniper", "personality": "Be concise and calm; bring a recommendation with the evidence.", "avatar": fixtureDrawing(), "look": "Short silver hair and a green scarf", "rationale": "A calm botanical identity suits the preference for measured communication."}
 }
 
-func TestIdentityInterviewPreviewsThenAppliesOnlyAcceptedRecommendation(t *testing.T) {
+type setupRequest struct {
+	Tools []struct {
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	} `json:"tools"`
+	Messages []struct{ Role, Content string } `json:"messages"`
+}
+
+func TestASuggestionForANewAssistantChangesNothing(t *testing.T) {
 	ctx := context.Background()
 	a := testApp(t)
 	var calls atomic.Int32
 	setupModel(t, a, func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Tools []struct {
-				Function struct {
-					Name string `json:"name"`
-				} `json:"function"`
-			} `json:"tools"`
-			Messages []struct{ Role, Content string } `json:"messages"`
-		}
+		var request setupRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
 		}
@@ -69,8 +72,11 @@ func TestIdentityInterviewPreviewsThenAppliesOnlyAcceptedRecommendation(t *testi
 				t.Error("project tool exposed to setup", tool.Function.Name)
 			}
 		}
+		if !strings.Contains(request.Messages[0].Content, "a new assistant of theirs") || !strings.Contains(request.Messages[1].Content, `"Quill"`) {
+			t.Errorf("the prompt should say who is suggested and which names are taken: %+v", request.Messages[:2])
+		}
 		if calls.Add(1) == 1 {
-			writeSetupCall(w, "ask_setup_questions", map[string]any{"questions": []string{"Should my tone be calm or energetic?", "Do you prefer a human or nature-inspired name?"}})
+			writeSetupCall(w, "ask_setup_questions", map[string]any{"questions": []string{"Should their tone be calm or energetic?", "Do you prefer a human or nature-inspired name?"}})
 			return
 		}
 		if !strings.Contains(request.Messages[len(request.Messages)-1].Content, "calm") {
@@ -78,72 +84,127 @@ func TestIdentityInterviewPreviewsThenAppliesOnlyAcceptedRecommendation(t *testi
 		}
 		writeSetupCall(w, "propose_identity", fixtureProposal())
 	})
-	original := a.Config().Assistant
-	state, err := a.InterviewIdentity(ctx, "")
+	original := a.Config()
+	state, err := a.InterviewIdentity(ctx, SetupAssistant, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(state.Questions) != 2 || len(state.Messages) != 2 || state.Recommendation != nil {
 		t.Fatalf("missing interview: %+v", state)
 	}
-	state, err = a.InterviewIdentity(ctx, "Keep it calm, with a nature-inspired name.")
+	state, err = a.InterviewIdentity(ctx, SetupAssistant, "Keep it calm, with a nature-inspired name.")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Recommendation == nil || state.Recommendation.ID == "" || state.Recommendation.Applied || !strings.Contains(state.Recommendation.AvatarSVG, "<svg") {
+	rec := state.Recommendation
+	if rec == nil || rec.ID == "" || rec.Name != "Juniper" || rec.Avatar.Look != "Short silver hair and a green scarf" || rec.Avatar.Marks[1].D != "M31 91 83 43" || !strings.Contains(rec.AvatarSVG, "<svg") {
 		t.Fatalf("missing preview: %+v", state)
 	}
-	if !reflect.DeepEqual(a.Config().Assistant, original) {
-		t.Fatal("recommendation applied without acceptance")
+	if !reflect.DeepEqual(a.Config(), original) {
+		t.Fatal("a suggestion changed the config")
 	}
-	restored, err := a.IdentitySetup()
-	if err != nil || restored.Recommendation.ID != state.Recommendation.ID {
+	restored, err := a.IdentitySetup(SetupAssistant)
+	if err != nil || restored.Recommendation.ID != rec.ID {
 		t.Fatal("setup did not persist", err)
 	}
-	info, err := os.Stat(a.configPath + ".identity-setup.json")
+	info, err := os.Stat(a.configPath + ".setup-assistant.json")
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatal("setup is not private", err)
 	}
-	if _, err = a.ApplyIdentity(ctx, state.Recommendation.ID, false); err == nil {
-		t.Fatal("implicit acceptance allowed")
+	if other, err := a.IdentitySetup(SetupMember); err != nil || len(other.Messages) != 0 {
+		t.Fatalf("a member's suggestion shares the assistant's: %+v %v", other, err)
 	}
-	if _, err = a.ApplyIdentity(ctx, "stale-proposal", true); err == nil {
-		t.Fatal("stale recommendation applied")
+	if err := a.ResetIdentitySetup(SetupAssistant); err != nil {
+		t.Fatal(err)
 	}
-	// Applying a draft must preserve settings edited since the recommendation.
+	if fresh, err := a.IdentitySetup(SetupAssistant); err != nil || len(fresh.Messages) != 0 || fresh.Recommendation != nil {
+		t.Fatalf("starting over kept %+v %v", fresh, err)
+	}
+}
+
+// A member's suggestion is for someone on project teams, and never takes a
+// name another member has or one that names a role.
+func TestASuggestionForANewMember(t *testing.T) {
+	a := testApp(t)
+	ctx := context.Background()
+	if _, err := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Juniper", Kinds: []string{core.RoleImplementer}, Engine: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	setupModel(t, a, func(w http.ResponseWriter, r *http.Request) {
+		var request setupRequest
+		json.NewDecoder(r.Body).Decode(&request)
+		if !strings.Contains(request.Messages[0].Content, "a new member of their team") || !strings.Contains(request.Messages[1].Content, `"Juniper"`) || strings.Contains(request.Messages[1].Content, `"Quill"`) {
+			t.Errorf("the prompt should be about a member and the members' names: %+v", request.Messages[:2])
+		}
+		proposal := fixtureProposal()
+		switch calls.Add(1) {
+		case 1:
+			// Taken by a member already, so it is sent back once.
+		case 2:
+			proposal["name"] = "Moss"
+		case 3:
+			proposal["name"] = "Reviewer"
+		case 4:
+			proposal["name"] = strings.Repeat("M", 41)
+		}
+		writeSetupCall(w, "propose_identity", proposal)
+	})
+	state, err := a.InterviewIdentity(ctx, SetupMember, "Someone careful")
+	if err != nil || state.Recommendation == nil || state.Recommendation.Name != "Moss" || calls.Load() != 2 {
+		t.Fatalf("%+v %v after %d calls", state.Recommendation, err, calls.Load())
+	}
+	if _, err := a.InterviewIdentity(ctx, SetupMember, "Another"); !errors.Is(err, errUnusableProposal) {
+		t.Fatalf("a member named for a role or too long was suggested: %v", err)
+	}
+	if _, err := a.InterviewIdentity(ctx, "project", "Anyone"); !errors.Is(err, ErrSetupSubject) {
+		t.Fatalf("a suggestion for something else: %v", err)
+	}
+}
+
+// With no one in the seat the first assistant makes suggestions; with no
+// assistants at all, the model chosen for small jobs does, so the first one
+// can still be suggested.
+func TestSuggestionsWithoutASeatedAssistant(t *testing.T) {
+	a := testApp(t)
+	var calls atomic.Int32
+	setupModel(t, a, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeSetupCall(w, "ask_setup_questions", map[string]any{"questions": []string{"What tone?"}})
+	})
 	cfg := a.Config()
-	cfg.Limits.MaxModelTurns = 7
-	if err = a.UpdateConfig(cfg); err != nil {
+	cfg.Assistant.Seat = ""
+	if err := a.UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
-	painter := &fakePainter{}
-	a.Painter = painter
-	identity, err := a.ApplyIdentity(ctx, state.Recommendation.ID, true)
-	if err != nil {
+	if _, err := a.InterviewIdentity(context.Background(), SetupAssistant, ""); err != nil || calls.Load() != 1 {
+		t.Fatal(err, calls.Load())
+	}
+	if err := a.DeleteAssistant(context.Background(), "milo"); err != nil {
 		t.Fatal(err)
 	}
-	a.WaitForDrawings()
-	if drawn := a.Config().Assistant.Avatar; drawn.Image == "" || drawn.Look != "Short silver hair and a green scarf" || !strings.Contains(painter.seen[0], "green scarf") {
-		t.Fatalf("applying should have Codex draw the assistant: %+v", drawn)
+	cfg = a.Config()
+	cfg.Models.Suggestions = config.SmallModel{Engine: "openai-compatible", Model: "fixture-small"}
+	if err := a.UpdateConfig(cfg); err != nil {
+		t.Fatal(err)
 	}
-	if identity.Name != "Juniper" || len(identity.Avatar.Marks) != 2 || identity.Avatar.Marks[1].D != "M31 91 83 43" || identity.Avatar.Accent != "#91b5e8" || a.Config().Limits.MaxModelTurns != 7 {
-		t.Fatal(identity)
+	state, err := a.InterviewIdentity(context.Background(), SetupAssistant, "")
+	if err != nil || calls.Load() != 2 || len(state.Questions) != 1 {
+		t.Fatal(state, err, calls.Load())
 	}
-	persisted, err := config.Load(a.configPath)
-	identity.Avatar.Image = a.Config().Assistant.Avatar.Image
-	if err != nil || !reflect.DeepEqual(persisted.Assistant, identity) {
-		t.Fatal("applied identity missing from config", err)
+}
+
+// With no assistants and no model chosen for small jobs, the default
+// assistant's model makes the suggestion.
+func TestSuggestionsWithNoAssistantsFallBackToTheDefaultModel(t *testing.T) {
+	a := testApp(t)
+	if err := a.DeleteAssistant(context.Background(), "milo"); err != nil {
+		t.Fatal(err)
 	}
-	snap, err := a.Core.Snapshot(ctx)
-	if err != nil || snap.Assistant.Name != "Juniper" {
-		t.Fatal("runtime identity stale", err)
-	}
-	restored, err = a.IdentitySetup()
-	if err != nil || !restored.Recommendation.Applied {
-		t.Fatal("apply receipt missing", err)
-	}
-	if _, err = a.ApplyIdentity(ctx, state.Recommendation.ID, true); err != nil {
-		t.Fatal("repeat apply should be idempotent", err)
+	ec := a.setupModel(context.Background(), a.Config())
+	want := config.DefaultProfile().Model
+	if ec.Engine != want.Engine || ec.Model != want.Model || ec.Effort != want.Effort {
+		t.Fatalf("%+v", ec)
 	}
 }
 
@@ -160,16 +221,16 @@ func TestSetupRejectsProjectToolsAndUnsafeAvatar(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			a := testApp(t)
 			setupModel(t, a, func(w http.ResponseWriter, r *http.Request) { writeSetupCall(w, test.tool, test.arguments) })
-			original := a.Config().Assistant
-			if _, err := a.InterviewIdentity(context.Background(), "Suggest an identity"); err == nil {
+			original := a.Config()
+			if _, err := a.InterviewIdentity(context.Background(), SetupAssistant, "Suggest an identity"); err == nil {
 				t.Fatal("unsafe setup result accepted")
 			}
-			state, err := a.IdentitySetup()
+			state, err := a.IdentitySetup(SetupAssistant)
 			if err != nil || state.Recommendation != nil {
 				t.Fatal("unsafe proposal persisted", err)
 			}
 			snap, _ := a.Core.Snapshot(context.Background())
-			if len(snap.Projects) != 0 || !reflect.DeepEqual(a.Config().Assistant, original) {
+			if len(snap.Projects) != 0 || !reflect.DeepEqual(a.Config(), original) {
 				t.Fatal("setup escaped identity scope")
 			}
 		})
@@ -178,46 +239,11 @@ func TestSetupRejectsProjectToolsAndUnsafeAvatar(t *testing.T) {
 
 // A drawing that is not usable is sent back once with the reason, so the
 // owner is not asked to try again for a slip in the path data.
-// Whether to draw follows the state: an identity whose drawing failed is
-// drawn when applied again, and one already drawn is left as it is.
-func TestReapplyingAnIdentityDrawsItOnlyWhileItHasNoPicture(t *testing.T) {
-	a := testApp(t)
-	ctx := context.Background()
-	setupModel(t, a, func(w http.ResponseWriter, r *http.Request) {
-		writeSetupCall(w, "propose_identity", fixtureProposal())
-	})
-	state, err := a.InterviewIdentity(ctx, "Choose your identity")
-	if err != nil || state.Recommendation == nil {
-		t.Fatal(state, err)
-	}
-	a.Painter = &fakePainter{fail: errors.New("no image tool")}
-	if _, err := a.ApplyIdentity(ctx, state.Recommendation.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	a.WaitForDrawings()
-	if snap, _ := a.Snapshot(ctx); !strings.Contains(snap.Assistant.DrawError, "no image tool") {
-		t.Fatalf("the failed drawing should show: %+v", snap.Assistant)
-	}
-	painter := &fakePainter{}
-	a.Painter = painter
-	for i := 0; i < 2; i++ {
-		if _, err := a.ApplyIdentity(ctx, state.Recommendation.ID, true); err != nil {
-			t.Fatal(err)
-		}
-		a.WaitForDrawings()
-	}
-	if a.Config().Assistant.Avatar.Image == "" || len(painter.seen) != 1 {
-		t.Fatalf("drawn %d times, picture %q", len(painter.seen), a.Config().Assistant.Avatar.Image)
-	}
-}
-
 func TestSetupRetriesAnUnusableDrawingOnce(t *testing.T) {
 	a := testApp(t)
 	var calls atomic.Int32
 	setupModel(t, a, func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Messages []struct{ Role, Content string } `json:"messages"`
-		}
+		var request setupRequest
 		json.NewDecoder(r.Body).Decode(&request)
 		if calls.Add(1) == 1 {
 			bad := fixtureProposal()
@@ -230,7 +256,7 @@ func TestSetupRetriesAnUnusableDrawingOnce(t *testing.T) {
 		}
 		writeSetupCall(w, "propose_identity", fixtureProposal())
 	})
-	state, err := a.InterviewIdentity(context.Background(), "Draw yourself")
+	state, err := a.InterviewIdentity(context.Background(), SetupAssistant, "Draw them")
 	if err != nil || state.Recommendation == nil || calls.Load() != 2 {
 		t.Fatalf("retry: %+v %v after %d calls", state, err, calls.Load())
 	}
@@ -244,7 +270,7 @@ func TestSetupDemoDoesNotInvokeModel(t *testing.T) {
 	var calls atomic.Int32
 	setupModel(t, a, func(w http.ResponseWriter, r *http.Request) { calls.Add(1) })
 	a.Demo = true
-	if _, err := a.InterviewIdentity(context.Background(), ""); err == nil {
+	if _, err := a.InterviewIdentity(context.Background(), SetupAssistant, ""); err == nil {
 		t.Fatal("demo started inference")
 	}
 	if calls.Load() != 0 {
@@ -261,20 +287,16 @@ func TestSetupRefinementInvalidatesPreviousProposal(t *testing.T) {
 		}
 		writeSetupCall(w, "ask_setup_questions", map[string]any{"questions": []string{"Would you prefer a warmer palette?"}})
 	})
-	state, err := a.InterviewIdentity(context.Background(), "Choose your identity")
-	if err != nil {
-		t.Fatal(err)
+	state, err := a.InterviewIdentity(context.Background(), SetupAssistant, "Suggest someone")
+	if err != nil || state.Recommendation == nil {
+		t.Fatal(state, err)
 	}
-	oldID := state.Recommendation.ID
-	state, err = a.InterviewIdentity(context.Background(), "Please change the palette")
+	state, err = a.InterviewIdentity(context.Background(), SetupAssistant, "Please change the palette")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if state.Recommendation != nil {
-		t.Fatal("stale identity remained actionable during refinement")
-	}
-	if _, err = a.ApplyIdentity(context.Background(), oldID, true); err == nil {
-		t.Fatal("replaced proposal applied")
+		t.Fatal("stale identity remained usable during refinement")
 	}
 }
 func TestSetupHonorsDurableModelAllowance(t *testing.T) {
@@ -289,10 +311,10 @@ func TestSetupHonorsDurableModelAllowance(t *testing.T) {
 	if err := a.UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.InterviewIdentity(context.Background(), ""); err != nil {
+	if _, err := a.InterviewIdentity(context.Background(), SetupAssistant, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.InterviewIdentity(context.Background(), "Calm"); err == nil {
+	if _, err := a.InterviewIdentity(context.Background(), SetupAssistant, "Calm"); err == nil {
 		t.Fatal("setup bypassed daily model allowance")
 	}
 	if calls.Load() != 1 {
@@ -309,23 +331,13 @@ func TestAppearanceIsTheOwnersAndSurvivesEarlierVersions(t *testing.T) {
 	if err := a.UpdateConfig(cfg); err != nil || a.Config().Assistant.Theme != config.ThemeSystem {
 		t.Fatalf("theme %q %v", a.Config().Assistant.Theme, err)
 	}
-	// A recommendation saved by an earlier version still names a palette;
-	// applying it keeps the owner's own appearance.
 	cfg = a.Config()
 	cfg.Assistant.Theme = config.ThemeLight
 	if err := a.UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
-	legacy := `{"messages":[],"questions":[],"recommendation":{"id":"old","name":"Juniper","personality":"Calm","theme":"ink-blue","avatar":{"shape":"leaf","background":"#10182a","accent":"#91b5e8"},"rationale":"Calm","avatar_svg":"","applied":false}}`
-	if err := os.WriteFile(a.configPath+".identity-setup.json", []byte(legacy), 0600); err != nil {
-		t.Fatal(err)
-	}
-	identity, err := a.ApplyIdentity(ctx, "old", true)
-	if err != nil || identity.Name != "Juniper" || identity.Theme != config.ThemeLight {
-		t.Fatalf("identity %+v %v", identity, err)
-	}
 	snap, _ := a.Core.Snapshot(ctx)
-	if snap.Assistant.Theme != config.ThemeLight || snap.Assistant.Avatar.Shape != "leaf" || !strings.HasPrefix(snap.Assistant.AvatarSVG, "<svg") {
+	if snap.Assistant.Theme != config.ThemeLight || snap.Assistant.Avatar.Shape != "orb" || !strings.HasPrefix(snap.Assistant.AvatarSVG, "<svg") {
 		t.Fatalf("the dashboard does not see the appearance and avatar: %+v", snap.Assistant)
 	}
 }

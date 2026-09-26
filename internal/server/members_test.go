@@ -25,7 +25,7 @@ func TestTheOwnerKeepsATeamOfMembers(t *testing.T) {
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &ada) != nil || len(ada.Learnings) != 1 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if w := call("GET", "/api/state", ""); !strings.Contains(w.Body.String(), "Run the linter") || strings.Count(w.Body.String(), `"avatar_svg":"\u003csvg`) != 2 {
+	if w := call("GET", "/api/state", ""); !strings.Contains(w.Body.String(), "Run the linter") || strings.Count(w.Body.String(), `"avatar_svg":"\u003csvg`) != 3 {
 		t.Fatal("the dashboard should see members drawn:", w.Body.String())
 	}
 	if w := call("DELETE", "/api/members/"+ada.ID+"/learnings/"+ada.Learnings[0].ID, ""); w.Code != 200 || strings.Contains(w.Body.String(), "Run the linter") {

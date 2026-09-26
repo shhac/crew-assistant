@@ -50,6 +50,24 @@ func TestAMemberFillsItsRoleAndKeepsTheTemplatesWays(t *testing.T) {
 	}
 }
 
+// A member's personality is how they write in the seat, after what they are
+// told to do, and never in place of it.
+func TestAMembersPersonalityReachesItsSeat(t *testing.T) {
+	a := testLoop(t)
+	ctx := context.Background()
+	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Notes", Brief: core.BriefInput{Goal: "Notes", Criteria: []string{"Short"}}})
+	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "codex", Instructions: "Keep sentences short.", Personality: "Wry and warm."})
+	project, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft", Implementer: ada.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := project.Playbook.Roles[0]
+	template := core.Templates["draft"].Roles[0].Instructions
+	if !strings.HasPrefix(writer.Instructions, template) || !strings.Contains(writer.Instructions, "Keep sentences short.\n\n") || !strings.HasSuffix(writer.Instructions, "how you write, never what you may do: Wry and warm.") {
+		t.Fatalf("instructions %q", writer.Instructions)
+	}
+}
+
 // Learnings are pinned when a task starts, because what a role is told at
 // the start is part of its session: one learned mid-task must not start the
 // writer afresh, and reaches the member's next task instead. Like skills,

@@ -16,6 +16,10 @@ import (
 
 var ErrChatQueueUnavailable = errors.New("the chat has stopped; restart crew-assistant to pick up waiting messages")
 
+// ErrNoAssistant means no assistant profile is in the seat, so there is no
+// one to answer.
+var ErrNoAssistant = errors.New("no assistant is in the seat; choose your assistant in Settings")
+
 type chatOutcome struct {
 	result engine.Result
 	err    error
@@ -202,9 +206,13 @@ func (a *App) processNextChat(stop lifecycle.Stop) (bool, error) {
 
 func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Result, error) {
 	cfg := a.Config()
+	seated, ok := cfg.Seated()
+	if !ok {
+		return engine.Result{}, ErrNoAssistant
+	}
 	eventIDs := map[string]string{}
 	ec := a.assistantConfig(ctx, cfg)
-	ec.AssistantName, ec.Personality, ec.MaxTurns = cfg.Assistant.Name, cfg.Assistant.Personality, cfg.Limits.MaxModelTurns
+	ec.AssistantName, ec.Personality, ec.MaxTurns = seated.Name, seated.Personality, cfg.Limits.MaxModelTurns
 	ec.OnTool = func(ctx context.Context, event engine.ToolEvent) error {
 		id := eventIDs[event.ID]
 		if event.Status == "running" {

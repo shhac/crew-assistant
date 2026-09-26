@@ -1,14 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { AssistantSetup } from "./AssistantSetup";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { ChatSettings } from "./ChatSettings";
-import { ModelSettings } from "./ModelSettings";
+import { EngineSettings, SuggestionModel } from "./ModelSettings";
 import { LimitsSettings } from "./LimitsSettings";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { Panel } from "./SettingsPanel";
 import { appearanceOf, applyAppearance, type Appearance } from "./appearance";
 import { href } from "./router";
-import { LookForm } from "./Redraw";
+import { assistantSummary } from "./members";
 import { Avatar } from "./Avatar";
 import { ErrorNotice, Pill, humanStatus, useAction } from "./ui";
 import {
@@ -16,7 +15,6 @@ import {
   getConfig,
   getConfigDefaults,
   putConfig,
-  redrawAssistant,
   type Config,
   type ConfigDefaults,
   type State,
@@ -25,7 +23,7 @@ import {
 const sections = [
   { id: "assistant", label: "Assistant" },
   { id: "appearance", label: "Appearance" },
-  { id: "model", label: "Model" },
+  { id: "models", label: "Models" },
   { id: "chat", label: "Chat" },
   { id: "connections", label: "Connections" },
   { id: "limits", label: "Limits" },
@@ -130,17 +128,10 @@ export function Settings({
           ) : (
             <>
               {current === "assistant" && (
-                <AssistantSection
+                <AssistantSeat
                   state={state}
-                  refresh={refresh}
                   config={draft}
                   onChange={setDraft}
-                  onApplied={async () => {
-                    const fresh = await getConfig();
-                    setSaved(fresh);
-                    setDraft(fresh);
-                    await refresh();
-                  }}
                 />
               )}
               {current === "appearance" && (
@@ -165,14 +156,19 @@ export function Settings({
                   </div>
                 </Panel>
               )}
-              {current === "model" && (
-                <Panel title="The assistant's model">
-                  <ModelSettings
-                    config={draft}
-                    defaults={defaults}
-                    onChange={setDraft}
-                  />
-                </Panel>
+              {current === "models" && (
+                <>
+                  <Panel title="Models for small jobs">
+                    <SuggestionModel config={draft} onChange={setDraft} />
+                  </Panel>
+                  <Panel title="Engines">
+                    <EngineSettings
+                      config={draft}
+                      defaults={defaults}
+                      onChange={setDraft}
+                    />
+                  </Panel>
+                </>
               )}
               {current === "chat" && (
                 <Panel title="Chat">
@@ -244,10 +240,7 @@ export function Settings({
                 >
                   Discard
                 </button>
-                <button
-                  className="btn btn-primary"
-                  disabled={saving.busy || !draft?.assistant?.name?.trim()}
-                >
+                <button className="btn btn-primary" disabled={saving.busy}>
                   Save
                 </button>
               </div>
@@ -259,67 +252,69 @@ export function Settings({
   );
 }
 
-function AssistantSection({
+/**
+ * Who sits in the assistant's seat, from the assistants set up on the Team
+ * page, where each is named, drawn and given its model.
+ */
+function AssistantSeat({
   state,
-  refresh,
   config,
   onChange,
-  onApplied,
 }: {
   state: State;
-  refresh: () => Promise<void>;
   config: Config;
   onChange: (next: Config) => void;
-  onApplied: () => Promise<void>;
 }) {
   const assistant = config.assistant ?? {};
-  const set = (patch: Record<string, unknown>) =>
-    onChange({ ...config, assistant: { ...assistant, ...patch } });
+  const profiles = config.assistants ?? [];
+  const team = href({ page: "team" });
   return (
-    <>
-      <Panel title="Assistant">
-        <div className="face-edit">
-          <Avatar of={state.assistant} size={96} />
-          <LookForm
-            key={state.assistant.avatar?.look ?? ""}
-            id="assistant-look"
-            face={state.assistant}
-            onRedraw={async (look) => {
-              await redrawAssistant(look);
-              await refresh();
-            }}
-          />
+    <Panel title="Choose your assistant">
+      {profiles.length ? (
+        <>
+          <fieldset className="seat-choices">
+            <legend className="sr-only">Your assistant</legend>
+            {profiles.map((p) => {
+              // The state has each face drawn; the config only describes it.
+              const face = state.assistants.find((a) => a.id === p.id) ?? p;
+              return (
+                <label key={p.id} className="seat-choice card">
+                  <input
+                    type="radio"
+                    name="assistant-seat"
+                    value={p.id}
+                    checked={assistant.seat === p.id}
+                    onChange={() =>
+                      onChange({
+                        ...config,
+                        assistant: { ...assistant, seat: p.id },
+                      })
+                    }
+                  />
+                  <Avatar of={face} size={40} />
+                  <span className="member-card-text">
+                    <span className="member-name">{p.name}</span>
+                    <span className="soft small">{assistantSummary(p)}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </fieldset>
+          <p className="hint">
+            {assistant.seat
+              ? "Whoever you choose answers from your next message, in a conversation of their own. "
+              : "No one is in the seat, so no assistant answers until you choose one. "}
+            <a href={team}>Set up assistants on the Team page</a>
+          </p>
+        </>
+      ) : (
+        <div className="empty">
+          <p>You have no assistants yet.</p>
+          <a className="btn btn-primary" href={team}>
+            Set one up on the Team page
+          </a>
         </div>
-        <label htmlFor="assistant-name">
-          Name
-          <input
-            id="assistant-name"
-            value={assistant.name ?? ""}
-            onChange={(e) => set({ name: e.target.value })}
-            maxLength={80}
-            required
-          />
-        </label>
-        <label htmlFor="personality">
-          Personality
-          <textarea
-            id="personality"
-            value={assistant.personality ?? ""}
-            onChange={(e) => set({ personality: e.target.value })}
-            rows={4}
-            maxLength={10000}
-            placeholder="Calm and direct. Bring a recommendation, not just a question."
-          />
-          <span className="hint">
-            How it writes to you. It can't change what it's allowed to do.
-          </span>
-        </label>
-      </Panel>
-      <AssistantSetup
-        currentName={state.assistant.name}
-        demo={state.demo}
-        onApplied={onApplied}
-      />
-    </>
+      )}
+    </Panel>
   );
 }

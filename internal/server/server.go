@@ -68,15 +68,17 @@ func New(a *app.App, auth *Auth) http.Handler {
 		}
 		respond(w, 200, result)
 	})
-	mux.HandleFunc("GET /api/setup", func(w http.ResponseWriter, r *http.Request) {
-		state, err := a.IdentitySetup()
+	// Suggestions for a new assistant or a new member: subject is assistant
+	// or member.
+	mux.HandleFunc("GET /api/setup/{subject}", func(w http.ResponseWriter, r *http.Request) {
+		state, err := a.IdentitySetup(r.PathValue("subject"))
 		if err != nil {
 			problem(w, err)
 			return
 		}
 		respond(w, 200, state)
 	})
-	mux.HandleFunc("POST /api/setup/interview", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/setup/{subject}/interview", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Message string `json:"message"`
 		}
@@ -85,27 +87,19 @@ func New(a *app.App, auth *Auth) http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 		defer cancel()
-		state, err := a.InterviewIdentity(ctx, in.Message)
+		state, err := a.InterviewIdentity(ctx, r.PathValue("subject"), in.Message)
 		if err != nil {
 			problem(w, err)
 			return
 		}
 		respond(w, 200, state)
 	})
-	mux.HandleFunc("POST /api/setup/apply", func(w http.ResponseWriter, r *http.Request) {
-		var in struct {
-			RecommendationID string `json:"recommendation_id"`
-			Accepted         bool   `json:"accepted"`
-		}
-		if decode(w, r, &in) != nil {
-			return
-		}
-		identity, err := a.ApplyIdentity(r.Context(), in.RecommendationID, in.Accepted)
-		if err != nil {
+	mux.HandleFunc("DELETE /api/setup/{subject}", func(w http.ResponseWriter, r *http.Request) {
+		if err := a.ResetIdentitySetup(r.PathValue("subject")); err != nil {
 			problem(w, err)
 			return
 		}
-		respond(w, 200, identity)
+		respond(w, 200, map[string]bool{"reset": true})
 	})
 
 	mux.HandleFunc("POST /api/chat", func(w http.ResponseWriter, r *http.Request) {

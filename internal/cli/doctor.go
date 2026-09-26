@@ -22,7 +22,8 @@ func registerDoctor(root *cobra.Command, o *options) {
 			return err
 		}
 		problems := configProblems(o.configPath)
-		checks := []check{{"name": "config", "ok": true}, {"name": "config keys", "ok": len(problems) == 0, "problems": problems}, {"name": "model", "ok": cfg.Model.Model != "", "engine": cfg.Model.Engine, "model": cfg.Model.Model, "effort": cfg.Model.Effort}}
+		seated := cfg.AssistantHarness()
+		checks := []check{{"name": "config", "ok": true}, {"name": "config keys", "ok": len(problems) == 0, "problems": problems}, {"name": "model", "ok": seated.Model != "", "assistant": cfg.Assistant.Seat, "engine": seated.Engine, "model": seated.Model, "effort": seated.Effort}}
 		for _, connection := range cfg.Connections {
 			_, lookupErr := exec.LookPath(connection.Tool)
 			hint := "Account credentials are managed by this CLI; choose its existing profiles in Settings."
@@ -43,7 +44,7 @@ func registerDoctor(root *cobra.Command, o *options) {
 			return err
 		}
 		checks = append(checks, assistant...)
-		if _, ok := cfg.Engines.CLI(cfg.Model.Engine); !ok {
+		if _, ok := cfg.Engines.CLI(seated.Engine); !ok && seated.Engine != "" {
 			_, apiKeyEnv := cfg.Engines.Endpoint()
 			refs = append(refs, apiKeyEnv)
 		}
@@ -57,11 +58,13 @@ func registerDoctor(root *cobra.Command, o *options) {
 	}})
 }
 
-// assistantEngineChecks prove the assistant's CLI is installed and signed
-// in, without inference. An API engine has nothing to check here.
+// assistantEngineChecks prove the seated assistant's CLI is installed and
+// signed in, without inference. An API engine, or an empty seat, has nothing
+// to check here.
 func assistantEngineChecks(ctx context.Context, cfg config.Config) ([]check, error) {
-	bin, home := cfg.Engines.Binary(cfg.Model.Engine)
-	switch cfg.Model.Engine {
+	engineName := cfg.AssistantHarness().Engine
+	bin, home := cfg.Engines.Binary(engineName)
+	switch engineName {
 	case "codex":
 		isolationErr := engine.ValidateCodexHome(home)
 		isolationHint := "Run crew-assistant model login to sign into the configured engines.codex.home."

@@ -107,8 +107,9 @@ func (a *App) drawSoon(key string, start func() error) {
 	a.setDrawing(key, finished(err))
 }
 
-// drawingAssistant keys the assistant's own picture in the drawing status.
-const drawingAssistant = "assistant"
+// drawingKey keys an assistant profile's picture in the drawing status,
+// apart from the members' ids.
+func drawingKey(profile string) string { return "assistant:" + profile }
 
 type drawing struct {
 	busy    bool
@@ -166,6 +167,9 @@ func (a *App) DrawMember(ctx context.Context, id, look string) error {
 		return err
 	}
 	character := m.Name + ", " + roleWords(m.Kinds) + " on a small software team."
+	if m.Personality != "" {
+		character += " Personality: " + text.Clip(m.Personality, 200)
+	}
 	if m.Instructions != "" {
 		character += " How they work: " + text.Clip(m.Instructions, 200)
 	}
@@ -178,19 +182,27 @@ func (a *App) DrawMember(ctx context.Context, id, look string) error {
 	})
 }
 
-// DrawAssistant draws the assistant's own face and puts it in the config.
-func (a *App) DrawAssistant(ctx context.Context, look string) error {
-	cfg := a.Config().Assistant
-	look, err := resolveLook(look, cfg.Avatar.Look)
+// DrawAssistant draws an assistant profile's face and puts it in the
+// config, from look if given, or else from how it was last described.
+func (a *App) DrawAssistant(ctx context.Context, id, look string) error {
+	p, ok := a.Config().Profile(id)
+	if !ok {
+		return core.ErrNotFound
+	}
+	look, err := resolveLook(look, p.Avatar.Look)
 	if err != nil {
 		return err
 	}
-	character := cfg.Name + ", a calm personal assistant who runs projects for its owner. Personality: " + text.Clip(cfg.Personality, 200) + " " + lookOrChoose(look)
-	return a.startDrawing(ctx, drawingAssistant, character, func(_ context.Context, image string) error {
+	character := p.Name + ", a calm personal assistant who runs projects for its owner. Personality: " + text.Clip(p.Personality, 200) + " " + lookOrChoose(look)
+	return a.startDrawing(ctx, drawingKey(id), character, func(_ context.Context, image string) error {
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		next := a.cfg
-		next.Assistant.Avatar.Image, next.Assistant.Avatar.Look = image, look
+		next := a.cfg.CloneAssistants()
+		drawn := next.ProfileRef(id)
+		if drawn == nil {
+			return errors.New("the assistant was deleted while it was being drawn")
+		}
+		drawn.Avatar.Image, drawn.Avatar.Look = image, look
 		return a.updateConfigLocked(next)
 	})
 }

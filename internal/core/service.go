@@ -40,9 +40,19 @@ func (s *Service) configuration() config.Config { s.mu.RLock(); defer s.mu.RUnlo
 func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	v, err := s.store.Snapshot(ctx)
 	cfg := s.configuration()
-	// A loaded configuration is valid, so its avatar always draws.
-	svg, _ := cfg.Assistant.Avatar.SVG()
-	v.Assistant = Assistant{Name: cfg.Assistant.Name, Personality: cfg.Assistant.Personality, Theme: cfg.Assistant.Theme, Avatar: cfg.Assistant.Avatar, AvatarSVG: svg}
+	// A loaded configuration is valid, so every avatar in it draws.
+	v.Assistants = make([]AssistantProfile, len(cfg.Assistants))
+	for i, p := range cfg.Assistants {
+		v.Assistants[i] = AssistantProfile{AssistantProfile: p}
+		v.Assistants[i].AvatarSVG, _ = p.Avatar.SVG()
+	}
+	seated, ok := cfg.Seated()
+	if !ok {
+		fallback := config.DefaultProfile()
+		seated = config.AssistantProfile{Name: fallback.Name, Avatar: fallback.Avatar}
+	}
+	svg, _ := seated.Avatar.SVG()
+	v.Assistant = Assistant{ID: seated.ID, Name: seated.Name, Personality: seated.Personality, Theme: cfg.Assistant.Theme, Avatar: seated.Avatar, AvatarSVG: svg}
 	for i := range v.Members {
 		v.Members[i].AvatarSVG, _ = v.Members[i].Avatar.SVG()
 	}

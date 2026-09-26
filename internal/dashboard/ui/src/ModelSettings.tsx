@@ -1,65 +1,94 @@
 import { section, withEngine, type Config, type ConfigDefaults } from "./api";
 import { modelLabel, useModelCatalog, type ModelOption } from "./modelCatalog";
 
-const group = "model";
+const group = "suggestions";
 
-export function ModelSettings({
+/**
+ * The model that suggests the owner's next message and writes loading
+ * lines: the small models unless the owner picks another, on a CLI login or
+ * the API.
+ */
+export function SuggestionModel({
   config,
-  defaults,
   onChange,
 }: {
   config: Config;
-  defaults?: ConfigDefaults;
   onChange: (value: Config) => void;
 }) {
-  const model = section(config[group]);
-  const value = (key: string) => String(model[key] ?? "");
-  const change = (key: string, next: string | number) =>
-    onChange({ ...config, [group]: { ...model, [key]: next } });
+  const models = section(config.models);
+  const chosen = section(models[group]);
+  const value = (key: string) => String(chosen[key] ?? "");
+  const set = (next: Record<string, unknown>) =>
+    onChange({
+      ...config,
+      models: { ...models, [group]: { ...chosen, ...next } },
+    });
   const engine = value("engine");
-  const engineSettings = section(section(config.engines)[engine]);
-  const setting = (key: string) => String(engineSettings[key] ?? "");
-  const changeSetting = (key: string, next: string) =>
-    onChange(withEngine(config, engine, { [key]: next }));
-  const codex = engine === "codex";
-  const claude = engine === "claude";
-  const localCLI = codex || claude;
+  // An API lists no models; its model is typed in.
+  const api = engine === "openai-compatible";
   const { catalog, options, error, loading, refresh } = useModelCatalog(
-    localCLI ? engine : "",
+    api ? "" : engine,
   );
   const selected = options.find((option) => option.id === value("model"));
   const efforts = selected?.efforts || [];
   const chooseModel = (id: string) => {
     const option = options.find((item) => item.id === id);
     if (!option) return;
-    const effort = effortsFor(option, value("effort"));
-    onChange({ ...config, [group]: { ...model, model: id, effort } });
+    set({ model: id, effort: effortsFor(option, value("effort")) });
   };
   return (
     <div className="form">
       <label htmlFor={`${group}-engine`}>
-        Runs on
+        Suggestions and loading lines
         <select
           id={`${group}-engine`}
           value={engine}
           onChange={(e) =>
-            onChange({
-              ...config,
-              [group]: {
-                ...model,
-                engine: e.target.value,
-                model: "",
-                effort: "",
-              },
-            })
+            set({ engine: e.target.value, model: "", effort: "" })
           }
         >
-          <option value="codex">Codex</option>
-          <option value="claude">Claude</option>
-          <option value="openai-compatible">Another API</option>
+          <option value="">The small models (recommended)</option>
+          <option value="codex">A model on Codex</option>
+          <option value="claude">A model on Claude</option>
+          <option value="openai-compatible">A model on another API</option>
         </select>
+        <span className="hint">
+          {engine
+            ? "Every suggestion and loading line uses this model, and no other."
+            : "Luna on your Codex login, or Haiku on your Claude login: your assistant's engine first, then the other if that isn't working."}
+        </span>
       </label>
-      {localCLI && (
+      {api && (
+        <>
+          <label htmlFor={`${group}-model`}>
+            Model
+            <input
+              id={`${group}-model`}
+              value={value("model")}
+              maxLength={80}
+              autoComplete="off"
+              onChange={(e) => set({ model: e.target.value.trim() })}
+            />
+            <span className="hint">
+              The model's id at the API address under Engines. Each call is kept
+              to a short reply and billed by the API.
+            </span>
+          </label>
+          <label htmlFor={`${group}-effort`}>
+            Reasoning effort
+            <input
+              id={`${group}-effort`}
+              value={value("effort")}
+              maxLength={20}
+              placeholder="low"
+              autoComplete="off"
+              onChange={(e) => set({ effort: e.target.value.trim() })}
+            />
+            <span className="hint">Optional.</span>
+          </label>
+        </>
+      )}
+      {engine && !api && (
         <>
           <label htmlFor={`${group}-model`}>
             Model
@@ -91,7 +120,7 @@ export function ModelSettings({
             <select
               id={`${group}-effort`}
               value={value("effort")}
-              onChange={(e) => change("effort", e.target.value)}
+              onChange={(e) => set({ effort: e.target.value })}
               disabled={loading || !selected}
             >
               <option value="">
@@ -114,15 +143,6 @@ export function ModelSettings({
               ))}
             </select>
           </label>
-          {efforts.find((effort) => effort.id === value("effort"))
-            ?.description && (
-            <p className="hint">
-              {
-                efforts.find((effort) => effort.id === value("effort"))
-                  ?.description
-              }
-            </p>
-          )}
           <p className="hint" role="status">
             {loading ? "Finding models…" : error || catalog?.detail}
           </p>
@@ -144,124 +164,109 @@ export function ModelSettings({
           </div>
         </>
       )}
-      <details className="disclosure">
-        <summary>More model settings</summary>
-        <div className="form disclosure-body">
-          <p className="hint">
-            Optional; a blank field uses what it shows. The list above uses the
-            saved login and program, so save changes here before refreshing it.
-          </p>
-          <label htmlFor={`${group}-manual-model`}>
-            Model ID
-            <input
-              id={`${group}-manual-model`}
-              value={value("model")}
-              onChange={(e) => change("model", e.target.value)}
-              autoComplete="off"
-            />
-          </label>
-          <label htmlFor={`${group}-manual-effort`}>
-            Reasoning effort
-            <input
-              id={`${group}-manual-effort`}
-              value={value("effort")}
-              onChange={(e) => change("effort", e.target.value)}
-              autoComplete="off"
-            />
-          </label>
-          {codex ? (
-            <>
-              <label htmlFor="engines-codex-bin">
-                Codex program
-                <input
-                  id="engines-codex-bin"
-                  value={setting("bin")}
-                  onChange={(e) => changeSetting("bin", e.target.value)}
-                  placeholder={defaults?.engines?.codex?.bin}
-                  autoComplete="off"
-                />
-              </label>
-              <label htmlFor="engines-codex-home">
-                Codex folder
-                <input
-                  id="engines-codex-home"
-                  value={setting("home")}
-                  onChange={(e) => changeSetting("home", e.target.value)}
-                  placeholder={defaults?.engines?.codex?.home}
-                  autoComplete="off"
-                />
-                <span className="hint">
-                  Codex keeps its settings, login and sessions here; use one
-                  without global AGENTS files. After changing it, sign in with{" "}
-                  <code>crew-assistant model login</code>.
-                </span>
-              </label>
-            </>
-          ) : claude ? (
-            <>
-              <label htmlFor="engines-claude-bin">
-                Claude program
-                <input
-                  id="engines-claude-bin"
-                  value={setting("bin")}
-                  onChange={(e) => changeSetting("bin", e.target.value)}
-                  placeholder={defaults?.engines?.claude?.bin}
-                  autoComplete="off"
-                />
-              </label>
-              <label htmlFor="engines-claude-home">
-                Claude settings folder
-                <input
-                  id="engines-claude-home"
-                  value={setting("home")}
-                  onChange={(e) => changeSetting("home", e.target.value)}
-                  placeholder={defaults?.engines?.claude?.home}
-                  autoComplete="off"
-                />
-                <span className="hint">Uses your existing Claude login.</span>
-              </label>
-            </>
-          ) : (
-            <>
-              <label htmlFor="engines-openai-compatible-base_url">
-                API address
-                <input
-                  type="url"
-                  id="engines-openai-compatible-base_url"
-                  value={setting("base_url")}
-                  onChange={(e) => changeSetting("base_url", e.target.value)}
-                  placeholder={defaults?.openai_base_url}
-                />
-              </label>
-              <label htmlFor="engines-openai-compatible-api_key_env">
-                API key variable
-                <input
-                  id="engines-openai-compatible-api_key_env"
-                  value={setting("api_key_env")}
-                  onChange={(e) => changeSetting("api_key_env", e.target.value)}
-                  pattern="[A-Za-z_][A-Za-z0-9_]*"
-                  autoComplete="off"
-                />
-                <span className="hint">
-                  The environment variable's name, never the key. Blank sends no
-                  key.
-                </span>
-              </label>
-              <label htmlFor={`${group}-max_tokens`}>
-                Most output tokens per call
-                <input
-                  type="number"
-                  min={128}
-                  max={131072}
-                  id={`${group}-max_tokens`}
-                  value={value("max_tokens")}
-                  onChange={(e) => change("max_tokens", Number(e.target.value))}
-                />
-              </label>
-            </>
-          )}
-        </div>
-      </details>
+    </div>
+  );
+}
+
+/**
+ * How the daemon reaches each engine, for every assistant, member and small
+ * model alike: the CLIs and their logins, and the API's address and key.
+ */
+export function EngineSettings({
+  config,
+  defaults,
+  onChange,
+}: {
+  config: Config;
+  defaults?: ConfigDefaults;
+  onChange: (value: Config) => void;
+}) {
+  const setting = (engine: string, key: string) =>
+    String(section(section(config.engines)[engine])[key] ?? "");
+  const change = (engine: string, key: string, next: string) =>
+    onChange(withEngine(config, engine, { [key]: next }));
+  return (
+    <div className="form">
+      <p className="hint">
+        Optional; a blank field uses what it shows. Lists of models use the
+        saved login and program, so save changes here before refreshing one.
+      </p>
+      <h3>Codex</h3>
+      <label htmlFor="engines-codex-bin">
+        Codex program
+        <input
+          id="engines-codex-bin"
+          value={setting("codex", "bin")}
+          onChange={(e) => change("codex", "bin", e.target.value)}
+          placeholder={defaults?.engines?.codex?.bin}
+          autoComplete="off"
+        />
+      </label>
+      <label htmlFor="engines-codex-home">
+        Codex folder
+        <input
+          id="engines-codex-home"
+          value={setting("codex", "home")}
+          onChange={(e) => change("codex", "home", e.target.value)}
+          placeholder={defaults?.engines?.codex?.home}
+          autoComplete="off"
+        />
+        <span className="hint">
+          Codex keeps its settings, login and sessions here; use one without
+          global AGENTS files. After changing it, sign in with{" "}
+          <code>crew-assistant model login</code>.
+        </span>
+      </label>
+      <h3>Claude</h3>
+      <label htmlFor="engines-claude-bin">
+        Claude program
+        <input
+          id="engines-claude-bin"
+          value={setting("claude", "bin")}
+          onChange={(e) => change("claude", "bin", e.target.value)}
+          placeholder={defaults?.engines?.claude?.bin}
+          autoComplete="off"
+        />
+      </label>
+      <label htmlFor="engines-claude-home">
+        Claude settings folder
+        <input
+          id="engines-claude-home"
+          value={setting("claude", "home")}
+          onChange={(e) => change("claude", "home", e.target.value)}
+          placeholder={defaults?.engines?.claude?.home}
+          autoComplete="off"
+        />
+        <span className="hint">Uses your existing Claude login.</span>
+      </label>
+      <h3>Another API</h3>
+      <label htmlFor="engines-openai-compatible-base_url">
+        API address
+        <input
+          type="url"
+          id="engines-openai-compatible-base_url"
+          value={setting("openai-compatible", "base_url")}
+          onChange={(e) =>
+            change("openai-compatible", "base_url", e.target.value)
+          }
+          placeholder={defaults?.openai_base_url}
+        />
+      </label>
+      <label htmlFor="engines-openai-compatible-api_key_env">
+        API key variable
+        <input
+          id="engines-openai-compatible-api_key_env"
+          value={setting("openai-compatible", "api_key_env")}
+          onChange={(e) =>
+            change("openai-compatible", "api_key_env", e.target.value)
+          }
+          pattern="[A-Za-z_][A-Za-z0-9_]*"
+          autoComplete="off"
+        />
+        <span className="hint">
+          The environment variable's name, never the key. Blank sends no key.
+        </span>
+      </label>
     </div>
   );
 }

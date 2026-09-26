@@ -144,7 +144,17 @@ var toolActions = map[string]toolAction{
 		return a.Core.AddLearning(ctx, in.MemberID, core.LearnedByAssistant, core.LearningInput{When: in.When, Text: in.Text, ProjectID: in.ProjectID})
 	}),
 	"remember_preference": with(func(a *App, ctx context.Context, in engine.PreferenceArgs) (any, error) {
-		return a.Core.Remember(ctx, in.Key, in.Value)
+		switch in.About {
+		case "", engine.AboutOwner:
+			return a.Core.Remember(ctx, in.Key, in.Value)
+		case engine.AboutYourself:
+			seated, ok := a.Config().Seated()
+			if !ok {
+				return nil, ErrNoAssistant
+			}
+			return a.Core.RememberAbout(ctx, seated.ID, in.Key, in.Value)
+		}
+		return nil, errors.New("about must be owner or yourself")
 	}),
 	"manage_conversation": with(func(a *App, ctx context.Context, in engine.ManageConversationArgs) (any, error) {
 		return a.manageConversation(ctx, in)

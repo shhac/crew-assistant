@@ -63,8 +63,9 @@ func TestConfigKeysCoverTheFile(t *testing.T) {
 		key, prefix string
 		want        []string
 	}{
-		{"model.effort", "m", []string{"max", "medium", "minimal"}},
-		{"model.model", "", []string{"gpt-6-astra"}},
+		{"models.suggestions.effort", "m", []string{"max", "medium", "minimal"}},
+		{"models.suggestions.engine", "", []string{"claude", "codex", "openai-compatible"}},
+		{"assistant.seat", "", []string{"milo"}},
 		{"dashboard.tailscale", "", []string{"off", "serve"}},
 		{"engines.claude.on_unknown_usage", "", []string{"allow", "pause"}},
 		{"assistant.theme", "da", []string{"dark"}},
@@ -79,7 +80,7 @@ func TestConfigKeysCoverTheFile(t *testing.T) {
 	if _, d := set.ValidArgsFunction(set, []string{"engines.codex.home"}, ""); d != cobra.ShellCompDirectiveFilterDirs {
 		t.Error("a home should complete directories")
 	}
-	values, _ := set.ValidArgsFunction(set, []string{"assistant.name", "Iris"}, "")
+	values, _ := set.ValidArgsFunction(set, []string{"assistant.seat", "milo"}, "")
 	if len(values) != 0 {
 		t.Fatal("offered a third argument")
 	}

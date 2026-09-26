@@ -80,6 +80,8 @@ export interface Member extends Drawable {
   effort?: string;
   instructions?: string;
   description?: string;
+  /** How they write. */
+  personality?: string;
   learnings: Learning[];
   created_at?: string;
 }
@@ -91,6 +93,30 @@ export interface MemberInput {
   effort: string;
   instructions: string;
   description: string;
+  personality: string;
+  /** A new member's stand-in face and the look to draw, from a suggestion. */
+  avatar?: AvatarSpec;
+}
+/** An assistant's model: any engine, the API one included. */
+export interface AssistantModel {
+  engine: string;
+  model: string;
+  effort: string;
+  max_tokens: number;
+}
+/** One of the owner's assistants; the one in the seat is the assistant. */
+export interface AssistantProfile extends Drawable {
+  id: string;
+  name: string;
+  personality: string;
+  model: AssistantModel;
+}
+export interface AssistantInput {
+  name: string;
+  personality: string;
+  model: AssistantModel;
+  /** A new assistant's stand-in face and the look to draw, from a suggestion. */
+  avatar?: AvatarSpec;
 }
 export interface Playbook {
   template: string;
@@ -491,6 +517,8 @@ export interface Memory {
   content: string;
   kind?: string;
   source?: string;
+  /** The assistant a memory it kept about itself belongs to; none is about the owner. */
+  assistant?: string;
   supersedes?: string;
   superseded_at?: string;
   updated_at?: string;
@@ -535,11 +563,14 @@ export interface Turn {
 }
 export interface State {
   pending_operations: PendingOperation[];
+  /** The assistant in the seat; with no one there it has no id. */
   assistant: Drawable & {
+    id?: string;
     name: string;
     personality: string;
     theme?: string;
   };
+  assistants: AssistantProfile[];
   projects: Project[];
   members: Member[];
   tasks: Task[];
@@ -556,12 +587,12 @@ export interface State {
 }
 export type Config = Record<string, unknown> & {
   assistant?: {
-    name?: string;
-    personality?: string;
+    /** The id of the assistant in the seat; empty is no one. */
+    seat?: string;
     theme?: string;
-    avatar?: AvatarSpec;
     [key: string]: unknown;
   };
+  assistants?: AssistantProfile[];
   connections?: Connection[];
 };
 export class APIError extends Error {
@@ -601,6 +632,7 @@ export async function api<T>(
 export function normalizeState(raw: Partial<State>): State {
   return {
     assistant: raw.assistant ?? { name: "", personality: "" },
+    assistants: raw.assistants ?? [],
     pending_operations: raw.pending_operations ?? [],
     projects: raw.projects ?? [],
     members: (raw.members ?? []).map((m) => ({
@@ -844,9 +876,22 @@ export function redrawMember(id: string, look: string) {
     body: JSON.stringify({ look }),
   });
 }
-/** Draws the assistant again; an empty look keeps the last one. */
-export function redrawAssistant(look: string) {
-  return api<{ drawing: boolean }>("/api/assistant/avatar", {
+const assistantPath = (id: string) =>
+  `/api/assistants/${encodeURIComponent(id)}`;
+
+/** saveAssistant adds an assistant when id is empty, and changes it otherwise. */
+export function saveAssistant(id: string, input: AssistantInput) {
+  return api<AssistantProfile>(id ? assistantPath(id) : "/api/assistants", {
+    method: id ? "PUT" : "POST",
+    body: JSON.stringify(input),
+  });
+}
+export function deleteAssistant(id: string) {
+  return api<{ deleted: boolean }>(assistantPath(id), { method: "DELETE" });
+}
+/** Draws an assistant again; an empty look keeps the last one. */
+export function redrawAssistant(id: string, look: string) {
+  return api<{ drawing: boolean }>(`${assistantPath(id)}/avatar`, {
     method: "POST",
     body: JSON.stringify({ look }),
   });

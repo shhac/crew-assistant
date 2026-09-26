@@ -46,6 +46,36 @@ func TestCorrectingAMemoryKeepsWhatWasBelievedBefore(t *testing.T) {
 	}
 }
 
+// The owner's memories and each assistant's own are separate stores: the
+// same key in each is its own memory, a correction stays in its store, and
+// forgetting an assistant takes only its own.
+func TestAnAssistantsOwnMemoriesAreKeptApart(t *testing.T) {
+	s, _ := fixture(t)
+	owner, _ := s.Remember(testContext, "tone", "The owner likes short answers.")
+	mine, err := s.RememberAbout(testContext, "iris", "tone", "I open with the outcome.")
+	if err != nil || mine.ID == owner.ID || mine.Assistant != "iris" {
+		t.Fatalf("%+v %v", mine, err)
+	}
+	updated, _ := s.RememberAbout(testContext, "iris", "tone", "I open with the outcome, then the evidence.")
+	if updated.ID != mine.ID {
+		t.Fatal("an assistant's own memory was not updated in place")
+	}
+	corrected, err := s.Correct(testContext, mine.ID, "I lead with a recommendation.", "")
+	if err != nil || corrected.Assistant != "iris" {
+		t.Fatalf("%+v %v", corrected, err)
+	}
+	if _, err := s.RememberAbout(testContext, "", "tone", "Anyone"); err == nil {
+		t.Fatal("a memory about no assistant")
+	}
+	if err := s.ForgetAssistant(testContext, "iris"); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := s.Snapshot(testContext)
+	if len(v.Memories) != 1 || v.Memories[0].ID != owner.ID || v.Memories[0].Content != "The owner likes short answers." {
+		t.Fatalf("%+v", v.Memories)
+	}
+}
+
 // Activity is an audit trail the owner reads; a correction names the memory
 // rather than restating what it now says.
 func TestCorrectionActivityDoesNotRestateContent(t *testing.T) {

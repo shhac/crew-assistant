@@ -10,7 +10,7 @@ import (
 func TestConfigAtomicPrivateRoundTrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "nested", "config.json")
 	c := Default()
-	c.Assistant.Name = "Juniper"
+	c.Assistants[0].Name = "Juniper"
 	if err := Save(p, c); err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func TestConfigAtomicPrivateRoundTrip(t *testing.T) {
 		t.Fatal(info.Mode())
 	}
 	got, err := Load(p)
-	if err != nil || got.Assistant.Name != "Juniper" {
+	if seated, _ := got.Seated(); err != nil || seated.Name != "Juniper" {
 		t.Fatal(got, err)
 	}
 	c.Limits.MaxModelTurns = 0
@@ -80,14 +80,15 @@ func TestLegacyAPIConfigRetainsProviderAndBillingPath(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Model.Engine != "openai-compatible" || got.Model.Effort != "" {
+		seated, _ := got.Seated()
+		if seated.Model.Engine != "openai-compatible" || seated.Model.Effort != "" {
 			t.Fatalf("legacy profile unexpectedly migrated: %+v", got)
 		}
 		url, key := got.Engines.Endpoint()
-		if strings.Contains(body, "existing-model") && (got.Model.Model != "existing-model" || key != "EXISTING_KEY" || url != "https://provider.example/v1") {
-			t.Fatal(got.Model)
+		if strings.Contains(body, "existing-model") && (seated.Model.Model != "existing-model" || key != "EXISTING_KEY" || url != "https://provider.example/v1") {
+			t.Fatal(seated.Model)
 		}
-		if body == `{"model":{}}` && got.Model.Model != "" {
+		if body == `{"model":{}}` && seated.Model.Model != "" {
 			t.Fatal("unconfigured legacy model enabled inference")
 		}
 	}
@@ -96,14 +97,20 @@ func TestLegacyAPIConfigRetainsProviderAndBillingPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := Load(path)
-	if err != nil || got.Model.Engine != "codex" || got.Model.Model != "gpt-6-astra" || got.Model.Effort != "high" {
-		t.Fatal(got.Model, err)
+	seated, _ := got.Seated()
+	if err != nil || seated.Name != "Juniper" || seated.Model.Engine != "codex" || seated.Model.Model != "gpt-6-astra" || seated.Model.Effort != "high" {
+		t.Fatal(seated, err)
 	}
 }
 func TestInvalidEngineAndEffortRejected(t *testing.T) {
 	for _, mutate := range []func(*Config){
-		func(c *Config) { c.Model.Engine = "unknown" },
-		func(c *Config) { c.Model.Effort = "maximumish" },
+		func(c *Config) { c.Assistants[0].Model.Engine = "unknown" },
+		func(c *Config) { c.Assistants[0].Model.Effort = "maximumish" },
+		func(c *Config) { c.Models.Suggestions = SmallModel{Engine: "gemini", Model: "flash"} },
+		func(c *Config) { c.Models.Suggestions = SmallModel{Engine: "openai-compatible"} },
+		func(c *Config) { c.Models.Suggestions = SmallModel{Engine: "codex"} },
+		func(c *Config) { c.Models.Suggestions = SmallModel{Model: "haiku"} },
+		func(c *Config) { c.Models.Suggestions = SmallModel{"claude", "haiku", "maximumish"} },
 	} {
 		c := Default()
 		mutate(&c)
@@ -128,7 +135,7 @@ func TestConnectionProfilesAndIdentityValidation(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	for _, mutate := range []func(*Config){func(c *Config) { c.Connections[0].Profiles = []string{"first", "first"} }, func(c *Config) { c.Connections[0].Tool = "sh" }, func(c *Config) { c.Assistant.Avatar.Accent = "url(https://example.com)" }, func(c *Config) { c.Assistant.Theme = "arbitrary" }} {
+	for _, mutate := range []func(*Config){func(c *Config) { c.Connections[0].Profiles = []string{"first", "first"} }, func(c *Config) { c.Connections[0].Tool = "sh" }, func(c *Config) { c.Assistants[0].Avatar.Accent = "url(https://example.com)" }, func(c *Config) { c.Assistant.Theme = "arbitrary" }} {
 		d := Default()
 		d.Connections = []Connection{{ID: "work", Name: "Work", Tool: "lin", Profiles: []string{"first"}}}
 		mutate(&d)
@@ -218,8 +225,8 @@ func TestAssignmentImportOptInDefaultsAndRoundTrip(t *testing.T) {
 
 func TestSmallModelsTryOwnEngineFirstThenOnlyTheOtherApprovedModel(t *testing.T) {
 	c := Default()
-	c.Model.Model = "gpt-6-astra"
-	c.Model.Effort = "high"
+	c.Assistants[0].Model.Model = "gpt-6-astra"
+	c.Assistants[0].Model.Effort = "high"
 	c.Engines.Codex.Home = "/synthetic/codex"
 	c.Engines.Claude.Home = "/synthetic/claude"
 	models, err := c.SmallModels()
@@ -234,8 +241,8 @@ func TestSmallModelsTryOwnEngineFirstThenOnlyTheOtherApprovedModel(t *testing.T)
 	if claude.Engine != "claude" || claude.Model != "haiku" || claude.Effort != "" || claude.Home != "/synthetic/claude" {
 		t.Fatal(claude)
 	}
-	c.Model.Engine = "claude"
-	c.Model.Model = "opus"
+	c.Assistants[0].Model.Engine = "claude"
+	c.Assistants[0].Model.Model = "opus"
 	models, err = c.SmallModels()
 	if err != nil || len(models) != 2 || models[0].Model != "haiku" || models[1].Model != "gpt-6-luna" {
 		t.Fatal(models, err)
@@ -250,15 +257,51 @@ func TestSmallModelsTryOwnEngineFirstThenOnlyTheOtherApprovedModel(t *testing.T)
 			t.Fatal("approved", pair)
 		}
 	}
-	c.Model.Engine = "openai-compatible"
+	c.Assistants[0].Model.Engine = "openai-compatible"
 	if models, err = c.SmallModels(); err == nil || len(models) != 0 {
 		t.Fatal("API assistant was given a small model", models)
+	}
+	c.Assistant.Seat = ""
+	if models, err = c.SmallModels(); err != nil || len(models) != 2 || models[0].Model != "gpt-6-luna" {
+		t.Fatal("with no one seated, the small models should still run, Codex first", models, err)
+	}
+}
+
+// Any model the owner chooses for small jobs is the only one they use; an
+// empty choice keeps the approved small models.
+func TestSmallModelsUseTheOwnersChoice(t *testing.T) {
+	c := Default()
+	c.Engines.Claude.Home = "/synthetic/claude"
+	c.Models.Suggestions = SmallModel{Engine: "claude", Model: "opus", Effort: "low"}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	models, err := c.SmallModels()
+	if err != nil || len(models) != 1 {
+		t.Fatal(models, err)
+	}
+	if m := models[0]; m.Engine != "claude" || m.Model != "opus" || m.Effort != "low" || m.Home != "/synthetic/claude" || m.MaxTokens != 128 {
+		t.Fatalf("%+v", m)
+	}
+	// The choice holds whoever is in the seat, even an assistant on an API.
+	c.Assistants[0].Model.Engine = "openai-compatible"
+	if models, err = c.SmallModels(); err != nil || len(models) != 1 || models[0].Model != "opus" {
+		t.Fatal(models, err)
+	}
+	// Any model means the API too, reached through its endpoint.
+	c.Models.Suggestions = SmallModel{Engine: "openai-compatible", Model: "local-small"}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	models, err = c.SmallModels()
+	if err != nil || len(models) != 1 || models[0].Model != "local-small" || models[0].BaseURL == "" || models[0].MaxTokens != 128 {
+		t.Fatal(models, err)
 	}
 }
 
 func TestLoadDiscardsASavedLoadingModelChoice(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
-	saved := `{"chat":{"loading_phrases":{"enabled":false,"model":"chosen-small-model","effort":"max"}},"model":{"engine":"codex"}}`
+	saved := `{"chat":{"loading_phrases":{"enabled":false,"model":"chosen-small-model","effort":"max"}},"assistants":[],"assistant":{"seat":""}}`
 	if err := os.WriteFile(p, []byte(saved), 0600); err != nil {
 		t.Fatal(err)
 	}

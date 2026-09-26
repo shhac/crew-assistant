@@ -62,17 +62,20 @@ func TestADrawnFaceIsServedByItsNameAndNothingElse(t *testing.T) {
 	}
 }
 
-func TestTheAssistantCanBeDrawnFromTheDashboard(t *testing.T) {
+func TestAnAssistantCanBeDrawnFromTheDashboard(t *testing.T) {
 	a, call := ownerApp(t)
 	a.Painter = &squarePainter{}
-	if w := call("POST", "/api/assistant/avatar", `{"look":"Silver hair","colour":"green"}`); w.Code != 400 {
+	if w := call("POST", "/api/assistants/milo/avatar", `{"look":"Silver hair","colour":"green"}`); w.Code != 400 {
 		t.Fatal("an unknown field", w.Code, w.Body.String())
 	}
-	if w := call("POST", "/api/assistant/avatar", `{"look":"Silver hair"}`); w.Code != 202 {
+	if w := call("POST", "/api/assistants/nobody/avatar", `{"look":"Silver hair"}`); w.Code != 404 {
+		t.Fatal("someone who isn't there", w.Code, w.Body.String())
+	}
+	if w := call("POST", "/api/assistants/milo/avatar", `{"look":"Silver hair"}`); w.Code != 202 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	a.WaitForDrawings()
-	if avatar := a.Config().Assistant.Avatar; avatar.Image == "" || avatar.Look != "Silver hair" {
-		t.Fatalf("the assistant was not drawn: %+v", avatar)
+	if p, _ := a.Config().Profile("milo"); p.Avatar.Image == "" || p.Avatar.Look != "Silver hair" {
+		t.Fatalf("the assistant was not drawn: %+v", p.Avatar)
 	}
 }

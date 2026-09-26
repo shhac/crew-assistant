@@ -181,22 +181,35 @@ func TestWithoutAPainterAMemberIsKeptAndSaysItWasNotDrawn(t *testing.T) {
 	}
 }
 
-func TestApplyingAnIdentityDrawsTheAssistant(t *testing.T) {
+func TestRedrawingAnAssistantDrawsThatProfile(t *testing.T) {
 	a := testApp(t)
 	painter := &fakePainter{}
 	a.Painter = painter
 	ctx := context.Background()
-	if err := a.DrawAssistant(ctx, "Silver hair, a green scarf"); err != nil {
+	iris, err := a.CreateAssistant(ctx, AssistantInput{Name: "Iris", Model: config.DefaultProfile().Model})
+	if err != nil {
 		t.Fatal(err)
 	}
 	a.drawings.Wait()
-	avatar := a.Config().Assistant.Avatar
-	if avatar.Image == "" || avatar.Look != "Silver hair, a green scarf" || !strings.Contains(painter.seen[0], "a green scarf") {
+	if err := a.DrawAssistant(ctx, "milo", "Silver hair, a green scarf"); err != nil {
+		t.Fatal(err)
+	}
+	a.drawings.Wait()
+	seatedAvatar, _ := a.Config().Profile("milo")
+	avatar := seatedAvatar.Avatar
+	if avatar.Image == "" || avatar.Look != "Silver hair, a green scarf" || !strings.Contains(painter.seen[1], "a green scarf") || !strings.Contains(painter.seen[1], "Quill") {
 		t.Fatalf("assistant avatar %+v, character %q", avatar, painter.seen)
 	}
+	other, _ := a.Config().Profile(iris.ID)
+	if other.Avatar.Look == avatar.Look || !strings.Contains(painter.seen[0], "Iris") {
+		t.Fatalf("the other profile was redrawn: %+v", other.Avatar)
+	}
 	snap, _ := a.Snapshot(ctx)
-	if snap.Assistant.Avatar.Image != avatar.Image || snap.Assistant.Drawing {
-		t.Fatalf("the dashboard should see the picture: %+v", snap.Assistant)
+	if snap.Assistant.Avatar.Image != avatar.Image || snap.Assistant.Drawing || len(snap.Assistants) != 2 || snap.Assistants[1].Avatar.Image != other.Avatar.Image {
+		t.Fatalf("the dashboard should see the pictures: %+v %+v", snap.Assistant, snap.Assistants)
+	}
+	if err := a.DrawAssistant(ctx, "nobody", ""); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("drew someone who isn't there: %v", err)
 	}
 }
 

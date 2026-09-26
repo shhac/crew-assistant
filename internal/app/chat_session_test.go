@@ -3,9 +3,11 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/lib-agent-harness/session"
@@ -65,7 +67,8 @@ func (o *openings) open(_ context.Context, spec chatSpec, ref *session.Ref) (cha
 func sessionApp(t *testing.T) (*App, *openings) {
 	t.Helper()
 	a := testApp(t)
-	a.cfg.Model.Engine, a.cfg.Model.Model = "claude", "opus"
+	own := seated(&a.cfg)
+	own.Model.Engine, own.Model.Model = "claude", "opus"
 	o := &openings{}
 	a.sessions.open = o.open
 	return a, o
@@ -191,10 +194,70 @@ func TestTheChatRunsTurnByTurnWithoutASession(t *testing.T) {
 	}
 	// The last turn's loading caption may still be reading the config.
 	a.mu.Lock()
-	a.cfg.Model.Engine = "openai-compatible"
+	seated(&a.cfg).Model.Engine = "openai-compatible"
 	a.mu.Unlock()
 	a.sessions.open = o.open
 	if got := runTurn(t, a, "Hello"); got.Message != "Stateless" || len(o.chats) != 0 {
 		t.Fatal("an HTTP engine opened a session")
+	}
+}
+
+// Whoever is in the seat answers, in their own name and personality and on
+// their own model; seating someone else starts a session of theirs.
+func TestTheSeatedAssistantAnswers(t *testing.T) {
+	a, o := sessionApp(t)
+	ctx := context.Background()
+	runTurn(t, a, "Hello")
+	iris, err := a.CreateAssistant(ctx, AssistantInput{Name: "Iris", Personality: "Warm and exact.", Model: config.Model{Engine: "codex", Model: "gpt-6-astra", Effort: "low", MaxTokens: 4096}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runTurn(t, a, "Still Quill?"); len(o.chats) != 1 {
+		t.Fatal("adding an assistant changed who answers")
+	}
+	cfg := a.Config()
+	cfg.Assistant.Seat = iris.ID
+	if err := a.UpdateConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	runTurn(t, a, "Hello Iris")
+	if len(o.chats) != 2 {
+		t.Fatalf("a new assistant in the seat should get its own session: %d", len(o.chats))
+	}
+	spec := o.chats[1].spec
+	if !strings.Contains(spec.Instructions, "Iris") || !strings.Contains(spec.Instructions, "Warm and exact.") || strings.Contains(spec.Instructions, "Quill") {
+		t.Fatalf("instructions %q", spec.Instructions)
+	}
+	if spec.Config.Engine != "codex" || spec.Config.Model != "gpt-6-astra" || spec.Config.Effort != "low" {
+		t.Fatalf("model %+v", spec.Config)
+	}
+	if snap, _ := a.Snapshot(ctx); snap.Assistant.ID != iris.ID || snap.Assistant.Name != "Iris" {
+		t.Fatalf("the dashboard shows %+v", snap.Assistant)
+	}
+}
+
+// With no one in the seat nothing answers, and the owner is told to choose.
+func TestAnEmptySeatAnswersNothing(t *testing.T) {
+	a, o := sessionApp(t)
+	ctx := context.Background()
+	if err := a.DeleteAssistant(ctx, "milo"); err != nil {
+		t.Fatal(err)
+	}
+	if a.Config().Assistant.Seat != "" {
+		t.Fatal("deleting the seated assistant left the seat filled")
+	}
+	if _, err := a.Core.EnqueueChat(ctx, chatID(), "Anyone?"); err != nil {
+		t.Fatal(err)
+	}
+	turn, _ := a.Core.StartNextChat(ctx)
+	if _, err := a.runChatTurn(ctx, turn); !errors.Is(err, ErrNoAssistant) || len(o.chats) != 0 {
+		t.Fatalf("%v, %d sessions", err, len(o.chats))
+	}
+	if reason := chatFailureReason(ErrNoAssistant); !strings.Contains(reason, "Choose your assistant in Settings") {
+		t.Fatal(reason)
+	}
+	snap, _ := a.Snapshot(ctx)
+	if snap.Assistant.ID != "" || snap.Assistant.Name != config.DefaultAssistantName || snap.Integrations[0].Detail != "Choose your assistant in Settings" {
+		t.Fatalf("%+v %+v", snap.Assistant, snap.Integrations[0])
 	}
 }

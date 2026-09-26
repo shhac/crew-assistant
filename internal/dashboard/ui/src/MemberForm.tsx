@@ -1,15 +1,20 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { engines, kindsProblem, memberKinds } from "./members";
-import { modelLabel, useModelCatalog } from "./modelCatalog";
+import { ModelFields } from "./ModelFields";
+import { PersonalityField, SuggestedLook } from "./ProfileFields";
+import type { Suggestion } from "./SuggestIdentity";
 import { ErrorNotice, useAction } from "./ui";
 import { saveMember, type Member, type MemberKind } from "./api";
 
 export function MemberForm({
   member,
+  suggestion,
   onSaved,
   onCancel,
 }: {
   member?: Member;
+  /** A suggestion the owner chose to fill in a new member with. */
+  suggestion?: Suggestion;
   onSaved: (member: Member) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -24,19 +29,19 @@ export function MemberForm({
         .map((k) => k.id)
         .filter((k) => (k === kind ? on : current.includes(k))),
     );
-  const [engine, setEngine] = useState(member?.engine ?? "claude");
-  const [model, setModel] = useState(member?.model ?? "");
-  const [effort, setEffort] = useState(member?.effort ?? "");
+  const [choice, setChoice] = useState({
+    engine: member?.engine ?? "claude",
+    model: member?.model ?? "",
+    effort: member?.effort ?? "",
+  });
   const [instructions, setInstructions] = useState(member?.instructions ?? "");
   const [description, setDescription] = useState(member?.description ?? "");
-  const models = useModelCatalog(engine);
-  const listed = models.options.some((option) => option.id === model);
-  // Another engine's models don't run here; going back to the saved engine
-  // brings back the saved model.
-  const chooseEngine = (next: string) => {
-    setEngine(next);
-    setModel(next === member?.engine ? (member.model ?? "") : "");
-  };
+  const [personality, setPersonality] = useState(member?.personality ?? "");
+  useEffect(() => {
+    if (!suggestion) return;
+    setName(suggestion.name);
+    setPersonality(suggestion.personality);
+  }, [suggestion]);
   const { busy, error, run } = useAction();
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -45,11 +50,13 @@ export function MemberForm({
       const saved = await saveMember(member?.id ?? "", {
         name: name.trim(),
         kinds,
-        engine,
-        model: model.trim(),
-        effort: effort.trim(),
+        engine: choice.engine,
+        model: choice.model.trim(),
+        effort: choice.effort.trim(),
         instructions: instructions.trim(),
         description: description.trim(),
+        personality: personality.trim(),
+        ...(!member && suggestion ? { avatar: suggestion.avatar } : {}),
       });
       await onSaved(saved);
     });
@@ -95,74 +102,18 @@ export function MemberForm({
           </p>
         )}
       </fieldset>
-      <div className="form-row">
-        <label htmlFor="member-engine">
-          Engine
-          <select
-            id="member-engine"
-            className="field"
-            value={engine}
-            onChange={(e) => chooseEngine(e.target.value)}
-          >
-            {engines.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label htmlFor="member-model">
-          Model
-          <select
-            id="member-model"
-            className="field"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            disabled={models.loading}
-          >
-            <option value="">The engine's default</option>
-            {model && !listed && <option value={model}>{model} (saved)</option>}
-            {models.options.map((option) => (
-              <option key={option.id} value={option.id}>
-                {modelLabel(option, models.catalog)}
-              </option>
-            ))}
-          </select>
-          <span className="hint" role="status">
-            {models.loading
-              ? "Finding models…"
-              : models.error || models.catalog?.detail}
-          </span>
-          {models.catalog?.available && model && !listed && (
-            <span className="hint">
-              The saved model isn't in this list. It stays until you pick
-              another.
-            </span>
-          )}
-        </label>
-        <label htmlFor="member-effort">
-          Reasoning effort
-          <input
-            id="member-effort"
-            className="field"
-            value={effort}
-            maxLength={20}
-            placeholder="high"
-            onChange={(e) => setEffort(e.target.value)}
-          />
-          <span className="hint">Optional.</span>
-        </label>
-      </div>
-      <div className="actions">
-        <button
-          className="btn btn-sm"
-          type="button"
-          disabled={models.loading}
-          onClick={models.refresh}
-        >
-          Refresh the list of models
-        </button>
-      </div>
+      <ModelFields
+        id="member"
+        engines={engines}
+        value={choice}
+        saved={member}
+        onChange={setChoice}
+      />
+      <PersonalityField
+        id="member-personality"
+        value={personality}
+        onChange={setPersonality}
+      />
       <label htmlFor="member-description">
         Description
         <textarea
@@ -192,6 +143,7 @@ export function MemberForm({
           Added after the project's own instructions for this kind of work.
         </span>
       </label>
+      {!member && suggestion && <SuggestedLook suggestion={suggestion} />}
       <ErrorNotice error={error} />
       <div className="actions">
         <button

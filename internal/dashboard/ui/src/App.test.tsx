@@ -685,23 +685,45 @@ describe("decisions in the inbox", () => {
 });
 
 describe("settings", () => {
-  it("saves a name change with the rest of the configuration untouched", async () => {
+  const profile = (id: string, name: string, engine = "codex") => ({
+    id,
+    name,
+    personality: "",
+    avatar: { shape: "orb", background: "#000000", accent: "#ffffff" },
+    model: { engine, model: "gpt-6-astra", effort: "high", max_tokens: 4096 },
+  });
+  it("chooses the assistant in the seat from the Team page's, with the rest of the configuration untouched", async () => {
     const config = {
-      assistant: { ...state.assistant, theme: "system" },
+      assistant: { seat: "iris", theme: "system" },
+      assistants: [profile("iris", "Iris"), profile("fern", "Fern", "claude")],
       dashboard: { addr: "127.0.0.1:8340" },
-      model: { model: "configured-model" },
       engines: {
         "openai-compatible": { base_url: "", api_key_env: "TEST_MODEL_KEY" },
       },
     };
+    state.assistant.id = "iris";
+    state.assistants = config.assistants;
     respond = (path) => ({ body: path === "/api/config" ? config : state });
     window.history.replaceState(null, "", "/#/settings");
     render(<App />);
-    const name = await screen.findByLabelText("Name");
+    const panel = await screen.findByRole("region", {
+      name: "Choose your assistant",
+    });
+    const iris = within(panel).getByRole("radio", { name: /^Iris/ });
+    const fern = within(panel).getByRole("radio", { name: /^Fern/ });
+    expect(iris).toHaveProperty("checked", true);
+    expect(within(panel).getByText("Claude gpt-6-astra")).toBeTruthy();
+    expect(within(panel).queryByLabelText("Name")).toBeNull();
+    expect(within(panel).queryByLabelText(/^Personality/)).toBeNull();
+    expect(
+      within(panel)
+        .getByRole("link", { name: "Set up assistants on the Team page" })
+        .getAttribute("href"),
+    ).toBe("#/team");
     expect(
       screen.queryByRole("region", { name: "Unsaved changes" }),
     ).toBeNull();
-    fireEvent.change(name, { target: { value: "Fern" } });
+    fireEvent.click(fern);
     fireEvent.click(
       within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole(
         "button",
@@ -717,7 +739,7 @@ describe("settings", () => {
       ),
     ).toEqual({
       ...config,
-      assistant: { ...config.assistant, name: "Fern" },
+      assistant: { ...config.assistant, seat: "fern" },
     });
     await waitFor(() =>
       expect(
@@ -725,74 +747,54 @@ describe("settings", () => {
       ).toBeNull(),
     );
   });
-  it("redraws the assistant with the look the owner gives", async () => {
-    state.assistant.avatar = {
-      image: "0123456789abcdef0123456789abcdef",
-      look: "Short silver hair",
-    };
+  it("sends the owner to the Team page to set up an assistant when there are none", async () => {
     respond = (path) => ({
       body:
         path === "/api/config"
-          ? { assistant: state.assistant }
-          : path === "/api/assistant/avatar"
-            ? { drawing: true }
-            : state,
+          ? { assistant: { seat: "", theme: "system" }, assistants: [] }
+          : state,
+    });
+    window.history.replaceState(null, "", "/#/settings/assistant");
+    render(<App />);
+    const panel = await screen.findByRole("region", {
+      name: "Choose your assistant",
+    });
+    expect(within(panel).getByText("You have no assistants yet.")).toBeTruthy();
+    expect(within(panel).queryByRole("radio")).toBeNull();
+    const link = within(panel).getByRole("link", {
+      name: "Set one up on the Team page",
+    });
+    expect(link.getAttribute("href")).toBe("#/team");
+    fireEvent.click(link);
+    go("#/team");
+    expect(
+      await screen.findByRole("heading", { name: "Assistants" }),
+    ).toBeTruthy();
+  });
+  it("offers Models in place of the assistant's own model", async () => {
+    respond = (path) => ({
+      body: path === "/api/config" ? { assistant: { seat: "" } } : state,
     });
     window.history.replaceState(null, "", "/#/settings");
     render(<App />);
-    const panel = await screen.findByRole("region", { name: "Assistant" });
-    expect(
-      [...panel.querySelectorAll("img")].map((i) => i.getAttribute("width")),
-    ).toContain("96");
-    const look = within(panel).getByLabelText(/^Look/);
-    expect(look).toHaveProperty("value", "Short silver hair");
-    expect(
-      within(panel).getByText("Leave it as it is to redraw the same look."),
-    ).toBeTruthy();
-    fireEvent.change(look, {
-      target: { value: " Short silver hair, round glasses " },
+    const nav = await screen.findByRole("navigation", {
+      name: "Settings sections",
     });
-    state.assistant = { ...state.assistant, drawing: true };
-    fireEvent.click(within(panel).getByRole("button", { name: "Redraw" }));
     expect(
-      await within(panel).findByText("Drawing… this takes a few minutes."),
-    ).toBeTruthy();
-    expect(within(panel).queryByRole("button", { name: "Redraw" })).toBeNull();
-    const redraw = writes().find((c) => c.path === "/api/assistant/avatar")!;
-    expect(redraw.options?.method).toBe("POST");
-    expect(JSON.parse(String(redraw.options?.body))).toEqual({
-      look: "Short silver hair, round glasses",
-    });
-    expect(writes().some((c) => c.path === "/api/config")).toBe(false);
+      within(nav)
+        .getAllByRole("link")
+        .map((a) => a.textContent),
+    ).toEqual([
+      "Assistant",
+      "Appearance",
+      "Models",
+      "Chat",
+      "Connections",
+      "Limits",
+      "Advanced",
+    ]);
   });
-  it("shows why the last drawing failed, and why a redraw was refused", async () => {
-    state.assistant.draw_error = "Codex didn't save a picture";
-    respond = (path) =>
-      path === "/api/assistant/avatar"
-        ? {
-            status: 400,
-            body: { error: "demo mode doesn't draw; the pictures are fixed" },
-          }
-        : {
-            body:
-              path === "/api/config" ? { assistant: state.assistant } : state,
-          };
-    window.history.replaceState(null, "", "/#/settings");
-    render(<App />);
-    const panel = await screen.findByRole("region", { name: "Assistant" });
-    expect(within(panel).getByRole("alert").textContent).toBe(
-      "Codex didn't save a picture",
-    );
-    fireEvent.click(within(panel).getByRole("button", { name: "Redraw" }));
-    await waitFor(() =>
-      expect(
-        within(panel)
-          .getAllByRole("alert")
-          .map((a) => a.textContent),
-      ).toContain("demo mode doesn't draw; the pictures are fixed"),
-    );
-  });
-  it("saves the model without touching credentials or settings it doesn't show", async () => {
+  it("saves the engines without touching credentials, assistants or settings it doesn't show", async () => {
     const model = {
       engine: "codex",
       model: "gpt-6-astra",
@@ -812,8 +814,9 @@ describe("settings", () => {
       },
     };
     const config = {
-      assistant: state.assistant,
-      model,
+      assistant: { seat: "iris", theme: "system" },
+      assistants: [{ ...profile("iris", "Iris"), model }],
+      models: { suggestions: { engine: "", model: "", effort: "" } },
       worker_model: { ...model, engine: "claude" },
       engines,
     };
@@ -834,21 +837,16 @@ describe("settings", () => {
             ? defaults
             : state,
     });
-    window.history.replaceState(null, "", "/#/settings/model");
+    window.history.replaceState(null, "", "/#/settings/models");
     render(<App />);
-    expect(await screen.findByLabelText("Runs on")).toHaveProperty(
-      "value",
-      "codex",
-    );
+    expect(
+      await screen.findByLabelText(/^Suggestions and loading lines/),
+    ).toHaveProperty("value", "");
     await waitFor(() =>
       expect(screen.getByLabelText("Codex program")).toHaveProperty(
         "placeholder",
         "codex",
       ),
-    );
-    expect(screen.getByLabelText("Model ID")).toHaveProperty(
-      "value",
-      "gpt-6-astra",
     );
     expect(screen.queryByLabelText("Most output tokens per call")).toBeNull();
     fireEvent.change(screen.getByLabelText(/^Codex folder/), {
@@ -866,7 +864,8 @@ describe("settings", () => {
     const saved = JSON.parse(
       writes().find((c) => c.path === "/api/config")!.options!.body as string,
     );
-    expect(saved.model).toEqual(model);
+    expect(saved.assistants).toEqual(config.assistants);
+    expect(saved.models).toEqual(config.models);
     expect(saved.engines).toEqual({
       ...engines,
       codex: { ...engines.codex, home: "/fixture/other-login" },
@@ -875,15 +874,13 @@ describe("settings", () => {
   });
   it("applies and keeps the appearance at once, without other unsaved edits", async () => {
     const config = {
-      assistant: { ...state.assistant, theme: "system" },
-      model: { engine: "openai-compatible" },
+      assistant: { seat: "iris", theme: "system" },
+      assistants: [profile("iris", "Iris"), profile("fern", "Fern")],
     };
     respond = (path) => ({ body: path === "/api/config" ? config : state });
     window.history.replaceState(null, "", "/#/settings/assistant");
     render(<App />);
-    fireEvent.change(await screen.findByLabelText("Name"), {
-      target: { value: "Unsaved" },
-    });
+    fireEvent.click(await screen.findByRole("radio", { name: /^Fern/ }));
     go("#/settings/appearance");
     fireEvent.click(await screen.findByRole("button", { name: "Dark" }));
     await waitFor(() =>
@@ -1140,7 +1137,269 @@ describe("the team", () => {
       effort: "",
       instructions: "Check the tests first.",
       description: "A tall woman with silver hair.",
+      personality: "",
     });
+  });
+  const milo = () => ({
+    id: "milo",
+    name: "Milo",
+    personality: "Calm and brief.",
+    avatar: {
+      shape: "orb",
+      background: "#000000",
+      accent: "#ffffff",
+      look: "Short silver hair",
+    },
+    avatar_svg: '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    model: {
+      engine: "codex",
+      model: "gpt-6-astra",
+      effort: "high",
+      max_tokens: 4096,
+    },
+  });
+  it("puts the assistants first, in their own section, with the one in the seat marked", async () => {
+    state.assistant.id = "milo";
+    state.assistants = [
+      milo(),
+      {
+        ...milo(),
+        id: "fern",
+        name: "Fern",
+        model: { ...milo().model, engine: "openai-compatible", model: "local" },
+      },
+    ];
+    state.members = [ada()];
+    window.history.replaceState(null, "", "/#/team");
+    render(<App />);
+    const assistants = await screen.findByRole("region", {
+      name: "Assistants",
+    });
+    const members = screen.getByRole("region", { name: "Members" });
+    expect(
+      assistants.compareDocumentPosition(members) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    const card = within(assistants).getByRole("link", { name: /^Milo/ });
+    expect(card.getAttribute("href")).toBe("#/team/assistant/milo");
+    expect(within(card).getByText("Codex gpt-6-astra")).toBeTruthy();
+    expect(within(card).getByText("Your assistant")).toBeTruthy();
+    const fern = within(assistants).getByRole("link", { name: /^Fern/ });
+    expect(within(fern).getByText("An API local")).toBeTruthy();
+    expect(within(fern).queryByText("Your assistant")).toBeNull();
+    expect(
+      within(assistants).getByRole("button", { name: "New assistant" }),
+    ).toBeTruthy();
+    expect(within(members).getByRole("link", { name: /^Ada/ })).toBeTruthy();
+    expect(
+      within(assistants).queryByText(/No assistant is in the seat/),
+    ).toBeNull();
+  });
+  it("says when no one is in the seat, and where to choose", async () => {
+    state.assistants = [milo()];
+    window.history.replaceState(null, "", "/#/team");
+    render(<App />);
+    const assistants = await screen.findByRole("region", {
+      name: "Assistants",
+    });
+    expect(
+      within(assistants).getByText(/No assistant is in the seat/),
+    ).toBeTruthy();
+    expect(
+      within(assistants)
+        .getByRole("link", { name: "Choose your assistant" })
+        .getAttribute("href"),
+    ).toBe("#/settings/assistant");
+  });
+  it("adds an assistant from a suggested name and personality, and opens it", async () => {
+    const suggestion = {
+      id: "s1",
+      name: "Juniper",
+      personality: "Warm and exact.",
+      rationale: "Suits you.",
+      avatar: {
+        background: "#101010",
+        marks: [{ d: "M1 1", color: "#ffffff", stroke_width: 0 }],
+        look: "Green scarf",
+      },
+    };
+    window.history.replaceState(null, "", "/#/team");
+    respond = (path) => ({
+      body:
+        path === "/api/assistants"
+          ? { ...milo(), id: "juniper", name: "Juniper" }
+          : path === "/api/setup/assistant"
+            ? { messages: [], questions: [], recommendation: suggestion }
+            : path.startsWith("/api/models")
+              ? { available: false, engine: "codex", detail: "", models: [] }
+              : state,
+    });
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "New assistant" }),
+    );
+    const form = screen.getByRole("form", { name: "New assistant" });
+    expect(within(form).getByLabelText("Engine")).toBeTruthy();
+    expect(within(form).getByLabelText(/^Personality/)).toBeTruthy();
+    const suggest = screen.getByRole("region", {
+      name: "Suggest a name and personality",
+    });
+    fireEvent.click(
+      await within(suggest).findByRole("button", { name: "Use this" }),
+    );
+    expect(within(form).getByLabelText("Name")).toHaveProperty(
+      "value",
+      "Juniper",
+    );
+    fireEvent.change(within(form).getByLabelText("Engine"), {
+      target: { value: "openai-compatible" },
+    });
+    fireEvent.change(within(form).getByLabelText(/^Model/), {
+      target: { value: " local-model " },
+    });
+    fireEvent.change(within(form).getByLabelText(/^Most output tokens/), {
+      target: { value: "2048" },
+    });
+    fireEvent.click(
+      within(form).getByRole("button", { name: "Add assistant" }),
+    );
+    await waitFor(() =>
+      expect(window.location.hash).toBe("#/team/assistant/juniper"),
+    );
+    const create = writes().find((c) => c.path === "/api/assistants")!;
+    expect(create.options?.method).toBe("POST");
+    expect(JSON.parse(String(create.options?.body))).toEqual({
+      name: "Juniper",
+      personality: "Warm and exact.",
+      model: {
+        engine: "openai-compatible",
+        model: "local-model",
+        effort: "",
+        max_tokens: 2048,
+      },
+      avatar: suggestion.avatar,
+    });
+    // The suggestion is used up; the next new assistant starts afresh.
+    expect(
+      writes().some(
+        (c) =>
+          c.path === "/api/setup/assistant" && c.options?.method === "DELETE",
+      ),
+    ).toBe(true);
+    expect(writes().some((c) => c.path === "/api/config")).toBe(false);
+  });
+  it("offers a suggested name and personality for a new member too", async () => {
+    window.history.replaceState(null, "", "/#/team");
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "New member" }));
+    const suggest = screen.getByRole("region", {
+      name: "Suggest a name and personality",
+    });
+    expect(
+      within(suggest).getByText(/a look for the new member\.$/),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(calls.some((c) => c.path === "/api/setup/member")).toBe(true),
+    );
+  });
+  it("edits, redraws and deletes an assistant as a member is", async () => {
+    state.assistant.id = "milo";
+    state.assistants = [milo()];
+    state.memories = [
+      { id: "own", content: "I open with the outcome.", assistant: "milo" },
+      { id: "yours", content: "The owner likes short answers." },
+    ];
+    respond = (path) => ({
+      body:
+        path === "/api/assistants/milo/avatar"
+          ? { drawing: true }
+          : path.startsWith("/api/models")
+            ? { available: false, engine: "codex", detail: "", models: [] }
+            : path === "/api/assistants/milo"
+              ? milo()
+              : state,
+    });
+    window.history.replaceState(null, "", "/#/team/assistant/milo");
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Milo" })).toBeTruthy();
+    expect(screen.getByText("Calm and brief.")).toBeTruthy();
+    expect(
+      screen.getByText("Milo is your assistant.", { exact: false }),
+    ).toBeTruthy();
+    const remembered = screen.getByRole("region", {
+      name: "What it remembers about itself",
+    });
+    expect(
+      within(remembered).getByText("I open with the outcome."),
+    ).toBeTruthy();
+    expect(
+      within(remembered).queryByText("The owner likes short answers."),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const form = screen.getByRole("form", { name: "Edit Milo" });
+    fireEvent.change(within(form).getByLabelText(/^Personality/), {
+      target: { value: "Brisk." },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(writes().some((c) => c.path === "/api/assistants/milo")).toBe(
+        true,
+      ),
+    );
+    expect(
+      JSON.parse(
+        String(
+          writes().find((c) => c.path === "/api/assistants/milo")!.options
+            ?.body,
+        ),
+      ),
+    ).toEqual({
+      name: "Milo",
+      personality: "Brisk.",
+      model: milo().model,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Redraw" }));
+    expect(screen.getByLabelText(/^Look/)).toHaveProperty(
+      "value",
+      "Short silver hair",
+    );
+    state.assistants = [{ ...milo(), drawing: true }];
+    fireEvent.click(screen.getByRole("button", { name: "Redraw" }));
+    expect(
+      await screen.findByText("Drawing… this takes a few minutes."),
+    ).toBeTruthy();
+    expect(
+      JSON.parse(
+        String(
+          writes().find((c) => c.path === "/api/assistants/milo/avatar")!
+            .options?.body,
+        ),
+      ),
+    ).toEqual({ look: "Short silver hair" });
+    fireEvent.click(screen.getByRole("button", { name: "Delete assistant" }));
+    expect(
+      screen.getByText(
+        /No assistant answers until you choose another in Settings/,
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Milo" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/team"));
+    expect(
+      writes().find(
+        (c) =>
+          c.path === "/api/assistants/milo" && c.options?.method === "DELETE",
+      ),
+    ).toBeTruthy();
+  });
+  it("shows why an assistant's drawing failed", async () => {
+    state.assistants = [
+      { ...milo(), draw_error: "Codex didn't save a picture" },
+    ];
+    window.history.replaceState(null, "", "/#/team/assistant/milo");
+    render(<App />);
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Codex didn't save a picture",
+    );
   });
   it("adds a member who keeps the to-do list beside its work", async () => {
     window.history.replaceState(null, "", "/#/team");
