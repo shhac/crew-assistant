@@ -1,6 +1,6 @@
 import { requestHref } from "./router";
 import { pmLandingLine } from "./landing";
-import { decisionFor, latestFirst, projectTasks, requestStep } from "./stages";
+import { latestFirst, projectTasks, requestStep } from "./stages";
 import { boardColumns, doneLabel, readyLabel } from "./boardLanes";
 import { AskForm } from "./AskForm";
 import { CardList } from "./BoardCard";
@@ -23,13 +23,7 @@ export function Board({
   const ready = at("ready");
   const done = latestFirst(at("done"));
   const stopped = at("stopped");
-  const cards = (list: Task[]) => (
-    <CardList
-      tasks={list}
-      decisionFor={(t) => decisionFor(t, state.decisions)}
-      members={state.members}
-    />
-  );
+  const cards = (list: Task[]) => <CardList tasks={list} state={state} />;
   return (
     <div className="board-page">
       <AskForm project={project} refresh={refresh} />

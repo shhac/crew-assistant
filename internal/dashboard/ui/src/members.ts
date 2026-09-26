@@ -212,28 +212,26 @@ export function roleMember(
 }
 
 /**
- * The member at work on a request now: the researcher while it researches,
- * the designer while it gives design input, the implementer while it writes,
- * the checker named while it is checked, and no one otherwise.
+ * The seat at work on a request now, or next to pick it up: the researcher
+ * while it researches, the designer while it gives design input, the
+ * implementer while it writes, the checker named while it is checked, and no
+ * one otherwise.
  */
-export function atWork(task: Task, members: Member[]) {
+export function roleAtWork(task: Task): Role | undefined {
   if (task.status === "writing")
-    return memberOf(
-      task.roles?.find((r) => holds(r, "implementer")),
-      members,
-    );
+    return task.roles?.find((r) => holds(r, "implementer"));
   if (task.status === "researching" || task.status === "designing") {
     const kind = task.status === "researching" ? "researcher" : "designer";
-    return memberOf(
+    return (
       task.roles?.find((r) => r.name === task.checking) ??
-        task.roles?.find((r) => holds(r, kind)),
-      members,
+      task.roles?.find((r) => holds(r, kind))
     );
   }
   if (task.status === "reviewing" || task.status === "deciding")
-    return memberOf(
-      task.roles?.find((r) => r.name === task.checking),
-      members,
-    );
+    return task.roles?.find((r) => r.name === task.checking);
   return undefined;
 }
+
+/** The member at work on a request now, if a member fills that seat. */
+export const atWork = (task: Task, members: Member[]) =>
+  memberOf(roleAtWork(task), members);

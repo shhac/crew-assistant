@@ -2,28 +2,22 @@ import type { ReactNode } from "react";
 import { requestHref } from "./router";
 import { pmLandingLine } from "./landing";
 import { atWork } from "./members";
-import { isOpenMessage, needsYou, requestStep } from "./stages";
+import { decisionFor, isOpenMessage, needsYou, requestStep } from "./stages";
+import { TaskActivity } from "./TaskActivity";
 import { Avatar } from "./Avatar";
 import { Icon, Pill } from "./ui";
-import type { Decision, Member, Task } from "./api";
+import type { Decision, Member, State, Task } from "./api";
 
-export function CardList({
-  tasks,
-  decisionFor,
-  members,
-}: {
-  tasks: Task[];
-  decisionFor: (t: Task) => Decision | undefined;
-  members: Member[];
-}) {
+export function CardList({ tasks, state }: { tasks: Task[]; state: State }) {
   return (
     <ul className="board-cards">
       {tasks.map((t) => (
         <li key={t.id}>
           <BoardCard
             task={t}
-            decision={decisionFor(t)}
-            worker={atWork(t, members)}
+            decision={decisionFor(t, state.decisions)}
+            worker={atWork(t, state.members)}
+            activity={<TaskActivity task={t} state={state} />}
           />
         </li>
       ))}
@@ -35,12 +29,14 @@ export function BoardCard({
   task,
   decision,
   worker,
+  activity,
   children,
 }: {
   task: Task;
   decision?: Decision;
   /** The member at work on it now, if a member is. */
   worker?: Member;
+  activity?: ReactNode;
   children?: ReactNode;
 }) {
   const open = (task.messages ?? []).filter(isOpenMessage).length;
@@ -66,6 +62,7 @@ export function BoardCard({
           )}
         </p>
       )}
+      {activity}
       {pm && <p className="board-card-meta muted small">{pm}</p>}
       {(open > 0 || blocks > 0) && (
         <p className="board-card-meta muted small">

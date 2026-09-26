@@ -198,3 +198,28 @@
     scroll-snap-align: start;
   }
 }
+
+/* Whether a role is at work on a request right now */
+.task-activity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--soft);
+  font-size: 12px;
+}
+
+.task-activity.working {
+  color: var(--work);
+}
+
+.task-activity.working .dot {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.task-activity.working.quiet {
+  color: var(--needs);
+}
+
+.task-activity.working.quiet .dot {
+  animation: none;
+}

@@ -4,6 +4,7 @@ import { Drafts } from "./Drafts";
 import { pmLandingLine } from "./landing";
 import { RequestDesign, RequestPlan } from "./RequestPlan";
 import { RequestRelations } from "./RequestRelations";
+import { TaskActivity } from "./TaskActivity";
 import { TeamThread } from "./TeamThread";
 import {
   decisionFor,
@@ -118,6 +119,7 @@ export function RequestPanel({
                 <span className="muted small">{task.detail}</span>
               )}
             </p>
+            <TaskActivity task={task} state={state} full />
             {pmLandingLine(task) && (
               <p className="muted small">{pmLandingLine(task)}</p>
             )}

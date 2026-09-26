@@ -512,6 +512,25 @@ export interface PendingOperation {
   summary: string;
   project_id?: string;
 }
+/** A role at work right now; the loop runs one at a time. */
+export interface Turn {
+  project_id: string;
+  /** Absent for a PM looking at the to-do list. */
+  task_id?: string;
+  role: MemberKind;
+  seat: string;
+  member?: string;
+  started_at: string;
+  /** When its session last reported anything. */
+  last_activity_at: string;
+  tool_calls: number;
+  edits: number;
+  /** The tool running now, if one is. */
+  tool?: string;
+  output_tokens: number;
+  /** How many files differ from where the round started, for a turn that writes. */
+  files_changed?: number;
+}
 export interface State {
   pending_operations: PendingOperation[];
   assistant: Drawable & {
@@ -527,6 +546,7 @@ export interface State {
   memories: Memory[];
   activity: Activity[];
   integrations: Integration[];
+  turns: Turn[];
   paused: boolean;
   // The daemon is finishing the work in progress before it stops.
   stopping: boolean;
@@ -591,6 +611,7 @@ export function normalizeState(raw: Partial<State>): State {
     memories: raw.memories ?? [],
     activity: raw.activity ?? [],
     integrations: raw.integrations ?? [],
+    turns: raw.turns ?? [],
     paused: raw.paused ?? false,
     stopping: raw.stopping ?? false,
     demo: raw.demo ?? false,

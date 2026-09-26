@@ -20,6 +20,7 @@ import {
   type Role,
   type State,
   type Task,
+  type Turn,
 } from "./api";
 
 const writingTeam: Playbook = {
@@ -116,6 +117,9 @@ function show(
     decisions?: Decision[];
     activity?: State["activity"];
     members?: Member[];
+    turns?: Turn[];
+    paused?: boolean;
+    stopping?: boolean;
   } = {},
   at: { tab?: ProjectTab; request?: string } = {},
 ) {
@@ -1259,6 +1263,168 @@ describe("a request's relations", () => {
       within(todo).getByText("Waits for “Cache the lookups”"),
     ).toBeTruthy();
     expect(within(todo).queryByText(/^Blocks/)).toBeNull();
+  });
+});
+
+describe("whether a role is at work", () => {
+  const now = new Date("2026-09-26T10:00:00Z");
+  const ago = (ms: number) => new Date(now.valueOf() - ms).toISOString();
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+  });
+  afterEach(() => vi.useRealTimers());
+  const ada: Role = {
+    name: "Ada",
+    kinds: ["implementer"],
+    engine: "claude",
+    member: "m1",
+  };
+  const roles = [ada, ...codeTeam().roles.slice(1)];
+  const writing = (overrides: Partial<Task> = {}) =>
+    started({
+      roles,
+      status: "writing",
+      stage: "implementing",
+      ...overrides,
+    });
+  const turn = (overrides: Partial<Turn> = {}): Turn => ({
+    project_id: "p1",
+    task_id: "t1",
+    role: "implementer",
+    seat: "Ada",
+    member: "m1",
+    started_at: ago(12 * 60_000),
+    last_activity_at: ago(8_000),
+    tool_calls: 37,
+    edits: 9,
+    tool: "Bash",
+    output_tokens: 4200,
+    files_changed: 5,
+    ...overrides,
+  });
+  const card = (objective: string) =>
+    screen.getByRole("link", { name: objective }).closest("article")!;
+  const line = (within: Element) =>
+    within.querySelector(".task-activity")?.textContent;
+
+  it("shows a running turn on its card and in its panel, with what it has done", () => {
+    show(project(), { tasks: [writing()], turns: [turn()] }, { request: "t1" });
+    expect(line(card("Cache the lookups"))).toBe(
+      "Working · 12m · 37 calls · 5 files · active 8s ago",
+    );
+    expect(
+      line(screen.getByRole("complementary", { name: "Cache the lookups" })),
+    ).toBe(
+      "Working · 12m · 37 tool calls · 5 files changed · active 8s ago · now: Bash",
+    );
+  });
+  it("says a turn that has said nothing for a while has gone quiet", () => {
+    show(project(), {
+      tasks: [writing()],
+      turns: [
+        turn({
+          last_activity_at: ago(3 * 60_000),
+          files_changed: undefined,
+          tool_calls: 1,
+        }),
+      ],
+    });
+    const activity = card("Cache the lookups").querySelector(".task-activity");
+    expect(activity?.textContent).toBe("Working · 12m · 1 call · quiet for 3m");
+    expect(activity?.classList.contains("quiet")).toBe(true);
+  });
+  it("says who has yet to pick up a request, and why when it can tell", () => {
+    const other = writing({
+      id: "t2",
+      objective: "Tidy the logs",
+      status: "reviewing",
+      stage: "reviewing",
+      revisions: [{ n: 1, brief_version: 2, files: [] }],
+      checking: "Reviewer",
+    });
+    const waiting = (extra: Parameters<typeof show>[1]) => {
+      cleanup();
+      show(project(), { tasks: [writing(), other], ...extra });
+      return line(card("Cache the lookups"));
+    };
+    expect(waiting({})).toBe("Waiting for Ada to pick this up");
+    expect(line(card("Tidy the logs"))).toBe(
+      "Waiting for Reviewer to pick this up",
+    );
+    expect(waiting({ paused: true })).toBe(
+      "Waiting for Ada to pick this up · teams are paused",
+    );
+    expect(waiting({ stopping: true, paused: true })).toBe(
+      "Waiting for Ada to pick this up · crew-assistant is stopping",
+    );
+    const onOther = turn({ task_id: "t2", member: "m9", seat: "Reviewer" });
+    expect(waiting({ turns: [onOther] })).toBe(
+      "Waiting for Ada to pick this up · the team is on “Tidy the logs”",
+    );
+    expect(waiting({ turns: [turn({ task_id: "t2" })] })).toBe(
+      "Waiting for Ada to pick this up · Ada is on “Tidy the logs”",
+    );
+    const pm = turn({ task_id: undefined, role: "pm", seat: "Pia" });
+    expect(waiting({ turns: [pm] })).toBe(
+      "Waiting for Ada to pick this up · Pia is ordering the to-do list",
+    );
+    const retry = new Date(now.valueOf() + 30 * 60_000);
+    const at = retry.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    cleanup();
+    show(project(), { tasks: [writing({ retry_at: retry.toISOString() })] });
+    expect(line(card("Cache the lookups"))).toBe(
+      `Waiting for Ada to pick this up · tries again at ${at}`,
+    );
+    // A request held for usage already says why in its step.
+    cleanup();
+    show(project(), {
+      tasks: [
+        writing({
+          retry_at: retry.toISOString(),
+          detail: "Waiting for Claude usage to reset",
+        }),
+      ],
+    });
+    expect(line(card("Cache the lookups"))).toBe(
+      "Waiting for Ada to pick this up",
+    );
+  });
+  it("says nothing of the sort for work that waits on the owner or the list", () => {
+    show(project(), {
+      tasks: [
+        task({ id: "q", objective: "Queued" }),
+        started({
+          id: "w",
+          objective: "Asks you",
+          status: "waiting",
+          stage: "reviewing",
+          decision_id: "d1",
+        }),
+        started({
+          id: "l",
+          objective: "Landing",
+          status: "landing",
+          stage: "ready",
+        }),
+      ],
+      decisions: [
+        {
+          id: "d1",
+          kind: "question",
+          title: "Which cache?",
+          context: "",
+          recommendation: "",
+          choices: [],
+          status: "open",
+        },
+      ],
+    });
+    for (const name of ["Queued", "Asks you", "Landing"])
+      expect(line(card(name))).toBeUndefined();
   });
 });
 
