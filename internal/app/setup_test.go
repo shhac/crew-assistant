@@ -188,7 +188,9 @@ func TestSuggestionsWithoutASeatedAssistant(t *testing.T) {
 	if err := a.UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
-	state, err := a.InterviewIdentity(context.Background(), SetupAssistant, "")
+	// An empty message resumes the saved interview without a model call, so the
+	// owner answers to make the small model ask its next question.
+	state, err := a.InterviewIdentity(context.Background(), SetupAssistant, "Warm and direct.")
 	if err != nil || calls.Load() != 2 || len(state.Questions) != 1 {
 		t.Fatal(state, err, calls.Load())
 	}
