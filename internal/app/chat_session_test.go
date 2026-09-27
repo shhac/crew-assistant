@@ -201,6 +201,22 @@ func TestTheChatRunsTurnByTurnWithoutASession(t *testing.T) {
 	if got := runTurn(t, a, "Hello"); got.Message != "Stateless" || len(o.chats) != 0 {
 		t.Fatal("an HTTP engine opened a session")
 	}
+	// Grok can't hold a session restricted to the assistant's tools, so it
+	// answers turn by turn, in the private folder its completions need.
+	a.mu.Lock()
+	seated(&a.cfg).Model.Engine = "grok"
+	a.mu.Unlock()
+	var used engine.Config
+	a.chatInvoker = func(_ context.Context, ec engine.Config, _ engine.Request, _ engine.ToolExecutor) (engine.Result, error) {
+		used = ec
+		return engine.Result{Message: "Stateless"}, nil
+	}
+	if got := runTurn(t, a, "Hello"); got.Message != "Stateless" || len(o.chats) != 0 {
+		t.Fatal("Grok opened a session")
+	}
+	if used.Engine() != "grok" || used.WorkDirRoot != a.Core.StateDirectory() {
+		t.Fatalf("Grok ran as %s in %q", used.Engine(), used.WorkDirRoot)
+	}
 }
 
 // Whoever is in the seat answers, in their own name and personality and on

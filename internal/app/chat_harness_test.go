@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -45,5 +46,25 @@ func TestTheChatsSessionHasOnlyTheAssistantsToolsInFoldersOfItsOwn(t *testing.T)
 	result, err := host.Handler.CallTool(context.Background(), session.ToolCall{Name: "read_state", Arguments: json.RawMessage(`{}`)})
 	if err != nil || !result.IsError {
 		t.Fatalf("a declined call should reach the model as a failure: %+v %v", result, err)
+	}
+}
+
+// The assistant never writes files or runs a shell, so a Grok chat session
+// refuses whatever Grok asks to do; other engines keep the policy their
+// stored conversations were started with.
+func TestAGrokChatSessionRefusesWhatItIsAskedToDo(t *testing.T) {
+	for engineName, want := range map[harness.Engine]session.Policy{
+		harness.Grok:   {GrokPermission: session.GrokDenyWhenAsked, GrokTelemetry: session.GrokTelemetryReduced},
+		harness.Codex:  {},
+		harness.Claude: {},
+	} {
+		spec := chatSpec{Config: engine.Config{Provider: harness.Provider{Engine: engineName}, Model: "m"}, StateDir: t.TempDir()}
+		o, err := chatSessionOptions(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(o.Policy, want) {
+			t.Errorf("%s policy %+v, want %+v", engineName, o.Policy, want)
+		}
 	}
 }

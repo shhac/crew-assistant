@@ -11,7 +11,11 @@ const none = {
   efforts: false,
 } satisfies Omit<EngineChoice, "engine" | "label">;
 
-/** The engines as the server offers them today, for tests. */
+/**
+ * Engine choices as a server offers them, for tests. Grok stands in for an
+ * engine offered only for listing models, although the server now also
+ * offers it for the assistant and small jobs.
+ */
 export const testChoices: EngineChoice[] = [
   {
     ...none,

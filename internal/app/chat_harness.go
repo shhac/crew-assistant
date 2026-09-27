@@ -10,6 +10,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/roles"
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
 )
 
@@ -59,7 +60,7 @@ func chatSessionOptions(spec chatSpec) (session.Options, error) {
 	handler := session.ToolHandlerFunc(func(ctx context.Context, call session.ToolCall) (session.ToolResult, error) {
 		return spec.Tool(ctx, call.Name, call.Arguments), nil
 	})
-	return session.Options{
+	o := session.Options{
 		Provider:     spec.Config.Provider,
 		RuntimeHome:  runtime,
 		WorkDir:      work,
@@ -76,7 +77,15 @@ func chatSessionOptions(spec chatSpec) (session.Options, error) {
 			MaxResultBytes: 256 << 10,
 		}},
 		Context: spec.Context,
-	}, nil
+	}
+	if o.Provider.Engine == harness.Grok {
+		// The assistant never writes files or runs a shell, so it refuses
+		// anything Grok asks to do. Grok can't yet hold a session restricted
+		// to the assistant's tools, and Support keeps its chat turn by turn
+		// until it can.
+		o.Policy = session.Policy{GrokPermission: session.GrokDenyWhenAsked, GrokTelemetry: session.GrokTelemetryReduced}
+	}
+	return o, nil
 }
 
 // harnessChat is a chat session held by lib-agent-harness.

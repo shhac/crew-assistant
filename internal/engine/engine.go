@@ -278,9 +278,25 @@ func (e *Engine) completeAttemptWithTools(ctx context.Context, messages []Messag
 	result, err := completion.Complete(ctx, completion.Config{
 		Provider: cfg.Provider, Model: cfg.Model, Effort: cfg.Effort,
 		WorkDirRoot: cfg.WorkDirRoot, MaxContextBytes: cfg.MaxContextBytes,
-		Timeout: cfg.Timeout, BeforeRequest: guardedAdmission(cfg.BeforeRequest),
+		MaxOutputTokens: outputCap(cfg.Provider.Engine, cfg.MaxOutputTokens),
+		Timeout:         cfg.Timeout,
+		BeforeRequest:   guardedAdmission(cfg.BeforeRequest),
 	}, messages, tools)
 	return result.Message, usageOf(result), err
+}
+
+// outputCap is the reply cap sent to the engine. An engine that can't prove
+// it applies a cap refuses one, so it gets none, and its reply is bounded by
+// the model's own limit rather than failing.
+// outputCap keeps the reply cap where it has always applied: API endpoints,
+// which bill per token with no plan behind them. CLI engines run on a plan and
+// never had one; capping Claude now would risk refusing small jobs whose
+// reasoning outgrows the cap.
+func outputCap(e harness.Engine, tokens int) int {
+	if e.Transport() != harness.APITransport || !harness.Support(e, harness.Complete, harness.MaxOutputTokens).Usable() {
+		return 0
+	}
+	return tokens
 }
 
 func (e *Engine) systemPrompt() string { return Instructions(e.cfg.AssistantName, e.cfg.Personality) }

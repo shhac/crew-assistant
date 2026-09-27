@@ -74,3 +74,24 @@ func TestHTTPUsageRequiresCompleteNonNegativeCounts(t *testing.T) {
 		})
 	}
 }
+
+// The reply cap reaches an endpoint as the field it reads.
+func TestHTTPRequestCarriesTheReplyCap(t *testing.T) {
+	server := testutil.NewModelServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			MaxTokens int `json:"max_completion_tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.MaxTokens != 512 {
+			t.Errorf("max_completion_tokens %d, want 512", request.MaxTokens)
+		}
+		io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+	result, _, err := Complete(context.Background(), Config{Provider: api(server.URL), Model: "api-model", MaxOutputTokens: 512}, []Message{{Role: "user", Content: "hello"}}, nil)
+	if err != nil || result.Content != "ok" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}

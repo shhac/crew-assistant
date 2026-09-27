@@ -67,7 +67,7 @@ func TestConfigKeysCoverTheFile(t *testing.T) {
 		want        []string
 	}{
 		{"models.suggestions.effort", "m", []string{"max", "medium", "minimal"}},
-		{"models.suggestions.engine", "", []string{"claude", "codex", "openai-compatible"}},
+		{"models.suggestions.engine", "", []string{"claude", "codex", "grok", "openai-compatible"}},
 		{"assistant.seat", "", []string{"milo"}},
 		{"dashboard.tailscale", "", []string{"off", "serve"}},
 		{"engines.claude.on_unknown_usage", "", []string{"allow", "pause"}},

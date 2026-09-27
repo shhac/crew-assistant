@@ -200,10 +200,28 @@ func options(spec Spec) session.Options {
 	if o.Provider.Engine != harness.Codex {
 		o.RuntimeHome = ""
 	}
+	if o.Provider.Engine == harness.Grok {
+		o.Policy = grokPolicy(spec.Write)
+	}
 	if spec.Instructions != "" {
 		o.Instructions = session.Instructions{Mode: session.Append, Text: spec.Instructions}
 	}
 	return o
+}
+
+// grokPolicy answers the permission requests a Grok role's session sends.
+// Grok's agent mode edits and runs commands without asking unless a rule
+// says to ask, so neither answer makes a role read-only: the sandbox bounds
+// what a role can touch, and a Grok role is offered only once the harness can
+// sandbox Grok sessions. A role that writes its workspace needs its edits and
+// checks to go ahead when Grok does ask; a role that only reads, such as a
+// reviewer, has nothing it should be asked to approve.
+func grokPolicy(write bool) session.Policy {
+	permission := session.GrokDenyWhenAsked
+	if write {
+		permission = session.GrokAllowWhenAsked
+	}
+	return session.Policy{GrokPermission: permission, GrokTelemetry: session.GrokTelemetryReduced}
 }
 
 // toolHost serves a turn's tools from a folder of its own, since turns run
