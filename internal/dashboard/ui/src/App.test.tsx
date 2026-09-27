@@ -179,6 +179,13 @@ describe("the shell", () => {
       const panel = await vi.waitFor(() =>
         screen.getByRole("complementary", { name: "Draft the note" }),
       );
+      // Opening the request moves focus to its close button; let that land
+      // before the owner starts typing, or it lands on top of the draft.
+      await vi.waitFor(() =>
+        expect(document.activeElement?.getAttribute("aria-label")).toBe(
+          "Close",
+        ),
+      );
       const field = screen.getByLabelText("Message Iris");
       field.focus();
       fireEvent.change(field, { target: { value: "Also mention pric" } });
