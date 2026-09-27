@@ -30,6 +30,8 @@ github.com/shhac/lib-agent-cli v0.27.0 h1:dqrNn5QlXB5i3i8ScZ/Qf0ZxVhh6max9U3XUqL
 github.com/shhac/lib-agent-cli v0.27.0/go.mod h1:+f4RsI2kX5rkh/BQW2Sr5KFXeZud/vL9RmwsUjeH7Fc=
 github.com/shhac/lib-agent-harness v0.8.1 h1:RMPNQGHfh1Axunpy+ZEfF/Or+Un4evIhQa33DbQE4oY=
 github.com/shhac/lib-agent-harness v0.8.1/go.mod h1:T1HWREtCnXLMzr68WCEifmSFNrSNZp9TRd8JRrjfjek=
+github.com/shhac/lib-agent-harness v0.8.2 h1:qeAyzC5DHIzaL8bLq0Rq75qIJvoSUVqR8b/0Hd3zmjE=
+github.com/shhac/lib-agent-harness v0.8.2/go.mod h1:T1HWREtCnXLMzr68WCEifmSFNrSNZp9TRd8JRrjfjek=
 github.com/shhac/lib-agent-keyring v0.1.1 h1:cAwFr0UzlQ0xsgO0zY607lmwhvSamPN6Tp1DCNJO7hg=
 github.com/shhac/lib-agent-keyring v0.1.1/go.mod h1:nTk+YfRDc2dc8Nghd1o9w4c40xU8Pqx/UgToN0yGvZ8=
 github.com/shhac/lib-agent-mcp v0.23.1 h1:7VSbZcLPtOUUeef95Wanv7hL0rZAPxerqfwoF8vcSQ0=

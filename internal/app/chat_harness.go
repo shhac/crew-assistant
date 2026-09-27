@@ -126,12 +126,14 @@ const (
 
 // chatLoop bounds the library's loop as a turn run turn by turn is bounded:
 // by the actions one reply may take, with room to be told to stop and then
-// answer, and by the model's own window once it is known.
+// answer, by the model's own window once it is known, and by the reply cap an
+// endpoint has always been given.
 func chatLoop(ec engine.Config) session.Loop {
 	return session.Loop{
 		MaxSteps:        min(sessionToolLimit(ec.MaxTurns)+2, maxLoopSteps),
 		MaxRequestBytes: min(ec.MaxContextBytes, maxLoopRequestBytes),
 		RequestTimeout:  ec.Timeout,
+		MaxOutputTokens: ec.MaxOutputTokens,
 	}
 }
 

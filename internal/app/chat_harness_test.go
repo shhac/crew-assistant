@@ -81,7 +81,7 @@ func TestAnEndpointsChatSessionIsTheLibrarysLoopOverTheAssistantsTools(t *testin
 	state := t.TempDir()
 	provider := config.Harness{Engine: "openai-compatible", Model: "m", Effort: "low", BaseURL: "https://gateway.example/v1", APIKeyEnv: "CREW_TEST_KEY", EffortParameter: "reasoning.effort"}.Provider()
 	spec := chatSpec{
-		Config:       engine.Config{Provider: provider, Model: "m", Effort: "low", MaxTurns: 4, MaxContextBytes: 90000},
+		Config:       engine.Config{Provider: provider, Model: "m", Effort: "low", MaxTurns: 4, MaxContextBytes: 90000, MaxOutputTokens: 2048},
 		Instructions: "Be brief.",
 		StateDir:     state,
 		Tool: func(_ context.Context, name string, _ json.RawMessage) session.ToolResult {
@@ -102,7 +102,7 @@ func TestAnEndpointsChatSessionIsTheLibrarysLoopOverTheAssistantsTools(t *testin
 	if o.Provider.API.EffortParameter != harness.EffortReasoningObject || o.Provider.API.Credentials == nil || o.Effort != "low" {
 		t.Fatalf("provider %+v effort %q", o.Provider.API, o.Effort)
 	}
-	if o.Loop.MaxSteps != 4*16+2 || o.Loop.MaxRequestBytes != 90000 {
+	if o.Loop.MaxSteps != 4*16+2 || o.Loop.MaxRequestBytes != 90000 || o.Loop.MaxOutputTokens != spec.Config.MaxOutputTokens || o.Loop.MaxOutputTokens == 0 {
 		t.Fatalf("loop %+v", o.Loop)
 	}
 	if result, err := host.Handler.CallTool(context.Background(), session.ToolCall{Name: "read_state"}); err != nil || result.Content != "ran read_state" {
