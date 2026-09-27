@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { FileSystemPicker } from "./FileSystemPicker";
 import { isCode } from "./landing";
-import { engines, teamChoice, teamWith } from "./members";
+import { engineOptions, useEngineChoices } from "./engines";
+import { teamChoice, teamWith } from "./members";
 import { projectKind } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
 import { setTeam, type Member, type Playbook, type Project } from "./api";
@@ -273,6 +274,7 @@ function EngineSlot({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const choices = useEngineChoices();
   return (
     <fieldset className="team-slot">
       <legend>{label}</legend>
@@ -284,7 +286,7 @@ function EngineSlot({
           value={value}
           onChange={(e) => onChange(e.target.value)}
         >
-          {engines.map((engine) => (
+          {engineOptions(choices, "roles", value).map((engine) => (
             <option key={engine.id} value={engine.id}>
               {engine.label}
             </option>

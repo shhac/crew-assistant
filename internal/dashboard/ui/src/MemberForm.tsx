@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { engines, kindsProblem, memberKinds } from "./members";
+import { choicesFor, useEngineChoices } from "./engines";
+import { kindsProblem, memberKinds } from "./members";
 import { ModelFields } from "./ModelFields";
 import { PersonalityField, SuggestedLook } from "./ProfileFields";
 import type { Suggestion } from "./SuggestIdentity";
@@ -29,11 +30,20 @@ export function MemberForm({
         .map((k) => k.id)
         .filter((k) => (k === kind ? on : current.includes(k))),
     );
-  const [choice, setChoice] = useState({
-    engine: member?.engine ?? "claude",
+  const [picked, setChoice] = useState({
+    engine: member?.engine ?? "",
     model: member?.model ?? "",
     effort: member?.effort ?? "",
   });
+  // A new member starts on Claude while it can run a role, and otherwise on
+  // the first engine that can.
+  const roleEngines = choicesFor(useEngineChoices(), "roles").map(
+    (c) => c.engine,
+  );
+  const firstEngine = roleEngines.includes("claude")
+    ? "claude"
+    : (roleEngines[0] ?? "");
+  const choice = { ...picked, engine: picked.engine || firstEngine };
   const [instructions, setInstructions] = useState(member?.instructions ?? "");
   const [description, setDescription] = useState(member?.description ?? "");
   const [personality, setPersonality] = useState(member?.personality ?? "");
@@ -104,7 +114,7 @@ export function MemberForm({
       </fieldset>
       <ModelFields
         id="member"
-        engines={engines}
+        use="roles"
         value={choice}
         saved={member}
         onChange={setChoice}
@@ -149,7 +159,7 @@ export function MemberForm({
         <button
           className="btn btn-primary"
           type="submit"
-          disabled={busy || !name.trim() || !!problem}
+          disabled={busy || !name.trim() || !!problem || !choice.engine}
         >
           {member ? "Save" : "Add member"}
         </button>

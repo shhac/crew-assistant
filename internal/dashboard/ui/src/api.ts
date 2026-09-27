@@ -474,7 +474,7 @@ export interface ChatTurn {
  * one; a conversation run turn by turn has none.
  */
 export interface ChatSession {
-  engine: "claude" | "codex" | (string & {});
+  engine: string;
   model: string;
   started_at: string;
   /** How it was last opened: new, picked up again, or new because the old one couldn't be resumed. */
@@ -594,7 +594,15 @@ export type Config = Record<string, unknown> & {
   };
   assistants?: AssistantProfile[];
   connections?: Connection[];
+  /**
+   * Keyed by engine: any CLI engine (bin, home, usage_floor,
+   * on_unknown_usage) and "openai-compatible" (base_url, api_key_env,
+   * effort_parameter).
+   */
+  engines?: Record<string, unknown>;
 };
+/** Where an API reads reasoning effort; blank is top-level reasoning_effort. */
+export type EffortParameter = "" | "reasoning_effort" | "reasoning.effort";
 export class APIError extends Error {
   constructor(
     message: string,
@@ -698,6 +706,13 @@ export interface EngineUsage {
   missing?: string;
   /** When captions and suggestions try the engine again after its rate limit. */
   rate_limited_until?: string;
+  /** Prepaid credit left, when the login reports it. */
+  credits?: EngineCredits;
+}
+/** An exact decimal balance, in an ISO currency such as "USD" or in "credits". */
+export interface EngineCredits {
+  balance: string;
+  unit: string;
 }
 export function getUsage() {
   return api<EngineUsage[]>("/api/usage");
@@ -714,11 +729,32 @@ export function getConfig() {
 export function putConfig(config: Config) {
   return api("/api/config", { method: "PUT", body: JSON.stringify(config) });
 }
+/**
+ * An engine the daemon can reach, and what it may be used for; the server
+ * sends them in the order they are offered.
+ */
+export interface EngineChoice {
+  engine: string;
+  label: string;
+  /** Reached through a local CLI, with a program and a folder for its login. */
+  cli: boolean;
+  assistant: boolean;
+  roles: boolean;
+  /** Suggestions and loading lines. */
+  small: boolean;
+  /** An implementer's conversation on it can be compacted from outside. */
+  compact: boolean;
+  /** Reports what its subscription has left. */
+  usage: boolean;
+  models: boolean;
+  /** Its model list says which reasoning efforts each model takes. */
+  efforts: boolean;
+}
 /** What a blank engine setting falls back to, for showing in its place. */
 export interface ConfigDefaults {
-  engines?: Partial<
-    Record<"codex" | "claude", { bin?: string; home?: string }>
-  >;
+  /** An empty home is the CLI's own. */
+  engines?: Record<string, { bin?: string; home?: string }>;
+  choices?: EngineChoice[];
   usage_floor?: number;
   on_unknown_usage?: "allow" | "pause";
   openai_base_url?: string;

@@ -3,6 +3,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ChatSettings } from "./ChatSettings";
 import type { AssistantProfile, Config } from "./api";
+import { rememberChoices } from "./engines";
+import { testChoices } from "./testEngines";
+
+rememberChoices(testChoices);
 
 afterEach(() => {
   cleanup();

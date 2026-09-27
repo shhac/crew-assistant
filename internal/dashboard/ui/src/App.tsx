@@ -26,9 +26,13 @@ import {
 import { useFavicon } from "./Avatar";
 import { ErrorNotice, useAction } from "./ui";
 import { useChatPane } from "./chatPane";
+import { useEngineChoices } from "./engines";
 
 export function App() {
   const [state, setState] = useState<State | null>(null);
+  // Engine labels read the remembered choices, so the whole app redraws once
+  // they arrive.
+  useEngineChoices(!!state);
   const [route, setRoute] = useState<Route>(() =>
     parseRoute(window.location.hash),
   );

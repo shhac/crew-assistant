@@ -70,6 +70,27 @@ describe("usage left in the sidebar", () => {
     ).toBeTruthy();
     expect(codex.className).not.toMatch(/tone-/);
   });
+  it("shows the credit an engine reports beside its usage", async () => {
+    usage = [
+      measured("codex", 42, "ok", {
+        credits: { balance: "12.50", unit: "USD" },
+      }),
+      {
+        engine: "grok",
+        level: "unknown",
+        windows: [],
+        missing: "usage not reported",
+        credits: { balance: "12.5", unit: "credits" },
+      },
+    ];
+    render(<UsageStatus />);
+    await screen.findByRole("listitem", { name: /^Codex:/ });
+    expect(within(row("Codex")).getByText(/Credits: 12\.50 USD/)).toBeTruthy();
+    expect(row("Codex").getAttribute("aria-label")).toMatch(
+      /Credits: 12\.50 USD$/,
+    );
+    expect(within(row("Grok")).getByText("12.5 credits")).toBeTruthy();
+  });
   it("says plainly when a figure isn't there, and shows no number", async () => {
     usage = [
       {

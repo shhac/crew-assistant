@@ -9,6 +9,7 @@ import {
 } from "./api";
 import { ConversationMarkdown } from "./ConversationMarkdown";
 import { Avatar } from "./Avatar";
+import { engineLabel } from "./engines";
 import { dateLabel, fullDateLabel, Icon } from "./ui";
 import { ChatQueue, type QueueHold } from "./ChatQueue";
 import { ToolActivity } from "./ToolActivity";
@@ -110,10 +111,7 @@ const percent = (part: number, whole: number) =>
 
 /** The session in a line, leaving out whatever it has not reported. */
 function sessionParts(session: ChatSession) {
-  const parts = [
-    session.engine.charAt(0).toUpperCase() + session.engine.slice(1),
-    session.model,
-  ];
+  const parts = [engineLabel(session.engine), session.model];
   if (session.context_used && session.context_window)
     parts.push(
       `${percent(session.context_used, session.context_window)} of context`,

@@ -9,6 +9,10 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MemberForm } from "./MemberForm";
 import type { Member } from "./api";
+import { rememberChoices } from "./engines";
+import { testChoices } from "./testEngines";
+
+rememberChoices(testChoices);
 
 const listed = (): Record<string, unknown> => ({
   claude: {
@@ -259,4 +263,42 @@ it("keeps the saved model when the list can't be found", async () => {
     "value",
     "claude-legacy-7",
   );
+});
+
+it("offers the engines that may run a role, whatever they are", () => {
+  rememberChoices([
+    ...testChoices,
+    { ...testChoices[2], engine: "nova", label: "Nova", roles: true },
+  ]);
+  try {
+    render(<MemberForm onSaved={async () => {}} onCancel={() => {}} />);
+    const engine = screen.getByLabelText<HTMLSelectElement>("Engine");
+    expect(Array.from(engine.options, (o) => o.textContent)).toEqual([
+      "Codex",
+      "Claude",
+      "Nova",
+    ]);
+  } finally {
+    rememberChoices(testChoices);
+  }
+});
+
+it("keeps a saved engine that is no longer offered for roles", () => {
+  const member: Member = {
+    id: "m1",
+    name: "Gil",
+    kinds: ["reviewer"],
+    engine: "grok",
+    learnings: [],
+  };
+  render(
+    <MemberForm member={member} onSaved={async () => {}} onCancel={() => {}} />,
+  );
+  const engine = screen.getByLabelText<HTMLSelectElement>("Engine");
+  expect(engine.value).toBe("grok");
+  expect(Array.from(engine.options, (o) => o.textContent)).toEqual([
+    "Codex",
+    "Claude",
+    "Grok",
+  ]);
 });

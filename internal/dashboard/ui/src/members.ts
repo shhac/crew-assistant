@@ -8,13 +8,7 @@ import type {
   Task,
   TeamInput,
 } from "./api";
-
-export const engines = [
-  { id: "claude", label: "Claude" },
-  { id: "codex", label: "Codex" },
-];
-export const engineLabel = (id: string) =>
-  engines.find((e) => e.id === id)?.label ?? id;
+import { choiceFor, engineLabel } from "./engines";
 
 /**
  * In the order a team works, then the PM who keeps its list; `word` is how a
@@ -86,7 +80,7 @@ export const memberSummary = (m: Member) =>
 /** "Codex gpt-6-astra": what an assistant runs on. */
 export const assistantSummary = (a: AssistantProfile) =>
   [
-    a.model.engine === "openai-compatible"
+    choiceFor(a.model.engine)?.cli === false
       ? "An API"
       : engineLabel(a.model.engine),
     a.model.model,

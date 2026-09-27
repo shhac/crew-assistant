@@ -9,6 +9,10 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import { LimitsSettings } from "./LimitsSettings";
 import type { Config } from "./api";
+import { rememberChoices } from "./engines";
+import { testChoices } from "./testEngines";
+
+rememberChoices(testChoices);
 
 afterEach(cleanup);
 
@@ -126,4 +130,31 @@ it("keeps the model call limits where they are", () => {
     ...config,
     limits: { max_model_calls_per_day: 300, max_model_turns: 8 },
   });
+});
+
+it("sets floors only for engines that report subscription usage", () => {
+  rememberChoices([
+    ...testChoices,
+    { ...testChoices[2], engine: "nova", label: "Nova", usage: true },
+  ]);
+  try {
+    render(
+      <LimitsSettings
+        config={config}
+        defaults={defaults}
+        onChange={() => {}}
+      />,
+    );
+    expect(
+      screen.getByRole("region", { name: "Nova subscription" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("region", { name: "Grok subscription" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Another API subscription" }),
+    ).toBeNull();
+  } finally {
+    rememberChoices(testChoices);
+  }
 });

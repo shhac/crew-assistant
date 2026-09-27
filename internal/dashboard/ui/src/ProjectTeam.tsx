@@ -1,7 +1,7 @@
 import { href, memberHref, projectHref } from "./router";
 import { isCode } from "./landing";
+import { engineLabel } from "./engines";
 import {
-  engineLabel,
   holds,
   kindLabel,
   kindsLabel,

@@ -15,6 +15,10 @@ import {
   type Member,
   type State,
 } from "./api";
+import { rememberChoices } from "./engines";
+import { testChoices } from "./testEngines";
+
+rememberChoices(testChoices);
 
 const initial = (): State =>
   normalizeState({

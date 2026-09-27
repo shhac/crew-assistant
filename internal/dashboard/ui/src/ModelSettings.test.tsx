@@ -3,6 +3,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { EngineSettings, SuggestionModel } from "./ModelSettings";
 import type { Config } from "./api";
+import { rememberChoices } from "./engines";
+import { testChoices } from "./testEngines";
+
+rememberChoices(testChoices);
 
 afterEach(() => {
   cleanup();
@@ -82,9 +86,13 @@ it("uses the small models unless the owner picks another, and lists none for the
     models: { suggestions: { engine: "claude", model: "", effort: "" } },
   });
 });
-it("takes a model on another API as typed, and lists none for it", () => {
-  const fetch = vi.fn();
-  vi.stubGlobal("fetch", fetch);
+it("takes a model on another API as typed while its list offers none", async () => {
+  mockCatalog({
+    available: false,
+    engine: "openai-compatible",
+    detail: "The API didn't list its models",
+    models: [],
+  });
   const changed = vi.fn();
   const api = {
     ...config,
@@ -93,9 +101,14 @@ it("takes a model on another API as typed, and lists none for it", () => {
     },
   };
   render(<SuggestionModel config={api} onChange={changed} />);
+  await screen.findByText("The API didn't list its models");
   const model = screen.getByLabelText(/^Model/);
   expect(model.tagName).toBe("INPUT");
   expect(screen.getByText(/billed by the API/)).toBeTruthy();
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/models?profile=assistant&engine=openai-compatible",
+    expect.anything(),
+  );
   fireEvent.change(model, { target: { value: " local-small " } });
   expect(changed).toHaveBeenLastCalledWith({
     ...api,
@@ -116,7 +129,68 @@ it("takes a model on another API as typed, and lists none for it", () => {
       suggestions: { engine: "openai-compatible", model: "", effort: "low" },
     },
   });
-  expect(fetch).not.toHaveBeenCalled();
+});
+it("offers the models another API lists, with any effort typed in", async () => {
+  mockCatalog({
+    available: true,
+    engine: "openai-compatible",
+    detail: "Listed by the API",
+    default: { model: "", effort: "" },
+    models: [
+      { id: "small-a", name: "small-a", efforts: [], efforts_known: false },
+      { id: "small-b", name: "small-b", efforts: [], efforts_known: false },
+    ],
+  });
+  const changed = vi.fn();
+  const api = {
+    ...config,
+    models: {
+      suggestions: {
+        engine: "openai-compatible",
+        model: "small-a",
+        effort: "",
+      },
+    },
+  };
+  render(<SuggestionModel config={api} onChange={changed} />);
+  await screen.findByRole("option", { name: "small-b" });
+  expect(screen.getByLabelText(/^Model/).tagName).toBe("SELECT");
+  expect(screen.getByLabelText(/^Reasoning effort/).tagName).toBe("INPUT");
+  fireEvent.change(screen.getByLabelText(/^Reasoning effort/), {
+    target: { value: "minimal" },
+  });
+  expect(changed).toHaveBeenLastCalledWith({
+    ...api,
+    models: {
+      suggestions: {
+        engine: "openai-compatible",
+        model: "small-a",
+        effort: "minimal",
+      },
+    },
+  });
+});
+it("offers only engines that may run small jobs", () => {
+  vi.stubGlobal("fetch", vi.fn());
+  rememberChoices([
+    ...testChoices,
+    { ...testChoices[2], engine: "nova", label: "Nova", small: true },
+  ]);
+  try {
+    render(<SuggestionModel config={smallModels} onChange={() => {}} />);
+    const engine = screen.getByLabelText<HTMLSelectElement>(
+      /^Suggestions and loading lines/,
+    );
+    expect(Array.from(engine.options, (o) => o.textContent)).toEqual([
+      "The small models (recommended)",
+      "A model on Codex",
+      "A model on Claude",
+      "A model on another API",
+      "A model on Nova",
+    ]);
+  } finally {
+    rememberChoices(testChoices);
+  }
 });
 it("offers any model its login lists, with only its supported efforts", async () => {
   mockCatalog(catalog);
@@ -183,6 +257,43 @@ it("keeps the saved choice and offers a refresh when the model list cannot load"
   await screen.findByRole("option", { name: "Test Thinker (recommended)" });
   expect(fetch).toHaveBeenCalledTimes(2);
   expect(changed).not.toHaveBeenCalled();
+});
+it("shows a folder and program for every CLI engine, such as Grok", () => {
+  vi.stubGlobal("fetch", vi.fn());
+  render(
+    <EngineSettings
+      config={config}
+      defaults={{
+        ...defaults,
+        engines: { ...defaults.engines, grok: { bin: "grok", home: "" } },
+      }}
+      onChange={() => {}}
+    />,
+  );
+  expect(
+    screen.getByLabelText<HTMLInputElement>("Grok program").placeholder,
+  ).toBe("grok");
+  expect(
+    screen.getByLabelText<HTMLInputElement>(/^Grok folder/).placeholder,
+  ).toBe("");
+  expect(screen.queryByLabelText(/^Another API program/)).toBeNull();
+});
+it("writes where the API reads reasoning effort, blank for the default", () => {
+  vi.stubGlobal("fetch", vi.fn());
+  const changed = vi.fn();
+  render(<EngineSettings config={config} onChange={changed} />);
+  const field = screen.getByLabelText<HTMLSelectElement>(
+    /^Reasoning effort is sent as/,
+  );
+  expect(field.value).toBe("");
+  fireEvent.change(field, { target: { value: "reasoning.effort" } });
+  expect(changed).toHaveBeenLastCalledWith({
+    ...config,
+    engines: {
+      ...engines,
+      "openai-compatible": { effort_parameter: "reasoning.effort" },
+    },
+  });
 });
 it("shows every engine's settings and what a blank one falls back to", () => {
   const fetch = vi.fn();

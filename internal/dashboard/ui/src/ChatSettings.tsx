@@ -1,13 +1,11 @@
 import { href } from "./router";
-import { section, type Config } from "./api";
-
-// The small models loading messages and suggestions use unless the owner
-// chooses another in Models. Haiku 4.5 has no effort setting, so none is
-// sent for it.
-const smallModels = {
-  codex: { label: "Codex", detail: "gpt-6-luna, low effort" },
-  claude: { label: "Claude", detail: "haiku" },
-} as const;
+import { section, type Config, type EngineChoice } from "./api";
+import {
+  choiceFor,
+  engineLabel,
+  smallLogins,
+  useEngineChoices,
+} from "./engines";
 
 export function ChatSettings({
   config,
@@ -18,15 +16,14 @@ export function ChatSettings({
 }) {
   const chat = section(config.chat);
   const phrases = section(chat.loading_phrases);
+  const choices = useEngineChoices();
+  const logins = smallLogins(choices);
   const seat = section(config.assistant).seat;
   const seated = config.assistants?.find((a) => a.id === seat);
-  const engine = seated?.model.engine || "codex";
+  const engine = seated?.model.engine || logins[0]?.engine || "";
   const chosen = section(section(config.models).suggestions);
-  const chosenEngine = chosen.engine === "claude" ? "claude" : "codex";
-  const local = engine === "codex" || engine === "claude";
+  const chosenEngine = String(chosen.engine ?? "");
   const enabled = phrases.enabled !== false;
-  const own = smallModels[engine === "claude" ? "claude" : "codex"];
-  const other = smallModels[engine === "claude" ? "codex" : "claude"];
   const change = (patch: Record<string, unknown>) =>
     onChange({
       ...config,
@@ -49,17 +46,36 @@ export function ChatSettings({
         your daily model calls.
       </p>
       <p className="hint">
-        {chosen.engine === "openai-compatible"
-          ? `Loading messages and next-message suggestions use ${String(chosen.model)} on your API, billed per call. No other model is used. `
-          : chosen.engine
-            ? `Loading messages and next-message suggestions use ${String(chosen.model)} on your ${smallModels[chosenEngine].label} login. No other model is used. `
-            : local
-              ? `Loading messages and next-message suggestions use your ${own.label} login (${own.detail}), or your ${other.label} login (${other.detail}) if that isn't working. No other model is used. `
-              : "The assistant uses an API, so loading messages are a fixed line and cost nothing extra. "}
+        {smallModelsLine(choices, logins, engine, chosenEngine, chosen.model)}
         <a href={href({ page: "settings", section: "models" })}>
           Choose the model
         </a>
       </p>
     </div>
   );
+}
+
+/** Which model writes loading messages and suggestions, as a sentence. */
+function smallModelsLine(
+  choices: readonly EngineChoice[],
+  logins: ReturnType<typeof smallLogins>,
+  engine: string,
+  chosenEngine: string,
+  chosenModel: unknown,
+) {
+  if (chosenEngine && choiceFor(chosenEngine, choices)?.cli === false)
+    return `Loading messages and next-message suggestions use ${String(chosenModel)} on your API, billed per call. No other model is used. `;
+  if (chosenEngine)
+    return `Loading messages and next-message suggestions use ${String(chosenModel)} on your ${engineLabel(chosenEngine, choices)} login. No other model is used. `;
+  if (choiceFor(engine, choices)?.cli === false)
+    return "The assistant uses an API, so loading messages are a fixed line and cost nothing extra. ";
+  const own = logins.find((login) => login.engine === engine);
+  if (!own) return "";
+  const others = logins
+    .filter((login) => login !== own)
+    .map((login) => `your ${login.label} login (${login.model.detail})`);
+  const fallback = others.length
+    ? `, or ${others.join(", or ")} if that isn't working`
+    : "";
+  return `Loading messages and next-message suggestions use your ${own.label} login (${own.model.detail})${fallback}. No other model is used. `;
 }

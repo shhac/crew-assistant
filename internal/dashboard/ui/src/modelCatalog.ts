@@ -1,13 +1,17 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { engineLabel } from "./engines";
 
 export type ModelOption = {
   id: string;
   name: string;
   description?: string;
-  default_effort: string;
-  efforts: { id: string; description?: string }[];
+  default_effort?: string;
+  efforts: { id: string; description?: string; default?: boolean }[];
+  /** False when the list doesn't say which efforts it takes; any may do. */
+  efforts_known?: boolean;
   is_default: boolean;
+  context_window?: number;
 };
 export type Catalog = {
   available: boolean;
@@ -20,7 +24,7 @@ export type Catalog = {
 
 /**
  * The models an engine offers, as the assistant's own settings find them.
- * With no engine (one that isn't a local CLI) there is nothing to list.
+ * With no engine (one whose models can't be listed) there is nothing to list.
  */
 export function useModelCatalog(engine: string) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -37,9 +41,12 @@ export function useModelCatalog(engine: string) {
     setLoading(true);
     setError("");
     setCatalog(null);
-    api<Catalog>(`/api/models?profile=assistant&engine=${engine}`, {
-      signal: controller.signal,
-    })
+    api<Catalog>(
+      `/api/models?profile=assistant&engine=${encodeURIComponent(engine)}`,
+      {
+        signal: controller.signal,
+      },
+    )
       .then((data) => {
         if (active) setCatalog(data);
       })
@@ -73,6 +80,10 @@ export function modelLabel(option: ModelOption, catalog: Catalog | null) {
   if (option.id === catalog?.default.model)
     return `${option.name} (recommended)`;
   if (option.is_default)
-    return `${option.name} (${catalog?.engine === "claude" ? "Claude" : "Codex"} default)`;
+    return `${option.name} (${engineLabel(catalog?.engine ?? "")} default)`;
   return option.name;
 }
+
+/** Whether a model's efforts are listed, so a pick can be offered from them. */
+export const effortsListed = (option?: ModelOption) =>
+  !!option && option.efforts_known !== false;

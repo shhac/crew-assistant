@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { getUsage, type EngineUsage } from "./api";
-import { engineLabel } from "./members";
+import { getUsage, type EngineCredits, type EngineUsage } from "./api";
+import { engineLabel } from "./engines";
 import { recordedTime } from "./ui";
 
 /**
@@ -24,9 +24,17 @@ export function resetLabel(value?: string) {
 
 const percent = (n: number) => `${Math.round(n)}%`;
 
+/** "Credits: 12.50 USD", or "12.5 credits" when the unit is credits itself. */
+export function creditsLabel(credits?: EngineCredits) {
+  if (!credits?.balance) return "";
+  if (credits.unit === "credits") return `${credits.balance} credits`;
+  return `Credits: ${credits.balance} ${credits.unit}`.trim();
+}
+
 /** What an engine's row says, only from what its CLI reported. */
 function describe(u: EngineUsage) {
   const name = engineLabel(u.engine);
+  const credits = creditsLabel(u.credits);
   // Read first: the small models skip an engine resting for its rate limit
   // whether or not a figure could be read since.
   const limited = resetLabel(u.rate_limited_until);
@@ -41,6 +49,7 @@ function describe(u: EngineUsage) {
       ]
         .filter(Boolean)
         .join(", "),
+      credits,
     };
   const tightest = u.windows.reduce((a, b) =>
     b.left_percent < a.left_percent ? b : a,
@@ -57,6 +66,7 @@ function describe(u: EngineUsage) {
       : `${u.level === "low" ? "low, " : ""}${percent(tightest.left_percent)} left`,
     resets && `resets ${resets}`,
     u.using_overage && "using extra usage",
+    credits,
   ].filter(Boolean);
   return {
     name,
@@ -81,6 +91,7 @@ function describe(u: EngineUsage) {
             .map((w) => `${w.name} ${percent(w.left_percent)}`)
             .join(" · ")
         : "",
+    credits,
   };
 }
 
@@ -143,9 +154,13 @@ export function UsageStatus() {
                   <span style={{ width: `${row.left}%` }} />
                 </div>
               )}
-              {(row.resets || row.windows) && (
+              {(row.resets || row.windows || row.credits) && (
                 <p className="hint">
-                  {[row.resets && `Resets ${row.resets}`, row.windows]
+                  {[
+                    row.resets && `Resets ${row.resets}`,
+                    row.windows,
+                    row.credits,
+                  ]
                     .filter(Boolean)
                     .join(" · ")}
                 </p>

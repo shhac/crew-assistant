@@ -1,4 +1,5 @@
 import { Panel } from "./SettingsPanel";
+import { choicesFor, useEngineChoices } from "./engines";
 import {
   section,
   withEngine,
@@ -10,11 +11,6 @@ import {
 function numberOrEmpty(value: unknown) {
   return typeof value === "number" ? value : "";
 }
-
-const subscriptions = [
-  { engine: "codex", label: "Codex" },
-  { engine: "claude", label: "Claude" },
-] as const;
 
 const windows = [
   ["5h_percent", "Keep unused of the 5-hour window (%)"],
@@ -31,6 +27,7 @@ export function LimitsSettings({
   onChange: (value: Config) => void;
 }) {
   const limits = section(config.limits);
+  const subscriptions = choicesFor(useEngineChoices(), "usage");
   const setLimit = (key: string, value: number) =>
     onChange({ ...config, limits: { ...limits, [key]: value } });
   return (

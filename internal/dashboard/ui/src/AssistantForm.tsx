@@ -1,16 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { engines } from "./members";
+import { choiceFor, choicesFor, useEngineChoices } from "./engines";
 import { ModelFields } from "./ModelFields";
 import { PersonalityField, SuggestedLook } from "./ProfileFields";
 import type { Suggestion } from "./SuggestIdentity";
 import { ErrorNotice, useAction } from "./ui";
 import { saveAssistant, type AssistantProfile } from "./api";
-
-/** An assistant runs on a CLI as a member does, or on an API. */
-export const assistantEngines = [
-  ...engines,
-  { id: "openai-compatible", label: "Another API" },
-];
 
 const defaultMaxTokens = 4096;
 
@@ -31,8 +25,8 @@ export function AssistantForm({
   onCancel: () => void;
 }) {
   const [name, setName] = useState(assistant?.name ?? "");
-  const [choice, setChoice] = useState({
-    engine: assistant?.model.engine ?? "codex",
+  const [picked, setChoice] = useState({
+    engine: assistant?.model.engine ?? "",
     model: assistant?.model.model ?? "",
     effort: assistant?.model.effort ?? "",
   });
@@ -45,7 +39,14 @@ export function AssistantForm({
     setName(suggestion.name);
     setPersonality(suggestion.personality);
   }, [suggestion]);
-  const api = choice.engine === "openai-compatible";
+  const choices = useEngineChoices();
+  // A new assistant starts on the first engine that can run one.
+  const choice = {
+    ...picked,
+    engine:
+      picked.engine || (choicesFor(choices, "assistant")[0]?.engine ?? ""),
+  };
+  const api = choiceFor(choice.engine, choices)?.cli === false;
   const { busy, error, run } = useAction();
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -84,7 +85,7 @@ export function AssistantForm({
       </label>
       <ModelFields
         id="assistant"
-        engines={assistantEngines}
+        use="assistant"
         value={choice}
         saved={assistant?.model}
         onChange={setChoice}
@@ -117,7 +118,7 @@ export function AssistantForm({
         <button
           className="btn btn-primary"
           type="submit"
-          disabled={busy || !name.trim()}
+          disabled={busy || !name.trim() || !choice.engine}
         >
           {assistant ? "Save" : "Add assistant"}
         </button>
