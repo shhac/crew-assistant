@@ -5,23 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/config"
-	"github.com/shhac/lib-agent-harness/session"
+	harness "github.com/shhac/lib-agent-harness"
+	"github.com/shhac/lib-agent-harness/account"
 )
 
 // twoWindows is a Codex reading with a 5-hour and a weekly window.
-func twoWindows(fiveHourUsed, weekUsed float64, resets *time.Time) session.QuotaSnapshot {
+func twoWindows(fiveHourUsed, weekUsed float64, resets *time.Time) harness.QuotaSnapshot {
 	q := fixture(fiveHourUsed)
 	q.Windows[0].ResetsAt = resets
 	week := fixture(weekUsed).Windows[0]
 	minutes := int64(10080)
-	week.ID, week.WindowMinutes = "codex/secondary", &minutes
+	week.ID, week.Kind, week.WindowMinutes = "codex/secondary", harness.QuotaWeekly, &minutes
 	q.Windows = append(q.Windows, week)
 	return q
 }
@@ -93,14 +92,19 @@ func TestDescribeSaysWhyNothingWasMeasured(t *testing.T) {
 		reading Reading
 		missing string
 	}{
-		{"not installed", Reading{Err: fmt.Errorf("start codex: %w", exec.ErrNotFound)}, "not installed"},
+		{"not installed", Reading{Err: fmt.Errorf("reading usage: %w", &account.Error{Engine: harness.Codex, Code: account.CodeNotInstalled, Family: harness.FailurePreflight})}, "not installed"},
 		{"not signed in", Reading{LoggedIn: &no, Quota: fixture(10)}, "not signed in"},
-		{"not reported", Reading{Quota: session.QuotaSnapshot{Observation: session.Observation{Quality: session.Measured, ObservedAt: now}, Complete: true}}, "usage not reported"},
+		{"not reported", Reading{Quota: harness.QuotaSnapshot{Observation: harness.Observation{Quality: harness.Measured, ObservedAt: now}, Complete: true}}, "usage not reported"},
 		{"nothing at all", Reading{}, "usage not reported"},
-		{"unrelated pool", func() Reading { q := fixture(10); q.Windows[0].Scope = "code-review"; return Reading{Quota: q} }(), "usage not reported"},
+		{"unrelated pool", func() Reading {
+			q := fixture(10)
+			q.Windows[0].ID, q.Windows[0].Scope = "review/primary", "review"
+			return Reading{Quota: q}
+		}(), "usage not reported"},
 		{"stale", func() Reading { q := fixture(10); q.ObservedAt = now.Add(-time.Hour); return Reading{Quota: q} }(), "usage not reported"},
 		{"failed", Reading{Err: errors.New("app-server exited")}, "usage check failed"},
 		{"timed out", Reading{Err: context.DeadlineExceeded}, "usage check timed out"},
+		{"CLI timed out", Reading{Err: &account.Error{Engine: harness.Codex, Code: account.CodeTimedOut, Family: harness.FailureProcess}}, "usage check timed out"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Describe(tc.reading, codex, tenAndTen, now)
@@ -121,11 +125,11 @@ func TestExhaustedIsANothingLeftWindowThatGovernsTheModel(t *testing.T) {
 	}
 	invalid := twoWindows(100, 0, nil)
 	invalid.Windows[0].Invalidated = true
-	if Exhausted(invalid, codex) || Exhausted(twoWindows(99, 0, nil), codex) || Exhausted(session.QuotaSnapshot{}, codex) {
+	if Exhausted(invalid, codex) || Exhausted(twoWindows(99, 0, nil), codex) || Exhausted(harness.QuotaSnapshot{}, codex) {
 		t.Fatal("an invalid, unspent or missing window counted as spent")
 	}
 	claudeWeekly := fixture(100)
-	claudeWeekly.Windows[0].ID, claudeWeekly.Windows[0].Scope = "seven_day_opus", "opus"
+	claudeWeekly.Windows[0].ID, claudeWeekly.Windows[0].Scope, claudeWeekly.Windows[0].Kind, claudeWeekly.Windows[0].Model = "seven_day_opus", "seven_day_opus", harness.QuotaWeeklyModel, "opus"
 	if Exhausted(claudeWeekly, config.Harness{Engine: "claude", Model: "haiku"}) || !Exhausted(claudeWeekly, config.Harness{Engine: "claude", Model: "opus"}) {
 		t.Fatal("an Opus pool governed the wrong model")
 	}
@@ -135,13 +139,13 @@ func TestExhaustedIsANothingLeftWindowThatGovernsTheModel(t *testing.T) {
 // says nothing of the spent window: only a reading of that window clears it.
 func TestOutOfUsageIsClearedOnlyByTheSpentWindow(t *testing.T) {
 	unrelated := fixture(10)
-	unrelated.Windows[0].ID, unrelated.Windows[0].Scope = "codex/code-review", "code-review"
-	script := []session.QuotaSnapshot{twoWindows(100, 0, nil), unrelated, twoWindows(30, 0, nil)}
+	unrelated.Windows[0].ID, unrelated.Windows[0].Scope = "review/primary", "review"
+	script := []harness.QuotaSnapshot{twoWindows(100, 0, nil), unrelated, twoWindows(30, 0, nil)}
 	looks := 0
-	meter := Meter{Inspect: func(context.Context, session.Options) (session.Inspection, error) {
+	meter := Meter{Inspect: func(context.Context, harness.Provider) (harness.AccountReport, error) {
 		q := script[looks]
 		looks++
-		return session.Inspection{Quota: q}, nil
+		return harness.AccountReport{Quota: q}, nil
 	}}
 	model := config.Harness{Engine: "codex", Model: "gpt-6-luna"}
 	for i, want := range []bool{true, true, false} {
@@ -158,7 +162,7 @@ func TestOutOfUsageIsClearedOnlyByTheSpentWindow(t *testing.T) {
 // spent it is only looked at, in the background, once per Recheck.
 func TestOutOfUsageHoldsUntilAReadingMeasuresUsageLeft(t *testing.T) {
 	type look struct {
-		quota session.QuotaSnapshot
+		quota harness.QuotaSnapshot
 		err   error
 	}
 	resets := time.Now().Add(time.Millisecond)
@@ -167,7 +171,7 @@ func TestOutOfUsageHoldsUntilAReadingMeasuresUsageLeft(t *testing.T) {
 	script := []look{{quota: twoWindows(100, 0, &resets)}, {err: errors.New("app-server exited")}, {quota: invalidated}, {quota: twoWindows(40, 0, nil)}}
 	var mu sync.Mutex
 	looks, gate := 0, make(chan struct{}, 1)
-	meter := Meter{Inspect: func(context.Context, session.Options) (session.Inspection, error) {
+	meter := Meter{Inspect: func(context.Context, harness.Provider) (harness.AccountReport, error) {
 		mu.Lock()
 		next, first := script[looks], looks == 0
 		looks++
@@ -175,7 +179,7 @@ func TestOutOfUsageHoldsUntilAReadingMeasuresUsageLeft(t *testing.T) {
 		if !first {
 			<-gate
 		}
-		return session.Inspection{Quota: next.quota}, next.err
+		return harness.AccountReport{Quota: next.quota}, next.err
 	}}
 	self, err := os.Executable()
 	if err != nil {
@@ -226,23 +230,39 @@ func TestOutOfUsageHoldsUntilAReadingMeasuresUsageLeft(t *testing.T) {
 	}
 }
 
-// The harness only says a CLI couldn't start; the meter says when it isn't
-// there at all.
+// A CLI that isn't there reads as not installed, apart from one that is
+// there and failed its check.
 func TestObserveTellsAMissingCLIFromAFailedCheck(t *testing.T) {
-	meter := Meter{Inspect: func(context.Context, session.Options) (session.Inspection, error) {
-		return session.Inspection{}, errors.New("codex harness could not be started")
+	meter := Meter{Inspect: func(_ context.Context, p harness.Provider) (harness.AccountReport, error) {
+		if p.CLI.Binary == "missing-codex" {
+			return harness.AccountReport{}, &account.Error{Engine: p.Engine, Code: account.CodeNotInstalled, Family: harness.FailurePreflight}
+		}
+		return harness.AccountReport{}, &account.Error{Engine: p.Engine, Code: account.CodeProcessExited, Family: harness.FailureProcess}
 	}}
-	missing := config.Harness{Engine: "codex", Bin: filepath.Join(t.TempDir(), "codex")}
+	missing := config.Harness{Engine: "codex", Bin: "missing-codex"}
 	if got := Describe(meter.Observe(context.Background(), missing), missing, tenAndTen, time.Now()); got.Missing != "not installed" {
 		t.Fatalf("%+v", got)
 	}
-	self, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	present := config.Harness{Engine: "codex", Bin: self}
+	present := config.Harness{Engine: "codex", Bin: "codex"}
 	if got := Describe(meter.Observe(context.Background(), present), present, tenAndTen, time.Now()); got.Missing != "usage check failed" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+// A reported credit balance is shown exactly as reported, beside the
+// windows or without them; an unreported one is not shown at all.
+func TestDescribeShowsReportedCredits(t *testing.T) {
+	now := time.Now()
+	balance := harness.CreditSnapshot{Observation: harness.Observation{Quality: harness.Measured, ObservedAt: now}, Balance: &harness.Amount{Value: "12.50", Unit: "USD"}}
+	if got := Describe(Reading{Quota: fixture(10), Credits: balance}, codex, tenAndTen, now); got.Credits == nil || *got.Credits != (Credits{Balance: "12.50", Unit: "USD"}) {
+		t.Fatalf("%+v", got.Credits)
+	}
+	if got := Describe(Reading{Credits: balance}, codex, tenAndTen, now); got.Credits == nil || got.Missing != "usage not reported" {
+		t.Fatalf("%+v", got)
+	}
+	unknown := harness.CreditSnapshot{Observation: harness.Observation{Quality: harness.Measured, ObservedAt: now}}
+	if got := Describe(Reading{Quota: fixture(10), Credits: unknown}, codex, tenAndTen, now); got.Credits != nil {
+		t.Fatalf("%+v", got.Credits)
 	}
 }
 
@@ -250,12 +270,12 @@ func TestObserveTellsAMissingCLIFromAFailedCheck(t *testing.T) {
 func TestCachedNeverWaitsOnAnInspection(t *testing.T) {
 	release := make(chan struct{})
 	calls := 0
-	meter := Meter{Inspect: func(context.Context, session.Options) (session.Inspection, error) {
+	meter := Meter{Inspect: func(context.Context, harness.Provider) (harness.AccountReport, error) {
 		calls++
 		if calls == 2 {
 			<-release
 		}
-		return session.Inspection{Quota: fixture(20)}, nil
+		return harness.AccountReport{Quota: fixture(20)}, nil
 	}}
 	model := config.Default().AssistantHarness()
 	if _, ok := meter.Cached(model); ok {

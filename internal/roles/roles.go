@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
 )
 
@@ -19,7 +20,7 @@ type Spec struct {
 	// Binary and Home select the installed CLI and the login it uses.
 	Binary, Home string
 	// RuntimeHome is the private home a Codex session runs in, sharing only the
-	// login from Home.
+	// login from Home. Another engine is given none.
 	RuntimeHome string
 	WorkDir     string
 	// Write lets the role change files in WorkDir. Nothing a role runs reaches
@@ -35,8 +36,8 @@ type Spec struct {
 	// Resume continues an earlier session of this role, when it still matches
 	// this configuration. The prompt must stand on its own either way.
 	Resume json.RawMessage
-	// Compact has a resumed session compact its context before the turn.
-	// Only Codex can; a fresh session has nothing to compact.
+	// Compact has a resumed session compact its context before the turn, on
+	// an engine that can be asked to; a fresh session has nothing to compact.
 	Compact bool
 	// Web lets the role search and fetch the web. What it runs in its shell
 	// still reaches no network.
@@ -151,7 +152,7 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 			s.Close()
 		}
 	}()
-	if spec.Compact && resumed {
+	if spec.Compact && resumed && harness.Support(o.Provider.Engine, harness.Session, harness.Compact).Usable() {
 		if err := compact(ctx, s); err != nil {
 			return Result{}, err
 		}
@@ -183,12 +184,12 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 }
 
 // options is the session a role runs as. Every role runs sandboxed; only a
-// Codex role gets a private runtime home.
+// Codex role gets a private runtime home. A stored reference names the
+// runtime home, so giving one to an engine that doesn't read it would stop
+// its conversations resuming.
 func options(spec Spec) session.Options {
 	o := session.Options{
-		Engine:      session.Engine(spec.Engine),
-		Binary:      spec.Binary,
-		Home:        spec.Home,
+		Provider:    harness.Provider{Engine: harness.Engine(spec.Engine), CLI: harness.CLI{Binary: spec.Binary, Home: spec.Home}},
 		RuntimeHome: spec.RuntimeHome,
 		WorkDir:     spec.WorkDir,
 		Model:       spec.Model,
@@ -196,7 +197,7 @@ func options(spec Spec) session.Options {
 		Sandbox:     &session.Sandbox{Write: spec.Write, Read: spec.Read, Web: spec.Web},
 		Env:         spec.Env,
 	}
-	if spec.Engine != string(session.Codex) {
+	if o.Provider.Engine != harness.Codex {
 		o.RuntimeHome = ""
 	}
 	if spec.Instructions != "" {
@@ -261,4 +262,10 @@ func compact(ctx context.Context, s conversation) error {
 func Permanent(err error) bool {
 	var capability *session.CapabilityError
 	return errors.As(err, &capability)
+}
+
+// VerifySandbox runs the proof a role's session makes before it starts,
+// without starting one or performing inference.
+func VerifySandbox(ctx context.Context, spec Spec) error {
+	return session.VerifySandbox(ctx, options(spec))
 }

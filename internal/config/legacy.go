@@ -181,7 +181,8 @@ func convertRoleUsage(doc map[string]any) bool {
 	}
 	delete(limits, "role_usage")
 	pause, _ := usage["on_unavailable"].(string)
-	for _, engine := range CLIEngineNames {
+	// The old layout knew only these two.
+	for _, engine := range []string{"codex", "claude"} {
 		used, limited := usage[engine+"_max_used_percent"].(float64)
 		floor, set := floorFrom(used)
 		if limited && set {

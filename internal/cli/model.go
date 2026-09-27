@@ -7,11 +7,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/shhac/crew-assistant/internal/config"
-	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/lib-agent-harness/completion"
 	"github.com/spf13/cobra"
 )
+
+// loginEngines are the CLIs whose own sign-in this command runs.
+var loginEngines = []string{"codex", "claude"}
 
 func registerModel(root *cobra.Command, o *options) {
 	var engineName string
@@ -24,12 +29,12 @@ func registerModel(root *cobra.Command, o *options) {
 		// Team roles use the same CLI homes as the assistant, one per engine, so
 		// signing in to an engine's home serves both.
 		selected := cfg.AssistantHarness()
-		switch engineName {
-		case "":
-		case "codex", "claude":
+		switch {
+		case engineName == "":
+		case slices.Contains(loginEngines, engineName):
 			selected = cfg.Harness(engineName, "", "")
 		default:
-			return errors.New("engine must be codex or claude")
+			return fmt.Errorf("engine must be %s", strings.Join(loginEngines, " or "))
 		}
 		child, err := prepareModelLogin(cmd.Context(), selected)
 		if err != nil {
@@ -50,8 +55,8 @@ func registerModel(root *cobra.Command, o *options) {
 // Login is an owner-invoked CLI action, never an assistant model tool. Codex owns
 // its credentials and refresh flow; we only select the directory and process.
 func prepareModelLogin(ctx context.Context, h config.Harness) (*exec.Cmd, error) {
-	if h.Engine != "codex" && h.Engine != "claude" {
-		return nil, errors.New("model login supports Codex and Claude CLI; API credentials stay with the configured provider")
+	if !slices.Contains(loginEngines, h.Engine) {
+		return nil, fmt.Errorf("model login signs in to %s; sign in to any other CLI with its own command, and API credentials stay with the configured provider", strings.Join(loginEngines, " or "))
 	}
 	if !filepath.IsAbs(h.Home) {
 		return nil, fmt.Errorf("engines.%s.home must be an absolute directory path", h.Engine)
@@ -68,7 +73,7 @@ func prepareModelLogin(ctx context.Context, h config.Harness) (*exec.Cmd, error)
 		if err = os.MkdirAll(h.Home, 0700); err != nil {
 			return nil, err
 		}
-		env, err := engine.ClaudeEnvironment(h.Home)
+		env, err := completion.ClaudeEnvironment(h.Home)
 		if err != nil {
 			return nil, err
 		}
@@ -87,10 +92,10 @@ func prepareModelLogin(ctx context.Context, h config.Harness) (*exec.Cmd, error)
 	if err = os.MkdirAll(h.Home, 0700); err != nil {
 		return nil, fmt.Errorf("create configured Codex home: %w", err)
 	}
-	if err = engine.ValidateCodexHome(h.Home); err != nil {
+	if err = completion.ValidateCodexHome(h.Home); err != nil {
 		return nil, err
 	}
-	env, err := engine.CodexEnvironment(h.Home)
+	env, err := completion.CodexEnvironment(h.Home)
 	if err != nil {
 		return nil, err
 	}

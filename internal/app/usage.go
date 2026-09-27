@@ -22,14 +22,15 @@ type EngineUsage struct {
 	RateLimitedUntil *time.Time `json:"rate_limited_until,omitempty"`
 }
 
-// Usage is what each CLI engine's login reports it has left, read without a
-// model call. The demo reads no login, and while the daemon stops only the
+// Usage is what each engine that reports usage windows has left, read
+// without a model call. The demo reads no login, and while the daemon stops only the
 // last reading is shown, since nothing new starts a CLI.
 func (a *App) Usage(ctx context.Context) []EngineUsage {
-	out := make([]EngineUsage, len(config.CLIEngineNames))
+	engines := config.EnginesFor(config.UseUsage)
+	out := make([]EngineUsage, len(engines))
 	stopping := a.Stopping()
 	var wg sync.WaitGroup
-	for i, name := range config.CLIEngineNames {
+	for i, name := range engines {
 		out[i].Engine = name
 		switch {
 		case a.Demo:

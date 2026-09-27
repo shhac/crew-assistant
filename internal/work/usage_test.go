@@ -11,28 +11,28 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/quota"
-	"github.com/shhac/lib-agent-harness/session"
+	harness "github.com/shhac/lib-agent-harness"
 )
 
-func spentReading(engine session.Engine) session.Inspection {
+func spentReading(engine harness.Engine) harness.AccountReport {
 	now := time.Now()
 	used, minutes, resets := 100.0, int64(300), now.Add(time.Hour)
-	observation := session.Observation{Quality: session.Measured, ObservedAt: now}
-	id, scope := "five_hour", ""
-	if engine == session.Codex {
+	observation := harness.Observation{Quality: harness.Measured, ObservedAt: now}
+	id, scope := "five_hour", "five_hour"
+	if engine == harness.Codex {
 		id, scope = "codex/primary", "codex"
 	}
-	return session.Inspection{Quota: session.QuotaSnapshot{Observation: observation, Complete: true, Windows: []session.QuotaWindow{{Observation: observation, ID: id, Scope: scope, UsedPercent: &used, WindowMinutes: &minutes, ResetsAt: &resets}}}}
+	return harness.AccountReport{Quota: harness.QuotaSnapshot{Observation: observation, Complete: true, Windows: []harness.QuotaWindow{{Observation: observation, ID: id, Kind: harness.QuotaSession, Scope: scope, UsedPercent: &used, WindowMinutes: &minutes, ResetsAt: &resets}}}}
 }
 
 // The sidebar reads the meter the hold reads, and says the same thing of it.
 func TestUsageAgreesWithTheHold(t *testing.T) {
 	a := testLoop(t)
-	a.meter = &quota.Meter{Inspect: func(_ context.Context, o session.Options) (session.Inspection, error) {
+	a.meter = &quota.Meter{Inspect: func(_ context.Context, o harness.Provider) (harness.AccountReport, error) {
 		return spentReading(o.Engine), nil
 	}}
 	ctx := context.Background()
-	for _, engine := range config.CLIEngineNames {
+	for _, engine := range config.EnginesFor(config.UseUsage) {
 		got := a.Usage(ctx, engine, time.Second)
 		if got.Level != quota.LevelExhausted || len(got.Windows) != 1 || got.ResetsAt == nil {
 			t.Fatalf("%s: %+v", engine, got)
@@ -56,11 +56,11 @@ func TestUsageStaysOutUntilMeasuredOtherwise(t *testing.T) {
 	a.Config = func() config.Config { return cfg }
 	var mu sync.Mutex
 	fail := false
-	a.meter = &quota.Meter{Inspect: func(_ context.Context, o session.Options) (session.Inspection, error) {
+	a.meter = &quota.Meter{Inspect: func(_ context.Context, o harness.Provider) (harness.AccountReport, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if fail {
-			return session.Inspection{}, errors.New("app-server exited")
+			return harness.AccountReport{}, errors.New("app-server exited")
 		}
 		return spentReading(o.Engine), nil
 	}}
@@ -87,7 +87,7 @@ func TestUsageIsBoundedAndNeverSpendsALook(t *testing.T) {
 	release := make(chan struct{})
 	var mu sync.Mutex
 	reads := 0
-	a.meter = &quota.Meter{Inspect: func(_ context.Context, o session.Options) (session.Inspection, error) {
+	a.meter = &quota.Meter{Inspect: func(_ context.Context, o harness.Provider) (harness.AccountReport, error) {
 		mu.Lock()
 		reads++
 		mu.Unlock()
@@ -127,15 +127,21 @@ func TestUsageIsBoundedAndNeverSpendsALook(t *testing.T) {
 func TestTheSidebarAndTheSmallModelsReadOneRule(t *testing.T) {
 	now := time.Now()
 	used, minutes, resets := 100.0, int64(10080), now.Add(time.Hour)
-	observation := session.Observation{Quality: session.Measured, ObservedAt: now}
-	window := func(id string) session.QuotaWindow {
-		scope, _ := strings.CutPrefix(id, "model:")
-		return session.QuotaWindow{Observation: observation, ID: id, Scope: scope, UsedPercent: &used, WindowMinutes: &minutes, ResetsAt: &resets}
+	observation := harness.Observation{Quality: harness.Measured, ObservedAt: now}
+	window := func(id string) harness.QuotaWindow {
+		w := harness.QuotaWindow{Observation: observation, ID: id, Kind: harness.QuotaWeekly, Scope: id, UsedPercent: &used, WindowMinutes: &minutes, ResetsAt: &resets}
+		if model, found := strings.CutPrefix(id, "seven_day_"); found {
+			w.Kind, w.Model = harness.QuotaWeeklyModel, model
+		}
+		if model, found := strings.CutPrefix(id, "model:"); found {
+			w.Kind, w.Model, w.Scope = harness.QuotaWeeklyModel, model, model
+		}
+		return w
 	}
 	for id, spent := range map[string]bool{"seven_day_opus": false, "model:Haiku": false, "seven_day": true} {
 		a := testLoop(t)
-		a.meter = &quota.Meter{Inspect: func(context.Context, session.Options) (session.Inspection, error) {
-			return session.Inspection{Quota: session.QuotaSnapshot{Observation: observation, Complete: true, Windows: []session.QuotaWindow{window(id)}}}, nil
+		a.meter = &quota.Meter{Inspect: func(context.Context, harness.Provider) (harness.AccountReport, error) {
+			return harness.AccountReport{Quota: harness.QuotaSnapshot{Observation: observation, Complete: true, Windows: []harness.QuotaWindow{window(id)}}}, nil
 		}}
 		sidebar := a.Usage(context.Background(), "claude", time.Second).Level == quota.LevelExhausted
 		fallback := a.OutOfUsage(a.Config().Harness("claude", "haiku", ""))
@@ -150,7 +156,7 @@ func TestTheSidebarAndTheSmallModelsReadOneRule(t *testing.T) {
 func TestARefusalHasTheLoginReadAgain(t *testing.T) {
 	a := testLoop(t)
 	looked := make(chan string, 1)
-	a.meter = &quota.Meter{Inspect: func(_ context.Context, o session.Options) (session.Inspection, error) {
+	a.meter = &quota.Meter{Inspect: func(_ context.Context, o harness.Provider) (harness.AccountReport, error) {
 		looked <- string(o.Engine)
 		return spentReading(o.Engine), nil
 	}}

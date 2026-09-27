@@ -2,12 +2,16 @@ package config
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
+
+	harness "github.com/shhac/lib-agent-harness"
 )
 
 // Engines are the CLIs and the endpoint everything that calls a model runs
@@ -17,6 +21,7 @@ import (
 type Engines struct {
 	Codex            CLIEngine  `json:"codex"`
 	Claude           CLIEngine  `json:"claude"`
+	Grok             CLIEngine  `json:"grok,omitzero"`
 	OpenAICompatible HTTPEngine `json:"openai-compatible"`
 }
 
@@ -47,6 +52,10 @@ type UsageFloor struct {
 type HTTPEngine struct {
 	BaseURL   string `json:"base_url"`
 	APIKeyEnv string `json:"api_key_env"`
+	// EffortParameter is where the endpoint reads a reasoning effort:
+	// reasoning_effort, the default, as OpenAI and xAI do, or
+	// reasoning.effort, as gateways such as OpenRouter do.
+	EffortParameter string `json:"effort_parameter,omitempty"`
 }
 
 // DefaultUsageFloor is the share of a usage window roles leave unused when
@@ -60,7 +69,17 @@ const (
 )
 
 // CLIEngineNames are the engines reached through a native CLI and its login.
-var CLIEngineNames = []string{"codex", "claude"}
+var CLIEngineNames = cliEngineNames()
+
+func cliEngineNames() []string {
+	var names []string
+	for _, e := range harness.Engines() {
+		if e.Transport() == harness.CLITransport {
+			names = append(names, string(e))
+		}
+	}
+	return names
+}
 
 const (
 	defaultBaseURL   = "https://api.openai.com/v1"
@@ -74,6 +93,8 @@ func (e *Engines) CLIRef(engine string) *CLIEngine {
 		return &e.Codex
 	case "claude":
 		return &e.Claude
+	case "grok":
+		return &e.Grok
 	}
 	return nil
 }
@@ -152,6 +173,40 @@ type Harness struct {
 	Bin, Home string
 	BaseURL   string
 	APIKeyEnv string
+	// EffortParameter is where the endpoint reads an effort.
+	EffortParameter string
+}
+
+// Provider is where the harness reaches the model: the CLI and its login,
+// or the endpoint with a credential read from APIKeyEnv at each request, so
+// the key is never held in configuration. An empty APIKeyEnv sends none,
+// which the harness allows only on this machine.
+func (h Harness) Provider() harness.Provider {
+	p := harness.Provider{Engine: harness.Engine(h.Engine)}
+	if p.Engine.Transport() == harness.CLITransport {
+		p.CLI = harness.CLI{Binary: h.Bin, Home: h.Home}
+		return p
+	}
+	if p.Engine.Transport() != harness.APITransport {
+		return p
+	}
+	p.API = harness.API{BaseURL: h.BaseURL, Dialect: harness.OpenAIChatCompletions, EffortParameter: harness.EffortParameter(cmp.Or(h.EffortParameter, string(harness.EffortReasoningEffort)))}
+	if h.APIKeyEnv == "" {
+		p.API.Unauthenticated = true
+		return p
+	}
+	p.API.Credentials = environmentCredential(h.APIKeyEnv)
+	return p
+}
+
+// environmentCredential reads the key when a request is made, never before.
+func environmentCredential(name string) harness.CredentialSource {
+	return func(context.Context) (string, error) {
+		if value := os.Getenv(name); value != "" {
+			return value, nil
+		}
+		return "", fmt.Errorf("model credential environment variable %s is not set", name)
+	}
 }
 
 // Harness is model and effort on engine, reached through this config. It
@@ -166,6 +221,7 @@ func (c Config) Harness(engine, model, effort string) Harness {
 		return h
 	}
 	h.BaseURL, h.APIKeyEnv = c.Engines.Endpoint()
+	h.EffortParameter = c.Engines.OpenAICompatible.EffortParameter
 	return h
 }
 
@@ -200,7 +256,11 @@ func (e Engines) validate() error {
 	if env := e.OpenAICompatible.APIKeyEnv; env != "" && !envName.MatchString(env) {
 		return errors.New("engines.openai-compatible.api_key_env must be an environment variable name")
 	}
-	return nil
+	switch harness.EffortParameter(e.OpenAICompatible.EffortParameter) {
+	case "", harness.EffortReasoningEffort, harness.EffortReasoningObject:
+		return nil
+	}
+	return fmt.Errorf("engines.openai-compatible.effort_parameter must be %s or %s", harness.EffortReasoningEffort, harness.EffortReasoningObject)
 }
 
 func (cli *CLIEngine) validate(prefix string) error {

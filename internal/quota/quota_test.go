@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/config"
-	"github.com/shhac/lib-agent-harness/session"
+	harness "github.com/shhac/lib-agent-harness"
 )
 
-func fixture(used float64) session.QuotaSnapshot {
-	observation := session.Observation{Quality: session.Measured, ObservedAt: time.Now()}
+func fixture(used float64) harness.QuotaSnapshot {
+	observation := harness.Observation{Quality: harness.Measured, ObservedAt: time.Now()}
 	five := int64(300)
-	return session.QuotaSnapshot{Observation: observation, Complete: true, Windows: []session.QuotaWindow{{Observation: observation, ID: "codex/primary", Scope: "codex", UsedPercent: &used, WindowMinutes: &five}}}
+	return harness.QuotaSnapshot{Observation: observation, Complete: true, Windows: []harness.QuotaWindow{{Observation: observation, ID: "codex/primary", Kind: harness.QuotaSession, Scope: "codex", UsedPercent: &used, WindowMinutes: &five}}}
 }
 
 var codex = config.Harness{Engine: "codex"}
@@ -38,7 +38,7 @@ func TestEvaluateFloors(t *testing.T) {
 			q := fixture(20)
 			switch tc {
 			case "absent":
-				q = session.QuotaSnapshot{}
+				q = harness.QuotaSnapshot{}
 			case "stale":
 				q.ObservedAt = now.Add(-3 * time.Minute)
 			case "invalidated":
@@ -51,7 +51,7 @@ func TestEvaluateFloors(t *testing.T) {
 			case "partial":
 				q.Complete = false
 			case "unrelated":
-				q.Windows[0].Scope = "code-review"
+				q.Windows[0].ID, q.Windows[0].Scope = "review/primary", "review"
 			}
 			v := Evaluate(q, codex, tenAndTen, now)
 			if v.Held || v.Known {
@@ -62,7 +62,7 @@ func TestEvaluateFloors(t *testing.T) {
 	q := fixture(10)
 	week := int64(10080)
 	high := fixture(95).Windows[0]
-	high.ID, high.WindowMinutes = "codex/secondary", &week
+	high.ID, high.Kind, high.WindowMinutes = "codex/secondary", harness.QuotaWeekly, &week
 	q.Windows = append(q.Windows, high)
 	if v := Evaluate(q, codex, tenAndTen, now); !v.Held || v.Detail != "codex weekly usage has 5% left (floor 10%)" {
 		t.Fatalf("weekly allowance ignored: %+v", v)
@@ -77,9 +77,10 @@ func TestEvaluateFloors(t *testing.T) {
 	if !Evaluate(q, codex, tenAndTen, now).Held {
 		t.Fatal("known exhausted window lost in partial snapshot")
 	}
-	// A window that doesn't say how long it is answers to the stricter floor.
+	// A window of the engine's own whose period isn't recognized answers to
+	// the stricter floor.
 	q = fixture(85)
-	q.Windows[0].WindowMinutes = nil
+	q.Windows[0].Kind, q.Windows[0].WindowMinutes = harness.QuotaOther, nil
 	if !Evaluate(q, codex, Floors{FiveHour: 5, Week: 20}, now).Held {
 		t.Fatal("a window of unknown length took the looser floor")
 	}
@@ -99,30 +100,39 @@ func TestHeldVerdictCarriesReset(t *testing.T) {
 }
 
 func TestModelScopes(t *testing.T) {
+	session, weekly, model, other := harness.QuotaSession, harness.QuotaWeekly, harness.QuotaWeeklyModel, harness.QuotaOther
 	for _, tc := range []struct {
-		engine, model, scope, id string
-		applies                  bool
+		engine, model string
+		window        harness.QuotaWindow
+		applies       bool
 	}{
-		{"codex", "gpt-6-astra", "codex", "codex/primary", true},
-		{"codex", "gpt-6-astra", "gpt-6-astra", "model/primary", true},
-		{"codex", "gpt-6-astra", "code-review", "review/primary", false},
-		{"claude", "claude-opus-5", "five_hour", "five_hour", true},
-		{"claude", "claude-opus-5", "seven_day_opus", "seven_day_opus", true},
-		{"claude", "claude-opus-5", "seven_day_sonnet", "seven_day_sonnet", false},
-		{"claude", "claude-opus-5", "Opus 5", "model:Opus 5", true},
-		{"claude", "claude-opus-5", "Sonnet", "model:Sonnet", false},
+		{"codex", "gpt-6-astra", harness.QuotaWindow{ID: "codex/primary", Scope: "codex", Kind: session}, true},
+		{"codex", "gpt-6-astra", harness.QuotaWindow{ID: "default/primary", Scope: "default", Kind: other}, true},
+		{"codex", "gpt-6-astra", harness.QuotaWindow{ID: "model/primary", Scope: "gpt-6-astra", Model: "gpt-6-astra", Kind: model}, true},
+		{"codex", "gpt-6-luna", harness.QuotaWindow{ID: "model/primary", Scope: "gpt-6-astra", Model: "gpt-6-astra", Kind: model}, false},
+		{"codex", "gpt-6-astra", harness.QuotaWindow{ID: "review/primary", Scope: "review", Kind: session}, false},
+		{"claude", "claude-opus-5", harness.QuotaWindow{ID: "five_hour", Scope: "five_hour", Kind: session}, true},
+		{"claude", "claude-opus-5", harness.QuotaWindow{ID: "seven_day", Scope: "seven_day", Kind: weekly}, true},
+		{"claude", "claude-opus-5", harness.QuotaWindow{ID: "seven_day_opus", Scope: "seven_day_opus", Kind: model, Model: "opus"}, true},
+		{"claude", "claude-opus-5", harness.QuotaWindow{ID: "seven_day_sonnet", Scope: "seven_day_sonnet", Kind: model, Model: "sonnet"}, false},
+		{"claude", "claude-opus-5", harness.QuotaWindow{ID: "model:Opus 5", Scope: "Opus 5", Kind: model, Model: "Opus 5"}, true},
+		{"claude", "opus", harness.QuotaWindow{ID: "model:Opus 5", Scope: "Opus 5", Kind: model, Model: "Opus 5"}, true},
+		{"claude", "claude-opus-5", harness.QuotaWindow{ID: "model:Sonnet", Scope: "Sonnet", Kind: model, Model: "Sonnet"}, false},
+		{"claude", "", harness.QuotaWindow{ID: "seven_day_opus", Scope: "seven_day_opus", Kind: model, Model: "opus"}, false},
+		{"claude", "claude-opus-5", harness.QuotaWindow{ID: "iguana_necktie", Scope: "iguana_necktie", Kind: other}, false},
+		{"claude", "claude-opus-5", harness.QuotaWindow{ID: "limits/session", Scope: "session", Kind: session}, true},
 	} {
-		if got := Applies(session.QuotaWindow{ID: tc.id, Scope: tc.scope}, config.Harness{Engine: tc.engine, Model: tc.model}); got != tc.applies {
+		if got := Applies(tc.window, config.Harness{Engine: tc.engine, Model: tc.model}); got != tc.applies {
 			t.Errorf("%+v got %v", tc, got)
 		}
 	}
 }
 
 func TestCacheUsesEngineBinaryAndHomeNotModel(t *testing.T) {
-	var options []session.Options
-	meter := Meter{Inspect: func(_ context.Context, o session.Options) (session.Inspection, error) {
-		options = append(options, o)
-		return session.Inspection{Quota: fixture(90)}, errors.New("account unavailable but quota succeeded")
+	var providers []harness.Provider
+	meter := Meter{Inspect: func(_ context.Context, p harness.Provider) (harness.AccountReport, error) {
+		providers = append(providers, p)
+		return harness.AccountReport{Quota: fixture(90)}, errors.New("account unavailable but quota succeeded")
 	}}
 	m := config.Default().AssistantHarness()
 	for i := 0; i < 2; i++ {
@@ -138,19 +148,19 @@ func TestCacheUsesEngineBinaryAndHomeNotModel(t *testing.T) {
 	meter.Read(context.Background(), m)
 	m.Engine, m.Bin, m.Home = "claude", "synthetic-claude", "/synthetic/claude-home"
 	meter.Read(context.Background(), m)
-	if len(options) != 4 || options[3].Engine != session.Claude || options[3].Binary != m.Bin || options[3].Home != m.Home {
-		t.Fatalf("wrong identities: %+v", options)
+	if len(providers) != 4 || providers[3].Engine != harness.Claude || providers[3].CLI.Binary != m.Bin || providers[3].CLI.Home != m.Home {
+		t.Fatalf("wrong identities: %+v", providers)
 	}
 }
 
 func TestRefreshDoesNotRetainFailedTelemetry(t *testing.T) {
 	calls := 0
-	meter := Meter{Inspect: func(context.Context, session.Options) (session.Inspection, error) {
+	meter := Meter{Inspect: func(context.Context, harness.Provider) (harness.AccountReport, error) {
 		calls++
 		if calls == 1 {
-			return session.Inspection{Quota: fixture(5)}, nil
+			return harness.AccountReport{Quota: fixture(5)}, nil
 		}
-		return session.Inspection{}, errors.New("failed refresh")
+		return harness.AccountReport{}, errors.New("failed refresh")
 	}}
 	model := config.Default().AssistantHarness()
 	if !meter.Read(context.Background(), model).Known() {

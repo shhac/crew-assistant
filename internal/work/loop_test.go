@@ -14,6 +14,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/quota"
 	"github.com/shhac/crew-assistant/internal/roles"
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
 )
 
@@ -141,7 +142,9 @@ func loopApp(t *testing.T, runner *scriptedRunner, deliverTo string) (*Loop, cor
 	a := testLoop(t)
 	a.runner = runner
 	// No real account is ever read from a test; an empty reading is unknown.
-	a.meter = &quota.Meter{Inspect: func(context.Context, session.Options) (session.Inspection, error) { return session.Inspection{}, nil }}
+	a.meter = &quota.Meter{Inspect: func(context.Context, harness.Provider) (harness.AccountReport, error) {
+		return harness.AccountReport{}, nil
+	}}
 	ctx := context.Background()
 	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Thanks", Template: "draft", Brief: core.BriefInput{Goal: "Thank the team", Criteria: []string{"Warm tone"}}})
 	if err != nil {
@@ -398,12 +401,12 @@ func TestNearlyUsedSubscriptionHoldsTheRoleWithoutFailing(t *testing.T) {
 	a, _, _ := loopApp(t, runner, "")
 	used := 95.0
 	resets := time.Now().Add(2 * time.Hour)
-	observation := session.Observation{Quality: session.Measured, ObservedAt: time.Now()}
-	a.meter = &quota.Meter{Inspect: func(_ context.Context, o session.Options) (session.Inspection, error) {
-		if o.Engine != session.Codex {
-			return session.Inspection{}, nil
+	observation := harness.Observation{Quality: harness.Measured, ObservedAt: time.Now()}
+	a.meter = &quota.Meter{Inspect: func(_ context.Context, o harness.Provider) (harness.AccountReport, error) {
+		if o.Engine != harness.Codex {
+			return harness.AccountReport{}, nil
 		}
-		return session.Inspection{Quota: session.QuotaSnapshot{Observation: observation, Complete: true, Windows: []session.QuotaWindow{{Observation: observation, ID: "codex/primary", Scope: "codex", UsedPercent: &used, ResetsAt: &resets}}}}, nil
+		return harness.AccountReport{Quota: harness.QuotaSnapshot{Observation: observation, Complete: true, Windows: []harness.QuotaWindow{{Observation: observation, ID: "codex/primary", Scope: "codex", UsedPercent: &used, ResetsAt: &resets}}}}, nil
 	}}
 	task := settle(t, a)
 	if task.Status != core.TaskReviewing || task.Failures != 0 || !task.RetryAt.Equal(resets.UTC()) || !strings.Contains(task.Detail, "usage to reset") {
@@ -422,12 +425,12 @@ func TestRaisingAUsageLimitLetsHeldWorkGoAtOnce(t *testing.T) {
 	a, _, _ := loopApp(t, runner, "")
 	used := 95.0
 	resets := time.Now().Add(48 * time.Hour)
-	observation := session.Observation{Quality: session.Measured, ObservedAt: time.Now()}
-	a.meter = &quota.Meter{Inspect: func(_ context.Context, o session.Options) (session.Inspection, error) {
-		if o.Engine != session.Codex {
-			return session.Inspection{}, nil
+	observation := harness.Observation{Quality: harness.Measured, ObservedAt: time.Now()}
+	a.meter = &quota.Meter{Inspect: func(_ context.Context, o harness.Provider) (harness.AccountReport, error) {
+		if o.Engine != harness.Codex {
+			return harness.AccountReport{}, nil
 		}
-		return session.Inspection{Quota: session.QuotaSnapshot{Observation: observation, Complete: true, Windows: []session.QuotaWindow{{Observation: observation, ID: "codex/primary", Scope: "codex", UsedPercent: &used, ResetsAt: &resets}}}}, nil
+		return harness.AccountReport{Quota: harness.QuotaSnapshot{Observation: observation, Complete: true, Windows: []harness.QuotaWindow{{Observation: observation, ID: "codex/primary", Scope: "codex", UsedPercent: &used, ResetsAt: &resets}}}}, nil
 	}}
 	task := settle(t, a)
 	if task.HeldFor != "codex" || !task.RetryAt.After(time.Now()) {
@@ -558,10 +561,10 @@ func TestChoosingStopEndsTheTaskWhateverItWasWaitingOn(t *testing.T) {
 // an API engine is never held.
 func TestUsageSettingsBelongToTheirEngine(t *testing.T) {
 	a := testLoop(t)
-	reads := map[session.Engine]int{}
-	a.meter = &quota.Meter{Inspect: func(_ context.Context, o session.Options) (session.Inspection, error) {
+	reads := map[harness.Engine]int{}
+	a.meter = &quota.Meter{Inspect: func(_ context.Context, o harness.Provider) (harness.AccountReport, error) {
 		reads[o.Engine]++
-		return session.Inspection{}, nil
+		return harness.AccountReport{}, nil
 	}}
 	cfg := config.Default()
 	cfg.Engines.Claude.OnUnknownUsage = config.OnUnknownUsagePause
@@ -572,14 +575,14 @@ func TestUsageSettingsBelongToTheirEngine(t *testing.T) {
 	if until, why := a.UsageWait(ctx, "claude"); !until.After(time.Now()) || !strings.Contains(why, "Claude usage can be checked") {
 		t.Fatalf("claude should wait while its usage can't be read: %v %q", until, why)
 	}
-	if until, _ := a.UsageWait(ctx, "codex"); !until.IsZero() || reads[session.Codex] != 0 {
-		t.Fatalf("codex with its floors off should run without reading usage: %v, %d reads", until, reads[session.Codex])
+	if until, _ := a.UsageWait(ctx, "codex"); !until.IsZero() || reads[harness.Codex] != 0 {
+		t.Fatalf("codex with its floors off should run without reading usage: %v, %d reads", until, reads[harness.Codex])
 	}
 	if until, _ := a.UsageWait(ctx, "openai-compatible"); !until.IsZero() {
 		t.Fatal("an API engine was held")
 	}
 	cfg.Engines.Codex.UsageFloor = config.UsageFloor{}
-	if until, _ := a.UsageWait(ctx, "codex"); !until.IsZero() || reads[session.Codex] != 1 {
-		t.Fatalf("codex allows unknown usage by default: %v, %d reads", until, reads[session.Codex])
+	if until, _ := a.UsageWait(ctx, "codex"); !until.IsZero() || reads[harness.Codex] != 1 {
+		t.Fatalf("codex allows unknown usage by default: %v, %d reads", until, reads[harness.Codex])
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
 )
 
@@ -35,11 +36,11 @@ func (f *fakeChat) Turn(ctx context.Context, text string, onEvent func(session.E
 	}
 	window := int64(200000)
 	onEvent(session.Event{Kind: "context", Context: &session.ContextSnapshot{CapacityTokens: &window}})
-	onEvent(session.Event{Kind: "usage", Usage: &session.Usage{Known: true, Final: true, Input: 100, CacheRead: 900, Output: 20}})
-	return session.Result{Status: "completed", Text: "Reply " + f.id, Usage: session.Usage{Known: true, Input: 100, CacheRead: 900, Output: 20}}, nil
+	onEvent(session.Event{Kind: "usage", Usage: &session.Usage{Usage: harness.Usage{Known: true, Input: 1000, CacheRead: 900, CacheKnown: true, Output: 20}, Final: true}})
+	return session.Result{Status: "completed", Text: "Reply " + f.id, Usage: session.Usage{Usage: harness.Usage{Known: true, Input: 1000, CacheRead: 900, CacheKnown: true, Output: 20}}}, nil
 }
 func (f *fakeChat) Compact(context.Context) error { return session.ErrUnsupported }
-func (f *fakeChat) Ref() session.Ref              { return session.Ref{Engine: session.Claude, ID: f.id} }
+func (f *fakeChat) Ref() session.Ref              { return session.Ref{Engine: harness.Claude, ID: f.id} }
 func (f *fakeChat) Close()                        { f.closed = true }
 
 type openings struct {
@@ -228,7 +229,7 @@ func TestTheSeatedAssistantAnswers(t *testing.T) {
 	if !strings.Contains(spec.Instructions, "Iris") || !strings.Contains(spec.Instructions, "Warm and exact.") || strings.Contains(spec.Instructions, "Quill") {
 		t.Fatalf("instructions %q", spec.Instructions)
 	}
-	if spec.Config.Engine != "codex" || spec.Config.Model != "gpt-6-astra" || spec.Config.Effort != "low" {
+	if spec.Config.Engine() != "codex" || spec.Config.Model != "gpt-6-astra" || spec.Config.Effort != "low" {
 		t.Fatalf("model %+v", spec.Config)
 	}
 	if snap, _ := a.Snapshot(ctx); snap.Assistant.ID != iris.ID || snap.Assistant.Name != "Iris" {

@@ -9,6 +9,8 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/engine"
+	harness "github.com/shhac/lib-agent-harness"
+	"github.com/shhac/lib-agent-harness/catalog"
 )
 
 // fakeCLIs stands in for both CLI logins. Each offers its approved model among
@@ -16,7 +18,7 @@ import (
 type fakeCLIs struct {
 	t           *testing.T
 	mu          sync.Mutex
-	offered     map[string][]engine.ModelOption
+	offered     map[string][]catalog.Model
 	discoverErr map[string]error
 	replyErr    map[string]error
 	block       bool // Replies wait for their deadline.
@@ -29,8 +31,8 @@ type fakeCLIs struct {
 func newFakeCLIs(t *testing.T) *fakeCLIs {
 	return &fakeCLIs{
 		t: t,
-		offered: map[string][]engine.ModelOption{
-			"codex":  {{ID: "gpt-6-astra", Efforts: []engine.ModelEffort{{ID: "high"}}}, {ID: "gpt-5.6-luna", Efforts: []engine.ModelEffort{{ID: "low"}}}, {ID: "gpt-6-luna", Efforts: []engine.ModelEffort{{ID: "low"}, {ID: "high"}}}},
+		offered: map[string][]catalog.Model{
+			"codex":  {{ID: "gpt-6-astra", EffortsKnown: true, Efforts: []catalog.Effort{{ID: "high"}}}, {ID: "gpt-5.6-luna", EffortsKnown: true, Efforts: []catalog.Effort{{ID: "low"}}}, {ID: "gpt-6-luna", EffortsKnown: true, Efforts: []catalog.Effort{{ID: "low"}, {ID: "high"}}}},
 			"claude": {{ID: "opus"}, {ID: "haiku"}},
 		},
 		discoverErr: map[string]error{},
@@ -44,19 +46,19 @@ func (f *fakeCLIs) models() *smallModels {
 	dir := f.t.TempDir()
 	s := newSmallModels(func() string { return dir })
 	s.now = func() time.Time { f.mu.Lock(); defer f.mu.Unlock(); return f.clock }
-	s.discover = func(_ context.Context, c engine.Config) ([]engine.ModelOption, error) {
+	s.discover = func(_ context.Context, p harness.Provider) ([]catalog.Model, error) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		f.discovered = append(f.discovered, c.Engine)
-		if err := f.discoverErr[c.Engine]; err != nil {
+		f.discovered = append(f.discovered, string(p.Engine))
+		if err := f.discoverErr[string(p.Engine)]; err != nil {
 			return nil, err
 		}
-		return f.offered[c.Engine], nil
+		return f.offered[string(p.Engine)], nil
 	}
 	s.complete = func(ctx context.Context, c engine.Config, _ []engine.Message, tools []engine.Tool) (engine.Message, engine.Usage, error) {
 		f.mu.Lock()
 		f.completed = append(f.completed, c)
-		err, block := f.replyErr[c.Engine], f.block
+		err, block := f.replyErr[c.Engine()], f.block
 		f.mu.Unlock()
 		if len(tools) != 0 || c.Retry == nil || c.Retry.MaxRetries != 0 {
 			f.t.Errorf("small model given tools or retries: %v %+v", tools, c.Retry)
@@ -87,10 +89,10 @@ func (f *fakeCLIs) used() []string {
 	defer f.mu.Unlock()
 	out := []string{}
 	for _, c := range f.completed {
-		if !config.ApprovedSmallModel(c.Engine, c.Model) {
-			f.t.Fatalf("unapproved model used: %s/%s", c.Engine, c.Model)
+		if !config.ApprovedSmallModel(c.Engine(), c.Model) {
+			f.t.Fatalf("unapproved model used: %s/%s", c.Engine(), c.Model)
 		}
-		out = append(out, c.Engine+"/"+c.Model+"/"+c.Effort)
+		out = append(out, c.Engine()+"/"+c.Model+"/"+c.Effort)
 	}
 	return out
 }
@@ -140,7 +142,7 @@ func TestSmallModelsFallBackFromCodexToClaude(t *testing.T) {
 	for name, outage := range map[string]func(*fakeCLIs){
 		"not installed or signed out": func(f *fakeCLIs) { f.discoverErr["codex"] = errors.New("codex: not logged in") },
 		"luna not offered":            func(f *fakeCLIs) { f.offered["codex"] = f.offered["codex"][:2] },
-		"low effort not offered":      func(f *fakeCLIs) { f.offered["codex"][2].Efforts = []engine.ModelEffort{{ID: "high"}} },
+		"low effort not offered":      func(f *fakeCLIs) { f.offered["codex"][2].Efforts = []catalog.Effort{{ID: "high"}} },
 		"out of usage":                func(f *fakeCLIs) { f.replyErr["codex"] = errors.New("usage limit reached") },
 		"rate limited":                func(f *fakeCLIs) { f.replyErr["codex"] = errors.New("429 rate limited") },
 	} {
@@ -282,7 +284,7 @@ func TestSmallModelsAskTheOwnersAPIModel(t *testing.T) {
 		t.Fatalf("discovered %v, completed %d", f.discovered, len(f.completed))
 	}
 	c := f.completed[0]
-	if c.Engine != "openai-compatible" || c.Model != "local-small" || c.Effort != "low" || c.Endpoint != "http://127.0.0.1:9/v1/chat/completions" || c.APIKeyEnv != "SMALL_TEST_KEY" {
+	if c.Engine() != "openai-compatible" || c.Model != "local-small" || c.Effort != "low" || c.Provider.API.BaseURL != "http://127.0.0.1:9/v1" || c.Provider.API.Credentials == nil {
 		t.Fatalf("%+v", c)
 	}
 	if c.MaxOutputTokens != 128 || c.MaxContextBytes != 8192 || c.Retry == nil || c.Retry.MaxRetries != 0 {
@@ -303,7 +305,7 @@ func TestSmallModelsAskTheOwnersChoice(t *testing.T) {
 	if _, err := f.models().ask(context.Background(), models, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.completed) != 1 || f.completed[0].Engine != "codex" || f.completed[0].Model != "gpt-6-astra" || f.completed[0].Effort != "high" {
+	if len(f.completed) != 1 || f.completed[0].Engine() != "codex" || f.completed[0].Model != "gpt-6-astra" || f.completed[0].Effort != "high" {
 		t.Fatalf("%+v", f.completed)
 	}
 	// When the login doesn't offer it, nothing else is tried.

@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/testutil"
@@ -31,7 +32,7 @@ func TestChatHistoryCheckpointBatchesAndRetainsOriginals(t *testing.T) {
 	}
 	before, _ := a.Core.Snapshot(ctx)
 	var calls atomic.Int32
-	provider := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	provider := testutil.NewModelServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		var request struct {
 			Messages []engine.Message `json:"messages"`
@@ -47,10 +48,10 @@ func TestChatHistoryCheckpointBatchesAndRetainsOriginals(t *testing.T) {
 		} else if err := json.Unmarshal([]byte(request.Messages[1].Content), &payload); err != nil || len(payload.Dialogue) != 8 {
 			t.Errorf("source %+v %v", payload, err)
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"summary keeps goals and unresolved decisions"}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"summary keeps goals and unresolved decisions"},"finish_reason":"stop"}]}`))
 	}))
 	defer provider.Close()
-	cfg := engine.Config{Endpoint: provider.URL, Model: "fixture"}
+	cfg := engine.Config{Provider: config.Harness{Engine: "openai-compatible", BaseURL: provider.URL}.Provider(), Model: "fixture"}
 	if err := a.compactChatHistory(ctx, "", cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -101,11 +102,11 @@ func TestChatCheckpointFailurePreservesHistory(t *testing.T) {
 		}
 		_, _ = a.Core.AddMessage(ctx, role, "source")
 	}
-	provider := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":""}}]}`))
+	provider := testutil.NewModelServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"stop"}]}`))
 	}))
 	defer provider.Close()
-	if err := a.compactChatHistory(ctx, "", engine.Config{Endpoint: provider.URL, Model: "fixture"}); err == nil {
+	if err := a.compactChatHistory(ctx, "", engine.Config{Provider: config.Harness{Engine: "openai-compatible", BaseURL: provider.URL}.Provider(), Model: "fixture"}); err == nil {
 		t.Fatal("accepted empty summary")
 	}
 	snap, _ := a.Core.Snapshot(ctx)

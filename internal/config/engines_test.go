@@ -41,6 +41,8 @@ func TestEngineSettingsAreChecked(t *testing.T) {
 		"a URL with a password": func(c *Config) { c.Engines.OpenAICompatible.BaseURL = "https://u:p@example.com" },
 		"plain HTTP":            func(c *Config) { c.Engines.OpenAICompatible.BaseURL = "http://example.com" },
 		"a raw key":             func(c *Config) { c.Engines.OpenAICompatible.APIKeyEnv = "raw token!" },
+		"an unknown effort key": func(c *Config) { c.Engines.OpenAICompatible.EffortParameter = "effort" },
+		"a relative Grok home":  func(c *Config) { c.Engines.Grok.Home = "relative/home" },
 	} {
 		c := Default()
 		mutate(&c)

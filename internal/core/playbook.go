@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/shhac/crew-assistant/internal/config"
 )
 
 // Role is one seat on a project team: a name, the kinds of role it holds,
@@ -290,8 +292,8 @@ func (p Playbook) Validate() error {
 			return errors.New("each role needs a distinct name")
 		}
 		names[key] = true
-		if r.Engine != "codex" && r.Engine != "claude" {
-			return fmt.Errorf("role %s: engine must be codex or claude", r.Name)
+		if !config.Supports(r.Engine, config.UseRoles) {
+			return fmt.Errorf("role %s: engine must be %s", r.Name, strings.Join(config.EnginesFor(config.UseRoles), " or "))
 		}
 		if err := seatKinds(r); err != nil {
 			return err
@@ -461,20 +463,10 @@ func (s *Service) SetPlaybook(ctx context.Context, projectID string, playbook Pl
 	return out, err
 }
 
-func engineLabel(engine string) string {
-	switch engine {
-	case "codex":
-		return "Codex"
-	case "claude":
-		return "Claude"
-	}
-	return engine
-}
-
 func playbookSummary(p Playbook) string {
 	parts := make([]string, 0, len(p.Roles))
 	for _, r := range p.Roles {
-		parts = append(parts, r.Name+" on "+engineLabel(r.Engine))
+		parts = append(parts, r.Name+" on "+config.EngineLabel(r.Engine))
 	}
 	return strings.Join(parts, ", ")
 }

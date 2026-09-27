@@ -19,18 +19,18 @@ func TestToolObserverRecordsBeforeExecutionAndConfirmedOutcome(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			calls := 0
-			provider := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			provider := testutil.NewModelServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
 				w.Header().Set("Content-Type", "application/json")
 				if calls == 1 {
-					_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-one","type":"function","function":{"name":"read_state","arguments":"{}"}}]}}]}`))
+					_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-one","type":"function","function":{"name":"read_state","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`))
 					return
 				}
-				_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Done"}}]}`))
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Done"},"finish_reason":"stop"}]}`))
 			}))
 			defer provider.Close()
 			var order []string
-			e, err := New(Config{Endpoint: provider.URL, Model: "fixture", OnTool: func(_ context.Context, event ToolEvent) error {
+			e, err := New(Config{Provider: api(provider.URL), Model: "fixture", OnTool: func(_ context.Context, event ToolEvent) error {
 				if event.ID != "call-one" || event.Tool != "read_state" {
 					t.Fatal(event)
 				}
@@ -64,12 +64,12 @@ func TestToolObserverRecordsBeforeExecutionAndConfirmedOutcome(t *testing.T) {
 }
 
 func TestToolObserverFailurePreventsUnrecordedAction(t *testing.T) {
-	provider := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	provider := testutil.NewModelServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-one","type":"function","function":{"name":"read_state","arguments":"{}"}}]}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-one","type":"function","function":{"name":"read_state","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`))
 	}))
 	defer provider.Close()
-	e, err := New(Config{Endpoint: provider.URL, Model: "fixture", OnTool: func(context.Context, ToolEvent) error { return errors.New("storage unavailable") }}, ExecutorFunc(func(context.Context, string, json.RawMessage) (any, error) {
+	e, err := New(Config{Provider: api(provider.URL), Model: "fixture", OnTool: func(context.Context, ToolEvent) error { return errors.New("storage unavailable") }}, ExecutorFunc(func(context.Context, string, json.RawMessage) (any, error) {
 		t.Fatal("executed without durable start event")
 		return nil, nil
 	}))

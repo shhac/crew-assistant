@@ -9,6 +9,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
+	harness "github.com/shhac/lib-agent-harness"
 )
 
 // settledReply records one completed exchange and returns the reply's ID.
@@ -49,7 +50,7 @@ func TestSuggestionRoutesToTheOwnEnginesApprovedModel(t *testing.T) {
 		after := settledReply(t, a, "one", "Plan the garden", "Here is a planting plan.")
 		complete := a.small.complete
 		a.small.complete = func(ctx context.Context, c engine.Config, m []engine.Message, tools []engine.Tool) (engine.Message, engine.Usage, error) {
-			if c.APIKeyEnv != "" || c.Endpoint != "" {
+			if c.Provider.Engine.Transport() != harness.CLITransport {
 				t.Fatal(c)
 			}
 			if len(m) != 2 || !strings.Contains(m[1].Content, "Owner: Plan the garden") || !strings.Contains(m[1].Content, "Assistant: Here is a planting plan.") {

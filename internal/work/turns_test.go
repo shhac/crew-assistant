@@ -9,6 +9,7 @@ import (
 	"github.com/shhac/lib-agent-harness/session"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	harness "github.com/shhac/lib-agent-harness"
 )
 
 // A turn is on show from when it is picked up to when it ends, counting its
@@ -24,8 +25,8 @@ func TestARunningTurnCountsWhatItDoes(t *testing.T) {
 	watch.Saw(session.Event{Kind: "tool_started", ItemID: "1", Tool: "Bash"})
 	watch.Saw(session.Event{Kind: "tool_completed", ItemID: "1"})
 	watch.Saw(session.Event{Kind: "tool_started", ItemID: "2", Tool: "Edit"})
-	watch.Saw(session.Event{Kind: "usage", Usage: &session.Usage{Known: true, Output: 40}})
-	watch.Saw(session.Event{Kind: "usage", Usage: &session.Usage{Known: true, Final: true, Output: 40}})
+	watch.Saw(session.Event{Kind: "usage", Usage: &session.Usage{Usage: harness.Usage{Known: true, Output: 40}}})
+	watch.Saw(session.Event{Kind: "usage", Usage: &session.Usage{Usage: harness.Usage{Known: true, Output: 40}, Final: true}})
 	got := a.Turns()
 	if len(got) != 1 || got[0].TaskID != "task-one" || got[0].Member != "ada" || got[0].ToolCalls != 2 || got[0].Edits != 1 || got[0].Tool != "Edit" || got[0].OutputTokens != 40 {
 		t.Fatalf("turns %+v", got)

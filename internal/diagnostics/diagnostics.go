@@ -11,27 +11,30 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shhac/lib-agent-harness/completion"
-	"github.com/shhac/lib-agent-harness/session"
+	harness "github.com/shhac/lib-agent-harness"
 	output "github.com/shhac/lib-agent-output"
 )
 
 // Event contains correlation metadata, never prompts, tool arguments or output.
 type Event struct {
 	output.Error
-	Time         time.Time `json:"time"`
-	Component    string    `json:"component"`
-	Stage        string    `json:"stage"`
-	ProjectID    string    `json:"project_id,omitempty"`
-	RunID        string    `json:"run_id,omitempty"`
-	Engine       string    `json:"engine,omitempty"`
-	Kind         string    `json:"kind,omitempty"`
-	Phase        string    `json:"phase,omitempty"`
-	Code         string    `json:"code,omitempty"`
-	ExitCode     *int      `json:"exit_code,omitempty"`
-	ErrorTypes   []string  `json:"error_types,omitempty"`
-	ModelCalls   int       `json:"model_calls,omitempty"`
-	ContextBytes int       `json:"context_bytes,omitempty"`
+	Time      time.Time `json:"time"`
+	Component string    `json:"component"`
+	Stage     string    `json:"stage"`
+	ProjectID string    `json:"project_id,omitempty"`
+	RunID     string    `json:"run_id,omitempty"`
+	Engine    string    `json:"engine,omitempty"`
+	// Operation, Family and Cause are the harness's own classification of
+	// the failure: what was being done, what kind of thing failed, and why.
+	Operation    string   `json:"operation,omitempty"`
+	Family       string   `json:"family,omitempty"`
+	Cause        string   `json:"cause,omitempty"`
+	Phase        string   `json:"phase,omitempty"`
+	Code         string   `json:"code,omitempty"`
+	ExitCode     *int     `json:"exit_code,omitempty"`
+	ErrorTypes   []string `json:"error_types,omitempty"`
+	ModelCalls   int      `json:"model_calls,omitempty"`
+	ContextBytes int      `json:"context_bytes,omitempty"`
 	// Detail carries library-sanitized harness output: bounded, control-stripped
 	// and credential-redacted by the harness before it reaches here. It is the
 	// only field that may contain anything a subprocess wrote, it never reaches
@@ -66,26 +69,21 @@ func (l *Logger) Failure(event Event, err error) {
 		// diagnostic, say — has better information than this does.
 		event.Code = "untyped_error"
 	}
-	var failure *completion.RequestError
-	if facts, native := session.ErrorFacts(err); native {
-		// A coding harness classifies its own failures, from a fixed vocabulary.
-		// Discarding that and reporting "untyped_error" was losing the one thing
-		// an operator could act on — an expired login reached them as nothing at
-		// all. Its Error() is built from constants, so it is safe to carry.
-		event.Message = err.Error()
-		event.Kind, event.Phase, event.Code = facts.Kind, facts.Phase, facts.Code
+	if facts, classified := harness.ErrorFacts(err); classified {
+		// The harness classifies its own failures, from a fixed vocabulary,
+		// whichever mode failed. Discarding that and reporting
+		// "untyped_error" was losing the one thing an operator could act on
+		// — an expired login reached them as nothing at all. Its Error() is
+		// built from constants, so it is safe to carry; what wraps it may not
+		// be.
+		event.Message = classifiedMessage(err)
+		event.Operation, event.Family, event.Cause = string(facts.Operation), string(facts.Family), string(facts.Cause)
+		event.Phase, event.Code = facts.Phase, facts.Code
 		if facts.Engine != "" {
-			event.Engine = facts.Engine
+			event.Engine = string(facts.Engine)
 		}
 		event.ExitCode = facts.ExitCode
-	} else if errors.As(err, &failure) {
-		event.Message = failure.Error()
-		event.Kind, event.Phase, event.Code = string(failure.Kind), string(failure.Phase), failure.Code
-		if failure.Engine != "" {
-			event.Engine = failure.Engine
-		}
-		event.ExitCode = failure.ExitCode
-		if failure.Retryable() && event.RetryAt != nil {
+		if facts.Retryable && event.RetryAt != nil {
 			event.FixableBy = output.FixableByRetry
 			event.Hint = "The daemon has scheduled recovery at retry_at; no manual retry is needed."
 		}
@@ -117,4 +115,15 @@ func (l *Logger) Failure(event Event, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	_ = l.writer.WriteItem(event)
+}
+
+// classifiedMessage is the text of the harness error err carries.
+func classifiedMessage(err error) string {
+	var carrier harness.Factual
+	if errors.As(err, &carrier) {
+		if failure, ok := carrier.(error); ok {
+			return failure.Error()
+		}
+	}
+	return ""
 }

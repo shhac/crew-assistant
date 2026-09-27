@@ -10,14 +10,14 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/roles"
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
 )
 
 func TestTheChatsSessionHasOnlyTheAssistantsToolsInFoldersOfItsOwn(t *testing.T) {
 	state := t.TempDir()
 	spec := chatSpec{
-		Config:       engine.Config{Engine: "codex", Model: "gpt"},
-		Binary:       "/usr/local/bin/codex",
+		Config:       engine.Config{Provider: harness.Provider{Engine: harness.Codex, CLI: harness.CLI{Binary: "/usr/local/bin/codex"}}, Model: "gpt"},
 		Instructions: "Be brief.",
 		StateDir:     state,
 		Tool: func(context.Context, string, json.RawMessage) session.ToolResult {
@@ -39,7 +39,7 @@ func TestTheChatsSessionHasOnlyTheAssistantsToolsInFoldersOfItsOwn(t *testing.T)
 	if len(host.Tools) != len(engine.Tools()) || host.Bridge.Args[0] != roles.ToolBridge || !filepath.IsAbs(host.Bridge.Path) {
 		t.Fatalf("tools %d, bridge %+v", len(host.Tools), host.Bridge)
 	}
-	if o.Instructions.Mode != session.Append || o.Instructions.Text != "Be brief." || o.Model != "gpt" {
+	if o.Instructions.Mode != session.Append || o.Instructions.Text != "Be brief." || o.Model != "gpt" || o.Provider.CLI.Binary != "/usr/local/bin/codex" {
 		t.Fatalf("options %+v", o)
 	}
 	result, err := host.Handler.CallTool(context.Background(), session.ToolCall{Name: "read_state", Arguments: json.RawMessage(`{}`)})

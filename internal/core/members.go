@@ -132,8 +132,8 @@ func (in MemberInput) validate(v *Snapshot, id string) error {
 			return fmt.Errorf("%s is listed twice", kind)
 		}
 	}
-	if in.Engine != "codex" && in.Engine != "claude" {
-		return errors.New("engine must be codex or claude")
+	if !config.Supports(in.Engine, config.UseRoles) {
+		return fmt.Errorf("engine must be %s", strings.Join(config.EnginesFor(config.UseRoles), " or "))
 	}
 	if len(in.Model) > 80 || len(in.Effort) > 20 {
 		return errors.New("model or effort is too long")

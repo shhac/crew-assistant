@@ -11,6 +11,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/lifecycle"
 	"github.com/shhac/crew-assistant/internal/quota"
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/completion"
 )
 
@@ -76,7 +77,7 @@ func TestUsageReadsNoLoginInTheDemo(t *testing.T) {
 func TestUsageShowsTheSmallModelsRateLimitRest(t *testing.T) {
 	a := usageApp(t, true)
 	now := time.Now()
-	a.small.setResting("claude", restingEngine{until: now.Add(10 * time.Minute), cause: &completion.RequestError{Kind: completion.ErrorRateLimited}})
+	a.small.setResting("claude", restingEngine{until: now.Add(10 * time.Minute), cause: &completion.RequestError{Cause: harness.CauseRateLimited}})
 	a.small.setResting("codex", restingEngine{until: now.Add(10 * time.Minute), cause: errors.New("overloaded")})
 	got := a.Usage(context.Background())
 	if got[1].RateLimitedUntil == nil || !got[1].RateLimitedUntil.Equal(now.Add(10*time.Minute)) || got[0].RateLimitedUntil != nil {

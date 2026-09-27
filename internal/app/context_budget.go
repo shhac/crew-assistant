@@ -2,10 +2,9 @@ package app
 
 import (
 	"context"
-	"errors"
 
 	"github.com/shhac/crew-assistant/internal/engine"
-	"github.com/shhac/lib-agent-harness/completion"
+	harness "github.com/shhac/lib-agent-harness"
 )
 
 // contextBudget is how many bytes a request to a model may carry: its stated
@@ -36,12 +35,12 @@ func smallerBudget(ec engine.Config, window int) int {
 // recordWindow keeps the window a reply stated for the model that gave it.
 // A window not kept is learned again from the next reply.
 func (a *App) recordWindow(ctx context.Context, ec engine.Config, usage engine.Usage) {
-	_ = a.Core.RecordModelWindow(context.WithoutCancel(ctx), ec.Engine, ec.Model, usage.ContextWindow)
+	_ = a.Core.RecordModelWindow(context.WithoutCancel(ctx), ec.Engine(), ec.Model, usage.ContextWindow)
 }
 
 // providerContextLimit reports a request the model refused as too long, as
 // opposed to one the daemon never sent.
 func providerContextLimit(err error) bool {
-	var failure *completion.RequestError
-	return errors.As(err, &failure) && failure.Kind == completion.ErrorContextLimit && failure.Phase != completion.PhasePreflight
+	facts, ok := harness.ErrorFacts(err)
+	return ok && facts.Cause == harness.CauseContextLimit && facts.Family != harness.FailurePreflight && facts.Family != harness.FailureCapability
 }

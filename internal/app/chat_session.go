@@ -13,6 +13,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
 )
 
@@ -39,9 +40,8 @@ type chatModel interface {
 
 // chatSpec is what a chat session is opened with.
 type chatSpec struct {
-	Config engine.Config
-	// Binary and Home are the engine's CLI and the login it uses.
-	Binary, Home string
+	// Config names the engine and the CLI and login it runs on.
+	Config       engine.Config
 	Instructions string
 	StateDir     string
 	// Tool runs one of the assistant's tools for the model.
@@ -88,9 +88,10 @@ type chatSessions struct {
 
 // runSessionTurn runs a chat turn on the conversation's model session, opening
 // or resuming it first. errNoChatSession means it can't, and the turn should
-// run the stateless way.
+// run the stateless way: the engine can't hold a session whose only tools
+// are the assistant's.
 func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.Config) (engine.Result, error) {
-	if a.sessions.open == nil || (ec.Engine != "claude" && ec.Engine != "codex") {
+	if a.sessions.open == nil || !harness.Support(ec.Provider.Engine, harness.Session, harness.RestrictTools).Usable() {
 		return engine.Result{}, errNoChatSession
 	}
 	started := time.Now().UTC()
@@ -104,8 +105,7 @@ func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.
 	}
 	cfg := a.Config()
 	instructions := engine.Instructions(ec.AssistantName, ec.Personality) + sessionNote
-	binary, home := cfg.Engines.Binary(ec.Engine)
-	spec := chatSpec{Config: ec, Binary: binary, Home: home, Instructions: instructions, StateDir: a.Core.StateDirectory(), Tool: a.sessionTool, Context: a.sessionContext}
+	spec := chatSpec{Config: ec, Instructions: instructions, StateDir: a.Core.StateDirectory(), Tool: a.sessionTool, Context: a.sessionContext}
 	live, rec, fresh, err := a.openChat(ctx, chatKey(conversation, ec, instructions), record, spec)
 	if err != nil {
 		return engine.Result{}, err
@@ -184,7 +184,7 @@ func (a *App) openChat(ctx context.Context, key string, record *core.ChatSession
 	default:
 		rec = core.ChatSession{Opened: core.SessionFresh, StartedAt: time.Now().UTC()}
 	}
-	rec.Engine, rec.Model = spec.Config.Engine, spec.Config.Model
+	rec.Engine, rec.Model = spec.Config.Engine(), spec.Config.Model
 	live = &liveChat{model: model, key: key, used: time.Now()}
 	a.sessions.mu.Lock()
 	a.sessions.live = live
@@ -205,9 +205,9 @@ func (a *App) closeChat() {
 }
 
 // compactSession shortens the model session's own history after /compact has
-// made the conversation's summary. A Codex session compacts itself; a Claude
-// session can't be asked to from outside, so, like a session not open now, it
-// is set aside and the next turn starts a new one from that summary.
+// made the conversation's summary. A session whose engine can be asked to
+// compacts itself; any other, like a session not open now, is set aside and
+// the next turn starts a new one from that summary.
 func (a *App) compactSession(ctx context.Context) error {
 	a.sessions.mu.Lock()
 	live := a.sessions.live
@@ -246,7 +246,7 @@ func (a *App) closeIdleChat(now time.Time) {
 // a different session.
 func chatKey(conversation string, ec engine.Config, instructions string) string {
 	sum := sha256.Sum256([]byte(instructions))
-	return strings.Join([]string{conversation, ec.Engine, ec.Model, ec.Effort, hex.EncodeToString(sum[:8])}, "|")
+	return strings.Join([]string{conversation, ec.Engine(), ec.Model, ec.Effort, hex.EncodeToString(sum[:8])}, "|")
 }
 
 // sessionTool runs a tool the model called, with the same checks and the
@@ -310,7 +310,8 @@ func observe(rec *core.ChatSession, e session.Event) {
 			rec.ContextWindow = *e.Context.CapacityTokens
 		}
 	case e.Usage != nil && e.Usage.Final && e.Usage.Known:
-		rec.Input, rec.CachedInput = e.Usage.Input+e.Usage.CacheRead+e.Usage.CacheWrite, e.Usage.CacheRead
+		// Input counts every prompt token, cached ones included.
+		rec.Input, rec.CachedInput = e.Usage.Input, e.Usage.CacheRead
 	}
 }
 
@@ -320,6 +321,6 @@ func sessionUsage(result session.Result, rec core.ChatSession) engine.Usage {
 	if !u.Known {
 		u = result.Observed
 	}
-	input := int(u.Input + u.CacheRead + u.CacheWrite)
+	input := int(u.Input)
 	return engine.Usage{InputTokens: input, OutputTokens: int(u.Output), TotalTokens: input + int(u.Output), Known: u.Known, ContextWindow: int(rec.ContextWindow)}
 }

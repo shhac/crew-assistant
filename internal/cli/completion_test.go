@@ -39,6 +39,9 @@ func TestConfigKeysCoverTheFile(t *testing.T) {
 	for _, engine := range []*config.CLIEngine{&c.Engines.Codex, &c.Engines.Claude} {
 		*engine = config.CLIEngine{Bin: "x", Home: "/x", UsageFloor: config.UsageFloor{FiveHourPercent: &floor, WeekPercent: &floor}, OnUnknownUsage: "pause"}
 	}
+	// Grok reports no usage windows, so it has no floors to set.
+	c.Engines.Grok = config.CLIEngine{Bin: "x", Home: "/x"}
+	c.Engines.OpenAICompatible.EffortParameter = "reasoning.effort"
 	raw, _ := json.Marshal(c)
 	var object map[string]any
 	_ = json.Unmarshal(raw, &object)

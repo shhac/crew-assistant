@@ -2,7 +2,7 @@ package cli
 
 import (
 	"context"
-	"io"
+	"fmt"
 	"os"
 	"os/exec"
 	"time"
@@ -10,7 +10,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/shhac/crew-assistant/internal/config"
-	"github.com/shhac/crew-assistant/internal/engine"
+	harness "github.com/shhac/lib-agent-harness"
+	"github.com/shhac/lib-agent-harness/account"
+	"github.com/shhac/lib-agent-harness/completion"
 )
 
 type check = map[string]any
@@ -62,46 +64,36 @@ func registerDoctor(root *cobra.Command, o *options) {
 // signed in, without inference. An API engine, or an empty seat, has nothing
 // to check here.
 func assistantEngineChecks(ctx context.Context, cfg config.Config) ([]check, error) {
-	engineName := cfg.AssistantHarness().Engine
-	bin, home := cfg.Engines.Binary(engineName)
-	switch engineName {
-	case "codex":
-		isolationErr := engine.ValidateCodexHome(home)
+	h := cfg.AssistantHarness()
+	if harness.Engine(h.Engine).Transport() != harness.CLITransport {
+		return nil, nil
+	}
+	checks := []check{}
+	// Codex reads instruction files from its home, so the assistant's must
+	// be one of its own.
+	if harness.Engine(h.Engine) == harness.Codex {
+		isolationErr := completion.ValidateCodexHome(h.Home)
 		isolationHint := "Run crew-assistant model login to sign into the configured engines.codex.home."
 		if isolationErr != nil {
 			isolationHint = isolationErr.Error()
 		}
-		checks := []check{{"name": "codex instruction isolation", "ok": isolationErr == nil, "hint": isolationHint}}
-		// Match the inference transport: use Codex's stored login, not
-		// unrelated provider keys inherited from the daemon environment.
-		login, err := loginChecks(ctx, "codex", bin, func() ([]string, error) { return engine.CodexEnvironment(home) }, []string{"login", "status"},
-			"install Codex or set engines.codex.bin",
-			"run crew-assistant model login; no inference was invoked")
-		return append(checks, login...), err
-	case "claude":
-		return loginChecks(ctx, "claude", bin, func() ([]string, error) { return engine.ClaudeEnvironment(home) }, []string{"auth", "status"},
-			"Install Claude CLI to use its existing subscription login.",
-			"Sign in once with crew-assistant model login; workers using this CLI home share the login.")
+		checks = append(checks, check{"name": "codex instruction isolation", "ok": isolationErr == nil, "hint": isolationHint})
 	}
-	return nil, nil
+	return append(checks, loginChecks(ctx, h, account.Inspect)...), nil
 }
 
-// loginChecks find the engine's executable and, when it is there, ask it
-// whether it is signed in.
-func loginChecks(ctx context.Context, name, bin string, environment func() ([]string, error), status []string, installHint, loginHint string) ([]check, error) {
-	binary, lookupErr := exec.LookPath(bin)
-	checks := []check{{"name": name + " executable", "ok": lookupErr == nil, "hint": installHint}}
-	if lookupErr != nil {
-		return checks, nil
+// loginChecks find the engine's executable and, when it is there and the
+// harness can read its account, ask whether it is signed in.
+func loginChecks(ctx context.Context, h config.Harness, inspect func(context.Context, harness.Provider) (harness.AccountReport, error)) []check {
+	label := config.EngineLabel(h.Engine)
+	_, lookupErr := exec.LookPath(h.Bin)
+	checks := []check{{"name": h.Engine + " executable", "ok": lookupErr == nil, "hint": fmt.Sprintf("Install the %s CLI or set engines.%s.bin.", label, h.Engine)}}
+	if lookupErr != nil || !harness.Support(harness.Engine(h.Engine), harness.Account, harness.Login).Usable() {
+		return checks
 	}
-	env, err := environment()
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	probe := exec.CommandContext(ctx, binary, status...)
-	probe.Env = env
-	probe.Stdout, probe.Stderr = io.Discard, io.Discard
-	return append(checks, check{"name": name + " login", "ok": probe.Run() == nil, "hint": loginHint}), nil
+	report, _ := inspect(ctx, h.Provider())
+	signedIn := report.Account.LoggedIn != nil && *report.Account.LoggedIn
+	return append(checks, check{"name": h.Engine + " login", "ok": signedIn, "hint": "Sign in once with crew-assistant model login; team roles on this CLI share the login. No inference was invoked."})
 }

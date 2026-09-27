@@ -80,11 +80,12 @@ func configKeys(o *options) []libcli.ConfigKey {
 	keys := []libcli.ConfigKey{
 		libcli.StringKey(b, "assistant.seat", "The id of the assistant in the seat, from assistants; empty is no one", func(c *config.Config) *string { return &c.Assistant.Seat }, nil),
 		libcli.JSONKey[config.Config, []config.AssistantProfile](b, "assistants", "The assistant profiles, each with its name, personality, avatar and model, as a JSON array", func(c *config.Config) *[]config.AssistantProfile { return &c.Assistants }, nil),
-		libcli.OneOfKey(b, "models.suggestions.engine", "The engine that suggests next messages and writes loading lines; empty is the approved small models", func(c *config.Config) *string { return &c.Models.Suggestions.Engine }, append([]string{""}, config.EngineNames...)),
+		libcli.OneOfKey(b, "models.suggestions.engine", "The engine that suggests next messages and writes loading lines; empty is the approved small models", func(c *config.Config) *string { return &c.Models.Suggestions.Engine }, append([]string{""}, config.EnginesFor(config.UseSmall)...)),
 		libcli.StringKey(b, "models.suggestions.model", "The model that suggests next messages and writes loading lines", func(c *config.Config) *string { return &c.Models.Suggestions.Model }, nil),
 		libcli.OneOfKey(b, "models.suggestions.effort", "Its reasoning effort; empty is the model's default", func(c *config.Config) *string { return &c.Models.Suggestions.Effort }, config.Efforts),
 		libcli.StringKey(b, "engines.openai-compatible.base_url", "The OpenAI-compatible endpoint", func(c *config.Config) *string { return &c.Engines.OpenAICompatible.BaseURL }, nil),
-		libcli.EnvNameKey(b, "engines.openai-compatible.api_key_env", "The environment variable holding the endpoint's key; empty sends none", func(c *config.Config) *string { return &c.Engines.OpenAICompatible.APIKeyEnv }),
+		libcli.EnvNameKey(b, "engines.openai-compatible.api_key_env", "The environment variable holding the endpoint's key; empty sends none, which only an endpoint on this machine accepts", func(c *config.Config) *string { return &c.Engines.OpenAICompatible.APIKeyEnv }),
+		libcli.OneOfKey(b, "engines.openai-compatible.effort_parameter", "Where the endpoint reads a reasoning effort: reasoning_effort (OpenAI, xAI) or reasoning.effort (gateways such as OpenRouter); empty is reasoning_effort", func(c *config.Config) *string { return &c.Engines.OpenAICompatible.EffortParameter }, []string{"", "reasoning_effort", "reasoning.effort"}),
 		libcli.IntKey(b, "limits.max_model_calls_per_day", "The most assistant model calls a day", func(c *config.Config) *int { return &c.Limits.MaxModelCallsPerDay }, 1, 100000),
 		libcli.IntKey(b, "limits.max_model_turns", "The most tool turns in one assistant reply", func(c *config.Config) *int { return &c.Limits.MaxModelTurns }, 1, 32),
 		boolKey(b, "chat.loading_phrases.enabled", "Show small-model captions while the assistant thinks", func(c *config.Config) *bool { return &c.Chat.LoadingPhrases.Enabled }),
@@ -107,6 +108,11 @@ func configKeys(o *options) []libcli.ConfigKey {
 		keys = append(keys,
 			libcli.StringKey(b, prefix+"bin", "The "+name+" executable; empty is "+name+" on PATH", func(c *config.Config) *string { return &engine(c).Bin }, nil),
 			libcli.PathKey(b, prefix+"home", "The "+name+" login home; empty is the default", func(c *config.Config) *string { return &engine(c).Home }),
+		)
+		if !config.Supports(name, config.UseUsage) {
+			continue
+		}
+		keys = append(keys,
 			libcli.OptionalIntKey(b, prefix+"usage_floor.5h_percent", "The share of the 5-hour window team roles leave unused; 0 turns it off", func(c *config.Config) **int { return &engine(c).UsageFloor.FiveHourPercent }, 0, 100),
 			libcli.OptionalIntKey(b, prefix+"usage_floor.1w_percent", "The share of the weekly window team roles leave unused; 0 turns it off", func(c *config.Config) **int { return &engine(c).UsageFloor.WeekPercent }, 0, 100),
 			libcli.OneOfKey(b, prefix+"on_unknown_usage", "Whether team roles carry on or wait while usage can't be read", func(c *config.Config) *string { return &engine(c).OnUnknownUsage }, []string{config.OnUnknownUsageAllow, config.OnUnknownUsagePause}),

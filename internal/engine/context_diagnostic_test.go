@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/completion"
 )
 
@@ -32,7 +33,7 @@ func TestContextSummaryDiagnosticsPreserveArchiveAndUsage(t *testing.T) {
 			})
 			var failure *completion.RequestError
 			var safe interface{ SafeDiagnostic() string }
-			if !errors.As(err, &failure) || failure.Kind != completion.ErrorUnknown || failure.Phase != completion.PhaseResponse || failure.Code != tt.code || failure.Retryable() {
+			if !errors.As(err, &failure) || failure.Cause != harness.CauseUnknown || failure.Phase != completion.PhaseResponse || failure.Code != tt.code || failure.Retryable() {
 				t.Fatalf("missing nonretryable diagnostic: %v", err)
 			}
 			if !errors.As(err, &safe) || !strings.Contains(safe.SafeDiagnostic(), tt.reason) || strings.Contains(err.Error(), secret) {
@@ -74,7 +75,8 @@ func TestContextPressureAndInvalidLimitsHaveLocalDiagnostics(t *testing.T) {
 }
 
 func TestCompleteInvalidConfigHasSafePreflightDiagnostic(t *testing.T) {
-	for _, cfg := range []Config{{Engine: "private-model"}, {Engine: "codex", Model: "fixture", MaxOutputTokens: -1}, {Engine: "codex"}} {
+	codex := harness.Provider{Engine: harness.Codex}
+	for _, cfg := range []Config{{Provider: harness.Provider{Engine: "private-model"}}, {Provider: codex, Model: "fixture", MaxOutputTokens: -1}, {Provider: codex}} {
 		_, _, err := Complete(context.Background(), cfg, nil, nil)
 		var failure *completion.RequestError
 		if !errors.As(err, &failure) || failure.Code != "invalid_model_configuration" || failure.Phase != completion.PhasePreflight || failure.Retryable() {
@@ -83,7 +85,7 @@ func TestCompleteInvalidConfigHasSafePreflightDiagnostic(t *testing.T) {
 		if strings.Contains(err.Error(), "private-model") {
 			t.Fatal("configuration value leaked")
 		}
-		if cfg.Engine == "codex" && cfg.Model == "" && !errors.Is(err, ErrNotConfigured) {
+		if cfg.Provider.Engine == harness.Codex && cfg.Model == "" && !errors.Is(err, ErrNotConfigured) {
 			t.Fatal("lost configuration sentinel")
 		}
 	}

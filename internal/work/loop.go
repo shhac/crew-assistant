@@ -299,9 +299,7 @@ func (lp *Loop) withTools(spec *roles.Spec, tools roleTools) {
 func (lp *Loop) baseSpec(r core.Role, workDir, prompt string) roles.Spec {
 	spec := roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Instructions: r.Instructions, Prompt: prompt}
 	spec.Binary, spec.Home = lp.Config().Engines.Binary(r.Engine)
-	if r.Engine == "codex" {
-		spec.RuntimeHome = filepath.Join(lp.Core.StateDirectory(), "roles", "codex")
-	}
+	spec.RuntimeHome = filepath.Join(lp.Core.StateDirectory(), "roles", r.Engine)
 	return spec
 }
 

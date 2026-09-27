@@ -13,23 +13,22 @@ import (
 )
 
 func TestHTTPEffortAndCallerTools(t *testing.T) {
-	server := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewModelServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
-			Model     string `json:"model"`
-			Effort    string `json:"reasoning_effort"`
-			Tools     []Tool `json:"tools"`
-			MaxTokens int    `json:"max_completion_tokens"`
+			Model  string `json:"model"`
+			Effort string `json:"reasoning_effort"`
+			Tools  []Tool `json:"tools"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
-		if request.Model != "api-model" || request.Effort != "high" || request.MaxTokens != 512 || len(request.Tools) != 1 || request.Tools[0].Function.Name != "worker_only" {
+		if request.Model != "api-model" || request.Effort != "high" || len(request.Tools) != 1 || request.Tools[0].Function.Name != "worker_only" {
 			t.Errorf("unexpected HTTP request: %+v", request)
 		}
 		io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
 	}))
 	defer server.Close()
-	result, _, err := Complete(context.Background(), Config{Engine: "openai-compatible", Endpoint: server.URL, Model: "api-model", Effort: "high", MaxOutputTokens: 512}, []Message{{Role: "user", Content: "hello"}}, []Tool{{Type: "function", Function: Function{Name: "worker_only"}}})
+	result, _, err := Complete(context.Background(), Config{Provider: api(server.URL), Model: "api-model", Effort: "high"}, []Message{{Role: "user", Content: "hello"}}, []Tool{{Type: "function", Function: Function{Name: "worker_only"}}})
 	if err != nil || result.Content != "ok" {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -61,11 +60,11 @@ func TestHTTPUsageRequiresCompleteNonNegativeCounts(t *testing.T) {
 				body += `,"usage":` + tc.usage
 			}
 			body += `}`
-			server := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := testutil.NewModelServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = io.WriteString(w, body)
 			}))
 			defer server.Close()
-			_, usage, err := Complete(context.Background(), Config{Engine: "openai-compatible", Endpoint: server.URL, Model: "fixture"}, []Message{{Role: "user", Content: "Hello"}}, nil)
+			_, usage, err := Complete(context.Background(), Config{Provider: api(server.URL), Model: "fixture"}, []Message{{Role: "user", Content: "Hello"}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

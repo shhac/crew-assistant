@@ -3,6 +3,7 @@ package engine
 import (
 	"strings"
 
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/completion"
 )
 
@@ -15,8 +16,8 @@ type completionDiagnostic struct {
 func (e *completionDiagnostic) Error() string          { return e.message }
 func (e *completionDiagnostic) SafeDiagnostic() string { return e.message }
 func (e *completionDiagnostic) Unwrap() error          { return e.failure }
-func localCompletionDiagnostic(message string, kind completion.ErrorKind, phase completion.ErrorPhase, code string) error {
-	return &completionDiagnostic{message: message, failure: &completion.RequestError{Kind: kind, Phase: phase, Code: code}}
+func localCompletionDiagnostic(message string, cause harness.Cause, phase completion.ErrorPhase, code string) error {
+	return &completionDiagnostic{message: message, failure: &completion.RequestError{Cause: cause, Phase: phase, Code: code}}
 }
 
 func validateContextSummary(reply Message, maxBytes int) error {
@@ -33,5 +34,5 @@ func validateContextSummary(reply Message, maxBytes int) error {
 	default:
 		return nil
 	}
-	return localCompletionDiagnostic(reason+"; original context preserved", completion.ErrorUnknown, completion.PhaseResponse, code)
+	return localCompletionDiagnostic(reason+"; original context preserved", harness.CauseUnknown, completion.PhaseResponse, code)
 }

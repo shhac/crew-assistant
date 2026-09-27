@@ -6,21 +6,23 @@ import (
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/engine"
-	"github.com/shhac/lib-agent-harness/completion"
+	harness "github.com/shhac/lib-agent-harness"
 )
 
 // Preserve useful next steps without copying raw provider, tool or storage errors
 // into durable conversation metadata.
 func chatFailureReason(err error) string {
-	var failure *completion.RequestError
-	if errors.As(err, &failure) {
-		switch failure.Kind {
-		case completion.ErrorOverloaded, completion.ErrorUnavailable, completion.ErrorRateLimited:
+	facts, classified := harness.ErrorFacts(err)
+	if classified {
+		switch facts.Cause {
+		case harness.CauseOverloaded, harness.CauseUnavailable, harness.CauseRateLimited:
 			return "The model provider remains unavailable or rate-limited after bounded recovery. Recorded actions were preserved; review them before asking to continue."
-		case completion.ErrorAuthentication:
+		case harness.CauseAuthentication, harness.CausePermissionDenied:
 			return "The selected model login needs attention. Check its account in Settings; recorded actions were preserved."
-		case completion.ErrorContextLimit:
+		case harness.CauseContextLimit:
 			return "The remaining context cannot fit safely. Original dialogue and recorded work were preserved; narrow the request before continuing."
+		case harness.CauseModelUnavailable:
+			return "The selected model isn't available to its login or endpoint. Choose another in Settings; recorded actions were preserved."
 		}
 	}
 	detail := strings.ToLower(err.Error())
@@ -40,7 +42,7 @@ func chatFailureReason(err error) string {
 		reason = "The model context limit was reached. Original dialogue and recorded work were preserved."
 	case errors.Is(err, engine.ErrTurnLimit):
 		reason = "The assistant reached its per-turn action limit. Review its progress before asking it to continue."
-	case strings.Contains(detail, "codex") || strings.Contains(detail, "claude"):
+	case classified && facts.Engine.Transport() == harness.CLITransport && (facts.Family == harness.FailurePreflight || facts.Family == harness.FailureProcess || facts.Family == harness.FailureCapability):
 		reason = "Check the selected CLI installation, login, and model in Settings; the assistant could not use that profile."
 	}
 	return reason + " Recorded actions were preserved; no automatic replay was attempted."

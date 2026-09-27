@@ -3,13 +3,12 @@ package quota
 import (
 	"context"
 	"errors"
-	"io/fs"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/config"
-	"github.com/shhac/lib-agent-harness/session"
+	harness "github.com/shhac/lib-agent-harness"
+	"github.com/shhac/lib-agent-harness/account"
 )
 
 // Recheck is how often a login that had nothing left is looked at again, to
@@ -47,8 +46,18 @@ type Remaining struct {
 	// that set it, when each of them said.
 	ResetsAt *time.Time `json:"resets_at,omitempty"`
 	Overage  bool       `json:"using_overage,omitempty"`
+	// Credits is the balance that can pay beyond the windows, when the CLI
+	// reported one.
+	Credits *Credits `json:"credits,omitempty"`
 	// Missing says in plain words why nothing was measured.
 	Missing string `json:"missing,omitempty"`
+}
+
+// Credits is a balance exactly as reported: a decimal in a currency or in
+// the provider's own credits.
+type Credits struct {
+	Balance string `json:"balance"`
+	Unit    string `json:"unit"`
 }
 
 // Describe is what a reading says a model's login has left. Only windows the
@@ -58,7 +67,7 @@ type Remaining struct {
 func Describe(r Reading, h config.Harness, floors Floors, now time.Time) Remaining {
 	out := Remaining{Level: LevelUnknown, Windows: []Window{}}
 	switch {
-	case errors.Is(r.Err, exec.ErrNotFound) || errors.Is(r.Err, fs.ErrNotExist):
+	case notInstalled(r.Err):
 		out.Missing = "not installed"
 		return out
 	case r.LoggedIn != nil && !*r.LoggedIn:
@@ -89,9 +98,10 @@ func Describe(r Reading, h config.Harness, floors Floors, now time.Time) Remaini
 			out.Windows = append(out.Windows, win)
 		}
 	}
+	out.Credits = credits(r.Credits, now)
 	if len(out.Windows) == 0 {
 		switch {
-		case errors.Is(r.Err, context.DeadlineExceeded):
+		case errors.Is(r.Err, context.DeadlineExceeded) || failureCode(r.Err) == account.CodeTimedOut:
 			out.Missing = "usage check timed out"
 		case r.Err != nil:
 			out.Missing = "usage check failed"
@@ -123,10 +133,26 @@ func Describe(r Reading, h config.Harness, floors Floors, now time.Time) Remaini
 	return out
 }
 
+func notInstalled(err error) bool { return failureCode(err) == account.CodeNotInstalled }
+
+func failureCode(err error) string {
+	facts, _ := harness.ErrorFacts(err)
+	return facts.Code
+}
+
+// credits is a fresh reported balance, or nil: an unreported balance is
+// unknown, not empty.
+func credits(c harness.CreditSnapshot, now time.Time) *Credits {
+	if c.IsStale(now, 2*CacheAge) || c.Balance == nil {
+		return nil
+	}
+	return &Credits{Balance: c.Balance.Value, Unit: c.Balance.Unit}
+}
+
 // Exhausted says a snapshot leaves a model's login with nothing in a window
 // that governs it. It is the one rule for "out of usage": the sidebar shows
 // it and the small models skip an engine by it.
-func Exhausted(q session.QuotaSnapshot, h config.Harness) bool {
+func Exhausted(q harness.QuotaSnapshot, h config.Harness) bool {
 	for _, w := range q.Windows {
 		if Applies(w, h) && spent(w) {
 			return true
@@ -135,6 +161,6 @@ func Exhausted(q session.QuotaSnapshot, h config.Harness) bool {
 	return false
 }
 
-func spent(w session.QuotaWindow) bool {
+func spent(w harness.QuotaWindow) bool {
 	return !w.Invalidated && validPercent(w) && *w.UsedPercent >= 100
 }

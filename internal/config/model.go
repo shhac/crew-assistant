@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // Model is an assistant profile's model choice; the engine it names is
@@ -20,7 +21,7 @@ func defaultModel() Model {
 }
 
 // EngineNames are the engines the assistant can run on.
-var EngineNames = []string{"codex", "claude", "openai-compatible"}
+var EngineNames = EnginesFor(UseAssistant)
 
 // Efforts are the reasoning efforts a model may be asked for; empty is the
 // model's own default.
@@ -30,7 +31,7 @@ var Efforts = []string{"", "none", "minimal", "low", "medium", "high", "xhigh", 
 // capabilities before inference rather than guessing from model name prefixes.
 func (m Model) Validate() error {
 	if !slices.Contains(EngineNames, m.Engine) {
-		return errors.New("engine must be codex, claude or openai-compatible")
+		return fmt.Errorf("engine must be %s", strings.Join(EngineNames, ", "))
 	}
 	if !slices.Contains(Efforts, m.Effort) {
 		return errors.New("effort must be empty, none, minimal, low, medium, high, xhigh, max or ultra")
@@ -66,8 +67,8 @@ func (m Models) validate() error {
 		}
 		return nil
 	}
-	if !slices.Contains(EngineNames, s.Engine) {
-		return errors.New("models.suggestions.engine must be codex, claude, openai-compatible or empty")
+	if small := EnginesFor(UseSmall); !slices.Contains(small, s.Engine) {
+		return fmt.Errorf("models.suggestions.engine must be %s or empty", strings.Join(small, ", "))
 	}
 	if s.Model == "" || len(s.Model) > 80 {
 		return errors.New("models.suggestions.model must contain 1–80 characters")
@@ -87,10 +88,11 @@ var approvedSmallModels = map[string]struct{ model, effort string }{
 }
 
 // SmallModels lists the models to try in order for a small job. A model the
-// owner chose is the only one. Otherwise they are the approved small models:
-// the seated assistant's CLI engine first, then the other one, or Codex
-// first while no one is seated. Each uses that CLI's configured login. An
-// API assistant has no CLI of its own to start from, so it gets none rather
+// owner chose is the only one. Otherwise they are the approved small models
+// on engines that can run small jobs: the seated assistant's engine first,
+// then the others, or in the usual order while no one is seated. Each uses
+// that CLI's configured login. An assistant on an engine with no approved
+// small model has none of its own to start from, so it gets none rather
 // than a guessed engine.
 func (c Config) SmallModels() ([]Harness, error) {
 	if chosen := c.Models.Suggestions; chosen.Engine != "" {
@@ -98,15 +100,18 @@ func (c Config) SmallModels() ([]Harness, error) {
 		m.MaxTokens = 128
 		return []Harness{m}, nil
 	}
-	order := []string{"codex", "claude"}
-	if seated, ok := c.Seated(); ok {
-		switch seated.Model.Engine {
-		case "codex":
-		case "claude":
-			order = []string{"claude", "codex"}
-		default:
-			return nil, fmt.Errorf("no approved small model for the %s engine", seated.Model.Engine)
+	var order []string
+	for _, engine := range EnginesFor(UseSmall) {
+		if _, ok := approvedSmallModels[engine]; ok {
+			order = append(order, engine)
 		}
+	}
+	if seated, ok := c.Seated(); ok {
+		first := seated.Model.Engine
+		if !slices.Contains(order, first) {
+			return nil, fmt.Errorf("no approved small model for the %s engine", first)
+		}
+		order = append([]string{first}, slices.DeleteFunc(order, func(e string) bool { return e == first })...)
 	}
 	models := make([]Harness, 0, len(order))
 	for _, engine := range order {

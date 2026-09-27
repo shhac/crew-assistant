@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/shhac/lib-agent-harness/completion"
+	harness "github.com/shhac/lib-agent-harness"
 )
 
 // RetryPolicy applies within one completion request, never to a conversation or
@@ -46,7 +46,7 @@ type RetryEvent struct {
 	Status     string
 	Attempt    int
 	MaxRetries int
-	Kind       completion.ErrorKind
+	Cause      harness.Cause
 	Delay      time.Duration
 	RetryAt    time.Time
 }
@@ -78,7 +78,7 @@ func (e *Engine) completeWithTools(ctx context.Context, messages []Message, tool
 	policy := *e.cfg.Retry
 	callCtx := ctx
 	var recoveryDeadline time.Time
-	var lastKind completion.ErrorKind
+	var lastCause harness.Cause
 	for attempt := 0; ; attempt++ {
 		if err := callCtx.Err(); err != nil {
 			return Message{}, usage, err
@@ -87,23 +87,25 @@ func (e *Engine) completeWithTools(ctx context.Context, messages []Message, tool
 		mergeContextUsage(&usage, u, attempt == 0)
 		if err == nil {
 			if attempt > 0 {
-				if hookErr := e.retryEvent(ctx, RetryEvent{Status: "recovered", Attempt: attempt, MaxRetries: policy.MaxRetries, Kind: lastKind}); hookErr != nil {
+				if hookErr := e.retryEvent(ctx, RetryEvent{Status: "recovered", Attempt: attempt, MaxRetries: policy.MaxRetries, Cause: lastCause}); hookErr != nil {
 					return Message{}, usage, hookErr
 				}
 			}
 			return m, usage, nil
 		}
+		// Only a provider's explicit transient rejection is retried, as the
+		// harness classifies it; an admission refusal never is.
 		var admission *requestAdmissionError
-		var rejection *completion.RequestError
-		if errors.As(err, &admission) || !errors.As(err, &rejection) || !rejection.Retryable() {
+		rejection, classified := harness.ErrorFacts(err)
+		if errors.As(err, &admission) || !classified || !rejection.Retryable {
 			return Message{}, usage, err
 		}
 		if callCtx.Err() != nil {
 			return Message{}, usage, callCtx.Err()
 		}
-		lastKind = rejection.Kind
+		lastCause = rejection.Cause
 		if attempt >= policy.MaxRetries {
-			if hookErr := e.retryEvent(ctx, RetryEvent{Status: "exhausted", Attempt: attempt, MaxRetries: policy.MaxRetries, Kind: rejection.Kind}); hookErr != nil {
+			if hookErr := e.retryEvent(ctx, RetryEvent{Status: "exhausted", Attempt: attempt, MaxRetries: policy.MaxRetries, Cause: rejection.Cause}); hookErr != nil {
 				return Message{}, usage, hookErr
 			}
 			return Message{}, usage, fmt.Errorf("model retry allowance exhausted after %d retries: %w", attempt, err)
@@ -122,12 +124,12 @@ func (e *Engine) completeWithTools(ctx context.Context, messages []Message, tool
 		}
 		// Never shorten a provider's Retry-After to squeeze an early call into budget.
 		if remaining <= 0 || delay >= remaining {
-			if hookErr := e.retryEvent(ctx, RetryEvent{Status: "exhausted", Attempt: attempt, MaxRetries: policy.MaxRetries, Kind: rejection.Kind}); hookErr != nil {
+			if hookErr := e.retryEvent(ctx, RetryEvent{Status: "exhausted", Attempt: attempt, MaxRetries: policy.MaxRetries, Cause: rejection.Cause}); hookErr != nil {
 				return Message{}, usage, hookErr
 			}
 			return Message{}, usage, fmt.Errorf("model recovery deadline prevents another attempt: %w", err)
 		}
-		event := RetryEvent{Status: "waiting", Attempt: attempt + 1, MaxRetries: policy.MaxRetries, Kind: rejection.Kind, Delay: delay, RetryAt: now.Add(delay)}
+		event := RetryEvent{Status: "waiting", Attempt: attempt + 1, MaxRetries: policy.MaxRetries, Cause: rejection.Cause, Delay: delay, RetryAt: now.Add(delay)}
 		if hookErr := e.retryEvent(callCtx, event); hookErr != nil {
 			return Message{}, usage, hookErr
 		}

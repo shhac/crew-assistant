@@ -19,7 +19,7 @@ import (
 
 func setupModel(t *testing.T, a *App, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
-	server := testutil.NewServer(t, handler)
+	server := testutil.NewModelServer(t, handler)
 	t.Cleanup(server.Close)
 	cfg := a.Config()
 	seated(&cfg).Model.Engine = "openai-compatible"
@@ -34,7 +34,7 @@ func setupModel(t *testing.T, a *App, handler http.HandlerFunc) *httptest.Server
 }
 func writeSetupCall(w http.ResponseWriter, name string, arguments any) {
 	encoded, _ := json.Marshal(arguments)
-	json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": "fixture-call", "type": "function", "function": map[string]any{"name": name, "arguments": string(encoded)}}}}}}})
+	json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": "fixture-call", "type": "function", "function": map[string]any{"name": name, "arguments": string(encoded)}}}}, "finish_reason": "tool_calls"}}})
 }
 func fixtureDrawing() map[string]any {
 	return map[string]any{"background": "#10182a", "marks": []any{
@@ -203,7 +203,7 @@ func TestSuggestionsWithNoAssistantsFallBackToTheDefaultModel(t *testing.T) {
 	}
 	ec := a.setupModel(context.Background(), a.Config())
 	want := config.DefaultProfile().Model
-	if ec.Engine != want.Engine || ec.Model != want.Model || ec.Effort != want.Effort {
+	if ec.Engine() != want.Engine || ec.Model != want.Model || ec.Effort != want.Effort {
 		t.Fatalf("%+v", ec)
 	}
 }

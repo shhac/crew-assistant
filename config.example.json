@@ -55,7 +55,7 @@
       "on_unknown_usage": "allow"
     },
     "openai-compatible": {
-      "//": "For an assistant on an API rather than a CLI subscription. api_key_env names the variable holding the key; empty sends none.",
+      "//": "For an assistant on an API rather than a CLI subscription. api_key_env names the variable holding the key, read at each request; empty sends none, which only an endpoint on this machine accepts. effort_parameter says where the endpoint reads a reasoning effort: reasoning_effort (the default; OpenAI, xAI) or reasoning.effort (gateways such as OpenRouter).",
       "base_url": "https://api.openai.com/v1",
       "api_key_env": "OPENAI_API_KEY"
     }

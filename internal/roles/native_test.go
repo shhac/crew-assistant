@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
 )
 
@@ -52,7 +53,7 @@ func (s *fakeSession) StartTurn(_ context.Context, in session.Input) (turn, erro
 	return fakeTurn{s: s, name: "turn", result: session.Result{Status: "completed", Text: "Done."}}, nil
 }
 
-func (s *fakeSession) Ref() session.Ref { return session.Ref{Engine: session.Codex, ID: "thread"} }
+func (s *fakeSession) Ref() session.Ref { return session.Ref{Engine: harness.Codex, ID: "thread"} }
 
 func (s *fakeSession) Release(context.Context) (session.Reclamation, error) {
 	s.calls = append(s.calls, "release")
@@ -87,15 +88,18 @@ func TestAResumedSessionFinishesCompactingBeforeItsTurnStarts(t *testing.T) {
 func TestAFreshSessionOrOneNotAskedToCompactGoesStraightToItsTurn(t *testing.T) {
 	for name, run := range map[string]struct {
 		resumed, compact bool
+		engine           string
 	}{
-		"fresh session asked to compact":   {false, true},
-		"resumed session not asked":        {true, false},
-		"fresh session with nothing to do": {false, false},
+		"fresh session asked to compact":   {false, true, "codex"},
+		"resumed session not asked":        {true, false, "codex"},
+		"fresh session with nothing to do": {false, false, "codex"},
+		// The harness says Claude can't be asked to compact from outside.
+		"resumed session that can't compact": {true, true, "claude"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := &fakeSession{compacted: session.Result{Status: "completed"}}
 			spec := codexRound
-			spec.Compact = run.compact
+			spec.Compact, spec.Engine = run.compact, run.engine
 			if _, err := native(s, run.resumed).Run(context.Background(), spec); err != nil {
 				t.Fatal(err)
 			}

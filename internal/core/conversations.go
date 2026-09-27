@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/text"
+
+	"github.com/shhac/crew-assistant/internal/config"
 )
 
 // The owner's chat commands. A command is a whole message on its own, such as
@@ -317,7 +319,7 @@ func (s *Service) SetWriterNext(ctx context.Context, projectID, taskID, next str
 		if len(writers) != 1 || len(t.WriterSession) == 0 {
 			return "", fmt.Errorf("the implementer has no conversation yet; its first round starts one: %w", ErrConflict)
 		}
-		if next == WriterCompact && writers[0].Engine != "codex" {
+		if next == WriterCompact && !config.Supports(writers[0].Engine, config.UseCompact) {
 			return "", fmt.Errorf("%s runs on %s, which can't be compacted from outside; start its conversation afresh instead, which loses nothing its next round needs: %w", writers[0].Name, writers[0].Engine, ErrConflict)
 		}
 		t.WriterNext = next

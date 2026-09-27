@@ -8,6 +8,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/engine"
+	harness "github.com/shhac/lib-agent-harness"
 )
 
 func TestLoadingCaptionUsesSmallCLIWithOnlyRecentContext(t *testing.T) {
@@ -15,7 +16,7 @@ func TestLoadingCaptionUsesSmallCLIWithOnlyRecentContext(t *testing.T) {
 	s := f.models()
 	complete := s.complete
 	s.complete = func(ctx context.Context, c engine.Config, m []engine.Message, tools []engine.Tool) (engine.Message, engine.Usage, error) {
-		if _, home := config.Default().Engines.Binary("codex"); c.APIKeyEnv != "" || c.Endpoint != "" || c.CodexHome != home {
+		if _, home := config.Default().Engines.Binary("codex"); c.Provider.Engine != harness.Codex || c.Provider.API.BaseURL != "" || c.Provider.API.Credentials != nil || c.Provider.CLI.Home != home {
 			t.Fatal(c)
 		}
 		if len(m) != 2 || strings.Contains(m[1].Content, "old secret") || !strings.Contains(m[1].Content, "recent answer") || !strings.Contains(m[1].Content, "plan a garden") {

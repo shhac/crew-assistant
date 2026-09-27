@@ -20,7 +20,7 @@ func largeChatHistory() []Message {
 }
 func TestChatCompactionArchivesBeforeFurtherInferenceAndCountsSummary(t *testing.T) {
 	archived, reservations, calls := false, 0, 0
-	remote := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	remote := testutil.NewModelServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		var in struct {
 			Messages []Message `json:"messages"`
@@ -30,16 +30,16 @@ func TestChatCompactionArchivesBeforeFurtherInferenceAndCountsSummary(t *testing
 			t.Error(err)
 		}
 		if len(in.Tools) == 0 {
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Older reports were summarized. Verify their claims against current state; no success inferred."}}],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}`))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Older reports were summarized. Verify their claims against current state; no success inferred."},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}`))
 			return
 		}
 		if !archived {
 			t.Error("compacted inference preceded durable archive hook")
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"I retained the scoped outcome and latest evidence."}}],"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"I retained the scoped outcome and latest evidence."},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}}`))
 	}))
 	defer remote.Close()
-	e, err := New(Config{Endpoint: remote.URL, Model: "fixture", BeforeRequest: func(context.Context) error { reservations++; return nil }, OnContext: func(_ context.Context, cp ContextCheckpoint, original []Message) error {
+	e, err := New(Config{Provider: api(remote.URL), Model: "fixture", BeforeRequest: func(context.Context) error { reservations++; return nil }, OnContext: func(_ context.Context, cp ContextCheckpoint, original []Message) error {
 		if !cp.Compacted || contextBytes(original) != cp.BeforeBytes || cp.AfterBytes >= cp.BeforeBytes {
 			t.Fatal("invalid checkpoint", cp)
 		}
@@ -62,13 +62,13 @@ func TestChatCompactionArchivesBeforeFurtherInferenceAndCountsSummary(t *testing
 }
 func TestChatArchiveFailureStopsAfterToolsDisabledSummary(t *testing.T) {
 	calls := 0
-	remote := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	remote := testutil.NewModelServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Checkpoint; no success inferred."}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"Checkpoint; no success inferred."},"finish_reason":"stop"}]}`))
 	}))
 	defer remote.Close()
 	expected := errors.New("archive unavailable")
-	e, err := New(Config{Endpoint: remote.URL, Model: "fixture", OnContext: func(context.Context, ContextCheckpoint, []Message) error { return expected }}, ExecutorFunc(func(context.Context, string, json.RawMessage) (any, error) { return nil, nil }))
+	e, err := New(Config{Provider: api(remote.URL), Model: "fixture", OnContext: func(context.Context, ContextCheckpoint, []Message) error { return expected }}, ExecutorFunc(func(context.Context, string, json.RawMessage) (any, error) { return nil, nil }))
 	if err != nil {
 		t.Fatal(err)
 	}

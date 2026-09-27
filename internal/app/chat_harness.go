@@ -46,7 +46,7 @@ func chatSessionOptions(spec chatSpec) (session.Options, error) {
 		return session.Options{}, err
 	}
 	root := filepath.Join(spec.StateDir, "chat")
-	tools, runtime, work := filepath.Join(root, "tools"), filepath.Join(root, "runtime", spec.Config.Engine), filepath.Join(root, "work")
+	tools, runtime, work := filepath.Join(root, "tools"), filepath.Join(root, "runtime", spec.Config.Engine()), filepath.Join(root, "work")
 	for _, dir := range []string{tools, runtime, work} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return session.Options{}, err
@@ -60,9 +60,7 @@ func chatSessionOptions(spec chatSpec) (session.Options, error) {
 		return spec.Tool(ctx, call.Name, call.Arguments), nil
 	})
 	return session.Options{
-		Engine:       session.Engine(spec.Config.Engine),
-		Binary:       spec.Binary,
-		Home:         spec.Home,
+		Provider:     spec.Config.Provider,
 		RuntimeHome:  runtime,
 		WorkDir:      work,
 		Model:        spec.Config.Model,

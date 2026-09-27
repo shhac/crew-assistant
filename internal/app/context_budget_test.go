@@ -6,6 +6,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/completion"
 )
 
@@ -28,8 +29,8 @@ func TestATurnIsSizedToTheWindowItsModelStated(t *testing.T) {
 	}
 	a := testApp(t)
 	ctx := context.Background()
-	a.recordWindow(ctx, engine.Config{Engine: "claude", Model: "opus"}, engine.Usage{ContextWindow: 200000})
-	a.recordWindow(ctx, engine.Config{Engine: "claude", Model: "opus"}, engine.Usage{})
+	a.recordWindow(ctx, engine.Config{Provider: harness.Provider{Engine: harness.Claude}, Model: "opus"}, engine.Usage{ContextWindow: 200000})
+	a.recordWindow(ctx, engine.Config{Provider: harness.Provider{Engine: harness.Claude}, Model: "opus"}, engine.Usage{})
 	snap, _ := a.Core.Snapshot(ctx)
 	if snap.ModelWindow("claude", "opus") != 200000 {
 		t.Fatalf("windows %v", snap.ModelWindows)
@@ -38,7 +39,7 @@ func TestATurnIsSizedToTheWindowItsModelStated(t *testing.T) {
 
 func TestATurnTooLongForANewlyChosenModelIsSizedToItAndTriedOnce(t *testing.T) {
 	a := testApp(t)
-	refused := &completion.RequestError{Kind: completion.ErrorContextLimit, Phase: completion.PhaseResponse}
+	refused := &completion.RequestError{Cause: harness.CauseContextLimit, Phase: completion.PhaseResponse}
 	run := func(replies ...engine.Result) (engine.Result, error, []int) {
 		var budgets []int
 		a.chatInvoker = func(_ context.Context, cfg engine.Config, _ engine.Request, _ engine.ToolExecutor) (engine.Result, error) {

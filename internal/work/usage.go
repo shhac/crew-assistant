@@ -161,12 +161,4 @@ func heldFor(t core.Task) string {
 	return ""
 }
 
-func engineName(engine string) string {
-	if engine == "codex" {
-		return "Codex"
-	}
-	if engine == "claude" {
-		return "Claude"
-	}
-	return engine
-}
+func engineName(engine string) string { return config.EngineLabel(engine) }

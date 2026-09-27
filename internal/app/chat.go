@@ -283,7 +283,7 @@ func (a *App) assistantConfig(ctx context.Context, cfg config.Config) engine.Con
 		return a.Core.ReserveModelCall(ctx, a.Config().Limits.MaxModelCallsPerDay)
 	}
 	if snap, err := a.Core.Snapshot(ctx); err == nil {
-		ec.MaxContextBytes = contextBudget(snap.ModelWindow(ec.Engine, ec.Model), ec.MaxOutputTokens)
+		ec.MaxContextBytes = contextBudget(snap.ModelWindow(ec.Engine(), ec.Model), ec.MaxOutputTokens)
 	}
 	return ec
 }

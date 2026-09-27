@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/completion"
 	"github.com/shhac/lib-agent-harness/session"
 )
@@ -41,12 +42,12 @@ func TestTypedFailureKeepsProviderFactsAndRetryDisposition(t *testing.T) {
 			event.RetryAt = &at
 		}
 		code := 1
-		New(&buf).Failure(event, &completion.RequestError{Kind: completion.ErrorOverloaded, Engine: "claude", Phase: completion.PhaseResponse, Code: "overloaded", ExitCode: &code})
+		New(&buf).Failure(event, &completion.RequestError{Cause: harness.CauseOverloaded, Engine: harness.Claude, Phase: completion.PhaseResponse, Code: "overloaded", ExitCode: &code})
 		var got Event
 		if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &got); err != nil {
 			t.Fatal(err)
 		}
-		if got.Engine != "claude" || got.Phase != "response" || got.Code != "overloaded" || got.ExitCode == nil || *got.ExitCode != 1 || (got.FixableBy == "retry") != scheduled {
+		if got.Engine != "claude" || got.Operation != "complete" || got.Family != "request" || got.Cause != "overloaded" || got.Phase != "response" || got.Code != "overloaded" || got.ExitCode == nil || *got.ExitCode != 1 || (got.FixableBy == "retry") != scheduled {
 			t.Fatalf("unexpected event: %+v", got)
 		}
 	}
@@ -97,7 +98,7 @@ func TestNativeHarnessFailureKeepsItsCodeAndEngine(t *testing.T) {
 			if event.Code != tc.code {
 				t.Fatalf("native diagnostic code lost: got %q", event.Code)
 			}
-			if event.Engine != tc.engine || event.Kind == "" {
+			if event.Engine != tc.engine || event.Family == "" {
 				t.Fatalf("native failure lost its engine or family: %+v", event)
 			}
 			if tc.name == "process" && (event.ExitCode == nil || *event.ExitCode != status) {

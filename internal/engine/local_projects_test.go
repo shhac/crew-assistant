@@ -13,7 +13,7 @@ import (
 
 func TestLocalProjectGuidanceAndToolsReachModel(t *testing.T) {
 	var calls, creations atomic.Int32
-	server := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := testutil.NewModelServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			Messages []Message `json:"messages"`
 			Tools    []Tool    `json:"tools"`
@@ -61,16 +61,16 @@ func TestLocalProjectGuidanceAndToolsReachModel(t *testing.T) {
 			call := ToolCall{ID: "local-create", Type: "function"}
 			call.Function.Name = "create_project"
 			call.Function.Arguments = `{"title":"Personal project","objective":"","acceptance_criteria":[],"directories":null}`
-			json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": Message{Role: "assistant", ToolCalls: []ToolCall{call}}}}})
+			json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": Message{Role: "assistant", ToolCalls: []ToolCall{call}}, "finish_reason": "tool_calls"}}})
 			return
 		}
 		if request.Messages[len(request.Messages)-1].ToolCallID != "local-create" {
 			t.Error("local project evidence not returned to model")
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"The project is tracked locally."}}]}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"The project is tracked locally."},"finish_reason":"stop"}]}`))
 	}))
 	defer server.Close()
-	e, err := New(Config{Endpoint: server.URL, Model: "synthetic"}, ExecutorFunc(func(_ context.Context, name string, raw json.RawMessage) (any, error) {
+	e, err := New(Config{Provider: api(server.URL), Model: "synthetic"}, ExecutorFunc(func(_ context.Context, name string, raw json.RawMessage) (any, error) {
 		if name != "create_project" {
 			t.Errorf("unexpected integration dependency: %s", name)
 		}

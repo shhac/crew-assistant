@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/completion"
 )
 
-var ErrContextPressure = localCompletionDiagnostic("context cannot be compacted safely within its limit; immutable instructions and unresolved or recent work were preserved", completion.ErrorContextLimit, completion.PhasePreflight, "working_context_budget")
+var ErrContextPressure = localCompletionDiagnostic("context cannot be compacted safely within its limit; immutable instructions and unresolved or recent work were preserved", harness.CauseContextLimit, completion.PhasePreflight, "working_context_budget")
 
 // ContextOptions describes a working-message budget. Callers subtract tool/schema
 // and provider framing overhead before supplying MaxBytes.
@@ -56,7 +57,7 @@ func CompactContext(ctx context.Context, messages []Message, opts ContextOptions
 	checkpoint := ContextCheckpoint{Messages: append([]Message(nil), messages...), BeforeBytes: contextBytes(messages), AfterBytes: contextBytes(messages)}
 	var usage Usage
 	if opts.MaxBytes < 1024 || opts.TriggerBytes < 1 || opts.TriggerBytes > opts.MaxBytes || opts.RetainTurns < 1 || opts.MaxSummaryBytes < 128 || opts.MaxSummaryBytes > opts.MaxBytes/2 {
-		return checkpoint, usage, localCompletionDiagnostic("invalid context compaction limits", completion.ErrorUnknown, completion.PhasePreflight, "invalid_context_limits")
+		return checkpoint, usage, localCompletionDiagnostic("invalid context compaction limits", harness.CauseUnknown, completion.PhasePreflight, "invalid_context_limits")
 	}
 	if checkpoint.BeforeBytes <= opts.TriggerBytes {
 		return checkpoint, usage, nil

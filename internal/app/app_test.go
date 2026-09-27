@@ -42,7 +42,7 @@ func testApp(t *testing.T) *App {
 func TestChatModelUsesConfiguredNameAndPersistsToolEffects(t *testing.T) {
 	a := testApp(t)
 	var calls atomic.Int32
-	remote := testutil.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	remote := testutil.NewModelServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
 			t.Error(r.URL.Path)
 		}
@@ -58,10 +58,10 @@ func TestChatModelUsesConfiguredNameAndPersistsToolEffects(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if calls.Add(1) == 1 {
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"create_project","arguments":"{\"title\":\"Export\",\"goal\":\"Improve exports\",\"audience\":\"\",\"constraints\":\"\",\"template\":\"draft\",\"criteria\":[\"CSV validates\"],\"directories\":null}"}}]}}],"usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}}`))
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"create_project","arguments":"{\"title\":\"Export\",\"goal\":\"Improve exports\",\"audience\":\"\",\"constraints\":\"\",\"template\":\"draft\",\"criteria\":[\"CSV validates\"],\"directories\":null}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"I recorded the outcome and acceptance criteria."}}],"usage":{"prompt_tokens":20,"completion_tokens":10,"total_tokens":30}}`))
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"I recorded the outcome and acceptance criteria."},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":10,"total_tokens":30}}`))
 	}))
 	defer remote.Close()
 	cfg := a.Config()

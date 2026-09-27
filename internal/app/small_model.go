@@ -4,18 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/engine"
-	"github.com/shhac/lib-agent-harness/completion"
+	harness "github.com/shhac/lib-agent-harness"
+	"github.com/shhac/lib-agent-harness/catalog"
 )
 
 type smallCompletion func(context.Context, engine.Config, []engine.Message, []engine.Tool) (engine.Message, engine.Usage, error)
-type smallDiscovery func(context.Context, engine.Config) ([]engine.ModelOption, error)
+type smallDiscovery func(context.Context, harness.Provider) ([]catalog.Model, error)
 
 // smallModels answers loading captions and next-message suggestions with the
 // models config.SmallModels lists: the model the owner chose in Settings, or
@@ -50,7 +50,7 @@ type restingEngine struct {
 }
 
 func newSmallModels(workDir func() string) *smallModels {
-	return &smallModels{discover: engine.DiscoverModels, complete: engine.Complete, workDir: workDir, attempt: 8 * time.Second, rest: 10 * time.Minute, now: time.Now, resting: map[string]restingEngine{}}
+	return &smallModels{discover: catalog.Discover, complete: engine.Complete, workDir: workDir, attempt: 8 * time.Second, rest: 10 * time.Minute, now: time.Now, resting: map[string]restingEngine{}}
 }
 
 // notOfferedError means the approved model, at its approved effort, is not
@@ -93,10 +93,10 @@ func (f *smallModelFailure) notOffered() bool {
 func (s *smallModels) ask(ctx context.Context, models []config.Harness, prompt []engine.Message, reserve func(context.Context) error) (engine.Message, error) {
 	failure := &smallModelFailure{}
 	for _, m := range models {
-		// Only an engine the config knows is ever reached, whatever the
-		// caller passed.
-		if !slices.Contains(config.EngineNames, m.Engine) {
-			failure.attempts = append(failure.attempts, fmt.Errorf("%s is not an engine", m.Engine))
+		// Only an engine that can do small jobs is ever reached, whatever
+		// the caller passed.
+		if !config.Supports(m.Engine, config.UseSmall) {
+			failure.attempts = append(failure.attempts, fmt.Errorf("%s can't write suggestions", m.Engine))
 			continue
 		}
 		if cause := s.restingCause(m.Engine); cause != nil {
@@ -142,19 +142,24 @@ func (s *smallModels) try(ctx context.Context, m config.Harness, prompt []engine
 func (s *smallModels) verify(ctx context.Context, m config.Harness, reserve func(context.Context) error) (engine.Config, error) {
 	ec := EngineConfig(m)
 	ec.Effort, ec.WorkDirRoot, ec.MaxOutputTokens, ec.MaxContextBytes, ec.Timeout, ec.Retry, ec.BeforeRequest = "", s.workDir(), 128, 8192, s.attempt, &engine.RetryPolicy{MaxRetries: 0}, reserve
-	// An API lists nothing to check against; the owner named the model, and
-	// the endpoint refuses one it doesn't serve.
-	if !slices.Contains(config.CLIEngineNames, m.Engine) {
+	// An engine that lists no efforts, such as an API, has nothing to check
+	// against; the owner named the model, and the endpoint refuses one it
+	// doesn't serve.
+	if !config.Supports(m.Engine, config.UseEfforts) {
 		ec.Effort = m.Effort
 		return ec, nil
 	}
-	models, err := s.discover(ctx, ec)
+	models, err := s.discover(ctx, ec.Provider)
 	if err != nil {
 		return engine.Config{}, err
 	}
 	for _, option := range models {
 		if option.ID != m.Model {
 			continue
+		}
+		if !option.EffortsKnown {
+			ec.Effort = m.Effort
+			return ec, nil
 		}
 		// An approved model without effort levels (Haiku 4.5) gets none.
 		for _, effort := range option.Efforts {
@@ -187,8 +192,7 @@ func (s *smallModels) rateLimitedUntil(engineName string) time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.resting[engineName]
-	var refused *completion.RequestError
-	if s.now().Before(r.until) && errors.As(r.cause, &refused) && refused.Kind == completion.ErrorRateLimited {
+	if facts, ok := harness.ErrorFacts(r.cause); ok && s.now().Before(r.until) && facts.Cause == harness.CauseRateLimited {
 		return r.until
 	}
 	return time.Time{}

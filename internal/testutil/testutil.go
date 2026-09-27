@@ -21,6 +21,17 @@ func NewServer(t testing.TB, handler http.Handler) *httptest.Server {
 	return server
 }
 
+// NewModelServer is NewServer for a fake OpenAI-compatible endpoint: its
+// replies are JSON unless the handler says otherwise, as a real endpoint's
+// are, and as the harness requires.
+func NewModelServer(t testing.TB, handler http.Handler) *httptest.Server {
+	t.Helper()
+	return NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		handler.ServeHTTP(w, r)
+	}))
+}
+
 // RequireLoopback skips a test that listens on loopback itself, such as one
 // that starts the daemon, where listening is forbidden.
 func RequireLoopback(t testing.TB) {
