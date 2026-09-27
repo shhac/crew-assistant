@@ -14,6 +14,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/testutil"
+	"github.com/shhac/lib-agent-harness/session"
 )
 
 // seated is the seated assistant's profile in c, to change in a test; c
@@ -37,7 +38,12 @@ func testApp(t *testing.T) *App {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	return New(core.NewService(s, cfg), cfg, filepath.Join(t.TempDir(), "config.json"), Options{})
+	a := New(core.NewService(s, cfg), cfg, filepath.Join(t.TempDir(), "config.json"), Options{})
+	// The chat answers turn by turn unless a test opens its sessions.
+	a.sessions.open = func(context.Context, chatSpec, *session.Ref) (chatModel, session.Opened, error) {
+		return nil, session.Opened{}, errNoChatSession
+	}
+	return a
 }
 func TestChatModelUsesConfiguredNameAndPersistsToolEffects(t *testing.T) {
 	a := testApp(t)

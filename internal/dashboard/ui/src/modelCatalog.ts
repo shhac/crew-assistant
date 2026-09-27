@@ -3,7 +3,10 @@ import { api } from "./api";
 import { engineLabel } from "./engines";
 
 export type ModelOption = {
+  /** What is saved: an alias here follows the engine's upgrades. */
   id: string;
+  /** The concrete model an alias selects today, when the engine says. */
+  resolved?: string;
   name: string;
   description?: string;
   default_effort?: string;
@@ -75,13 +78,20 @@ export function useModelCatalog(engine: string) {
   };
 }
 
-/** How a model is named in a list: marked if recommended or the default. */
+/**
+ * How a model is named in a list: with the concrete model an alias selects
+ * today, and marked if recommended or the default.
+ */
 export function modelLabel(option: ModelOption, catalog: Catalog | null) {
-  if (option.id === catalog?.default.model)
-    return `${option.name} (recommended)`;
+  const concrete = option.resolved;
+  const name =
+    concrete && concrete !== option.id && concrete !== option.name
+      ? `${option.name} · ${concrete}`
+      : option.name;
+  if (option.id === catalog?.default.model) return `${name} (recommended)`;
   if (option.is_default)
-    return `${option.name} (${engineLabel(catalog?.engine ?? "")} default)`;
-  return option.name;
+    return `${name} (${engineLabel(catalog?.engine ?? "")} default)`;
+  return name;
 }
 
 /** Whether a model's efforts are listed, so a pick can be offered from them. */

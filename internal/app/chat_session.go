@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/engine"
 	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
@@ -35,6 +36,9 @@ type chatModel interface {
 	// session.ErrUnsupported when its engine can't be asked to.
 	Compact(ctx context.Context) error
 	Ref() session.Ref
+	// Recovered is what opening the session found cut off when the process
+	// that last had it open stopped.
+	Recovered() session.Recovery
 	Close()
 }
 
@@ -65,6 +69,9 @@ type liveChat struct {
 	key   string
 	used  time.Time
 	turn  *sessionTurn
+	// unknown are calls opening the session found cut off, until the next
+	// turn is told of them.
+	unknown []session.RecoveredCall
 }
 
 // sessionTurn is what the tool handler needs of the turn in progress. Its
@@ -103,10 +110,13 @@ func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.
 	if err != nil {
 		return engine.Result{}, err
 	}
-	cfg := a.Config()
 	instructions := engine.Instructions(ec.AssistantName, ec.Personality) + sessionNote
 	spec := chatSpec{Config: ec, Instructions: instructions, StateDir: a.Core.StateDirectory(), Tool: a.sessionTool, Context: a.sessionContext}
-	live, rec, fresh, err := a.openChat(ctx, chatKey(conversation, ec, instructions), record, spec)
+	key := chatKey(conversation, ec, instructions)
+	if err := a.foldBeforeNewSession(ctx, turn.UserMessageID, ec, key, record); err != nil {
+		return engine.Result{}, err
+	}
+	live, rec, fresh, err := a.openChat(ctx, key, record, spec)
 	if err != nil {
 		return engine.Result{}, err
 	}
@@ -119,12 +129,15 @@ func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.
 			text = since + "\n\n" + text
 		}
 	}
+	if note := a.takeRecoveryNote(live, ec); note != "" {
+		text = note + "\n\n" + text
+	}
 	if ec.BeforeRequest != nil {
 		if err := ec.BeforeRequest(ctx); err != nil {
 			return engine.Result{}, err
 		}
 	}
-	state := &sessionTurn{id: turn.ID, messageID: turn.UserMessageID, limit: max(cfg.Limits.MaxModelTurns, 1) * 16, cfg: ec}
+	state := &sessionTurn{id: turn.ID, messageID: turn.UserMessageID, limit: sessionToolLimit(ec.MaxTurns), cfg: ec}
 	a.sessions.mu.Lock()
 	live.turn = state
 	a.sessions.mu.Unlock()
@@ -136,6 +149,12 @@ func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.
 		runErr = fmt.Errorf("the model's turn ended as %s", result.Status)
 	}
 	rec.Ref, _ = json.Marshal(live.model.Ref())
+	if outgrown(ec, runErr) {
+		// A session that can't compact itself can't go on once its history
+		// is too long for the model. It is set aside, and the next message
+		// starts a new one from the conversation's summary.
+		rec.Ref = nil
+	}
 	rec.SeenAt = started
 	usage := sessionUsage(result, rec)
 	a.recordWindow(ctx, ec, usage)
@@ -185,11 +204,77 @@ func (a *App) openChat(ctx context.Context, key string, record *core.ChatSession
 		rec = core.ChatSession{Opened: core.SessionFresh, StartedAt: time.Now().UTC()}
 	}
 	rec.Engine, rec.Model = spec.Config.Engine(), spec.Config.Model
-	live = &liveChat{model: model, key: key, used: time.Now()}
+	live = &liveChat{model: model, key: key, used: time.Now(), unknown: model.Recovered().UnknownOutcomes}
 	a.sessions.mu.Lock()
 	a.sessions.live = live
 	a.sessions.mu.Unlock()
 	return live, rec, !opened.Resumed, nil
+}
+
+// foldBeforeNewSession brings the conversation's summary up to the
+// exchanges a new session is given word for word, when the session about to
+// open is new and its engine can't compact its own history. Such a session
+// is only ever set aside, so what it is started from has to be current.
+func (a *App) foldBeforeNewSession(ctx context.Context, currentID string, ec engine.Config, key string, record *core.ChatSession) error {
+	resumable := record != nil && len(record.Ref) > 0 && record.Engine == ec.Engine()
+	if selfCompacting(ec) || resumable {
+		return nil
+	}
+	a.sessions.mu.Lock()
+	open := a.sessions.live != nil && a.sessions.live.key == key
+	a.sessions.mu.Unlock()
+	if open {
+		return nil
+	}
+	_, err := a.summarizeChat(ctx, currentID, ec, sessionExchanges, 1)
+	return err
+}
+
+// selfCompacting says whether ec's engine compacts a session's history
+// itself as it fills: a CLI does, and the library's own loop for an
+// endpoint never does.
+func selfCompacting(ec engine.Config) bool {
+	return ec.Provider.Engine.Transport() == harness.CLITransport
+}
+
+// outgrown reports a turn that failed because its session's history no
+// longer fits the model, on a session that can't compact it.
+func outgrown(ec engine.Config, err error) bool {
+	facts, ok := harness.ErrorFacts(err)
+	return ok && facts.Cause == harness.CauseContextLimit && !selfCompacting(ec)
+}
+
+// sessionToolLimit is how many actions one reply on a session may take.
+func sessionToolLimit(maxModelTurns int) int {
+	return max(maxModelTurns, 1) * 16
+}
+
+// errToolOutcomeUnknown says an action was cut off by a stop and its
+// outcome is unknown.
+var errToolOutcomeUnknown = errors.New("a chat action's outcome is unknown after a stop")
+
+// takeRecoveryNote tells the next turn, once, which of the assistant's
+// actions were cut off when the daemon last stopped. The session never runs
+// them again and has told the model their outcome is unknown; this asks it to
+// find out and tell the owner.
+func (a *App) takeRecoveryNote(live *liveChat, ec engine.Config) string {
+	a.sessions.mu.Lock()
+	calls := live.unknown
+	live.unknown = nil
+	a.sessions.mu.Unlock()
+	if len(calls) == 0 {
+		return ""
+	}
+	labels := make([]string, 0, len(calls))
+	for _, c := range calls {
+		label, ok := engine.ToolLabel(c.Tool)
+		if !ok {
+			label = "an action"
+		}
+		labels = append(labels, label)
+		a.Diagnostics.Failure(diagnostics.Event{Component: "chat", Stage: "session_recovery", Engine: ec.Engine(), Code: "tool_outcome_unknown"}, errToolOutcomeUnknown)
+	}
+	return "Before this message, crew-assistant stopped while you were doing this, so whether it took effect is unknown: " + strings.Join(labels, "; ") + ". It was not done again. Check what happened before relying on it or doing it again, and tell the owner."
 }
 
 // closeChat closes the open session, if any. Its conversation stays saved in

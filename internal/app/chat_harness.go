@@ -16,7 +16,8 @@ import (
 
 // harnessChatOpener opens the chat's sessions with lib-agent-harness: a
 // restricted session whose only tools are the assistant's, reached through
-// this binary as the bridge. Sessions live as long as life, the chat queue's
+// this binary as the bridge for a CLI, or called directly by the library's
+// own loop for an endpoint. Sessions live as long as life, the chat queue's
 // run, not as long as any one turn.
 func harnessChatOpener(life context.Context) chatOpener {
 	return func(ctx context.Context, spec chatSpec, ref *session.Ref) (chatModel, session.Opened, error) {
@@ -31,6 +32,13 @@ func harnessChatOpener(life context.Context) chatOpener {
 			// runs turn by turn instead.
 			return nil, session.Opened{}, errors.Join(errNoChatSession, err)
 		}
+		if ref != nil && unreadableTranscript(err) {
+			// The conversation itself is kept here, so a new session carries
+			// it on from its summary and latest exchanges rather than every
+			// turn failing on a transcript nothing can read.
+			s, opened, err = session.Open(life, o, nil)
+			opened.Fresh = session.FreshUnavailable
+		}
 		if err != nil {
 			return nil, session.Opened{}, err
 		}
@@ -38,20 +46,19 @@ func harnessChatOpener(life context.Context) chatOpener {
 	}
 }
 
+func unreadableTranscript(err error) bool {
+	var state *session.StateError
+	return errors.As(err, &state) && state.Code == session.StateCorrupt
+}
+
 // chatSessionOptions is the chat's session: the assistant's own instructions
 // after the CLI's, its tools as the whole tool surface, and folders of its own
 // under the state directory, apart from the teams' sessions.
 func chatSessionOptions(spec chatSpec) (session.Options, error) {
-	bridge, err := roles.Bridge()
-	if err != nil {
-		return session.Options{}, err
-	}
 	root := filepath.Join(spec.StateDir, "chat")
-	tools, runtime, work := filepath.Join(root, "tools"), filepath.Join(root, "runtime", spec.Config.Engine()), filepath.Join(root, "work")
-	for _, dir := range []string{tools, runtime, work} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return session.Options{}, err
-		}
+	runtime := filepath.Join(root, "runtime", spec.Config.Engine())
+	if err := os.MkdirAll(runtime, 0o700); err != nil {
+		return session.Options{}, err
 	}
 	defs := make([]session.ToolDefinition, 0, len(engine.Tools()))
 	for _, t := range engine.Tools() {
@@ -63,7 +70,6 @@ func chatSessionOptions(spec chatSpec) (session.Options, error) {
 	o := session.Options{
 		Provider:     spec.Config.Provider,
 		RuntimeHome:  runtime,
-		WorkDir:      work,
 		Model:        spec.Config.Model,
 		Effort:       spec.Config.Effort,
 		Instructions: session.Instructions{Mode: session.Append, Text: spec.Instructions},
@@ -71,13 +77,36 @@ func chatSessionOptions(spec chatSpec) (session.Options, error) {
 			Server:  "crew",
 			Tools:   defs,
 			Handler: handler,
-			Dir:     tools,
-			Bridge:  bridge,
 			// read_state and read_task answer with whole records.
 			MaxResultBytes: 256 << 10,
 		}},
 		Context: spec.Context,
 	}
+	if o.Provider.Engine.Transport() == harness.APITransport {
+		// The library runs the loop against the endpoint and calls the
+		// handler itself: there is no process, workspace or bridge. The
+		// transcript under RuntimeHome is the conversation.
+		o.Loop = chatLoop(spec.Config)
+		return o, nil
+	}
+	return withChatBridge(o, root)
+}
+
+// withChatBridge gives a CLI's session the bridge that reaches the
+// assistant's tools, and a workspace of its own it never uses.
+func withChatBridge(o session.Options, root string) (session.Options, error) {
+	bridge, err := roles.Bridge()
+	if err != nil {
+		return session.Options{}, err
+	}
+	tools, work := filepath.Join(root, "tools"), filepath.Join(root, "work")
+	for _, dir := range []string{tools, work} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return session.Options{}, err
+		}
+	}
+	o.WorkDir = work
+	o.Restriction.Tools.Dir, o.Restriction.Tools.Bridge = tools, bridge
 	if o.Provider.Engine == harness.Grok {
 		// The assistant never writes files or runs a shell, so it refuses
 		// anything Grok asks to do. Grok can't yet hold a session restricted
@@ -86,6 +115,24 @@ func chatSessionOptions(spec chatSpec) (session.Options, error) {
 		o.Policy = session.Policy{GrokPermission: session.GrokDenyWhenAsked, GrokTelemetry: session.GrokTelemetryReduced}
 	}
 	return o, nil
+}
+
+// maxLoopSteps and maxLoopRequestBytes are the most the library lets its own
+// loop be given.
+const (
+	maxLoopSteps        = 1024
+	maxLoopRequestBytes = 64 << 20
+)
+
+// chatLoop bounds the library's loop as a turn run turn by turn is bounded:
+// by the actions one reply may take, with room to be told to stop and then
+// answer, and by the model's own window once it is known.
+func chatLoop(ec engine.Config) session.Loop {
+	return session.Loop{
+		MaxSteps:        min(sessionToolLimit(ec.MaxTurns)+2, maxLoopSteps),
+		MaxRequestBytes: min(ec.MaxContextBytes, maxLoopRequestBytes),
+		RequestTimeout:  ec.Timeout,
+	}
 }
 
 // harnessChat is a chat session held by lib-agent-harness.
@@ -131,6 +178,8 @@ func (h *harnessChat) Compact(ctx context.Context) error {
 }
 
 func (h *harnessChat) Ref() session.Ref { return h.s.Ref() }
+
+func (h *harnessChat) Recovered() session.Recovery { return h.s.Recovered() }
 
 // Close lets the CLI go, confirming its process is gone and, for Codex,
 // keeping any refreshed login. Its conversation stays saved to resume.

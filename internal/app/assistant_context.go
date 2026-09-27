@@ -180,6 +180,10 @@ func (a *App) chatContext(ctx context.Context, currentMessageID string) (json.Ra
 	return raw, history, err
 }
 
+// sessionExchanges is how many of the latest messages a new session is
+// given word for word.
+const sessionExchanges = 12
+
 // sessionContext is the assistant's current context for a session that is new
 // or was just compacted: the overview, and for a new one also the
 // conversation's summary and latest exchanges, so it carries on where the
@@ -198,8 +202,8 @@ func (a *App) sessionContext(ctx context.Context, reason session.ContextReason) 
 	if reason != session.ContextStarted {
 		return string(state), nil
 	}
-	if n := len(history); n > 12 {
-		history = history[n-12:]
+	if n := len(history); n > sessionExchanges {
+		history = history[n-sessionExchanges:]
 	}
 	recent, err := json.Marshal(history)
 	if err != nil {

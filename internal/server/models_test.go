@@ -86,7 +86,7 @@ func TestModelEndpointCanPreviewClaudeBeforeSavingEngine(t *testing.T) {
 		if p.Engine != harness.Claude || p.CLI.Home != cfg.Engines.Claude.Home {
 			t.Fatal(p)
 		}
-		return []catalog.Model{{ID: "opus", Name: "Opus"}}, nil
+		return []catalog.Model{{ID: "opus", Resolved: "claude-opus-5-5", Name: "Opus"}}, nil
 	})
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/models?profile=assistant&engine=claude", nil))
@@ -95,6 +95,10 @@ func TestModelEndpointCanPreviewClaudeBeforeSavingEngine(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Engine != "claude" || !result.Available || a.Config().AssistantHarness().Engine != "codex" {
+		t.Fatal(w.Body.String())
+	}
+	// The alias is what is chosen; the model it selects today is shown beside it.
+	if !strings.Contains(w.Body.String(), `"id":"opus","resolved":"claude-opus-5-5"`) {
 		t.Fatal(w.Body.String())
 	}
 }

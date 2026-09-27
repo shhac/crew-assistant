@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/engine"
 	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
@@ -25,10 +27,15 @@ type fakeChat struct {
 	failed  bool
 	closed  bool
 	id      string
+	unknown []session.RecoveredCall
+	err     error // what the next turn fails with
 }
 
 func (f *fakeChat) Turn(ctx context.Context, text string, onEvent func(session.Event)) (session.Result, error) {
 	f.sent = append(f.sent, text)
+	if f.err != nil {
+		return session.Result{Status: "failed"}, f.err
+	}
 	if f.call != "" {
 		result := f.spec.Tool(ctx, f.call, json.RawMessage(`{}`))
 		f.told, f.failed = result.Content, result.IsError
@@ -42,12 +49,15 @@ func (f *fakeChat) Turn(ctx context.Context, text string, onEvent func(session.E
 func (f *fakeChat) Compact(context.Context) error { return session.ErrUnsupported }
 func (f *fakeChat) Ref() session.Ref              { return session.Ref{Engine: harness.Claude, ID: f.id} }
 func (f *fakeChat) Close()                        { f.closed = true }
+func (f *fakeChat) Recovered() session.Recovery   { return session.Recovery{UnknownOutcomes: f.unknown} }
 
 type openings struct {
 	chats []*fakeChat
 	refs  []*session.Ref
 	// resume answers whether a given reference resumes.
 	resume func(*session.Ref) (bool, string)
+	// unknown are the calls the next session opened finds cut off.
+	unknown []session.RecoveredCall
 }
 
 func (o *openings) open(_ context.Context, spec chatSpec, ref *session.Ref) (chatModel, session.Opened, error) {
@@ -60,7 +70,8 @@ func (o *openings) open(_ context.Context, spec chatSpec, ref *session.Ref) (cha
 	if resumed {
 		id = ref.ID
 	}
-	chat := &fakeChat{spec: spec, id: id}
+	chat := &fakeChat{spec: spec, id: id, unknown: o.unknown}
+	o.unknown = nil
 	o.chats = append(o.chats, chat)
 	return chat, session.Opened{Resumed: resumed, Fresh: fresh}, nil
 }
@@ -194,13 +205,7 @@ func TestTheChatRunsTurnByTurnWithoutASession(t *testing.T) {
 		t.Fatalf("result %+v", got)
 	}
 	// The last turn's loading caption may still be reading the config.
-	a.mu.Lock()
-	seated(&a.cfg).Model.Engine = "openai-compatible"
-	a.mu.Unlock()
 	a.sessions.open = o.open
-	if got := runTurn(t, a, "Hello"); got.Message != "Stateless" || len(o.chats) != 0 {
-		t.Fatal("an HTTP engine opened a session")
-	}
 	// Grok can't hold a session restricted to the assistant's tools, so it
 	// answers turn by turn, in the private folder its completions need.
 	a.mu.Lock()
@@ -276,5 +281,90 @@ func TestAnEmptySeatAnswersNothing(t *testing.T) {
 	snap, _ := a.Snapshot(ctx)
 	if snap.Assistant.ID != "" || snap.Assistant.Name != config.DefaultAssistantName || snap.Integrations[0].Detail != "Choose your assistant in Settings" {
 		t.Fatalf("%+v %+v", snap.Assistant, snap.Integrations[0])
+	}
+}
+
+// A session reopened after a stop that cut off one of the assistant's actions
+// says so once: the assistant is asked to find out what it did and tell the
+// owner, and the operator's log records it without saying what it was.
+func TestAnActionCutOffByAStopIsRaisedOnce(t *testing.T) {
+	a, o := sessionApp(t)
+	var logged bytes.Buffer
+	a.Diagnostics = diagnostics.New(&logged)
+	o.unknown = []session.RecoveredCall{{ID: "call-7", Tool: "create_project"}}
+	runTurn(t, a, "Hello")
+	label, _ := engine.ToolLabel("create_project")
+	sent := o.chats[0].sent[0]
+	if !strings.Contains(sent, label) || !strings.Contains(sent, "unknown") || !strings.HasSuffix(sent, "Hello") || strings.Contains(sent, "call-7") {
+		t.Fatalf("the turn wasn't told of the cut-off action: %q", sent)
+	}
+	if !strings.Contains(logged.String(), `"tool_outcome_unknown"`) || strings.Contains(logged.String(), "create_project") {
+		t.Fatalf("log %s", logged.String())
+	}
+	runTurn(t, a, "Again")
+	if o.chats[0].sent[1] != "Again" {
+		t.Fatalf("the cut-off action was raised twice: %q", o.chats[0].sent[1])
+	}
+}
+
+// An endpoint's session can't compact its own history, so one that outgrows
+// the model is set aside, and the next message starts a new session from the
+// conversation's summary. A CLI's session compacts itself and is kept.
+func TestASessionThatOutgrowsItsModelIsSetAsideOnlyWhenItCantCompact(t *testing.T) {
+	outgrown := &session.TurnError{Engine: harness.OpenAICompatible, Code: "context_length_exceeded", Cause: harness.CauseContextLimit}
+	for engineName, setAside := range map[string]bool{"openai-compatible": true, "claude": false} {
+		a, o := sessionApp(t)
+		ctx := context.Background()
+		a.mu.Lock()
+		seated(&a.cfg).Model.Engine = engineName
+		a.mu.Unlock()
+		runTurn(t, a, "Hello")
+		o.chats[0].err = outgrown
+		if _, err := a.Core.EnqueueChat(ctx, chatID(), "Too much"); err != nil {
+			t.Fatal(err)
+		}
+		turn, _ := a.Core.StartNextChat(ctx)
+		if _, err := a.runChatTurn(ctx, turn); err == nil {
+			t.Fatal("the failed turn succeeded")
+		}
+		a.Core.FinishChat(ctx, turn.ID, "failed", "", chatFailureReason(outgrown))
+		runTurn(t, a, "Next")
+		if got := o.refs[len(o.refs)-1] == nil; got != setAside {
+			t.Errorf("%s: set aside %v, want %v", engineName, got, setAside)
+		}
+	}
+}
+
+// A new session on an endpoint is started from the summary and the latest
+// exchanges alone, so the summary is brought up to them first. A CLI's
+// session compacts itself, and needs no summary made for it.
+func TestANewEndpointSessionStartsFromACurrentSummary(t *testing.T) {
+	for engineName, want := range map[string]int{"openai-compatible": 1, "claude": 0} {
+		a, _ := sessionApp(t)
+		a.mu.Lock()
+		seated(&a.cfg).Model.Engine = engineName
+		a.mu.Unlock()
+		a.chatInvoker = func(context.Context, engine.Config, engine.Request, engine.ToolExecutor) (engine.Result, error) {
+			return engine.Result{Message: "Earlier reply"}, nil
+		}
+		// An earlier conversation, answered turn by turn.
+		stateless := a.sessions.open
+		a.sessions.open = func(context.Context, chatSpec, *session.Ref) (chatModel, session.Opened, error) {
+			return nil, session.Opened{}, errNoChatSession
+		}
+		summaries := 0
+		a.summarize = func(context.Context, engine.Config, []engine.Message, []engine.Tool) (engine.Message, engine.Usage, error) {
+			summaries++
+			return engine.Message{Role: "assistant", Content: "They talked earlier."}, engine.Usage{}, nil
+		}
+		for range 8 {
+			runTurn(t, a, "Earlier")
+		}
+		a.sessions.open = stateless
+		summaries = 0
+		runTurn(t, a, "Now on a session")
+		if summaries != want {
+			t.Errorf("%s: %d summaries, want %d", engineName, summaries, want)
+		}
 	}
 }
