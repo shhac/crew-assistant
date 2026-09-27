@@ -169,7 +169,12 @@ func TestARefusalHasTheLoginReadAgain(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the login wasn't read again")
 	}
-	if !a.OutOfUsage(a.Config().Harness("claude", "haiku", "")) {
-		t.Fatal("the new reading didn't count")
+	// The reading is kept once the look returns, just after it was seen.
+	deadline := time.Now().Add(2 * time.Second)
+	for !a.OutOfUsage(a.Config().Harness("claude", "haiku", "")) {
+		if time.Now().After(deadline) {
+			t.Fatal("the new reading didn't count")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
