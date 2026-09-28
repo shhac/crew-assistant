@@ -436,7 +436,7 @@ func (r roleTools) read(ctx context.Context, id string) (string, error) {
 			if v.Revision != last.N || v.Answered {
 				continue
 			}
-			fmt.Fprintf(&b, "- %s: %s %s\n", v.Role, v.Outcome, text.Clip(v.Summary, 300))
+			fmt.Fprintf(&b, "- %s: %s%s %s\n", v.Role, v.Outcome, checkedRef(v, last), text.Clip(v.Summary, 300))
 			if v.Next != "" || v.Note != "" {
 				fmt.Fprintf(&b, "  recommends %s: %s\n", orDash(v.Next), orDash(v.Note))
 			}

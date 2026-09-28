@@ -34,6 +34,7 @@ func (lp *Loop) review(ctx context.Context, p core.Project, t core.Task, m mediu
 		// changed the objective or criteria meanwhile, it judges again.
 		verdict.TextVersion = t.TextVersion
 		_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
+			// Ref is what the checker's own copy held, set with the verdict.
 			verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, checker.Name, p.Brief.Version, time.Now().UTC()
 			t.Verdicts = append(t.Verdicts, verdict)
 			t.Failures, t.RetryAt = 0, time.Time{}
@@ -44,22 +45,28 @@ func (lp *Loop) review(ctx context.Context, p core.Project, t core.Task, m mediu
 	return lp.setStatus(ctx, t.ID, core.TaskDeciding, "Checks are in")
 }
 
-// runChecker gives a fresh checking session the revision to judge. Only QA
-// may write, to run the check; the medium discards whatever it wrote. A reply
-// that is not a usable verdict gets one plain retry.
+// runChecker gives a fresh checking session the revision to judge, in a copy
+// of its own that no one else works in. Only QA may write, and only to its
+// scratch folder, to run the check. The copy must still be exactly the
+// revision afterwards, or the verdict is discarded and the check fails, to
+// run again. A reply that is not a usable verdict gets one plain retry.
 func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium, note string) (core.Verdict, error) {
-	dir, cleanup, err := m.checkDir(ctx, t, r)
+	c, err := m.check(ctx, t, r, checker.Holds(core.RoleQA))
 	if err != nil {
 		return core.Verdict{}, err
 	}
-	defer cleanup()
+	defer c.remove()
 	playbook := taskPlaybook(p, t)
-	base := checkerPrompt(p, t, r, checker, playbook) + note + learnedGuide(checker, true)
-	spec, cleanupLearnings, err := lp.roleSpec(t, checker, dir, checker.Holds(core.RoleQA), m, base)
+	base := checkerPrompt(p, t, r, checker, playbook) + c.note + note + learnedGuide(checker, true)
+	spec, cleanupLearnings, err := lp.roleSpec(t, checker, c.workDir, c.write, m, base)
 	if err != nil {
 		return core.Verdict{}, err
 	}
 	defer cleanupLearnings()
+	if c.env != nil {
+		spec.Env = c.env
+	}
+	spec.Read = append(append([]string(nil), spec.Read...), c.read...)
 	var verdict core.Verdict
 	_, researches := t.Researcher()
 	_, learned, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
@@ -72,7 +79,11 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 	if parseErr != nil {
 		return core.Verdict{}, parseErr
 	}
+	if err = c.verify(ctx); err != nil {
+		return core.Verdict{}, fmt.Errorf("its verdict was discarded: %w", err)
+	}
 	lp.recordLearned(ctx, p, t, checker, m, learned)
+	verdict.Ref = c.ref
 	return verdict, nil
 }
 

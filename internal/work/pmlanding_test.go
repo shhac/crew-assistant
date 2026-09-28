@@ -170,9 +170,13 @@ func TestThePMLandsASignedOffChangeOnAPushProject(t *testing.T) {
 	}
 }
 
-// branchLeft reports whether the task's branch is still in the clone.
+// branchLeft reports whether the task's branch is still anywhere: in its own
+// clone, or the project's.
 func (w pmPush) branchLeft(t *testing.T, task core.Task) bool {
 	t.Helper()
+	if _, err := os.Stat(filepath.Join(w.p.ScratchDirectory, "tasks", task.ID)); err == nil {
+		return true
+	}
 	return ownerGit(t, filepath.Join(w.p.ScratchDirectory, "clone"), "branch", "--list", task.Branch) != ""
 }
 
@@ -429,7 +433,7 @@ func TestARestartAfterThePMDecidedNeverLandsTwice(t *testing.T) {
 		t.Fatalf("the PM's decision was not recorded before landing: %+v", task)
 	}
 	tip := task.Revisions[len(task.Revisions)-1].Ref
-	ownerGit(t, w.source, "fetch", "-q", filepath.Join(w.p.ScratchDirectory, "clone"), task.Branch)
+	ownerGit(t, w.source, "fetch", "-q", filepath.Join(w.p.ScratchDirectory, "clone"), tip)
 	ownerGit(t, w.source, "merge", "-q", "--ff-only", tip)
 
 	restarted := New(w.a.Core, w.a.Config, false)

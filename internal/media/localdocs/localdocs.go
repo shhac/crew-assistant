@@ -33,69 +33,200 @@ func Open(projectDir string) (Docs, error) {
 	if !filepath.IsAbs(projectDir) {
 		return Docs{}, errors.New("project directory must be absolute")
 	}
-	d := Docs{root: projectDir}
-	if err := os.MkdirAll(d.Workspace(), 0700); err != nil {
-		return Docs{}, err
-	}
-	return d, nil
+	return Docs{root: projectDir}, nil
 }
 
-// Workspace is where the writer works.
-func (d Docs) Workspace() string { return filepath.Join(d.root, "workspace") }
+// Workspace is where the writer works on a task: the task's own, which no
+// other task shares.
+func (d Docs) Workspace(taskID string) string {
+	return filepath.Join(d.task(taskID), "workspace")
+}
+
+func (d Docs) task(taskID string) string {
+	return filepath.Join(d.root, "tasks", filepath.Base(taskID))
+}
 
 func (d Docs) revision(taskID string, n int) string {
-	return filepath.Join(d.root, "tasks", filepath.Base(taskID), "r"+strconv.Itoa(n))
+	return filepath.Join(d.task(taskID), "r"+strconv.Itoa(n))
 }
 
-// Snapshot records the workspace as revision n and returns its files.
-func (d Docs) Snapshot(taskID string, n int) ([]string, error) {
+// Snapshot records the task's workspace as revision n and returns its files
+// and the digest that identifies them.
+func (d Docs) Snapshot(taskID string, n int) ([]string, string, error) {
 	target := d.revision(taskID, n)
 	if err := os.RemoveAll(target); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	files, err := copyTree(d.Workspace(), target)
+	files, err := copyTree(d.Workspace(taskID), target)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if len(files) == 0 {
-		return nil, errors.New("the workspace has no files to record")
+		return nil, "", errors.New("the workspace has no files to record")
 	}
-	return files, nil
+	sum, err := digest(target)
+	return files, sum, err
 }
 
-// Reset puts the workspace back to revision n, or empties it for n == 0, so
-// whatever an interrupted or failed turn left behind is dropped.
+// Digest identifies revision n's files and contents, or is "" when there is
+// no revision n.
+func (d Docs) Digest(taskID string, n int) (string, error) {
+	dir := d.revision(taskID, n)
+	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	return digest(dir)
+}
+
+// Reset puts the task's workspace back to revision n, or empties it for
+// n == 0, so whatever an interrupted or failed turn left behind is dropped.
 func (d Docs) Reset(taskID string, n int) error {
-	if err := os.RemoveAll(d.Workspace()); err != nil {
+	workspace := d.Workspace(taskID)
+	if err := os.RemoveAll(workspace); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(d.Workspace(), 0700); err != nil {
+	if err := os.MkdirAll(workspace, 0700); err != nil {
 		return err
 	}
 	if n == 0 {
 		return nil
 	}
-	_, err := copyTree(d.revision(taskID, n), d.Workspace())
+	_, err := copyTree(d.revision(taskID, n), workspace)
 	return err
 }
 
-// ReviewCopy gives a reviewer its own copy of revision n. Whatever the reviewer
-// does to it cannot change the revision.
-func (d Docs) ReviewCopy(taskID string, n int) (string, func(), error) {
+// RemoveWorkspace deletes a finished task's workspace. Its revisions stay.
+func (d Docs) RemoveWorkspace(taskID string) error {
+	return os.RemoveAll(d.Workspace(taskID))
+}
+
+// Workspaces names the tasks that have a workspace.
+func (d Docs) Workspaces() ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(d.root, "tasks"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	var ids []string
+	for _, e := range entries {
+		if _, statErr := os.Stat(d.Workspace(e.Name())); statErr == nil {
+			ids = append(ids, e.Name())
+		}
+	}
+	return ids, err
+}
+
+// RemoveChecks deletes every copy a check left behind.
+func (d Docs) RemoveChecks() error {
+	return removeAll(filepath.Join(d.root, "reviews"))
+}
+
+// Check is one check's own copy of a revision: never the writer's
+// workspace. Its files are read-only, and what the check writes goes to
+// Scratch.
+type Check struct {
+	// Dir is the revision, copied read-only.
+	Dir string
+	// Scratch is where the check may write.
+	Scratch string
+	digest  string
+	root    string
+}
+
+// ErrCopyChanged is a check that changed the revision it was checking.
+var ErrCopyChanged = errors.New("the check changed the revision it was checking")
+
+// Checkout copies revision n for one check, read-only, in a folder of its
+// own beside a scratch folder. want is the digest the revision was recorded
+// with: a copy that is not exactly it is refused.
+func (d Docs) Checkout(taskID string, n int, want string) (Check, error) {
 	parent := filepath.Join(d.root, "reviews")
 	if err := os.MkdirAll(parent, 0700); err != nil {
-		return "", nil, err
+		return Check{}, err
 	}
-	dir, err := os.MkdirTemp(parent, "r"+strconv.Itoa(n)+"-")
+	root, err := os.MkdirTemp(parent, "r"+strconv.Itoa(n)+"-")
 	if err != nil {
-		return "", nil, err
+		return Check{}, err
 	}
-	cleanup := func() { _ = os.RemoveAll(dir) }
-	if _, err = copyTree(d.revision(taskID, n), dir); err != nil {
-		cleanup()
-		return "", nil, err
+	c := Check{Dir: filepath.Join(root, "copy"), Scratch: filepath.Join(root, "scratch"), digest: want, root: root}
+	if err = c.fill(d.revision(taskID, n)); err != nil {
+		c.Remove()
+		return Check{}, err
 	}
-	return dir, cleanup, nil
+	return c, nil
+}
+
+func (c Check) fill(revision string) error {
+	if _, err := copyTree(revision, c.Dir); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(c.Scratch, 0700); err != nil {
+		return err
+	}
+	if err := c.Verify(); err != nil {
+		return fmt.Errorf("the revision is not as recorded: %w", err)
+	}
+	return setWritable(c.Dir, false)
+}
+
+// Verify says the copy is still exactly the revision: the same files with
+// the same contents, and nothing else, links included.
+func (c Check) Verify() error {
+	var extra []string
+	err := filepath.WalkDir(c.Dir, func(path string, entry fs.DirEntry, err error) error {
+		if err == nil && !entry.IsDir() && !entry.Type().IsRegular() {
+			extra = append(extra, path)
+		}
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrCopyChanged, err)
+	}
+	if len(extra) > 0 {
+		return fmt.Errorf("%w: %s", ErrCopyChanged, strings.Join(extra, ", "))
+	}
+	if got, err := digest(c.Dir); err != nil || got != c.digest {
+		return fmt.Errorf("%w: its files differ", errors.Join(ErrCopyChanged, err))
+	}
+	return nil
+}
+
+// Remove deletes the copy and its scratch folder.
+func (c Check) Remove() {
+	if c.root != "" {
+		_ = removeAll(c.root)
+	}
+}
+
+func removeAll(dir string) error {
+	_ = setWritable(dir, true)
+	return os.RemoveAll(dir)
+}
+
+// setWritable takes write permission from, or gives it back to, every file
+// and folder under dir. Links are left alone: changing one would change
+// what it points at.
+func setWritable(dir string, writable bool) error {
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		mode := info.Mode().Perm() &^ 0o222
+		if writable {
+			mode |= 0o200
+		}
+		return os.Chmod(path, mode)
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // File is one file of a revision as shown to the owner.

@@ -290,6 +290,8 @@ export interface Finding {
 }
 export interface Verdict {
   revision: number;
+  /** Exactly what was checked: the commit, or a document draft's digest. */
+  ref?: string;
   role: string;
   brief_version: number;
   outcome: "pass" | "revise" | "question" | "research" | (string & {});

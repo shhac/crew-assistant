@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 	"github.com/shhac/crew-assistant/internal/text"
 )
 
@@ -17,9 +18,12 @@ type TaskPlace struct {
 	TaskID    string `json:"task_id"`
 	Status    string `json:"status"`
 	Stage     string `json:"stage"`
-	// Workspace is the daemon's own working copy. Other tasks share it and
-	// each step resets it, so it is for looking, not changing.
+	// Workspace is the task's own working copy. Each step resets it, so it
+	// is for looking, not changing.
 	Workspace string `json:"workspace"`
+	// Records is a code project's clone, which keeps every task's recorded
+	// drafts: a draft is taken from there.
+	Records string `json:"records,omitempty"`
 	// Repo, Branch, Base and From are a code task's: the owner's repository,
 	// the task's branch, the commit it started from and the owner's branch
 	// that was.
@@ -40,12 +44,12 @@ func (lp *Loop) Place(ctx context.Context, projectID, taskID string) (TaskPlace,
 	if err != nil {
 		return TaskPlace{}, err
 	}
-	place := TaskPlace{ProjectID: p.ID, TaskID: t.ID, Status: t.Status, Stage: t.Stage, Branch: t.Branch, Base: t.Base, From: t.From, Approved: t.Approved, Running: lp.running(t.ID), Workspace: m.workspace()}
+	place := TaskPlace{ProjectID: p.ID, TaskID: t.ID, Status: t.Status, Stage: t.Stage, Branch: t.Branch, Base: t.Base, From: t.From, Approved: t.Approved, Running: lp.running(t.ID), Workspace: m.workspace(t)}
 	if n := len(t.Revisions); n > 0 {
 		place.Draft = &t.Revisions[n-1]
 	}
 	if g, ok := m.(gitMedium); ok {
-		place.Repo = g.playbook.Repo
+		place.Repo, place.Records = g.playbook.Repo, g.repo.Workspace()
 	}
 	return place, nil
 }
@@ -80,9 +84,33 @@ func (lp *Loop) AdoptDraft(ctx context.Context, projectID, taskID, ref, note str
 	if err != nil {
 		return core.Task{}, err
 	}
+	// Kept as any revision is before it is recorded. One the record then
+	// refuses is removed when the loop next starts.
+	name, err := lp.nextRef(ctx, t.ID)
+	if err != nil {
+		return core.Task{}, err
+	}
+	if err = g.repo.Publish(ctx, g.repo, r.Ref, name); err != nil {
+		return core.Task{}, err
+	}
 	out, err := lp.Core.AdoptDraft(ctx, t.ID, r, approve)
 	lp.nudgeUnless(err)
 	return out, err
+}
+
+// nextRef names the ref the task's next revision is kept under, on an
+// attempt of its own.
+func (lp *Loop) nextRef(ctx context.Context, taskID string) (string, error) {
+	var name string
+	_, err := lp.updateOpen(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
+		t.Attempt++
+		name = gitrepo.TaskRef(t.ID, len(t.Revisions)+1, t.Attempt)
+		return "", nil
+	})
+	if err == nil && name == "" {
+		err = fmt.Errorf("the task has finished: %w", core.ErrConflict)
+	}
+	return name, err
 }
 
 // ownersRevision is the owner's commit as the task's next draft: fetched

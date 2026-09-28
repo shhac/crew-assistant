@@ -17,6 +17,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/integrations/github"
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // fakeGitHub stands in for GitHub: a bare repository takes the pushes, and
@@ -33,6 +34,7 @@ type fakeGitHub struct {
 	checksOn string
 	decision string
 	reviews  []github.Review
+	comments []github.Comment
 	merged   string
 	merges   [][]string
 	closed   bool
@@ -66,7 +68,7 @@ func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
 	case "pr view":
 		head := ownerGit(f.t, f.remote, "rev-parse", "refs/heads/"+f.head)
 		pr := map[string]any{"number": 7, "url": "https://github.com/o/r/pull/7", "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED", "reviewDecision": f.decision,
-			"headRefOid": head, "reviews": f.reviews, "comments": []any{}}
+			"headRefOid": head, "reviews": f.reviews, "comments": f.comments}
 		checks := f.checks
 		if f.checksOn != "" && f.checksOn != head {
 			checks = "PENDING"
@@ -409,5 +411,42 @@ func TestFeedbackThatNeedsNoChangeDoesNotLoop(t *testing.T) {
 	}
 	if s.current(t); s.runner.edits != 2 {
 		t.Fatal("the same feedback was answered again")
+	}
+}
+
+// Feedback from the pull request names what it was actually on: a review
+// made on an older push names that commit, not the draft pushed since, and
+// a comment, which is on no commit, claims none.
+func TestPullRequestFeedbackNamesTheCommitItWasOn(t *testing.T) {
+	s := newPRScenario(t, 4)
+	task := s.open(t)
+	pushed := task.Revisions[0].Ref
+	older := task.Base
+	said := time.Now()
+	s.gh.set(func() {
+		review := github.Review{Author: github.Author{Login: "alice"}, State: "CHANGES_REQUESTED", Body: "Handle the nil case.", SubmittedAt: said}
+		review.Commit.Oid = older
+		s.gh.reviews = []github.Review{review}
+		s.gh.comments = []github.Comment{{Author: github.Author{Login: "bob"}, Body: "Please add a test.", CreatedAt: said}}
+	})
+	if err := s.a.checkWakes(s.ctx, said.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	task = s.current(t)
+	got := map[string]string{}
+	for _, v := range task.Verdicts {
+		if v.Outside {
+			got[v.Role] = v.Ref
+		}
+	}
+	if ref, ok := got["@alice on the pull request"]; !ok || ref != older || ref == pushed {
+		t.Fatalf("the review of %s was recorded as checking %q", older, ref)
+	}
+	if ref, ok := got["@bob on the pull request"]; !ok || ref != "" {
+		t.Fatalf("the comment was recorded as checking %q", ref)
+	}
+	history := historyText(task, true)
+	if !strings.Contains(history, "(checked "+text.Short(older)+")") || !strings.Contains(history, "(on the conversation, not a commit)") {
+		t.Fatalf("history:\n%s", history)
 	}
 }

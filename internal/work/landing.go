@@ -33,7 +33,7 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 			return lp.landingFailed(ctx, t, r, err)
 		}
 		if done {
-			return lp.cleanUp(ctx, t, r, m, lp.recordLanded(ctx, t, r, playbook.Land.Target, "it was already there"))
+			return lp.cleanUp(t, m, lp.recordLanded(ctx, t, r, playbook.Land.Target, "it was already there"))
 		}
 	}
 	c, l, err := lag(ctx, m, t)
@@ -52,7 +52,7 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 	if err != nil {
 		return lp.landingFailed(ctx, t, r, err)
 	}
-	return lp.cleanUp(ctx, t, r, m, lp.recordLanded(ctx, t, r, target, ""))
+	return lp.cleanUp(t, m, lp.recordLanded(ctx, t, r, target, ""))
 }
 
 // proposed reports a task whose pull request is open: updates to it go out

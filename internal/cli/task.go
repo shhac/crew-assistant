@@ -59,7 +59,7 @@ func registerTask(root *cobra.Command, o *options) {
 		}{t.Ref, t.Objective, place})
 	}}
 
-	path := &cobra.Command{Use: "path <task>", Short: "Print the daemon's workspace for a task; each step resets it, so look but don't change", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	path := &cobra.Command{Use: "path <task>", Short: "Print a task's own workspace; each step resets it, so look but don't change", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		place, _, err := o.place(args[0])
 		if err != nil {
 			return err
@@ -74,12 +74,12 @@ func registerTask(root *cobra.Command, o *options) {
 		if err != nil {
 			return err
 		}
-		if place.Repo == "" || place.Draft == nil || place.Draft.Ref == "" {
+		if place.Repo == "" || place.Records == "" || place.Draft == nil || place.Draft.Ref == "" {
 			return errors.New("only a code task with a draft can be checked out")
 		}
 		into := cmp.Or(branch, place.Branch)
 		ctx := cmd.Context()
-		if err := gitrepo.CheckoutDraft(ctx, place.Repo, place.Workspace, place.Draft.Ref, into, force); err != nil {
+		if err := gitrepo.CheckoutDraft(ctx, place.Repo, place.Records, place.Draft.Ref, into, force); err != nil {
 			return err
 		}
 		out := map[string]any{"repo": place.Repo, "branch": into, "commit": place.Draft.Ref, "draft": place.Draft.N}

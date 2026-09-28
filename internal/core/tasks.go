@@ -62,6 +62,10 @@ type Task struct {
 	// the team, with their replies.
 	Messages  []TeamMessage `json:"messages,omitempty"`
 	Revisions []Revision    `json:"revisions"`
+	// Handoff is a revision on its way to being recorded; see handoff.go.
+	// Attempt counts the handoffs the task has started, and only goes up.
+	Handoff *Handoff `json:"handoff,omitempty"`
+	Attempt int      `json:"attempt,omitempty"`
 	// Plan is what the researcher worked out before anything was written. It
 	// is kept on the task, so everyone who works on it reads the same plan
 	// rather than inheriting a conversation.
@@ -217,7 +221,12 @@ type Revision struct {
 
 // Verdict is one reviewer's judgement of one revision.
 type Verdict struct {
-	Revision     int       `json:"revision"`
+	Revision int `json:"revision"`
+	// Ref is exactly what was checked: the commit, or the digest of a
+	// document draft, in the checker's own copy of the revision; for pull
+	// request feedback, the commit GitHub says it was on. It is empty only
+	// for a pull request comment, which is on no commit.
+	Ref          string    `json:"ref,omitempty"`
 	Role         string    `json:"role"`
 	BriefVersion int       `json:"brief_version"`
 	Outcome      string    `json:"outcome"`

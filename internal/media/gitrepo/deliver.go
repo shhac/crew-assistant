@@ -7,14 +7,17 @@ import (
 	"strings"
 )
 
+// errNotRecorded is a commit to land that the project's clone does not hold:
+// only a recorded revision lands.
+var errNotRecorded = errors.New("the approved revision is not in the project's clone")
+
 // Deliver puts commit on a new branch in the owner's repository without
 // checking anything out there. A branch already at commit counts as
 // delivered, so a retried delivery settles; one pointing elsewhere is left
 // alone and a numbered name is used instead.
-func (r Repo) Deliver(ctx context.Context, taskBranch, commit, name string) (string, error) {
-	tip, err := run(ctx, r.Workspace(), "rev-parse", "refs/heads/"+taskBranch)
-	if err != nil || strings.TrimSpace(tip) != commit {
-		return "", errors.New("the task branch is not at the approved revision")
+func (r Repo) Deliver(ctx context.Context, commit, name string) (string, error) {
+	if !r.Holds(ctx, commit) {
+		return "", errNotRecorded
 	}
 	current, _ := run(ctx, r.source, "symbolic-ref", "--quiet", "--short", "HEAD")
 	for attempt := 1; attempt <= 100; attempt++ {
@@ -38,7 +41,7 @@ func (r Repo) Deliver(ctx context.Context, taskBranch, commit, name string) (str
 		// Bring the objects over without naming any branch, then create the
 		// branch only if it still does not exist: a branch that appeared in
 		// between is never moved.
-		if _, err = run(ctx, r.source, append(fetchQuietly, "--no-write-fetch-head", r.Workspace(), "refs/heads/"+taskBranch+":refs/crew-assistant/incoming")...); err != nil {
+		if _, err = run(ctx, r.source, append(fetchQuietly, "--no-write-fetch-head", r.Workspace(), "+"+commit+":refs/crew-assistant/incoming")...); err != nil {
 			return "", fmt.Errorf("the revision could not be fetched: %w", err)
 		}
 		_, err = run(ctx, r.source, "update-ref", "-m", "crew-assistant delivery", "refs/heads/"+candidate, commit, strings.Repeat("0", len(commit)))
@@ -96,30 +99,28 @@ var receivePack = "git " + strings.Join(append(append([]string(nil), safety...),
 // push: never forced, so it only succeeds when target has not moved past what
 // commit was built on. A checked-out target is updated in place only when the
 // checkout has no uncommitted changes to tracked files.
-func (r Repo) PushFastForward(ctx context.Context, taskBranch, commit, target string) error {
-	tip, err := run(ctx, r.Workspace(), "rev-parse", "refs/heads/"+taskBranch)
-	if err != nil || strings.TrimSpace(tip) != commit {
-		return errors.New("the task branch is not at the approved revision")
+func (r Repo) PushFastForward(ctx context.Context, commit, target string) error {
+	if !r.Holds(ctx, commit) {
+		return errNotRecorded
 	}
-	if err = validBranch(ctx, r.source, target); err != nil {
+	if err := validBranch(ctx, r.source, target); err != nil {
 		return err
 	}
 	return r.pushTo(ctx, commit, target)
 }
 
-// PushSquashed lands what a task branch holds as one new commit on target:
-// the approved commit's tree, on top of target's last fetched tip, with
-// message. The task's drafts stay on its own branch, so the owner's history
-// reads one commit per change. The branch must already hold everything on
-// target, so that the one commit is exactly the change; one that is behind
-// is refused as a moved target, to catch up first. It returns the commit
-// landed, which is target's tip itself when the change is already there.
-func (r Repo) PushSquashed(ctx context.Context, taskBranch, commit, target, message string) (string, error) {
-	tip, err := run(ctx, r.Workspace(), "rev-parse", "refs/heads/"+taskBranch)
-	if err != nil || strings.TrimSpace(tip) != commit {
-		return "", errors.New("the task branch is not at the approved revision")
+// PushSquashed lands an approved commit as one new commit on target: its
+// tree, on top of target's last fetched tip, with message. The task's drafts
+// stay in the project's clone, so the owner's history reads one commit per
+// change. The commit must already hold everything on target, so that the one
+// commit is exactly the change; one that is behind is refused as a moved
+// target, to catch up first. It returns the commit landed, which is target's
+// tip itself when the change is already there.
+func (r Repo) PushSquashed(ctx context.Context, commit, target, message string) (string, error) {
+	if !r.Holds(ctx, commit) {
+		return "", errNotRecorded
 	}
-	if err = validBranch(ctx, r.source, target); err != nil {
+	if err := validBranch(ctx, r.source, target); err != nil {
 		return "", err
 	}
 	onto, err := run(ctx, r.Workspace(), "rev-parse", "--verify", "refs/remotes/source/"+target)
@@ -148,26 +149,6 @@ func (r Repo) PushSquashed(ctx context.Context, taskBranch, commit, target, mess
 	}
 	squash = strings.TrimSpace(squash)
 	return squash, r.pushTo(ctx, squash, target)
-}
-
-// DropBranch deletes a task branch from the clone once its change has
-// landed, only while it is still at commit: a branch that moved since holds
-// work that has not landed, and is kept. A clone left on the branch is
-// detached at commit first. The owner's repository is never touched.
-func (r Repo) DropBranch(ctx context.Context, branch, commit string) error {
-	if err := validBranch(ctx, r.Workspace(), branch); err != nil {
-		return err
-	}
-	if tip, err := run(ctx, r.Workspace(), "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil || strings.TrimSpace(tip) != commit {
-		return fmt.Errorf("%s is no longer at what landed; it is kept", branch)
-	}
-	if current, err := CurrentBranch(ctx, r.Workspace()); err == nil && current == branch {
-		if _, err = run(ctx, r.Workspace(), "checkout", "--quiet", "--force", "--detach", commit); err != nil {
-			return err
-		}
-	}
-	_, err := run(ctx, r.Workspace(), "update-ref", "-m", "crew-assistant: landed", "-d", "refs/heads/"+branch, commit)
-	return err
 }
 
 // Mentions reports whether any commit in ref's history has marker in its

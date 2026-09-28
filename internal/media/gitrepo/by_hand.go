@@ -8,10 +8,9 @@ import (
 )
 
 // Adopt brings the commit ref names in the owner's repository into the
-// clone for a task and returns it. It touches no working tree, since other
-// tasks share the clone: the task's next step checks it out. One ref per
-// task keeps the latest such commit in the clone, whether or not it was
-// taken.
+// project's clone for a task and returns it. It touches no working tree: the
+// task's next step checks it out in the task's own clone. One ref per task
+// keeps the latest such commit in the clone, whether or not it was taken.
 func (r Repo) Adopt(ctx context.Context, taskID, ref string) (string, error) {
 	commit, err := resolve(ctx, r.source, ref)
 	if err != nil {

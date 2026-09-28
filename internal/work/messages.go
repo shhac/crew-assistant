@@ -22,12 +22,28 @@ func (lp *Loop) MessageTeam(ctx context.Context, projectID, taskID, to, from, te
 // latest revision, with the message in the prompt. It runs ahead of the
 // task's own next step, so the owner need not wait for the loop to get there.
 // A message sent while the implementer is working waits for the revision it
-// is making; one whose role is over its usage threshold waits too.
+// is making; one whose role is over its usage threshold waits too. It holds
+// the task while the check runs, so no draft replaces the one it checks.
 func (lp *Loop) answerMessage(ctx context.Context, snap core.Snapshot) (bool, error) {
 	t, m, ok := nextCheckerMessage(snap)
 	if !ok {
 		return false, nil
 	}
+	// The owner is handing it a draft; the message is answered on that one.
+	if !lp.claim(t.ID) {
+		return false, nil
+	}
+	defer lp.release(t.ID)
+	// A draft recorded before the hold is the one to check.
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return false, err
+	}
+	now, next, ok := nextCheckerMessage(snap)
+	if !ok || now.ID != t.ID || next.ID != m.ID {
+		return false, nil
+	}
+	t = now
 	role, ok := t.Role(m.To)
 	if !ok {
 		return true, lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, nil, m.To+" is not on this task's team")
@@ -61,6 +77,7 @@ func (lp *Loop) answerMessage(ctx context.Context, snap core.Snapshot) (bool, er
 	if err != nil {
 		return failed(err)
 	}
+	// Ref is what the checker's own copy held, set with the verdict.
 	verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, role.Name, p.Brief.Version, time.Now().UTC()
 	// The verdict judged the text the checker was shown, not whatever it
 	// became while the checker worked.

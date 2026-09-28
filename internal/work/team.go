@@ -26,6 +26,8 @@ type TeamChoice struct {
 	Check        string   `json:"check"`
 	Prepare      []string `json:"prepare"`
 	Sign         string   `json:"sign"`
+	// CheckInCopy is "yes" for QA to run the check in a writable copy.
+	CheckInCopy string `json:"check_in_copy"`
 	// Members to fill a role with, by id; empty keeps the template's role.
 	Implementer string `json:"implementer_member"`
 	Reviewer    string `json:"reviewer_member"`
@@ -95,6 +97,7 @@ func teamFrom(in TeamChoice, snap core.Snapshot, current *core.Playbook) (core.P
 		playbook.Check = in.Check
 		playbook.Prepare = append([]string(nil), in.Prepare...)
 		playbook.Sign = in.Sign
+		playbook.CheckInCopy = in.CheckInCopy == "yes"
 	}
 	return playbook, nil
 }

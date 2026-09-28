@@ -101,7 +101,7 @@ func (lp *Loop) recordLearned(ctx context.Context, p core.Project, t core.Task, 
 		return
 	}
 	home, _ := os.UserHomeDir()
-	specific := projectSpecifics(p, t, []string{lp.Core.StateDirectory(), m.workspace()}, home)
+	specific := projectSpecifics(p, t, []string{lp.Core.StateDirectory(), m.workspace(t)}, home)
 	for _, l := range learned {
 		lp.Core.RecordLearning(ctx, r.Member, t.ID, core.LearningInput{When: l.When, Text: l.Learning, ProjectID: p.ID}, specific)
 	}

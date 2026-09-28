@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"testing"
 	"time"
@@ -33,6 +34,20 @@ func TestFeedbackIsWhatArrivedSinceTheTeamLastLookedOldestFirst(t *testing.T) {
 	}
 	got := pr.FeedbackSince(t0)
 	if len(got) != 2 || got[0].Body != "between" || got[1].Kind != "review (changes requested)" || !pr.Latest().Equal(t0.Add(2*time.Minute)) {
+		t.Fatalf("feedback %+v", got)
+	}
+}
+
+// A review keeps the head it was made on, as gh reports it; a comment is on
+// no commit.
+func TestAReviewKeepsTheCommitItWasMadeOn(t *testing.T) {
+	var pr PR
+	raw := `{"reviews":[{"author":{"login":"alice"},"state":"COMMENTED","body":"old push","submittedAt":"2026-09-24T09:01:00Z","commit":{"oid":"abc123"}}],"comments":[{"author":{"login":"bob"},"body":"hi","createdAt":"2026-09-24T09:02:00Z"}]}`
+	if err := json.Unmarshal([]byte(raw), &pr); err != nil {
+		t.Fatal(err)
+	}
+	got := pr.FeedbackSince(time.Time{})
+	if len(got) != 2 || got[0].Commit != "abc123" || got[1].Commit != "" {
 		t.Fatalf("feedback %+v", got)
 	}
 }

@@ -31,12 +31,17 @@ const (
 	cacheDir = ".crew"
 )
 
-// Repo is one project's clone of the owner's repository.
+// Repo is a clone of the owner's repository: the project's own clone, which
+// fetches from the owner, keeps every recorded revision and lands them, or a
+// task's clone, made from the project's, which its implementer works in.
 type Repo struct {
 	root    string
 	source  string
 	prepare []string
 	sign    Signing
+	// records is the project's clone a task's clone fetches from; empty for
+	// the project's clone itself.
+	records string
 }
 
 // Open prepares the clone under the project's private directory. The owner's
@@ -50,28 +55,126 @@ func Open(ctx context.Context, projectDir, source string, prepare []string, sign
 		return Repo{}, fmt.Errorf("%s is not a git repository", source)
 	}
 	if _, err := os.Stat(filepath.Join(r.Workspace(), ".git")); errors.Is(err, os.ErrNotExist) {
-		if err = os.MkdirAll(r.root, 0700); err != nil {
+		if err = r.cloneFrom(ctx, source); err != nil {
 			return Repo{}, err
 		}
-		// An empty template: no hooks or config from the operator's own
-		// git templates reach the clone.
-		if _, err = run(ctx, r.root, "clone", "--quiet", "--template=", "--no-hardlinks", "--no-tags", "--no-recurse-submodules", source, "clone"); err != nil {
-			return Repo{}, fmt.Errorf("the repository could not be cloned: %w", err)
-		}
-		if err = r.configure(ctx); err != nil {
-			return Repo{}, err
-		}
-		// Only now, before any role has worked here: later, a folder a role
-		// replaced with a link could lead the copy outside the clone.
-		if err = r.copyPrepared(); err != nil {
-			return Repo{}, err
-		}
+		return r, nil
 	}
-	return r, nil
+	// Task clones and checks fetch revisions from here by commit.
+	return r, r.serveCommits(ctx)
 }
 
-// Workspace is where team roles work.
+// Cloned reports whether the project at projectDir has its clone yet.
+func Cloned(projectDir string) bool {
+	_, err := os.Stat(filepath.Join(Repo{root: projectDir}.Workspace(), ".git"))
+	return err == nil
+}
+
+// cloneFrom makes the clone from another repository on this machine.
+func (r Repo) cloneFrom(ctx context.Context, from string) error {
+	if err := os.MkdirAll(r.root, 0700); err != nil {
+		return err
+	}
+	// A clone a crash left half made is made again.
+	if err := os.RemoveAll(r.Workspace()); err != nil {
+		return err
+	}
+	// An empty template: no hooks or config from the operator's own git
+	// templates reach the clone.
+	if _, err := run(ctx, r.root, "clone", "--quiet", "--template=", "--no-hardlinks", "--no-tags", "--no-recurse-submodules", from, "clone"); err != nil {
+		return fmt.Errorf("the repository could not be cloned: %w", err)
+	}
+	if err := r.configure(ctx); err != nil {
+		return err
+	}
+	// Only now, before any role has worked here: later, a folder a role
+	// replaced with a link could lead the copy outside the clone.
+	return r.copyPrepared(r.Workspace())
+}
+
+// serveCommits lets clones made from this one fetch any commit it holds by
+// name, recorded or not, such as what landed.
+func (r Repo) serveCommits(ctx context.Context) error {
+	const key = "uploadpack.allowAnySHA1InWant"
+	if on, _ := run(ctx, r.Workspace(), "config", "--get", key); strings.TrimSpace(on) == "true" {
+		return nil
+	}
+	_, err := run(ctx, r.Workspace(), "config", key, "true")
+	return err
+}
+
+// Workspace is the clone's working tree: for a task's clone, where its
+// implementer works.
 func (r Repo) Workspace() string { return filepath.Join(r.root, "clone") }
+
+// Task is the clone task taskID's implementer works in, made from this one,
+// the project's, on first use. Nothing is on disk until Ready.
+func (r Repo) Task(taskID string) Repo {
+	return Repo{root: r.taskDir(taskID), source: r.source, prepare: r.prepare, sign: r.sign, records: r.Workspace()}
+}
+
+func (r Repo) taskDir(taskID string) string {
+	return filepath.Join(r.root, "tasks", filepath.Base(taskID))
+}
+
+// Ready makes a task's clone if it has none: a local clone of the project's,
+// configured as the project's is, with the prepared folders copied in. A
+// task whose clone was removed gets a new one, and fetches its revisions
+// from the project's clone as it needs them.
+func (r Repo) Ready(ctx context.Context) error {
+	if _, err := os.Stat(filepath.Join(r.Workspace(), ".git")); err == nil {
+		return nil
+	}
+	if r.records == "" {
+		return errors.New("only a task's clone is made on demand")
+	}
+	return r.cloneFrom(ctx, r.records)
+}
+
+// RemoveTask deletes task taskID's clone, once the task has finished. Its
+// revisions stay in the project's clone.
+func (r Repo) RemoveTask(taskID string) error {
+	return os.RemoveAll(r.taskDir(taskID))
+}
+
+// TaskClones names the tasks that have a clone of their own.
+func (r Repo) TaskClones() ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(r.root, "tasks"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	var ids []string
+	for _, e := range entries {
+		if e.IsDir() {
+			ids = append(ids, e.Name())
+		}
+	}
+	return ids, err
+}
+
+// bring fetches, into a task's clone, the commits it lacks from the
+// project's clone, which holds every recorded revision and everything
+// fetched from the owner.
+func (r Repo) bring(ctx context.Context, commits ...string) error {
+	if r.records == "" {
+		return nil
+	}
+	for _, c := range commits {
+		if c == "" || r.Holds(ctx, c) {
+			continue
+		}
+		if _, err := run(ctx, r.Workspace(), append(fetchQuietly, "--no-write-fetch-head", r.records, c)...); err != nil {
+			return fmt.Errorf("fetching %s from the project's clone: %w", c, err)
+		}
+	}
+	return nil
+}
+
+// Holds reports whether the clone has commit.
+func (r Repo) Holds(ctx context.Context, commit string) bool {
+	_, err := run(ctx, r.Workspace(), "cat-file", "-e", commit+"^{commit}")
+	return err == nil
+}
 
 // Readable is what roles may read outside the clone: the owner's Go module
 // cache, so an offline build finds the modules the owner already has.
@@ -103,9 +206,16 @@ var moduleCache = sync.OnceValue(func() string {
 // Env is the environment roles need to build and test inside their sandbox:
 // caches and temporary files in the clone, and no attempts at the network.
 func (r Repo) Env() []string {
-	cache := filepath.Join(r.Workspace(), cacheDir)
-	for _, dir := range []string{"go-build", "tmp", "npm", "xdg"} {
-		_ = os.MkdirAll(filepath.Join(cache, dir), 0700)
+	return envAt(filepath.Join(r.Workspace(), cacheDir))
+}
+
+// envAt is that environment with its caches and temporary files in cache,
+// made if the folder it is in exists.
+func envAt(cache string) []string {
+	if _, err := os.Stat(filepath.Dir(cache)); err == nil {
+		for _, dir := range []string{"go-build", "tmp", "npm", "xdg"} {
+			_ = os.MkdirAll(filepath.Join(cache, dir), 0700)
+		}
 	}
 	env := []string{
 		"GOCACHE=" + filepath.Join(cache, "go-build"),
@@ -129,6 +239,7 @@ func (r Repo) configure(ctx context.Context) error {
 		{"core.fsmonitor", "false"},
 		{"user.name", author},
 		{"user.email", authorKey},
+		{"uploadpack.allowAnySHA1InWant", "true"},
 	} {
 		if _, err := run(ctx, r.Workspace(), "config", kv[0], kv[1]); err != nil {
 			return err
@@ -148,14 +259,15 @@ func (r Repo) configure(ctx context.Context) error {
 }
 
 // copyPrepared copies ignored dependencies, such as node_modules, from the
-// owner's checkout into a fresh clone, so roles can build without the network.
-func (r Repo) copyPrepared() error {
+// owner's checkout into a fresh clone or checkout at dir, so roles can build
+// without the network.
+func (r Repo) copyPrepared(dir string) error {
 	for _, rel := range r.prepare {
 		clean := filepath.Clean(rel)
 		if filepath.IsAbs(clean) || clean == "." || strings.HasPrefix(clean, "..") {
 			return fmt.Errorf("prepare path %q must be inside the repository", rel)
 		}
-		from, to := filepath.Join(r.source, clean), filepath.Join(r.Workspace(), clean)
+		from, to := filepath.Join(r.source, clean), filepath.Join(dir, clean)
 		if _, err := os.Stat(from); err != nil {
 			continue
 		}
@@ -165,15 +277,24 @@ func (r Repo) copyPrepared() error {
 		if err := os.MkdirAll(filepath.Dir(to), 0700); err != nil {
 			return err
 		}
-		args := []string{"-R", from, to}
-		if runtime.GOOS == "darwin" {
-			args = []string{"-Rc", from, to} // copy-on-write clones on APFS
+		if err := copyTree(from, to); err != nil {
+			return fmt.Errorf("copying %s into the clone: %w", clean, err)
 		}
-		cmd := exec.Command("cp", args...)
-		procgroup.Detach(cmd)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("copying %s into the clone: %s", clean, strings.TrimSpace(string(out)))
-		}
+	}
+	return nil
+}
+
+// copyTree copies a folder, with copy-on-write clones where the file system
+// has them.
+func copyTree(from, to string) error {
+	args := []string{"-R", from, to}
+	if runtime.GOOS == "darwin" {
+		args = []string{"-Rc", from, to} // copy-on-write clones on APFS
+	}
+	cmd := exec.Command("cp", args...)
+	procgroup.Detach(cmd)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return errors.New(strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -182,15 +303,23 @@ func (r Repo) copyPrepared() error {
 // their current branch when from is empty, and a task branch is created from
 // its tip. It returns the base commit and the branch it came from.
 func (r Repo) Begin(ctx context.Context, branch, from string) (base, start string, err error) {
+	if base, from, err = r.Start(ctx, from); err != nil {
+		return "", "", err
+	}
+	return base, from, r.Reset(ctx, branch, base)
+}
+
+// Start is where a task starts: the tip of the owner's branch from, or of
+// their current branch when from is empty, fetched into the clone. It
+// returns the commit and the branch, and checks nothing out.
+func (r Repo) Start(ctx context.Context, from string) (base, start string, err error) {
 	if from == "" {
 		if from, err = CurrentBranch(ctx, r.source); err != nil {
 			return "", "", err
 		}
 	}
-	if base, err = r.Fetch(ctx, from); err != nil {
-		return "", "", err
-	}
-	return base, from, r.Reset(ctx, branch, base)
+	base, err = r.Fetch(ctx, from)
+	return base, from, err
 }
 
 // CurrentBranch names the branch a checkout is on.
@@ -251,6 +380,9 @@ func isAncestor(ctx context.Context, dir, commit, tip string) (bool, error) {
 // returns the new merge commit, or "" when the two conflict and someone has to
 // resolve them.
 func (r Repo) MergeClean(ctx context.Context, tip, commit, message string) (string, error) {
+	if err := r.bring(ctx, tip, commit); err != nil {
+		return "", err
+	}
 	tree, err := run(ctx, r.Workspace(), "merge-tree", "--write-tree", "--no-messages", tip, commit)
 	var status *gitError
 	if errors.As(err, &status) && status.code == 1 {
@@ -273,6 +405,9 @@ func (r Repo) MergeClean(ctx context.Context, tip, commit, message string) (stri
 // it dropped stays dropped, rather than coming back with a merge. It returns
 // "" when the change does not apply cleanly.
 func (r Repo) ReplayClean(ctx context.Context, base, tip, onto, message string) (string, error) {
+	if err := r.bring(ctx, base, tip, onto); err != nil {
+		return "", err
+	}
 	tree, err := run(ctx, r.Workspace(), "merge-tree", "--write-tree", "--no-messages", "--merge-base="+base, onto, tip)
 	var status *gitError
 	if errors.As(err, &status) && status.code == 1 {
@@ -293,6 +428,9 @@ func (r Repo) ReplayClean(ctx context.Context, base, tip, onto, message string) 
 // change, base..tip, on top without committing, leaving the files that
 // conflict for the implementer to resolve. The next snapshot records it.
 func (r Repo) Replay(ctx context.Context, branch, base, tip, onto string) ([]string, error) {
+	if err := r.bring(ctx, base, tip, onto); err != nil {
+		return nil, err
+	}
 	tree, err := run(ctx, r.Workspace(), "rev-parse", tip+"^{tree}")
 	if err != nil {
 		return nil, err
@@ -351,6 +489,9 @@ func (r Repo) ChangedFiles(ctx context.Context, from, to string) ([]string, erro
 // the implementer's next revision records the merged result. It returns the
 // files left with conflicts for the implementer to resolve.
 func (r Repo) Merge(ctx context.Context, commit string) ([]string, error) {
+	if err := r.bring(ctx, commit); err != nil {
+		return nil, err
+	}
 	_, mergeErr := run(ctx, r.Workspace(), "merge", "--quiet", "--no-commit", "--no-ff", "--no-edit", commit)
 	out, err := run(ctx, r.Workspace(), "diff", "--name-only", "--diff-filter=U")
 	if err != nil {
@@ -422,10 +563,14 @@ func (r Repo) Snapshot(ctx context.Context, base, previous, message string) (str
 // Reset puts the clone on branch at commit, dropping anything a role left behind,
 // ignored files included: an ignored source file would still be compiled, so a
 // check could pass on code that never ships. Only the build caches and the
-// copied dependencies are kept.
+// copied dependencies are kept. A task's clone fetches commit from the
+// project's clone first if it lacks it.
 func (r Repo) Reset(ctx context.Context, branch, commit string) error {
-	// Several tasks share the clone, so each step checks out its own task's
-	// branch; a bare reset would move whichever branch was left checked out.
+	if err := r.bring(ctx, commit); err != nil {
+		return err
+	}
+	// Checking out the branch, rather than a bare reset, moves the branch
+	// named and never whichever one was left checked out.
 	if _, err := run(ctx, r.Workspace(), "checkout", "--quiet", "--force", "--no-recurse-submodules", "-B", branch, commit); err != nil {
 		return err
 	}

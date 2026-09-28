@@ -59,6 +59,11 @@ type Review struct {
 	State       string    `json:"state"`
 	Body        string    `json:"body"`
 	SubmittedAt time.Time `json:"submittedAt"`
+	// Commit is the head the review was made on, which may be older than
+	// the pull request's head now.
+	Commit struct {
+		Oid string `json:"oid"`
+	} `json:"commit"`
 }
 
 type Comment struct {
@@ -139,10 +144,12 @@ func (p PR) CheckState() string {
 	return state
 }
 
-// Feedback is a review or comment written after since, newest last.
+// Feedback is a review or comment written after since, newest last. Commit
+// is the head a review was made on; a comment is on the conversation, not a
+// commit, and has none.
 type Feedback struct {
-	Author, Kind, Body string
-	At                 time.Time
+	Author, Kind, Body, Commit string
+	At                         time.Time
 }
 
 // FeedbackSince lists reviews and comments newer than since.
@@ -150,7 +157,7 @@ func (p PR) FeedbackSince(since time.Time) []Feedback {
 	var out []Feedback
 	for _, r := range p.Reviews {
 		if r.SubmittedAt.After(since) {
-			out = append(out, Feedback{Author: r.Author.Login, Kind: "review (" + strings.ToLower(strings.ReplaceAll(r.State, "_", " ")) + ")", Body: r.Body, At: r.SubmittedAt})
+			out = append(out, Feedback{Author: r.Author.Login, Kind: "review (" + strings.ToLower(strings.ReplaceAll(r.State, "_", " ")) + ")", Body: r.Body, Commit: r.Commit.Oid, At: r.SubmittedAt})
 		}
 	}
 	for _, c := range p.Comments {

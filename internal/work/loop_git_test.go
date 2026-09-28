@@ -154,33 +154,58 @@ func TestCodeTaskRunsInACloneAndDeliversALocalBranch(t *testing.T) {
 	if d.Kind != core.DecisionDelivery || !strings.Contains(d.Context, "paul/add-feature") || !strings.Contains(d.Context, "from main at "+start[:7]) || !strings.Contains(d.Context, "Nothing is pushed") {
 		t.Fatalf("delivery decision %+v", d)
 	}
-	// QA ran with write access in the clone; the reviewer read-only; both saw
-	// the build environment inside the clone. Roles load no instruction files,
-	// so the implementer and reviewer are sent to the repository's own.
+	// The implementer and the researcher worked in the task's own clone. The
+	// reviewer read a checkout of the draft of its own, read-only; QA wrote
+	// only to a scratch folder beside its checkout, which it read. Each saw a
+	// build environment where it runs. Roles load no instruction files, so
+	// the implementer and reviewer are sent to the repository's own.
+	taskClone := filepath.Join(p.ScratchDirectory, "tasks", task.ID, "clone")
+	checks := filepath.Join(p.ScratchDirectory, "checks")
 	var sawQA, sawReviewer bool
 	prompts := []string{}
 	for _, spec := range runner.seen {
 		prompts = append(prompts, spec.Prompt)
 		qa := strings.Contains(spec.Prompt, "Run exactly this")
-		if qa && spec.Write {
+		reviewer := strings.Contains(spec.Prompt, "Do not modify anything")
+		switch {
+		case qa:
+			checkout := spec.Read[len(spec.Read)-1]
+			if !spec.Write || !strings.HasPrefix(spec.WorkDir, checks) || !strings.HasPrefix(checkout, checks) || checkout == spec.WorkDir ||
+				!strings.Contains(spec.Prompt, "checked out, read-only, at "+checkout) || !strings.Contains(strings.Join(spec.Env, " "), "GOCACHE="+spec.WorkDir) {
+				t.Fatalf("QA did not run from a scratch folder beside a read-only checkout: %+v", spec)
+			}
 			sawQA = true
-		}
-		if strings.Contains(spec.Prompt, "git diff "+start+"..HEAD") && strings.Contains(spec.Prompt, "QA runs `make check` separately") && !spec.Write {
+		case reviewer:
+			if spec.Write || !strings.HasPrefix(spec.WorkDir, checks) || !strings.Contains(spec.Prompt, "git diff "+start+"..HEAD") || !strings.Contains(spec.Prompt, "QA runs `make check` separately") {
+				t.Fatalf("the reviewer did not read a checkout of its own: %+v", spec)
+			}
 			sawReviewer = true
+		case spec.WorkDir != taskClone:
+			t.Fatalf("a role ran outside the task's clone: %+v", spec)
 		}
 		if !qa && !strings.Contains(spec.Prompt, "AGENTS.md") {
 			t.Fatalf("a role was not sent to the repository's instructions: %s", spec.Prompt)
 		}
-		if !strings.HasPrefix(spec.WorkDir, filepath.Join(p.ScratchDirectory, "clone")) || !strings.Contains(strings.Join(spec.Env, " "), "GOCACHE=") {
-			t.Fatalf("a role ran outside the clone or without its build environment: %+v", spec)
+		if strings.HasPrefix(spec.WorkDir, filepath.Join(p.ScratchDirectory, "clone")) || !strings.Contains(strings.Join(spec.Env, " "), "GOCACHE=") {
+			t.Fatalf("a role ran in the project's clone or without its build environment: %+v", spec)
 		}
 		// An offline build needs the modules the owner already has.
-		if len(spec.Read) != 1 || !slices.Contains(spec.Env, "GOMODCACHE="+spec.Read[0]) {
+		if len(spec.Read) == 0 || !slices.Contains(spec.Env, "GOMODCACHE="+spec.Read[0]) {
 			t.Fatalf("a role cannot read the Go module cache its build uses: read=%v env=%v", spec.Read, spec.Env)
 		}
 	}
 	if !sawQA || !sawReviewer {
 		t.Fatalf("qa=%v reviewer=%v", sawQA, sawReviewer)
+	}
+	// Every verdict names the commit it checked, and the checks' copies are
+	// gone.
+	for _, v := range task.Verdicts {
+		if v.Ref == "" || v.Ref != task.Revisions[v.Revision-1].Ref {
+			t.Fatalf("verdict %+v does not name the draft it checked", v)
+		}
+	}
+	if entries, _ := os.ReadDir(checks); len(entries) != 0 {
+		t.Fatalf("checkouts were left behind: %v", entries)
 	}
 	if !strings.Contains(strings.Join(prompts, "\n"), "missing doc") {
 		t.Fatal("QA's failure never reached the implementer")
@@ -571,7 +596,7 @@ func TestNoApprovalStepAndAlreadyLanded(t *testing.T) {
 	settle(t, a)
 	snap, _ = a.Core.Snapshot(ctx)
 	second, _ = findTask(snap, p.ID, second.ID)
-	ownerGit(t, source, "fetch", "-q", filepath.Join(p.ScratchDirectory, "clone"), second.Branch)
+	ownerGit(t, source, "fetch", "-q", filepath.Join(p.ScratchDirectory, "clone"), second.Revisions[len(second.Revisions)-1].Ref)
 	ownerGit(t, source, "merge", "-q", "--ff-only", second.Revisions[len(second.Revisions)-1].Ref)
 	a.Core.ChooseDecision(ctx, openDecision(t, a, second).ID, choiceApprove)
 	settle(t, a)

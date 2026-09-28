@@ -35,7 +35,8 @@ const (
 )
 
 // Loop runs the teams' tasks. One task step runs at a time, across every
-// project.
+// project. Each task's work is in a workspace of its own, and each check in
+// a copy of the revision of its own.
 type Loop struct {
 	Core   *core.Service
 	Config func() config.Config
@@ -87,6 +88,11 @@ func (lp *Loop) Run(stop lifecycle.Stop, noDispatch bool) {
 	// Learnings are copied out only while a turn runs; any left here were
 	// left by a daemon that stopped mid-turn.
 	os.RemoveAll(lp.learningsRoot())
+	if !lp.Demo && !noDispatch {
+		if err := lp.resume(stop.Force); err != nil {
+			lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_resume"}, err)
+		}
+	}
 	tick := time.NewTicker(15 * time.Second)
 	defer tick.Stop()
 	for {
@@ -97,6 +103,12 @@ func (lp *Loop) Run(stop lifecycle.Stop, noDispatch bool) {
 			}
 			if !progressed || err != nil {
 				break
+			}
+		}
+		// With nothing to do, what finished tasks kept goes.
+		if !lp.Demo && !noDispatch && !stop.Stopping() {
+			if err := lp.tidy(stop.Force, false); err != nil {
+				lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_cleanup"}, err)
 			}
 		}
 		select {
@@ -246,7 +258,7 @@ func taskPlaybook(p core.Project, t core.Task) *core.Playbook {
 // from last only as long as the turn: run it before cleanup.
 func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m medium, prompt string) (spec roles.Spec, cleanup func(), err error) {
 	spec = lp.baseSpec(r, workDir, prompt)
-	spec.Write, spec.Env, spec.Read = write, m.env(), m.readable()
+	spec.Write, spec.Env, spec.Read = write, m.env(t), m.readable()
 	learned, err := lp.prepareLearnings(t, r)
 	if err != nil {
 		return spec, nil, err

@@ -84,7 +84,7 @@ var toolActions = map[string]toolAction{
 		return a.Work.UpdateBrief(ctx, in.ProjectID, core.BriefInput{Goal: in.Goal, Audience: in.Audience, Constraints: in.Constraints, Criteria: in.Criteria})
 	}),
 	"set_team": with(func(a *App, ctx context.Context, in engine.SetTeamArgs) (any, error) {
-		return a.Work.SetTeam(ctx, in.ProjectID, work.TeamChoice{Template: in.Template, WriterEngine: in.WriterEngine, ReviewerEngine: in.ReviewerEngine, MaxRounds: in.MaxRounds, DeliverTo: in.DeliverTo, Repo: in.Repo, BranchPrefix: in.BranchPrefix, Check: in.Check, Prepare: in.Prepare, Sign: in.Sign, Implementer: in.ImplementerMember, Reviewer: in.ReviewerMember, QA: in.QAMember, Researcher: in.ResearcherMember, Designer: in.DesignerMember, PM: in.PMMember})
+		return a.Work.SetTeam(ctx, in.ProjectID, work.TeamChoice{Template: in.Template, WriterEngine: in.WriterEngine, ReviewerEngine: in.ReviewerEngine, MaxRounds: in.MaxRounds, DeliverTo: in.DeliverTo, Repo: in.Repo, BranchPrefix: in.BranchPrefix, Check: in.Check, Prepare: in.Prepare, Sign: in.Sign, CheckInCopy: in.CheckInCopy, Implementer: in.ImplementerMember, Reviewer: in.ReviewerMember, QA: in.QAMember, Researcher: in.ResearcherMember, Designer: in.DesignerMember, PM: in.PMMember})
 	}),
 	"set_landing": with(func(a *App, ctx context.Context, in engine.SetLandingArgs) (any, error) {
 		return a.Work.SetLanding(ctx, in.ProjectID, core.LandPolicy{Means: in.Means, Via: in.Via, Target: in.Target, Method: in.Method, GitHub: in.GitHub, Approve: in.Approve})

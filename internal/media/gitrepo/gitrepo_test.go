@@ -119,53 +119,237 @@ func TestRevisionsAndResetKeepIgnoredFilesOnly(t *testing.T) {
 	}
 }
 
-func TestTasksSharingTheCloneKeepTheirOwnBranches(t *testing.T) {
+// Each task works in a clone of its own, made from the project's, on a
+// branch of its own; a draft reaches the project's clone only when it is
+// published, and lands from there.
+func TestEachTaskWorksInItsOwnClone(t *testing.T) {
+	source := ownerRepo(t)
+	r, err := Open(ctx, t.TempDir(), source, []string{"node_modules"}, SignAsOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, err := r.Start(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := r.Task("a"), r.Task("b")
+	if a.Workspace() == b.Workspace() || a.Workspace() == r.Workspace() {
+		t.Fatal("tasks share a clone")
+	}
+	for _, task := range []Repo{a, b} {
+		if err = task.Ready(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = os.Stat(filepath.Join(a.Workspace(), "node_modules", "dep", "index.js")); err != nil {
+		t.Fatal("the prepared dependency was not copied into the task's clone")
+	}
+	if err = a.Reset(ctx, "crew-task/a", base); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(a.Workspace(), "a.go"), "package main\n")
+	a1, _, err := a.Snapshot(ctx, base, base, "a draft 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Holds(ctx, a1) {
+		t.Fatal("a snapshot reached the project's clone before it was published")
+	}
+	// The second task works while the first waits on its checks.
+	if err = b.Reset(ctx, "crew-task/b", base); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(b.Workspace(), "b.go"), "package main\n")
+	if _, err = os.Stat(filepath.Join(a.Workspace(), "b.go")); err == nil {
+		t.Fatal("the second task's work is in the first task's clone")
+	}
+	if head := git(t, a.Workspace(), "rev-parse", "HEAD"); head != a1 || git(t, a.Workspace(), "status", "--porcelain") != "" {
+		t.Fatal("the second task's work changed the first task's clone")
+	}
+	b1, _, err := b.Snapshot(ctx, base, base, "b draft 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.Publish(ctx, a, a1, TaskRef("a", 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err = r.Publish(ctx, b, b1, TaskRef("b", 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if git(t, a.Workspace(), "branch", "--list", "crew-task/b") != "" || git(t, r.Workspace(), "branch", "--list", "crew-task/*") != "" {
+		t.Fatal("a task's branch is outside its own clone")
+	}
+	// The first task's clone is lost; the next round rebuilds it from what
+	// the project's clone keeps.
+	if err = r.RemoveTask("a"); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Ready(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Reset(ctx, "crew-task/a", a1); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(a.Workspace(), "a.go"), "package main\n\nfunc A() {}\n")
+	a2, _, err := a.Snapshot(ctx, base, a1, "a draft 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent := git(t, a.Workspace(), "rev-parse", a2+"^"); parent != a1 {
+		t.Fatalf("draft 2 does not follow draft 1: parent %s", parent)
+	}
+	if err = r.Publish(ctx, a, a2, TaskRef("a", 2, 2)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.Deliver(ctx, a2, "paul/a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.Deliver(ctx, b1, "paul/b"); err != nil {
+		t.Fatal(err)
+	}
+	if ids, err := r.TaskClones(); err != nil || len(ids) != 2 {
+		t.Fatalf("task clones %v: %v", ids, err)
+	}
+}
+
+// A revision's ref is only ever created: publishing again settles, and a ref
+// already at another commit is never moved.
+func TestPublishingNeverMovesARevisionsRef(t *testing.T) {
 	source := ownerRepo(t)
 	r, err := Open(ctx, t.TempDir(), source, nil, SignAsOwner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, _, err := r.Begin(ctx, "crew-task/a", "")
+	base, _, err := r.Start(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(t, filepath.Join(r.Workspace(), "a.go"), "package main\n")
-	a1, _, err := r.Snapshot(ctx, base, base, "a draft 1")
+	a := r.Task("a")
+	if err = a.Ready(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Reset(ctx, "crew-task/a", base); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(a.Workspace(), "a.go"), "package main\n")
+	a1, _, err := a.Snapshot(ctx, base, base, "a draft 1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A second task starts while the first waits on the owner.
-	if _, _, err = r.Begin(ctx, "crew-task/b", ""); err != nil {
+	name := TaskRef("a", 1, 1)
+	if err = r.Publish(ctx, a, a1, name); err != nil {
 		t.Fatal(err)
 	}
-	write(t, filepath.Join(r.Workspace(), "b.go"), "package main\n")
-	b1, _, err := r.Snapshot(ctx, base, base, "b draft 1")
+	if at, err := r.RefAt(ctx, name); err != nil || at != a1 {
+		t.Fatalf("the ref holds %q: %v", at, err)
+	}
+	if err = r.Publish(ctx, a, a1, name); err != nil {
+		t.Fatalf("publishing again did not settle: %v", err)
+	}
+	if err = r.Publish(ctx, a, base, name); !errors.Is(err, ErrRefTaken) {
+		t.Fatalf("a published ref was moved: %v", err)
+	}
+	if at, _ := r.RefAt(ctx, name); at != a1 {
+		t.Fatal("the ref no longer holds its revision")
+	}
+	if err = r.Publish(ctx, a, a1, "refs/heads/main"); err == nil {
+		t.Fatal("published outside the revisions' refs")
+	}
+	if refs, err := r.TaskRefs(ctx); err != nil || len(refs) != 1 || refs[name] != a1 || RefTask(name) != "a" {
+		t.Fatalf("refs %v: %v", refs, err)
+	}
+	if err = r.DropRef(ctx, name, a1); err != nil {
+		t.Fatal(err)
+	}
+	if at, _ := r.RefAt(ctx, name); at != "" {
+		t.Fatal("the ref was not dropped")
+	}
+}
+
+// A check gets a read-only checkout of its own, made from the project's
+// clone. It does not move while the implementer works on, and one the check
+// changed is caught.
+func TestACheckoutIsTheRevisionReadOnly(t *testing.T) {
+	source := ownerRepo(t)
+	r, err := Open(ctx, t.TempDir(), source, []string{"node_modules"}, SignAsOwner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The owner asks the first task for changes.
-	if err = r.Reset(ctx, "crew-task/a", a1); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = os.Stat(filepath.Join(r.Workspace(), "b.go")); err == nil {
-		t.Fatal("the second task's work is in the first task's round")
-	}
-	write(t, filepath.Join(r.Workspace(), "a.go"), "package main\n\nfunc A() {}\n")
-	a2, _, err := r.Snapshot(ctx, base, a1, "a draft 2")
+	base, _, err := r.Start(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tip := git(t, r.Workspace(), "rev-parse", "crew-task/b"); tip != b1 {
-		t.Fatalf("the first task's round moved the second task's branch to %s", tip)
-	}
-	if parent := git(t, r.Workspace(), "rev-parse", a2+"^"); parent != a1 {
-		t.Fatalf("draft 2 does not follow draft 1: parent %s", parent)
-	}
-	if _, err = r.Deliver(ctx, "crew-task/a", a2, "paul/a"); err != nil {
+	a := r.Task("a")
+	if err = a.Ready(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = r.Deliver(ctx, "crew-task/b", b1, "paul/b"); err != nil {
+	if err = a.Reset(ctx, "crew-task/a", base); err != nil {
 		t.Fatal(err)
+	}
+	write(t, filepath.Join(a.Workspace(), "a.go"), "package main // one\n")
+	a1, _, err := a.Snapshot(ctx, base, base, "a draft 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.Publish(ctx, a, a1, TaskRef("a", 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	c, err := r.Checkout(ctx, a1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Remove()
+	if git(t, c.Dir, "rev-parse", "HEAD") != a1 || git(t, c.Dir, "rev-parse", base) != base {
+		t.Fatal("the checkout is not the revision, with its history")
+	}
+	if _, err = os.Stat(filepath.Join(c.Dir, "node_modules", "dep", "index.js")); err != nil {
+		t.Fatal("the prepared dependency is not in the checkout")
+	}
+	if os.WriteFile(filepath.Join(c.Dir, "a.go"), []byte("changed"), 0600) == nil || os.WriteFile(filepath.Join(c.Dir, "new.go"), []byte("new"), 0600) == nil {
+		t.Fatal("the checkout is writable")
+	}
+	if !strings.HasPrefix(c.Scratch, filepath.Dir(c.Dir)) || c.Tree != "" {
+		t.Fatalf("scratch %q tree %q", c.Scratch, c.Tree)
+	}
+	write(t, filepath.Join(c.Scratch, "out.txt"), "a check's own output")
+	// The implementer's next round, in the task's clone.
+	write(t, filepath.Join(a.Workspace(), "a.go"), "package main // two\n")
+	if _, _, err = a.Snapshot(ctx, base, a1, "a draft 2"); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Verify(ctx); err != nil {
+		t.Fatalf("the implementer's work moved the check's checkout: %v", err)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(c.Dir, "a.go")); string(raw) != "package main // one\n" {
+		t.Fatalf("the checkout holds %q", raw)
+	}
+	// A check that gets round the permissions is caught.
+	os.Chmod(c.Dir, 0o700)
+	write(t, filepath.Join(c.Dir, "left.go"), "package main\n")
+	if err = c.Verify(ctx); !errors.Is(err, ErrCheckoutChanged) || !strings.Contains(err.Error(), "left.go") {
+		t.Fatalf("a changed checkout passed: %v", err)
+	}
+	c.Remove()
+	if _, err = os.Stat(c.Dir); !os.IsNotExist(err) {
+		t.Fatal("the checkout was not removed")
+	}
+	// A check that has to write into its tree gets a writable copy.
+	withTree, err := r.Checkout(ctx, a1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(withTree.Tree, "node_modules", ".cache"), "written")
+	if raw, _ := os.ReadFile(filepath.Join(withTree.Tree, "a.go")); string(raw) != "package main // one\n" {
+		t.Fatalf("the copy holds %q", raw)
+	}
+	if err = withTree.Verify(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = r.RemoveChecks(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(withTree.Dir); !os.IsNotExist(err) {
+		t.Fatal("a leftover checkout was not removed")
 	}
 }
 
@@ -249,14 +433,14 @@ func TestPushLandsOnlyByFastForwardAndFollowsTheOwnersCheckoutRules(t *testing.T
 	// main is checked out in the owner's repository. Landing may update it in
 	// place, but only when the checkout is clean.
 	write(t, filepath.Join(source, "main.go"), "package main // the owner's edit\n")
-	if err = r.PushFastForward(ctx, "crew-task/a", commit, "main"); !errors.Is(err, ErrDirtyCheckout) {
+	if err = r.PushFastForward(ctx, commit, "main"); !errors.Is(err, ErrDirtyCheckout) {
 		t.Fatalf("landed over the owner's uncommitted work: %v", err)
 	}
 	if raw, _ := os.ReadFile(filepath.Join(source, "main.go")); string(raw) != "package main // the owner's edit\n" {
 		t.Fatal("the owner's uncommitted work was changed")
 	}
 	git(t, source, "checkout", "--", "main.go")
-	if err = r.PushFastForward(ctx, "crew-task/a", commit, "main"); err != nil {
+	if err = r.PushFastForward(ctx, commit, "main"); err != nil {
 		t.Fatal(err)
 	}
 	if git(t, source, "rev-parse", "main") != commit {
@@ -295,7 +479,7 @@ func TestPushLandsOnlyByFastForwardAndFollowsTheOwnersCheckoutRules(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = r.PushFastForward(ctx, "crew-task/a", next, "main"); !errors.Is(err, ErrTargetMoved) {
+	if err = r.PushFastForward(ctx, next, "main"); !errors.Is(err, ErrTargetMoved) {
 		t.Fatalf("expected the moved branch to be refused: %v", err)
 	}
 	if git(t, source, "rev-parse", "main") != ownerTip {
@@ -434,19 +618,19 @@ func TestDeliverySettlesAndNeverOverwritesABranch(t *testing.T) {
 	// The owner already has a branch by that name, pointing somewhere else.
 	git(t, source, "branch", "paul/note", "main")
 	before := git(t, source, "status", "--porcelain")
-	name, err := r.Deliver(ctx, "crew/note", commit, "paul/note")
+	name, err := r.Deliver(ctx, commit, "paul/note")
 	if err != nil || name != "paul/note-2" || git(t, source, "rev-parse", "refs/heads/paul/note-2") != commit {
 		t.Fatalf("delivered %q err %v", name, err)
 	}
 	if git(t, source, "rev-parse", "refs/heads/paul/note") != base || git(t, source, "rev-parse", "--abbrev-ref", "HEAD") != "main" || git(t, source, "status", "--porcelain") != before {
 		t.Fatal("delivery moved an existing branch or touched the checkout")
 	}
-	again, err := r.Deliver(ctx, "crew/note", commit, "paul/note")
+	again, err := r.Deliver(ctx, commit, "paul/note")
 	if err != nil || again != "paul/note-2" {
 		t.Fatalf("a retried delivery made another branch: %q %v", again, err)
 	}
-	if _, err = r.Deliver(ctx, "crew/note", base, "paul/other"); err == nil {
-		t.Fatal("delivered a commit the task branch does not hold")
+	if _, err = r.Deliver(ctx, strings.Repeat("1", 40), "paul/other"); err == nil {
+		t.Fatal("delivered a commit the project's clone does not hold")
 	}
 }
 

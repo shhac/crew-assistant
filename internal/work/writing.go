@@ -41,7 +41,7 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 	}
 	seen := len(t.Direction)
 	guide := learnedGuide(writers[0], false)
-	spec, cleanup, err := lp.roleSpec(t, writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp, false)+prompt+guide)
+	spec, cleanup, err := lp.roleSpec(t, writers[0], m.workspace(t), true, m, writerPrompt(p, t, caughtUp, false)+prompt+guide)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
@@ -147,20 +147,13 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	if err != nil {
 		return lp.roleFailed(ctx, t, writer, fmt.Errorf("the work could not be recorded: %w", err))
 	}
-	_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
-		// A draft recorded meanwhile, such as the owner's by hand, is newer
-		// than the one this round built on, and this one never replaces it.
-		if len(t.Revisions) != n-1 {
-			return "", fmt.Errorf("draft %d was recorded while the implementer worked: %w", len(t.Revisions), core.ErrConflict)
-		}
-		revision.BriefVersion, revision.Summary, revision.At = p.Brief.Version, text.Clip(reply, 2000), time.Now().UTC()
-		t.Revisions = append(t.Revisions, revision)
-		t.AnswerDirection(seen, n, reply, revision.At)
-		t.WakeErrors = wakeErrors
-		took(t)
-		t.Failures, t.RetryAt = 0, time.Time{}
-		t.Status, t.Detail = core.TaskReviewing, ""
-		return fmt.Sprintf("%s finished version %d of %s", writer, n, t.Objective), nil
-	})
-	return err
+	// The draft counts only once the project's records hold it; the handoff
+	// carries the round's whole outcome until then.
+	revision.Summary = text.Clip(reply, 2000)
+	h := core.Handoff{Revision: revision, Writer: writer, Session: result.Session, Seen: seen, Reply: reply, Request: applied, WakeErrors: wakeErrors}
+	if ok {
+		r.Learnings = nil
+		h.Seat = &r
+	}
+	return lp.handOff(ctx, t, m, h)
 }

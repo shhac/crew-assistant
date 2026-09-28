@@ -104,6 +104,11 @@ type Playbook struct {
 	BranchPrefix string   `json:"branch_prefix,omitempty"`
 	Check        string   `json:"check,omitempty"`
 	Prepare      []string `json:"prepare,omitempty"`
+	// CheckInCopy has QA run the check in a writable copy of the revision in
+	// its scratch folder, for a check that writes into the tree it runs in.
+	// Otherwise it runs in the read-only checkout itself. Either way the
+	// revision checked stays exactly as it was recorded.
+	CheckInCopy bool `json:"check_in_copy,omitempty"`
 	// Sign is whether the team's commits are signed: "" as the owner's git
 	// config for the repository says, SignAlways or SignNever.
 	Sign string `json:"sign,omitempty"`

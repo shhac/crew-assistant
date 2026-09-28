@@ -33,7 +33,7 @@ func TestAChangeLandsAsOneCommitWithItsDraftsLeftBehind(t *testing.T) {
 	if _, err = r.Fetch(ctx, "main"); err != nil {
 		t.Fatal(err)
 	}
-	landed, err := r.PushSquashed(ctx, "crew-task/a", draft2, "main", "Add A\n\nCrew-Task: a revision 2")
+	landed, err := r.PushSquashed(ctx, draft2, "main", "Add A\n\nCrew-Task: a revision 2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestAChangeLandsAsOneCommitWithItsDraftsLeftBehind(t *testing.T) {
 	}
 	// The drafts are not in main, so the branch as it stands is behind it
 	// and pushing it again is refused rather than landing twice.
-	if again, err := r.PushSquashed(ctx, "crew-task/a", draft2, "main", "Add A"); !errors.Is(err, ErrTargetMoved) {
+	if again, err := r.PushSquashed(ctx, draft2, "main", "Add A"); !errors.Is(err, ErrTargetMoved) {
 		t.Fatalf("the same branch landed again: %s %v", again, err)
 	}
 }
@@ -80,7 +80,7 @@ func TestASquashedLandingNeedsTheChangeCaughtUp(t *testing.T) {
 	if _, err = r.Fetch(ctx, "main"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = r.PushSquashed(ctx, "crew-task/a", change, "main", "Add A"); !errors.Is(err, ErrTargetMoved) {
+	if _, err = r.PushSquashed(ctx, change, "main", "Add A"); !errors.Is(err, ErrTargetMoved) {
 		t.Fatalf("a change behind main was landed: %v", err)
 	}
 	if git(t, source, "rev-parse", "main") != ownerTip {
@@ -90,7 +90,7 @@ func TestASquashedLandingNeedsTheChangeCaughtUp(t *testing.T) {
 	if err = r.Reset(ctx, "crew-task/a", ownerTip); err != nil {
 		t.Fatal(err)
 	}
-	if landed, err := r.PushSquashed(ctx, "crew-task/a", ownerTip, "main", "Nothing"); err != nil || landed != ownerTip {
+	if landed, err := r.PushSquashed(ctx, ownerTip, "main", "Nothing"); err != nil || landed != ownerTip {
 		t.Fatalf("a change already there should land as main itself: %s %v", landed, err)
 	}
 }
@@ -165,36 +165,43 @@ func TestCatchingUpAfterARewriteKeepsOnlyTheTasksOwnChange(t *testing.T) {
 	}
 }
 
-// A landed task's branch is removed from the clone, even while checked out,
-// but only while it still holds exactly what landed.
-func TestALandedBranchIsCleanedUpOnlyAtWhatLanded(t *testing.T) {
+// A landed task's clone, and its branch with it, is removed; what landed
+// stays in the project's clone, and the owner's repository is not touched.
+func TestALandedTasksCloneIsRemoved(t *testing.T) {
 	source := ownerRepo(t)
 	r, err := Open(ctx, t.TempDir(), source, nil, SignNever)
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, _, err := r.Begin(ctx, "crew-task/a", "main")
+	base, _, err := r.Start(ctx, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(t, filepath.Join(r.Workspace(), "a.go"), "package main // a\n")
-	draft, _, err := r.Snapshot(ctx, base, base, "draft 1")
+	a := r.Task("a")
+	if err = a.Ready(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Reset(ctx, "crew-task/a", base); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(a.Workspace(), "a.go"), "package main // a\n")
+	draft, _, err := a.Snapshot(ctx, base, base, "draft 1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = r.DropBranch(ctx, "crew-task/a", base); err == nil {
-		t.Fatal("a branch that moved past what landed was dropped")
-	}
-	if err = r.DropBranch(ctx, "crew-task/a", draft); err != nil {
+	if err = r.Publish(ctx, a, draft, TaskRef("a", 1, 1)); err != nil {
 		t.Fatal(err)
 	}
-	if out := git(t, r.Workspace(), "branch", "--list", "crew-task/a"); out != "" {
-		t.Fatalf("the branch is still there: %q", out)
+	if err = r.RemoveTask("a"); err != nil {
+		t.Fatal(err)
 	}
-	if git(t, r.Workspace(), "rev-parse", "HEAD") != draft {
-		t.Fatal("the clone was not left at what landed")
+	if _, err = os.Stat(a.Workspace()); !os.IsNotExist(err) {
+		t.Fatal("the task's clone is still there")
 	}
-	if git(t, source, "rev-parse", "main") != base {
-		t.Fatal("the owner's repository was touched")
+	if ids, _ := r.TaskClones(); len(ids) != 0 {
+		t.Fatalf("task clones left: %v", ids)
+	}
+	if !r.Holds(ctx, draft) || git(t, source, "rev-parse", "main") != base {
+		t.Fatal("removing the task's clone lost its revision or touched the owner's repository")
 	}
 }

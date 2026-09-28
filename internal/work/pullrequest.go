@@ -203,6 +203,9 @@ func prFeedback(pr github.PR, prop core.Proposal, r core.Revision) []core.Verdic
 			continue
 		}
 		out = append(out, core.Verdict{
+			// A review names the head it was made on, which may be an older
+			// draft; a comment is on no commit, and claims none.
+			Ref:      f.Commit,
 			Role:     "@" + f.Author + " on the pull request",
 			Outcome:  core.VerdictRevise,
 			Summary:  strings.ToUpper(f.Kind[:1]) + f.Kind[1:] + " on the pull request.",
@@ -217,7 +220,7 @@ func prFeedback(pr github.PR, prop core.Proposal, r core.Revision) []core.Verdic
 				findings = append(findings, core.Finding{Criterion: c.Label(), Note: "failed on the pull request: " + c.Link()})
 			}
 		}
-		out = append(out, core.Verdict{Role: "CI", Outcome: core.VerdictRevise, Summary: "Checks failed on the pull request.", Findings: findings})
+		out = append(out, core.Verdict{Ref: pr.HeadRefOid, Role: "CI", Outcome: core.VerdictRevise, Summary: "Checks failed on the pull request.", Findings: findings})
 	}
 	return out
 }
@@ -233,6 +236,8 @@ func (lp *Loop) answerPR(ctx context.Context, t core.Task, r core.Revision, pr g
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 		now := time.Now().UTC()
 		for _, v := range feedback {
+			// The feedback is answered in the round after the revision pushed
+			// to the pull request; its Ref is what it was actually on.
 			v.Revision, v.BriefVersion, v.At = r.N, p.Brief.Version, now
 			t.Verdicts = append(t.Verdicts, v)
 		}

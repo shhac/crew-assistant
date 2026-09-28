@@ -18,8 +18,12 @@ func (lp *Loop) takeInLanded(ctx context.Context, t core.Task, m medium) (core.T
 	}
 	moved, commit, err := c.cleanMerge(ctx, t, *l)
 	var conflicts []string
-	if err == nil && commit == "" {
+	switch {
+	case err == nil && commit == "":
 		moved, conflicts, err = c.conflictMerge(ctx, t, *l)
+	case err == nil:
+		// The implementer's next draft builds on the merge.
+		err = c.resetTo(ctx, t, commit)
 	}
 	if err != nil {
 		return t, "", fmt.Errorf("catching up: %s: %w", l.What, err)
@@ -77,42 +81,25 @@ func (lp *Loop) catchUpRound(ctx context.Context, t core.Task, c catcher, l line
 }
 
 // recordCatchUp records a clean merge as a new revision without the
-// implementer. The task's own change is unchanged, so the reviewers' passes
-// against the current brief carry over and an approval still stands; QA runs
-// again on the merged result.
+// implementer, handed over as a draft is. The task's own change is
+// unchanged, so the reviewers' passes against the current brief carry over
+// and an approval still stands; QA runs again on the merged result.
 func (lp *Loop) recordCatchUp(ctx context.Context, moved core.Task, c catcher, commit string, l line) error {
 	files, err := c.files(ctx, moved, commit)
 	if err != nil {
 		return lp.roleFailed(ctx, moved, "The workspace", err)
 	}
-	reviewers := map[string]bool{}
-	for _, r := range moved.RolesOf(core.RoleReviewer) {
-		reviewers[r.Name] = true
+	if len(moved.Revisions) == 0 {
+		return nil
 	}
-	_, err = lp.updateOpen(ctx, moved.ID, func(t *core.Task, p *core.Project) (string, error) {
-		if len(t.Revisions) == 0 {
-			return "", nil
-		}
-		prev := t.Revisions[len(t.Revisions)-1]
-		n := prev.N + 1
-		now := time.Now().UTC()
-		summary := "Merged in without conflicts: " + l.What + "."
-		if l.Diverged {
-			summary = "Replayed onto " + l.Name + " without conflicts, after its history was rewritten: " + l.What + "."
-		}
-		revision := core.Revision{N: n, BriefVersion: p.Brief.Version, Files: files, Ref: commit, Summary: summary, At: now}
-		// Someone else's commits are new work: nothing carries over from them.
-		if !l.Foreign {
-			t.Base, t.From = moved.Base, moved.From
-			revision.CleanMergeOf = prev.N
-			t.Verdicts = append(t.Verdicts, carriedOver(t.Verdicts, prev.N, n, reviewers, p.Brief.Version, now)...)
-		}
-		t.Revisions = append(t.Revisions, revision)
-		t.DecisionID, t.Failures, t.RetryAt = "", 0, time.Time{}
-		t.Status, t.Detail = core.TaskReviewing, fmt.Sprintf("Took in %s cleanly; checking it again", l.Name)
-		return fmt.Sprintf("%s caught up cleanly: %s", t.Objective, l.What), nil
+	summary := "Merged in without conflicts: " + l.What + "."
+	if l.Diverged {
+		summary = "Replayed onto " + l.Name + " without conflicts, after its history was rewritten: " + l.What + "."
+	}
+	return lp.handOff(ctx, moved, c, core.Handoff{
+		Revision: core.Revision{N: len(moved.Revisions) + 1, Files: files, Ref: commit, Summary: summary},
+		CatchUp:  &core.CatchUp{Base: moved.Base, From: moved.From, Carry: !l.Foreign, Name: l.Name, What: l.What, Detail: fmt.Sprintf("Took in %s cleanly; checking it again", l.Name)},
 	})
-	return err
 }
 
 // carriedOver is the reviewers' passes on draft from, against the current

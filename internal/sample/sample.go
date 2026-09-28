@@ -274,10 +274,13 @@ func writeDrafts(s core.Snapshot) error {
 				continue
 			}
 			for _, r := range t.Revisions {
-				if err := os.WriteFile(filepath.Join(docs.Workspace(), "q4-plan.md"), []byte(planDraft[r.N-1]), 0600); err != nil {
+				if err := docs.Reset(t.ID, 0); err != nil {
 					return err
 				}
-				if _, err := docs.Snapshot(t.ID, r.N); err != nil {
+				if err := os.WriteFile(filepath.Join(docs.Workspace(t.ID), "q4-plan.md"), []byte(planDraft[r.N-1]), 0600); err != nil {
+					return err
+				}
+				if _, _, err := docs.Snapshot(t.ID, r.N); err != nil {
 					return err
 				}
 			}

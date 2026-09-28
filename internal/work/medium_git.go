@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/media"
@@ -11,8 +12,11 @@ import (
 	"github.com/shhac/crew-assistant/internal/text"
 )
 
-// gitMedium is code work in a private clone of one of the project's
-// repositories. How an approved change lands is its way.
+// gitMedium is code work on one of the project's repositories. repo is the
+// project's clone: it fetches from the owner, keeps every recorded revision,
+// and is where checks, previews and landing read them. Each task's
+// implementer works in a clone of its own, made from it. How an approved
+// change lands is its way.
 type gitMedium struct {
 	repo     gitrepo.Repo
 	playbook core.Playbook
@@ -24,9 +28,16 @@ type gitMedium struct {
 // url is where a pull request's branch is pushed and its base fetched from.
 func (m gitMedium) url() string { return m.remote(m.playbook.Land.GitHub) }
 
-func (m gitMedium) workspace() string  { return m.repo.Workspace() }
-func (m gitMedium) env() []string      { return m.repo.Env() }
-func (m gitMedium) readable() []string { return m.repo.Readable() }
+func (m gitMedium) workspace(t core.Task) string { return m.repo.Task(t.ID).Workspace() }
+func (m gitMedium) env(t core.Task) []string     { return m.repo.Task(t.ID).Env() }
+func (m gitMedium) readable() []string           { return m.repo.Readable() }
+
+// clone is the task's own clone, made if it has none: one removed, or never
+// made, is rebuilt from the revisions the project's clone keeps.
+func (m gitMedium) clone(ctx context.Context, t core.Task) (gitrepo.Repo, error) {
+	tc := m.repo.Task(t.ID)
+	return tc, tc.Ready(ctx)
+}
 
 func (m gitMedium) begin(ctx context.Context, t core.Task) (core.Task, error) {
 	if t.Base != "" {
@@ -70,28 +81,46 @@ func onto(t core.Task, l line) core.Task {
 	return t
 }
 
+// cleanMerge is made in the task's clone, as a draft is: the project's clone
+// holds it only once a handoff publishes it.
 func (m gitMedium) cleanMerge(ctx context.Context, t core.Task, l line) (core.Task, string, error) {
+	tc, err := m.clone(ctx, t)
+	if err != nil {
+		return t, "", err
+	}
 	message := fmt.Sprintf("catch up with %s: %s", l.Name, text.Clip(t.Objective, 60))
-	merge := func() (string, error) { return m.repo.MergeClean(ctx, tipOf(t), l.Commit, message) }
+	merge := func() (string, error) { return tc.MergeClean(ctx, tipOf(t), l.Commit, message) }
 	if l.Diverged {
-		merge = func() (string, error) { return m.repo.ReplayClean(ctx, t.Base, tipOf(t), l.Commit, message) }
+		merge = func() (string, error) { return tc.ReplayClean(ctx, t.Base, tipOf(t), l.Commit, message) }
 	}
 	commit, err := merge()
 	if err != nil || commit == "" {
 		return t, "", err
 	}
-	return onto(t, l), commit, m.repo.Reset(ctx, t.Branch, commit)
+	return onto(t, l), commit, nil
+}
+
+func (m gitMedium) resetTo(ctx context.Context, t core.Task, commit string) error {
+	tc, err := m.clone(ctx, t)
+	if err != nil {
+		return err
+	}
+	return tc.Reset(ctx, t.Branch, commit)
 }
 
 func (m gitMedium) conflictMerge(ctx context.Context, t core.Task, l line) (core.Task, []string, error) {
-	if err := m.repo.Reset(ctx, t.Branch, tipOf(t)); err != nil {
+	tc, err := m.clone(ctx, t)
+	if err != nil {
+		return t, nil, err
+	}
+	if err := tc.Reset(ctx, t.Branch, tipOf(t)); err != nil {
 		return t, nil, err
 	}
 	if l.Diverged {
-		conflicts, err := m.repo.Replay(ctx, t.Branch, t.Base, tipOf(t), l.Commit)
+		conflicts, err := tc.Replay(ctx, t.Branch, t.Base, tipOf(t), l.Commit)
 		return onto(t, l), conflicts, err
 	}
-	conflicts, err := m.repo.Merge(ctx, l.Commit)
+	conflicts, err := tc.Merge(ctx, l.Commit)
 	return onto(t, l), conflicts, err
 }
 
@@ -102,8 +131,12 @@ func (m gitMedium) alreadyLanded(ctx context.Context, t core.Task, r core.Revisi
 	return m.way.alreadyLanded(ctx, m, t, r)
 }
 
-func (m gitMedium) files(ctx context.Context, t core.Task, ref string) ([]string, error) {
-	return m.repo.ChangedFiles(ctx, t.Base, ref)
+func (m gitMedium) files(ctx context.Context, t core.Task, merge string) ([]string, error) {
+	tc, err := m.clone(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	return tc.ChangedFiles(ctx, t.Base, merge)
 }
 
 func (m gitMedium) reset(ctx context.Context, t core.Task) error {
@@ -111,21 +144,48 @@ func (m gitMedium) reset(ctx context.Context, t core.Task) error {
 	if ref == "" {
 		return errors.New("the task has no starting point")
 	}
-	return m.repo.Reset(ctx, t.Branch, ref)
+	return m.resetTo(ctx, t, ref)
 }
 
 func (m gitMedium) snapshot(ctx context.Context, t core.Task, n int) (core.Revision, error) {
-	commit, files, err := m.repo.Snapshot(ctx, t.Base, tipOf(t), fmt.Sprintf("draft %d: %s", n, text.Clip(t.Objective, 60)))
+	commit, files, err := m.repo.Task(t.ID).Snapshot(ctx, t.Base, tipOf(t), fmt.Sprintf("draft %d: %s", n, text.Clip(t.Objective, 60)))
 	return core.Revision{N: n, Files: files, Ref: commit}, err
 }
 
-// checkDir is the clone itself, at the revision. Checks run one at a time, so
-// nothing else is working there; whatever a check wrote is reset afterwards.
-func (m gitMedium) checkDir(ctx context.Context, t core.Task, r core.Revision) (string, func(), error) {
-	if err := m.repo.Reset(ctx, t.Branch, r.Ref); err != nil {
-		return "", nil, err
+func (m gitMedium) publish(ctx context.Context, t core.Task, ref, name string) error {
+	return m.repo.Publish(ctx, m.repo.Task(t.ID), ref, name)
+}
+
+func (m gitMedium) published(ctx context.Context, t core.Task, h core.Handoff) (string, bool, error) {
+	at, err := m.repo.RefAt(ctx, h.Name)
+	if err != nil {
+		return "", false, err
 	}
-	return m.repo.Workspace(), func() { _ = m.repo.Reset(context.WithoutCancel(ctx), t.Branch, r.Ref) }, nil
+	kept := m.repo.Holds(ctx, h.Revision.Ref) || m.repo.Task(t.ID).Holds(ctx, h.Revision.Ref)
+	return at, kept, nil
+}
+
+// check is a checkout of the revision of its own, made from the project's
+// clone and read-only. A reviewer reads it where it is. QA runs in a scratch
+// folder that holds its caches and temporary files, and reads the checkout,
+// or, where the team's check has to write into the tree it runs in, runs in
+// a writable copy of it there.
+func (m gitMedium) check(ctx context.Context, t core.Task, r core.Revision, qa bool) (checkout, error) {
+	inCopy := qa && m.playbook.CheckInCopy
+	c, err := m.repo.Checkout(ctx, r.Ref, inCopy)
+	if err != nil {
+		return checkout{}, err
+	}
+	out := checkout{ref: r.Ref, workDir: c.Dir, env: c.Env, verify: c.Verify, remove: c.Remove}
+	if !qa {
+		return out, nil
+	}
+	out.workDir, out.write, out.read = c.Scratch, true, []string{c.Dir}
+	out.note = fmt.Sprintf("\n\nThe repository is checked out, read-only, at %s: that is the repository root to run the check from. Your working directory is a scratch folder for anything the check writes; build caches and temporary files already go there.\n", c.Dir)
+	if inCopy {
+		out.note = fmt.Sprintf("\n\nThe repository root to run the check from is %s: a writable copy of the revision, in your scratch folder, for a check that writes into the tree it runs in. The revision itself is at %s, read-only.\n", c.Tree, c.Dir)
+	}
+	return out, nil
 }
 
 func (m gitMedium) preview(ctx context.Context, t core.Task, r core.Revision) ([]media.File, error) {
@@ -143,6 +203,50 @@ func (m gitMedium) deliveryNote(t core.Task) string {
 	}
 	return note
 }
+
+// tidy removes the clones of tasks that have finished, and the refs the
+// project's clone keeps for tasks that have settled. With strays, a ref that
+// is neither a recorded revision nor named by a handoff under way, left by
+// one that never finished, goes too; only when nothing else is running.
+func (m gitMedium) tidy(ctx context.Context, tasks []core.Task, settled func(core.Task) bool, strays bool) error {
+	byID := map[string]core.Task{}
+	for _, t := range tasks {
+		byID[t.ID] = t
+	}
+	clones, err := m.repo.TaskClones()
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, id := range clones {
+		if t, ok := byID[id]; !ok || t.Finished() {
+			errs = append(errs, m.repo.RemoveTask(id))
+		}
+	}
+	refs, err := m.repo.TaskRefs(ctx)
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	for ref, commit := range refs {
+		t, ok := byID[gitrepo.RefTask(ref)]
+		if ok && !settled(t) && (!strays || keeps(t, ref, commit)) {
+			continue
+		}
+		errs = append(errs, m.repo.DropRef(ctx, ref, commit))
+	}
+	return errors.Join(errs...)
+}
+
+// keeps reports whether a task still needs a ref: one of its revisions, or
+// the one its handoff is writing.
+func keeps(t core.Task, ref, commit string) bool {
+	if t.Handoff != nil && t.Handoff.Name == ref {
+		return true
+	}
+	return slices.ContainsFunc(t.Revisions, func(r core.Revision) bool { return r.Ref == commit })
+}
+
+func (m gitMedium) removeChecks() error { return m.repo.RemoveChecks() }
 
 func (m gitMedium) branchName(t core.Task) string {
 	return m.playbook.BranchPrefix + slugify(t.Objective)

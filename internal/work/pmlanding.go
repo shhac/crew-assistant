@@ -132,15 +132,16 @@ func keepsCommits(t core.Task) bool {
 	return pmApproved(t) && t.LandDecision.Method == core.LandKeepCommits
 }
 
-// cleanUp removes the task branch of a change the PM landed from the clone,
-// whichever way it landed. The landing has happened by then, so a failure to
+// cleanUp removes a landed change's own clone, and its task branch with it,
+// whichever way it landed. Its revisions stay in the project's clone until
+// the loop tidies them. The landing has happened by then, so a failure to
 // clean up is only noted; it never undoes the landing.
-func (lp *Loop) cleanUp(ctx context.Context, t core.Task, r core.Revision, m medium, landed error) error {
-	if landed != nil || !pmApproved(t) || t.Branch == "" {
+func (lp *Loop) cleanUp(t core.Task, m medium, landed error) error {
+	if landed != nil {
 		return landed
 	}
 	if gm, ok := m.(gitMedium); ok {
-		if err := gm.repo.DropBranch(ctx, t.Branch, r.Ref); err != nil {
+		if err := gm.repo.RemoveTask(t.ID); err != nil {
 			lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_cleanup", ProjectID: t.ProjectID}, err)
 		}
 	}

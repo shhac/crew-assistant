@@ -16,8 +16,10 @@ import (
 // revision is recorded and restored, what reviewers see, and how an approved
 // revision leaves.
 type medium interface {
-	workspace() string
-	env() []string
+	// workspace is where roles work on t: the task's own, which no other
+	// task shares.
+	workspace(t core.Task) string
+	env(t core.Task) []string
 	// readable is what roles may read outside the workspace.
 	readable() []string
 	// begin readies the workspace for a task's first round and returns the
@@ -26,13 +28,48 @@ type medium interface {
 	// reset restores the latest revision, or the starting point before any.
 	reset(ctx context.Context, t core.Task) error
 	snapshot(ctx context.Context, t core.Task, n int) (core.Revision, error)
-	// checkDir is where a checking role reads revision r, and what to do after.
-	checkDir(ctx context.Context, t core.Task, r core.Revision) (string, func(), error)
+	// publish hands a snapshot, ref, to where recorded revisions are kept,
+	// under name, which is only ever created and never moved.
+	publish(ctx context.Context, t core.Task, ref, name string) error
+	// published is what a handoff's name holds where recorded revisions are
+	// kept, or "" for nothing, and whether its snapshot can still be
+	// published.
+	published(ctx context.Context, t core.Task, h core.Handoff) (at string, kept bool, err error)
+	// check is a checking role's own copy of revision r, never the
+	// implementer's workspace.
+	check(ctx context.Context, t core.Task, r core.Revision, qa bool) (checkout, error)
 	preview(ctx context.Context, t core.Task, r core.Revision) ([]media.File, error)
 	// deliver makes the approved revision real and says where it went.
 	deliver(ctx context.Context, t core.Task, r core.Revision) (string, error)
 	// deliveryNote tells the owner what approving will do.
 	deliveryNote(t core.Task) string
+	// tidy removes what is kept for tasks, and only for them, once they have
+	// finished, or settled: finished, with no decision open on them. With
+	// strays, it also removes what an unfinished handoff left. tasks are
+	// every task of the project.
+	tidy(ctx context.Context, tasks []core.Task, settled func(core.Task) bool, strays bool) error
+	// removeChecks deletes the copies checks were given, left behind by a
+	// daemon that stopped mid-check.
+	removeChecks() error
+}
+
+// checkout is one check's own copy of a revision, and how the checking role
+// runs on it.
+type checkout struct {
+	// ref is what the copy holds, which a verdict records.
+	ref string
+	// workDir is where the role runs, and write whether it may write there:
+	// the read-only copy itself for a reviewer, a scratch folder for QA.
+	workDir string
+	write   bool
+	env     []string
+	// read is the copy, when the role runs elsewhere, and note tells the
+	// role where it is.
+	read []string
+	note string
+	// verify says the copy is still exactly the revision; remove deletes it.
+	verify func(context.Context) error
+	remove func()
 }
 
 // catcher is a medium whose work can fall behind what lands, and catch up.
@@ -41,15 +78,20 @@ type catcher interface {
 	medium
 	// behind reports what the task must take in before it can land, or nil.
 	behind(ctx context.Context, t core.Task) (*line, error)
-	// cleanMerge merges l into the task without touching the workspace and
+	// cleanMerge merges l into the task, without touching the workspace, and
 	// returns the task on its new base and the merge commit, or "" when the
-	// two conflict.
+	// two conflict. Like a snapshot, nothing durable holds the commit until
+	// a handoff publishes it.
 	cleanMerge(ctx context.Context, t core.Task, l line) (core.Task, string, error)
+	// resetTo puts the workspace at commit, such as a clean merge the next
+	// round builds on.
+	resetTo(ctx context.Context, t core.Task, commit string) error
 	// conflictMerge leaves the workspace mid-merge for the implementer and
 	// returns the files in conflict.
 	conflictMerge(ctx context.Context, t core.Task, l line) (core.Task, []string, error)
-	// files lists what a revision changes from the task's base.
-	files(ctx context.Context, t core.Task, ref string) ([]string, error)
+	// files lists what a clean merge, not yet handed off, changes from the
+	// task's base.
+	files(ctx context.Context, t core.Task, merge string) ([]string, error)
 	// alreadyLanded reports whether the revision is already where it lands.
 	alreadyLanded(ctx context.Context, t core.Task, r core.Revision) (bool, error)
 }

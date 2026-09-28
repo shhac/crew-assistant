@@ -47,7 +47,7 @@ func (s *Service) AdoptDraft(ctx context.Context, taskID string, r Revision, app
 		if approve {
 			t.Approved = r.N
 			for _, reviewer := range t.RolesOf(RoleReviewer) {
-				t.Verdicts = append(t.Verdicts, Verdict{Revision: r.N, Role: reviewer.Name, BriefVersion: p.Brief.Version, Outcome: VerdictPass, Summary: "The owner changed this draft by hand and approved it.", At: now})
+				t.Verdicts = append(t.Verdicts, Verdict{Revision: r.N, Ref: r.Ref, Role: reviewer.Name, BriefVersion: p.Brief.Version, Outcome: VerdictPass, Summary: "The owner changed this draft by hand and approved it.", At: now})
 			}
 		}
 		t.Status, t.DecisionID, t.ResumeStatus, t.Detail = TaskReviewing, "", "", "Checking the owner's draft"

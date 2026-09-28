@@ -51,10 +51,13 @@ func TestTheOwnersChangeByHandBecomesTheNextDraft(t *testing.T) {
 	decisionID := task.DecisionID
 
 	place, err := a.Place(ctx, p.ID, task.ID)
-	if err != nil || place.Draft == nil || place.Draft.N != 1 || place.Branch != task.Branch || place.Workspace == "" || place.Running {
+	if err != nil || place.Draft == nil || place.Draft.N != 1 || place.Branch != task.Branch || place.Running ||
+		place.Workspace != filepath.Join(p.ScratchDirectory, "tasks", task.ID, "clone") || place.Records != filepath.Join(p.ScratchDirectory, "clone") {
 		t.Fatalf("place %+v, %v", place, err)
 	}
-	if err := gitrepo.CheckoutDraft(ctx, place.Repo, place.Workspace, place.Draft.Ref, place.Branch, false); err != nil {
+	// The draft is taken from the project's clone, which keeps every
+	// recorded draft, not from the task's own.
+	if err := gitrepo.CheckoutDraft(ctx, place.Repo, place.Records, place.Draft.Ref, place.Branch, false); err != nil {
 		t.Fatal(err)
 	}
 	worktree := filepath.Join(t.TempDir(), "by-hand")
@@ -71,6 +74,15 @@ func TestTheOwnersChangeByHandBecomesTheNextDraft(t *testing.T) {
 	draft := adopted.Revisions[1]
 	if draft.N != 2 || draft.By != core.DraftByOwner || draft.Summary != "Tidy Feature by hand" || adopted.Approved != 2 || adopted.Status != core.TaskReviewing {
 		t.Fatalf("adopted %+v", adopted)
+	}
+	// It is kept as any draft is, and the owner's approval names it.
+	if at := ownerGit(t, place.Records, "for-each-ref", "--format=%(objectname)", "refs/crew/tasks/"+task.ID+"/r2-a*"); at != draft.Ref {
+		t.Fatalf("the owner's draft is kept at %q", at)
+	}
+	for _, v := range adopted.Verdicts {
+		if v.Revision == 2 && v.Ref != draft.Ref {
+			t.Fatalf("the owner's approval %+v does not name their commit", v)
+		}
 	}
 	snap, _ := a.Core.Snapshot(ctx)
 	if d, _ := findDecision(snap, decisionID); d.Status != core.DecisionDismissed {

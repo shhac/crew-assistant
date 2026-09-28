@@ -16,7 +16,8 @@ import (
 // fast-forward push onto a target, or a GitHub pull request. Each way owns
 // where a task starts, what it must catch up with, and how it delivers.
 type landWay interface {
-	// start creates the task branch at its starting point and names it.
+	// start is where the task starts, fetched into the project's clone, and
+	// the branch that is; the task's own clone checks it out.
 	start(ctx context.Context, m gitMedium, t core.Task) (base, from string, err error)
 	// line is what a task must include before it lands, or nil.
 	line(ctx context.Context, m gitMedium, t core.Task) (*line, error)
@@ -41,7 +42,7 @@ func wayFor(land core.LandPolicy) landWay {
 type branchWay struct{}
 
 func (branchWay) start(ctx context.Context, m gitMedium, t core.Task) (string, string, error) {
-	base, from, err := m.repo.Begin(ctx, t.Branch, "")
+	base, from, err := m.repo.Start(ctx, "")
 	if err != nil || m.landed == nil {
 		return base, from, err
 	}
@@ -51,7 +52,7 @@ func (branchWay) start(ctx context.Context, m gitMedium, t core.Task) (string, s
 	if err != nil || !ahead || m.landed.Commit == base {
 		return base, from, err
 	}
-	return m.landed.Commit, m.landed.Branch, m.repo.Reset(ctx, t.Branch, m.landed.Commit)
+	return m.landed.Commit, m.landed.Branch, nil
 }
 
 func (branchWay) line(_ context.Context, m gitMedium, t core.Task) (*line, error) {
@@ -62,7 +63,7 @@ func (branchWay) line(_ context.Context, m gitMedium, t core.Task) (*line, error
 }
 
 func (branchWay) deliver(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (string, error) {
-	return m.repo.Deliver(ctx, t.Branch, r.Ref, m.branchName(t))
+	return m.repo.Deliver(ctx, r.Ref, m.branchName(t))
 }
 
 func (branchWay) alreadyLanded(context.Context, gitMedium, core.Task, core.Revision) (bool, error) {
@@ -82,7 +83,7 @@ func (branchWay) note(m gitMedium, t core.Task) string {
 type pushWay struct{}
 
 func (pushWay) start(ctx context.Context, m gitMedium, t core.Task) (string, string, error) {
-	return m.repo.Begin(ctx, t.Branch, m.playbook.Land.Target)
+	return m.repo.Start(ctx, m.playbook.Land.Target)
 }
 
 func (pushWay) line(ctx context.Context, m gitMedium, t core.Task) (*line, error) {
@@ -105,9 +106,9 @@ func (pushWay) line(ctx context.Context, m gitMedium, t core.Task) (*line, error
 func (pushWay) deliver(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (string, error) {
 	target := m.playbook.Land.Target
 	if keepsCommits(t) {
-		return target, m.repo.PushFastForward(ctx, t.Branch, r.Ref, target)
+		return target, m.repo.PushFastForward(ctx, r.Ref, target)
 	}
-	_, err := m.repo.PushSquashed(ctx, t.Branch, r.Ref, target, landingMessage(t, r))
+	_, err := m.repo.PushSquashed(ctx, r.Ref, target, landingMessage(t, r))
 	return target, err
 }
 
@@ -166,7 +167,7 @@ func (prWay) start(ctx context.Context, m gitMedium, t core.Task) (string, strin
 	if err != nil {
 		return "", "", err
 	}
-	return base, target, m.repo.Reset(ctx, t.Branch, base)
+	return base, target, nil
 }
 
 func (prWay) line(ctx context.Context, m gitMedium, t core.Task) (*line, error) {
