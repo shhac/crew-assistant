@@ -206,6 +206,17 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		}
 		respond(w, 201, v)
 	})
+	// What one seat has done on a task, for its member's panel. Prompts and
+	// tool payloads are private: they are served to the signed-in owner here
+	// and nowhere else, and are never part of the polled state.
+	mux.HandleFunc("GET /api/projects/{id}/tasks/{task}/seats/{seat}/steps", func(w http.ResponseWriter, r *http.Request) {
+		v, err := a.Core.TurnSteps(r.Context(), r.PathValue("id"), r.PathValue("task"), r.PathValue("seat"))
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, map[string]any{"steps": v})
+	})
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/stop", func(w http.ResponseWriter, r *http.Request) {
 		v, err := a.Work.StopTask(r.Context(), r.PathValue("id"), r.PathValue("task"))
 		if err != nil {

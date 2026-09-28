@@ -1,12 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { DecisionCard } from "./DecisionCard";
 import { Drafts } from "./Drafts";
 import { pmLandingLine } from "./landing";
+import { MemberPanel } from "./MemberPanel";
 import { RequestEdits, RequestNotes } from "./RequestNotes";
 import { RequestDesign, RequestPlan, RequestResearch } from "./RequestPlan";
 import { RequestRelations } from "./RequestRelations";
 import { TaskActivity } from "./TaskActivity";
-import { TeamThread } from "./TeamThread";
+import { TeamSeats } from "./TeamThread";
 import {
   decisionFor,
   finished,
@@ -33,32 +34,62 @@ import {
   type Task,
 } from "./api";
 
-/** One request in full, beside its project's board. */
+/**
+ * One request in full, beside its project's board. A team member's panel
+ * opens over it; the request stays as it was underneath, so closing the
+ * panel comes back to it unchanged.
+ */
 export function RequestPanel({
   project,
   task,
   state,
+  seat,
+  onSeat,
   refresh,
   onClose,
 }: {
   project: Project;
   task?: Task;
   state: State;
+  /** The seat whose panel is open, if one is. */
+  seat?: string;
+  /** Opens a seat's panel, or with none closes it. */
+  onSeat: (seat?: string) => void;
   refresh: () => Promise<void>;
   onClose: () => void;
 }) {
   const panel = useRef<HTMLElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const close = useRef<HTMLButtonElement>(null);
   // The page hands a fresh onClose on every refresh; focus moves only when
-  // the request opens or closes, never on a refresh.
+  // the request opens or closes, never on a refresh. Escape closes a
+  // member's panel before the request.
   const closing = useRef(onClose);
   useEffect(() => {
-    closing.current = onClose;
+    closing.current = seat ? () => onSeat() : onClose;
   });
+  // Where the request was scrolled to and which member was open, to come
+  // back to both.
+  const scrolled = useRef(0);
+  const lastSeat = useRef(seat);
+  useLayoutEffect(() => {
+    const was = lastSeat.current;
+    lastSeat.current = seat;
+    if (seat || !was || !body.current) return;
+    body.current.scrollTop = scrolled.current;
+    [...body.current.querySelectorAll<HTMLButtonElement>("button[data-seat]")]
+      .find((b) => b.dataset.seat === was)
+      ?.focus();
+  }, [seat]);
+  const openSeat = (name: string) => {
+    scrolled.current = body.current?.scrollTop ?? 0;
+    onSeat(name);
+  };
   useEffect(() => {
     const prior = focusedElement();
     const inside = panel.current;
-    close.current?.focus();
+    // A member's panel open from the start takes focus itself.
+    if (!seat) close.current?.focus();
     const keydown = (event: KeyboardEvent) => {
       if (
         event.key === "Escape" &&
@@ -110,7 +141,7 @@ export function RequestPanel({
           <p className="muted">It may have been removed.</p>
         </div>
       ) : (
-        <div className="request-body">
+        <div ref={body} className="request-body" hidden={!!seat}>
           <header className="request-header">
             <TaskRef task={task} />
             <h2 id="request-title">{task.objective}</h2>
@@ -138,12 +169,11 @@ export function RequestPanel({
               full
             />
           )}
-          <TeamThread
+          <TeamSeats
             project={project}
             task={task}
-            members={state.members}
-            waitingOn={decision?.kind}
-            refresh={refresh}
+            state={state}
+            onOpen={openSeat}
           />
           <RequestNotes task={task} closed={finished(task)} refresh={refresh} />
           {task.plan && <RequestPlan plan={task.plan} />}
@@ -185,6 +215,20 @@ export function RequestPanel({
             tasks={state.tasks}
             members={state.members}
             refresh={refresh}
+          />
+        </div>
+      )}
+      {task && seat && (
+        <div className="request-body">
+          <MemberPanel
+            key={seat}
+            project={project}
+            task={task}
+            seat={seat}
+            state={state}
+            waitingOn={decision?.kind}
+            refresh={refresh}
+            onClose={() => onSeat()}
           />
         </div>
       )}

@@ -54,10 +54,13 @@ type Spec struct {
 	Observer Observer
 }
 
-// Observer hears a turn from when it starts to when it ends, with what its
-// session reports along the way, so whoever waits on it can see it is alive.
+// Observer hears a turn from when it starts to when it ends, with the prompt
+// it was given and what its session reports along the way, so whoever waits
+// on it can see it is alive. Every event a finished turn reported is heard
+// before it ends.
 type Observer interface {
 	Started()
+	Asked(prompt string)
 	Saw(session.Event)
 	Ended()
 }
@@ -169,7 +172,12 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if spec.Observer != nil {
+		spec.Observer.Asked(prompt)
+	}
+	heard := make(chan struct{})
 	go func() {
+		defer close(heard)
 		for e := range turn.Events() {
 			if spec.Observer != nil {
 				spec.Observer.Saw(e)
@@ -177,6 +185,10 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 		}
 	}()
 	result, err := turn.Wait(ctx)
+	// A finished turn has closed its events; one given up on may not have.
+	if ctx.Err() == nil {
+		<-heard
+	}
 	ref, _ := json.Marshal(s.Ref())
 	released = true
 	if _, releaseErr := s.Release(context.WithoutCancel(ctx)); releaseErr != nil && err == nil {

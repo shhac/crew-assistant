@@ -40,6 +40,8 @@ type liveTurn struct {
 	// tools are the tools running now, in the order they started.
 	tools []runningTool
 	done  chan struct{}
+	// steps keeps what the turn does for the owner to read back.
+	steps stepLog
 }
 
 type runningTool struct{ item, name string }
@@ -71,10 +73,13 @@ func (lp *Loop) Turns() []core.Turn {
 
 // watchTurn is how a role's turn on t reports itself while it runs.
 func (lp *Loop) watchTurn(t core.Task, kind string, r core.Role, workDir string, writes bool) roles.Observer {
-	return &liveTurn{reg: &lp.turns, workDir: workDir, writes: writes, who: core.Turn{ProjectID: t.ProjectID, TaskID: t.ID, Role: kind, Seat: r.Name, Member: r.Member}}
+	l := &liveTurn{reg: &lp.turns, workDir: workDir, writes: writes, who: core.Turn{ProjectID: t.ProjectID, TaskID: t.ID, Role: kind, Seat: r.Name, Member: r.Member}}
+	l.steps = stepLog{who: core.TurnStep{TaskID: t.ID, Seat: r.Name, Member: r.Member, Role: kind}, keep: lp.keepStep}
+	return l
 }
 
 func (l *liveTurn) Started() {
+	l.steps.start()
 	if l.writes {
 		l.count = counter(l.workDir)
 	}
@@ -93,7 +98,10 @@ func (l *liveTurn) Started() {
 	}
 }
 
+func (l *liveTurn) Asked(prompt string) { l.steps.asked(prompt) }
+
 func (l *liveTurn) Saw(e session.Event) {
+	l.steps.saw(e)
 	l.reg.mu.Lock()
 	defer l.reg.mu.Unlock()
 	if _, ok := l.reg.running[l]; !ok {
@@ -124,6 +132,7 @@ func (l *liveTurn) Saw(e session.Event) {
 }
 
 func (l *liveTurn) Ended() {
+	l.steps.end()
 	l.reg.mu.Lock()
 	defer l.reg.mu.Unlock()
 	if _, ok := l.reg.running[l]; ok {

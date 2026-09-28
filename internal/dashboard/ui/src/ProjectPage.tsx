@@ -8,6 +8,8 @@ import {
   href,
   projectHref,
   projectTabs,
+  requestHref,
+  seatHref,
   type ProjectTab,
   type Route,
 } from "./router";
@@ -115,6 +117,13 @@ export function ProjectPage({
           project={project}
           task={request}
           state={state}
+          seat={route.seat}
+          onSeat={(seat) => {
+            const task = route.request!;
+            window.location.hash = seat
+              ? seatHref(project.id, task, seat)
+              : requestHref(project.id, task);
+          }}
           refresh={refresh}
           onClose={() => {
             window.location.hash = projectHref(project.id);

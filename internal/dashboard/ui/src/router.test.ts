@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { href, parseRoute, requestHref } from "./router";
+import { href, parseRoute, requestHref, seatHref } from "./router";
 
 describe("addresses", () => {
   it("reads every page, and sends anything else to the inbox", () => {
@@ -62,6 +62,24 @@ describe("addresses", () => {
       id: "p 1",
       tab: "board",
       request: "t/1",
+    });
+  });
+  it("keeps a team member's panel open in the address", () => {
+    expect(seatHref("p1", "t1", "Ada Lovelace")).toBe(
+      "#/projects/p1/requests/t1/team/Ada%20Lovelace",
+    );
+    expect(parseRoute(seatHref("p1", "t1", "Ada Lovelace"))).toEqual({
+      page: "project",
+      id: "p1",
+      tab: "board",
+      request: "t1",
+      seat: "Ada Lovelace",
+    });
+    expect(parseRoute("#/projects/p1/requests/t1/team")).toEqual({
+      page: "project",
+      id: "p1",
+      tab: "board",
+      request: "t1",
     });
   });
 });

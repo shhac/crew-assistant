@@ -95,7 +95,11 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	_, err = db.Exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1);`)
+	// Turn steps sit beside the state rather than in it: they are many and
+	// large, and only the member panel that asks for them reads them.
+	_, err = db.Exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1);
+		CREATE TABLE IF NOT EXISTS turn_steps (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, seat TEXT NOT NULL, turn TEXT NOT NULL, item TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(turn, item));
+		CREATE INDEX IF NOT EXISTS turn_steps_task ON turn_steps(task_id, seat, id);`)
 	if err != nil {
 		db.Close()
 		return nil, err

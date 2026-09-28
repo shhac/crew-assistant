@@ -1,13 +1,27 @@
 import { useState, type FormEvent } from "react";
-import { finished, isCode, taskPlaybook, verdictOutcome } from "./stages";
-import { kindWord, roleMember, taskRoles, workingKind } from "./members";
+import {
+  finished,
+  isCode,
+  isOpenMessage,
+  taskPlaybook,
+  verdictOutcome,
+} from "./stages";
+import {
+  kindsLabel,
+  memberOf,
+  roleAtWork,
+  taskRoles,
+  workingKind,
+} from "./members";
 import { Avatar } from "./Avatar";
-import { ErrorNotice, Pill, sinceLabel, useAction } from "./ui";
+import { turnFor } from "./turns";
+import { ErrorNotice, Icon, Pill, counted, sinceLabel, useAction } from "./ui";
 import {
   messageTeam,
   type Member,
   type Project,
   type Role,
+  type State,
   type Task,
   type TeamMessage,
 } from "./api";
@@ -42,118 +56,163 @@ function prompt(role: Role | undefined, code: boolean) {
 }
 
 /**
- * How a seat is offered in "To": by its name, and by the role a message
- * reaches when the seat also researches or designs, since that isn't what it
- * answers.
+ * A request's team, one entry per seat, each opening that member's panel.
+ * The conversation itself lives in the panel; here each says only whether
+ * it is at work and whether a message to it is waiting.
  */
-function recipient(role: Role, code: boolean) {
-  if (role.kinds.length < 2) return role.name;
-  const kind = workingKind(role);
-  const word = kind === "implementer" && !code ? "writer" : kindWord(kind);
-  return `${role.name} (${word})`;
+export function TeamSeats({
+  project,
+  task,
+  state,
+  onOpen,
+}: {
+  project: Project;
+  task: Task;
+  state: State;
+  onOpen: (seat: string) => void;
+}) {
+  const team = taskRoles(task, project);
+  if (!team.length) return null;
+  const turn = turnFor(task, state.turns);
+  const next = finished(task) ? undefined : roleAtWork(task)?.name;
+  return (
+    <section className="section" aria-label="Team">
+      <h3>Team</h3>
+      <ul className="seats">
+        {team.map((r) => {
+          const member = memberOf(r, state.members);
+          const messages = (task.messages ?? []).filter((m) => m.to === r.name);
+          const open = messages.filter(isOpenMessage).length;
+          return (
+            <li key={r.name}>
+              <button
+                type="button"
+                className="seat"
+                data-seat={r.name}
+                onClick={() => onOpen(r.name)}
+              >
+                {member && <Avatar of={member} size={24} />}
+                <span className="seat-name">{r.name}</span>
+                <span className="muted small">{kindsLabel(r.kinds)}</span>
+                <span className="seat-note small">
+                  {turn?.seat === r.name ? (
+                    <Pill tone="work" dot>
+                      Working now
+                    </Pill>
+                  ) : next === r.name ? (
+                    <span className="muted">Up next</span>
+                  ) : null}
+                  {open > 0 ? (
+                    <Pill tone="wait">{counted(open, "message")} waiting</Pill>
+                  ) : messages.length > 0 ? (
+                    <span className="muted">
+                      {counted(messages.length, "message")}
+                    </span>
+                  ) : null}
+                </span>
+                <Icon name="Chevron" size={14} />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/** Where a message to a seat waits until it is sent, surviving a reload. */
+const draftKey = (task: Task, seat: string) =>
+  `crew-assistant.message.${task.id}.${seat}`;
+
+function useDraft(key: string) {
+  const [text, setText] = useState(() => {
+    try {
+      return sessionStorage.getItem(key) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const keep = (next: string) => {
+    setText(next);
+    try {
+      if (next) sessionStorage.setItem(key, next);
+      else sessionStorage.removeItem(key);
+    } catch {
+      // A draft that can't be kept still lasts while the page is open.
+    }
+  };
+  return [text, keep] as const;
 }
 
 /**
  * Talking directly to one member of the team: the implementer takes it as
- * direction; a reviewer or QA checks the latest draft with it in mind.
+ * direction; a reviewer or QA checks the latest draft with it in mind. A seat
+ * that only researches, designs or keeps the list is done before the work
+ * starts, so nothing reaches it.
  */
-export function TeamThread({
+export function MessageForm({
   project,
   task,
-  members,
+  role,
   waitingOn,
   refresh,
 }: {
   project: Project;
   task: Task;
-  members: Member[];
+  role: Role;
   /** The kind of decision the request waits on, if any. */
   waitingOn?: string;
   refresh: () => Promise<void>;
 }) {
-  const team = taskRoles(task, project);
-  // A seat that only plans is done before the work starts; nothing reaches it.
-  const reachable = team.filter((r) => workingKind(r) !== "");
-  const [to, setTo] = useState(reachable[0]?.name ?? "");
-  const [text, setText] = useState("");
+  const [text, setText] = useDraft(draftKey(task, role.name));
   const { busy, error, run } = useAction();
-  const messages = task.messages ?? [];
-  const role = reachable.find((r) => r.name === to);
-  const closed = finished(task);
   const code = isCode(taskPlaybook(task, project));
+  if (finished(task))
+    return (
+      <p className="muted small">
+        This request is finished. Ask for a new one to change it.
+      </p>
+    );
+  if (!workingKind(role))
+    return (
+      <p className="muted small">
+        Only the seats that write and check the work take messages.
+      </p>
+    );
   async function send(e: FormEvent) {
     e.preventDefault();
     await run(async () => {
-      await messageTeam(task.project_id, task.id, to, text.trim());
+      await messageTeam(task.project_id, task.id, role.name, text.trim());
       setText("");
       await refresh();
     });
   }
-  if (!reachable.length) return null;
   return (
-    <section className="section thread" aria-label="Team">
-      <h3>Message the team</h3>
-      {messages.length > 0 && (
-        <ol className="thread-messages">
-          {messages.map((m) => (
-            <MessageView
-              key={m.id}
-              message={m}
-              member={roleMember(team, m.to, members)}
-              made={code ? "change" : "draft"}
-            />
-          ))}
-        </ol>
-      )}
-      {closed ? (
-        <p className="muted small">
-          This request is finished. Ask for a new one to change it.
-        </p>
-      ) : (
-        <form className="thread-form" onSubmit={send}>
-          <div className="thread-to">
-            <label htmlFor="thread-to" className="label">
-              To
-            </label>
-            <select
-              id="thread-to"
-              className="field"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-            >
-              {reachable.map((r) => (
-                <option key={r.name} value={r.name}>
-                  {recipient(r, code)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <label className="sr-only" htmlFor="thread-text">
-            Message
-          </label>
-          <textarea
-            id="thread-text"
-            className="field"
-            rows={2}
-            value={text}
-            maxLength={8192}
-            placeholder={prompt(role, code)}
-            onChange={(e) => setText(e.target.value)}
-          />
-          <p className="hint">{effect(role, task, waitingOn)}</p>
-          <ErrorNotice error={error} />
-          <div className="actions">
-            <button className="btn btn-primary" disabled={busy || !text.trim()}>
-              Send to {to}
-            </button>
-          </div>
-        </form>
-      )}
-    </section>
+    <form className="thread-form" onSubmit={send}>
+      <label className="sr-only" htmlFor="thread-text">
+        Message
+      </label>
+      <textarea
+        id="thread-text"
+        className="field"
+        rows={3}
+        value={text}
+        maxLength={8192}
+        placeholder={prompt(role, code)}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <p className="hint">{effect(role, task, waitingOn)}</p>
+      <ErrorNotice error={error} />
+      <div className="actions">
+        <button className="btn btn-primary" disabled={busy || !text.trim()}>
+          Send to {role.name}
+        </button>
+      </div>
+    </form>
   );
 }
 
-function MessageView({
+export function MessageView({
   message: m,
   member,
   made,

@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
@@ -21,6 +23,8 @@ type fakeSession struct {
 	compactErr error
 	compacted  session.Result
 	waitErr    error
+	// events are what its work turn reports.
+	events []session.Event
 }
 
 type fakeTurn struct {
@@ -28,11 +32,20 @@ type fakeTurn struct {
 	name   string
 	result session.Result
 	err    error
+	events []session.Event
 }
 
+// Events are the turn's events, delivered slowly, as a busy session might
+// still be delivering them when its turn finishes.
 func (t fakeTurn) Events() <-chan session.Event {
 	events := make(chan session.Event)
-	close(events)
+	go func() {
+		defer close(events)
+		for _, e := range t.events {
+			time.Sleep(time.Millisecond)
+			events <- e
+		}
+	}()
 	return events
 }
 
@@ -51,7 +64,7 @@ func (s *fakeSession) Compact(context.Context) (turn, error) {
 
 func (s *fakeSession) StartTurn(_ context.Context, in session.Input) (turn, error) {
 	s.calls = append(s.calls, "turn: "+in.Text)
-	return fakeTurn{s: s, name: "turn", result: session.Result{Status: "completed", Text: "Done."}}, nil
+	return fakeTurn{s: s, name: "turn", result: session.Result{Status: "completed", Text: "Done."}, events: s.events}, nil
 }
 
 func (s *fakeSession) Ref() session.Ref { return session.Ref{Engine: harness.Codex, ID: "thread"} }
@@ -207,23 +220,41 @@ func TestATurnsToolsAreHostedForThatTurnOnly(t *testing.T) {
 	}
 }
 
-type recordingObserver struct{ calls []string }
+type recordingObserver struct {
+	mu    sync.Mutex
+	calls []string
+}
 
-func (o *recordingObserver) Started()          { o.calls = append(o.calls, "started") }
-func (o *recordingObserver) Saw(session.Event) { o.calls = append(o.calls, "saw") }
-func (o *recordingObserver) Ended()            { o.calls = append(o.calls, "ended") }
+func (o *recordingObserver) add(call string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.calls = append(o.calls, call)
+}
+func (o *recordingObserver) Started()            { o.add("started") }
+func (o *recordingObserver) Asked(prompt string) { o.add("asked: " + prompt) }
+func (o *recordingObserver) Saw(e session.Event) { o.add("saw: " + e.Kind) }
+func (o *recordingObserver) Ended()              { o.add("ended") }
+func (o *recordingObserver) heard() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return slices.Clone(o.calls)
+}
 
 // A turn is watched from before its session opens, so opening counts as
-// picked up, until after it is released.
+// picked up, until after it is released. It is told the prompt the session
+// was given, and hears every event before it ends, even ones still on their
+// way when the turn finished.
 func TestAnObserverHearsTheWholeTurn(t *testing.T) {
-	s := &fakeSession{}
+	s := &fakeSession{events: []session.Event{{Kind: "text"}, {Kind: "tool_started"}, {Kind: "tool_completed"}}}
 	o := &recordingObserver{}
 	spec := codexRound
+	spec.FreshPrompt = "Everything so far, then revise the draft"
 	spec.Observer = o
-	if _, err := native(s, true).Run(context.Background(), spec); err != nil {
+	if _, err := native(s, false).Run(context.Background(), spec); err != nil {
 		t.Fatal(err)
 	}
-	if len(o.calls) < 2 || o.calls[0] != "started" || o.calls[len(o.calls)-1] != "ended" || !slices.Contains(s.calls, "release") {
-		t.Fatalf("observer %v, session %v", o.calls, s.calls)
+	want := []string{"started", "asked: " + spec.FreshPrompt, "saw: text", "saw: tool_started", "saw: tool_completed", "ended"}
+	if got := o.heard(); !slices.Equal(got, want) || !slices.Contains(s.calls, "release") {
+		t.Fatalf("observer %q, session %v", got, s.calls)
 	}
 }

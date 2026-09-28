@@ -614,6 +614,33 @@ export interface Turn {
   /** How many files differ from where the round started, for a turn that writes. */
   files_changed?: number;
 }
+/**
+ * One thing a seat did on a request, as its session reported it: the prompt
+ * it was given, a reply it wrote, or a tool it ran. A reply streaming in or a
+ * tool still running is the same step, changed as it goes.
+ */
+export interface TurnStep {
+  id: number;
+  task_id: string;
+  seat: string;
+  member?: string;
+  role: string;
+  /** The run it belongs to. */
+  turn: string;
+  item: string;
+  at: string;
+  kind: "prompt" | "reply" | "tool";
+  text?: string;
+  tool?: string;
+  /** The tool's arguments, as JSON when they weren't cut. */
+  input?: string;
+  output?: string;
+  /** For a tool: running, completed, failed, interrupted or the engine's own word. */
+  status?: string;
+  exit_code?: number;
+  /** Some of it was cut to keep it to a sensible size. */
+  clipped?: boolean;
+}
 export interface State {
   pending_operations: PendingOperation[];
   /** The assistant in the seat; with no one there it has no id. */
@@ -969,6 +996,19 @@ export async function revisionFiles(
     { signal },
   );
   return body.files ?? [];
+}
+/** What one seat has done on a request, oldest first. */
+export async function turnSteps(
+  projectID: string,
+  taskID: string,
+  seat: string,
+  signal?: AbortSignal,
+) {
+  const body = await api<{ steps?: TurnStep[] | null }>(
+    `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/seats/${encodeURIComponent(seat)}/steps`,
+    { signal },
+  );
+  return body.steps ?? [];
 }
 
 const memberPath = (id: string) => `/api/members/${encodeURIComponent(id)}`;

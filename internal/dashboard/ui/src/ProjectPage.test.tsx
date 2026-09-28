@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
@@ -9,7 +10,7 @@ import {
   within,
 } from "@testing-library/react";
 import { ProjectPage } from "./ProjectPage";
-import type { ProjectTab } from "./router";
+import { parseRoute, requestHref, type ProjectTab } from "./router";
 import {
   normalizeState,
   type Decision,
@@ -21,6 +22,7 @@ import {
   type State,
   type Task,
   type Turn,
+  type TurnStep,
 } from "./api";
 
 const writingTeam: Playbook = {
@@ -82,10 +84,13 @@ const started = (overrides: Partial<Task> = {}) =>
 
 let calls: { path: string; method: string; body: unknown }[];
 let files: Record<number, unknown>;
+/** What each seat has done, as the server would answer for its panel. */
+let steps: Record<string, TurnStep[]>;
 const refresh = vi.fn(async () => {});
 beforeEach(() => {
   calls = [];
   files = {};
+  steps = {};
   refresh.mockClear();
   vi.stubGlobal(
     "fetch",
@@ -96,11 +101,16 @@ beforeEach(() => {
         body: options.body ? JSON.parse(options.body as string) : undefined,
       });
       const revision = /\/revisions\/(\d+)$/.exec(path);
+      const seat = /\/seats\/([^/]+)\/steps$/.exec(path);
       return {
         ok: true,
         status: 200,
         json: async () =>
-          revision ? { files: files[Number(revision[1])] } : {},
+          revision
+            ? { files: files[Number(revision[1])] }
+            : seat
+              ? { steps: steps[decodeURIComponent(seat[1])] ?? [] }
+              : {},
       };
     }),
   );
@@ -121,7 +131,7 @@ function show(
     paused?: boolean;
     stopping?: boolean;
   } = {},
-  at: { tab?: ProjectTab; request?: string } = {},
+  at: { tab?: ProjectTab; request?: string; seat?: string } = {},
 ) {
   const state = normalizeState({
     assistant: { name: "Iris", personality: "" },
@@ -136,6 +146,7 @@ function show(
         id: p.id,
         tab: at.tab ?? "board",
         request: at.request,
+        seat: at.seat,
       }}
       state={state}
       refresh={refresh}
@@ -585,7 +596,7 @@ describe("the board", () => {
       expect(screen.queryByText(/Landed/)).toBeNull();
     });
     it("opens a landed request as before", () => {
-      show(project(), { tasks: tasks() }, { request: "b2" });
+      show(project(), { tasks: tasks() }, { request: "b2", seat: "QA" });
       const panel = screen.getByRole("complementary", { name: "Newest" });
       expect(
         within(panel).getByText(
@@ -789,145 +800,6 @@ describe("a request", () => {
       },
     ]);
   });
-  it("messages one member of the team and shows their reply", async () => {
-    const replied = started({
-      status: "reviewing",
-      stage: "qa",
-      revisions: [{ n: 1, brief_version: 2, files: [] }],
-      messages: [
-        {
-          id: "m1",
-          to: "Reviewer",
-          kind: "reviewer",
-          direction: 0,
-          from: "owner",
-          text: "Is the cache safe?",
-          status: "answered",
-          outcome: "pass",
-          revision: 1,
-          reply: "Yes; it is keyed by tenant.",
-        },
-      ],
-    });
-    show(project(), { tasks: [replied] }, { request: "t1" });
-    expect(screen.getByText("Is the cache safe?")).toBeTruthy();
-    expect(screen.getByText("Yes; it is keyed by tenant.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("To"), { target: { value: "QA" } });
-    expect(
-      screen.getByText("QA checks the latest draft now, with your note."),
-    ).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Message"), {
-      target: { value: "Run it with the race detector" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send to QA" }));
-    await waitFor(() => expect(refresh).toHaveBeenCalled());
-    expect(writes()).toEqual([
-      {
-        path: "/api/projects/p1/tasks/t1/messages",
-        method: "POST",
-        body: { to: "QA", text: "Run it with the race detector" },
-      },
-    ]);
-  });
-  it("prompts by the kind of role, never lowercasing a member's name", () => {
-    const roles = [
-      { name: "Ada", kinds: ["implementer"], engine: "claude", member: "m1" },
-      { name: "Rune", kinds: ["reviewer"], engine: "codex", member: "m2" },
-      { name: "QA", kinds: ["qa"], engine: "codex" },
-    ];
-    show(
-      project(),
-      {
-        tasks: [started({ status: "writing", stage: "implementing", roles })],
-      },
-      { request: "t1" },
-    );
-    const box = screen.getByLabelText("Message");
-    expect(box.getAttribute("placeholder")).toBe(
-      "Tell the implementer what to change",
-    );
-    fireEvent.change(screen.getByLabelText("To"), {
-      target: { value: "Rune" },
-    });
-    expect(box.getAttribute("placeholder")).toBe(
-      "Ask the reviewer to check something",
-    );
-    expect(screen.getByRole("button", { name: "Send to Rune" })).toBeTruthy();
-  });
-  it("leaves out a seat that only researches, and names a seat that also researches by its work", () => {
-    const researcher = {
-      name: "Researcher",
-      kinds: ["researcher"],
-      engine: "claude",
-    };
-    show(
-      project(),
-      {
-        tasks: [
-          started({
-            status: "researching",
-            stage: "researching",
-            checking: "Researcher",
-            roles: [researcher, ...codeTeam().roles],
-          }),
-        ],
-      },
-      { request: "t1" },
-    );
-    const options = () =>
-      within(screen.getByLabelText("To"))
-        .getAllByRole("option")
-        .map((o) => o.textContent);
-    expect(options()).toEqual(["Implementer", "Reviewer", "QA"]);
-    expect(screen.getByText("Goes into the first round.")).toBeTruthy();
-    cleanup();
-    const ada = {
-      name: "Ada",
-      kinds: ["implementer", "researcher"],
-      engine: "claude",
-    };
-    show(
-      project(),
-      {
-        tasks: [
-          started({
-            status: "writing",
-            stage: "implementing",
-            roles: [ada, ...codeTeam().roles.slice(1)],
-          }),
-        ],
-      },
-      { request: "t1" },
-    );
-    expect(options()).toEqual(["Ada (implementer)", "Reviewer", "QA"]);
-    expect(screen.getByLabelText("Message").getAttribute("placeholder")).toBe(
-      "Tell the implementer what to change",
-    );
-    expect(screen.getByRole("button", { name: "Send to Ada" })).toBeTruthy();
-  });
-  it("leaves out a seat that only keeps the to-do list, and names one that also works by its work", () => {
-    const pia = { name: "Pia", kinds: ["pm"], engine: "claude" };
-    const rune = { name: "Rune", kinds: ["reviewer", "pm"], engine: "codex" };
-    const [implementer, , qa] = codeTeam().roles;
-    show(
-      project(),
-      {
-        tasks: [
-          started({
-            status: "writing",
-            stage: "implementing",
-            roles: [implementer, rune, qa, pia],
-          }),
-        ],
-      },
-      { request: "t1" },
-    );
-    expect(
-      within(screen.getByLabelText("To"))
-        .getAllByRole("option")
-        .map((o) => o.textContent),
-    ).toEqual(["Implementer", "Rune (reviewer)", "QA"]);
-  });
   it("shows the plan with only the parts it has, and who researched it", () => {
     show(
       project(),
@@ -1045,6 +917,17 @@ describe("a request", () => {
       { request: "t1" },
     );
     expect(screen.queryByRole("button", { name: "Stop request" })).toBeNull();
+    cleanup();
+    show(
+      project(),
+      {
+        tasks: [
+          started({ status: "landed", stage: "done", delivered_to: "main" }),
+        ],
+      },
+      { request: "t1", seat: "Implementer" },
+    );
+    expect(screen.queryByLabelText("Message")).toBeNull();
     expect(screen.getByText(/This request is finished/)).toBeTruthy();
   });
   it("offers to land a change delivered before the project landed on main", async () => {
@@ -1139,6 +1022,424 @@ describe("a request", () => {
     } finally {
       field.remove();
     }
+  });
+});
+
+describe("a team member's panel", () => {
+  const ago = (minutes: number) =>
+    new Date(Date.now() - minutes * 60000).toISOString();
+  const working = (seat: string, extra: Partial<Turn> = {}): Turn => ({
+    project_id: "p1",
+    task_id: "t1",
+    role: "implementer",
+    seat,
+    started_at: ago(3),
+    last_activity_at: ago(0),
+    tool_calls: 2,
+    edits: 0,
+    output_tokens: 0,
+    ...extra,
+  });
+  const step = (overrides: Partial<TurnStep>): TurnStep => ({
+    id: 1,
+    task_id: "t1",
+    seat: "Implementer",
+    role: "implementer",
+    turn: "run-1",
+    item: "item",
+    at: ago(2),
+    kind: "reply",
+    ...overrides,
+  });
+  type Extra = Parameters<typeof show>[1];
+  const state = (p: Project, extra: Extra = {}) =>
+    normalizeState({
+      assistant: { name: "Iris", personality: "" },
+      projects: [p],
+      ...extra,
+    });
+  /** The page as the app shows it, following the address as it changes. */
+  function Routed({ p, at }: { p: Project; at: State }) {
+    const [route, setRoute] = useState(() => parseRoute(window.location.hash));
+    useEffect(() => {
+      const follow = () => setRoute(parseRoute(window.location.hash));
+      window.addEventListener("hashchange", follow);
+      return () => window.removeEventListener("hashchange", follow);
+    }, []);
+    return route.page === "project" ? (
+      <ProjectPage project={p} route={route} state={at} refresh={refresh} />
+    ) : null;
+  }
+  /** Opens the page at hash; poll hands it the state a later poll brings. */
+  function routed(p: Project, extra: Extra, hash: string) {
+    window.history.replaceState(null, "", `/${hash}`);
+    const view = render(<Routed p={p} at={state(p, extra)} />);
+    return {
+      poll: (next: Extra) =>
+        view.rerender(<Routed p={p} at={state(p, next)} />),
+    };
+  }
+  const writing = (overrides: Partial<Task> = {}) =>
+    started({ status: "writing", stage: "implementing", ...overrides });
+  const seatButton = (name: string) =>
+    within(screen.getByRole("region", { name: "Team" })).getByRole("button", {
+      name: new RegExp(`^${name}`),
+    });
+  const box = (panel: HTMLElement) =>
+    within(panel).getByLabelText("Message") as HTMLTextAreaElement;
+  beforeEach(() => sessionStorage.clear());
+  afterEach(() => window.history.replaceState(null, "", "/"));
+
+  it("shows each member of the team with a way in, and keeps the conversation for the panel", () => {
+    show(
+      project(),
+      {
+        tasks: [
+          writing({
+            messages: [
+              {
+                id: "m1",
+                to: "Reviewer",
+                kind: "reviewer",
+                direction: 0,
+                from: "owner",
+                text: "Is the cache safe?",
+                status: "waiting",
+              },
+            ],
+          }),
+        ],
+        turns: [working("Implementer")],
+      },
+      { request: "t1" },
+    );
+    const team = screen.getByRole("region", { name: "Team" });
+    expect(
+      within(team)
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("data-seat")),
+    ).toEqual(["Implementer", "Reviewer", "QA"]);
+    expect(
+      within(seatButton("Implementer")).getByText("Working now"),
+    ).toBeTruthy();
+    expect(
+      within(seatButton("Reviewer")).getByText("1 message waiting"),
+    ).toBeTruthy();
+    expect(screen.queryByText("Is the cache safe?")).toBeNull();
+    expect(screen.queryByLabelText("Message")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Reviewer" })).toBeNull();
+  });
+
+  it("opens with one click and closes back to the request as it was left", async () => {
+    const plan = {
+      summary: "Wrap the lookup in a cache.",
+      exists: ["A lookup", "A store"],
+      changes: ["A cache"],
+      out_of_scope: ["Eviction"],
+      role: "Ada",
+      at: "2026-09-21T10:00:00Z",
+    };
+    routed(project(), { tasks: [writing({ plan })] }, requestHref("p1", "t1"));
+    fireEvent.click(screen.getByRole("button", { name: "Show the plan" }));
+    expect(screen.getByText("Eviction")).toBeTruthy();
+    fireEvent.click(seatButton("Reviewer"));
+    await waitFor(() =>
+      expect(window.location.hash).toBe(
+        "#/projects/p1/requests/t1/team/Reviewer",
+      ),
+    );
+    const panel = await screen.findByRole("region", { name: "Reviewer" });
+    expect(within(panel).getByText("Reviewer · Codex")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Plan" })).toBeNull();
+    const back = within(panel).getByRole("button", {
+      name: "Back to the request",
+    });
+    expect(document.activeElement).toBe(back);
+    fireEvent.click(back);
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Reviewer" })).toBeNull(),
+    );
+    expect(window.location.hash).toBe("#/projects/p1/requests/t1");
+    // The request is as it was: the plan still open, and focus back where
+    // the owner left it.
+    expect(
+      within(screen.getByRole("region", { name: "Plan" })).getByText(
+        "Eviction",
+      ),
+    ).toBeTruthy();
+    expect(document.activeElement).toBe(seatButton("Reviewer"));
+    // Escape closes the panel first, and only then the request.
+    fireEvent.click(seatButton("QA"));
+    await screen.findByRole("region", { name: "QA" });
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "QA" })).toBeNull(),
+    );
+    expect(window.location.hash).toBe("#/projects/p1/requests/t1");
+    expect(screen.getByRole("region", { name: "Plan" })).toBeTruthy();
+  });
+
+  it("shows what the member was asked, wrote and ran, with long output folded away", async () => {
+    const long = `${"The cache sits in front of the store. ".repeat(40)}The end of it.`;
+    steps.Implementer = [
+      step({
+        id: 1,
+        kind: "prompt",
+        item: "prompt",
+        at: ago(9),
+        text: "Cache the lookups, keyed by tenant.",
+      }),
+      step({ id: 2, item: "msg-1", at: ago(8), text: "Looking at the store." }),
+      step({
+        id: 3,
+        kind: "tool",
+        item: "call-1",
+        at: ago(7),
+        tool: "Bash",
+        input: '{"command":"go test ./...","timeout":60}',
+        output: "FAIL store 0.2s",
+        status: "failed",
+        exit_code: 1,
+        clipped: true,
+      }),
+      step({ id: 4, item: "msg-2", at: ago(6), text: long }),
+    ];
+    show(
+      project(),
+      { tasks: [writing()] },
+      { request: "t1", seat: "Implementer" },
+    );
+    const panel = screen.getByRole("region", { name: "Implementer" });
+    expect(
+      await within(panel).findByText("Looking at the store."),
+    ).toBeTruthy();
+    expect(calls.map((c) => c.path)).toContain(
+      "/api/projects/p1/tasks/t1/seats/Implementer/steps",
+    );
+    const prompt = within(panel).getByText(
+      "Cache the lookups, keyed by tenant.",
+    );
+    expect(prompt.closest("details")?.open).toBe(false);
+    const tool = within(panel).getByText("go test ./...").closest("details")!;
+    expect(tool.open).toBe(false);
+    expect(within(tool).getByText("Failed · exit 1")).toBeTruthy();
+    expect(within(tool).getByText("FAIL store 0.2s")).toBeTruthy();
+    expect(within(tool).getByText(/"timeout": 60/)).toBeTruthy();
+    expect(
+      within(tool).getByText("Cut to its first part; the rest wasn't kept."),
+    ).toBeTruthy();
+    expect(within(panel).queryByText(/The end of it\./)).toBeNull();
+    fireEvent.click(within(panel).getByRole("button", { name: "Show all" }));
+    expect(within(panel).getByText(/The end of it\./)).toBeTruthy();
+    // It only shows: the way back, the fold and the message box are all
+    // there is to press.
+    expect(
+      within(panel)
+        .getAllByRole("button")
+        .map((b) => b.textContent?.trim()),
+    ).toEqual(["Back to the request", "Show less", "Send to Implementer"]);
+  });
+
+  it("follows the member while it works", async () => {
+    steps.Implementer = [
+      step({ id: 1, kind: "prompt", item: "prompt", text: "Cache it." }),
+    ];
+    const { poll } = routed(
+      project(),
+      { tasks: [writing()] },
+      "#/projects/p1/requests/t1/team/Implementer",
+    );
+    const panel = await screen.findByRole("region", { name: "Implementer" });
+    expect(
+      within(panel).getByText("Waiting for the implementer to pick this up"),
+    ).toBeTruthy();
+    steps.Implementer = [
+      ...steps.Implementer,
+      step({ id: 2, item: "msg-1", at: ago(1), text: "Reading the store." }),
+      step({
+        id: 3,
+        kind: "tool",
+        item: "call-1",
+        at: ago(0),
+        tool: "Read",
+        input: '{"file_path":"store.go"}',
+        status: "running",
+      }),
+    ];
+    poll({
+      tasks: [writing()],
+      turns: [working("Implementer", { tool: "Read" })],
+    });
+    expect(await within(panel).findByText("Reading the store.")).toBeTruthy();
+    expect(within(panel).getByText("store.go")).toBeTruthy();
+    expect(within(panel).getByText("Running")).toBeTruthy();
+    const status = within(panel).getByRole("status");
+    expect(status.textContent).toMatch(/^Working · 3m · 2 tool calls/);
+    expect(status.textContent).toContain("now: Read");
+  });
+
+  it("sends a message from the panel, and shows it with the member's reply", async () => {
+    const reviewing = (messages: Task["messages"]) =>
+      started({
+        status: "reviewing",
+        stage: "qa",
+        revisions: [{ n: 1, brief_version: 2, files: [] }],
+        messages,
+      });
+    const toReviewer = {
+      id: "m1",
+      to: "Reviewer",
+      kind: "reviewer",
+      direction: 0,
+      from: "owner",
+      text: "Is the cache safe?",
+      status: "answered" as const,
+      outcome: "pass",
+      revision: 1,
+      reply: "Yes; it is keyed by tenant.",
+      at: ago(5),
+    };
+    const { poll } = routed(
+      project(),
+      { tasks: [reviewing([toReviewer])] },
+      "#/projects/p1/requests/t1/team/Reviewer",
+    );
+    let panel = await screen.findByRole("region", { name: "Reviewer" });
+    expect(within(panel).getByText("Is the cache safe?")).toBeTruthy();
+    expect(within(panel).getByText("Yes; it is keyed by tenant.")).toBeTruthy();
+    fireEvent.click(
+      within(panel).getByRole("button", { name: "Back to the request" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Reviewer" })).toBeNull(),
+    );
+    fireEvent.click(seatButton("QA"));
+    panel = await screen.findByRole("region", { name: "QA" });
+    expect(within(panel).queryByText("Is the cache safe?")).toBeNull();
+    expect(
+      within(panel).getByText(
+        "QA checks the latest draft now, with your note.",
+      ),
+    ).toBeTruthy();
+    fireEvent.change(box(panel), {
+      target: { value: "Run it with the race detector" },
+    });
+    fireEvent.click(within(panel).getByRole("button", { name: "Send to QA" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/tasks/t1/messages",
+        method: "POST",
+        body: { to: "QA", text: "Run it with the race detector" },
+      },
+    ]);
+    expect(box(panel).value).toBe("");
+    const toQA = {
+      ...toReviewer,
+      id: "m2",
+      to: "QA",
+      kind: "qa",
+      text: "Run it with the race detector",
+      status: "working" as const,
+      reply: undefined,
+      outcome: undefined,
+      at: ago(0),
+    };
+    poll({ tasks: [reviewing([toReviewer, toQA])] });
+    expect(
+      await within(panel).findByText("Run it with the race detector"),
+    ).toBeTruthy();
+    expect(within(panel).getByText("QA is on it")).toBeTruthy();
+    poll({
+      tasks: [
+        reviewing([
+          toReviewer,
+          { ...toQA, status: "answered", outcome: "pass", reply: "No races." },
+        ]),
+      ],
+    });
+    expect(await within(panel).findByText("No races.")).toBeTruthy();
+  });
+
+  it("keeps the panel open and the unsent message through refreshes and a reload", async () => {
+    const hash = "#/projects/p1/requests/t1/team/Implementer";
+    const { poll } = routed(project(), { tasks: [writing()] }, hash);
+    let panel = await screen.findByRole("region", { name: "Implementer" });
+    fireEvent.change(box(panel), {
+      target: { value: "Keep the old API working" },
+    });
+    poll({ tasks: [writing({ round: 2 })], turns: [working("Implementer")] });
+    poll({ tasks: [writing({ round: 2 })] });
+    panel = screen.getByRole("region", { name: "Implementer" });
+    expect(box(panel).value).toBe("Keep the old API working");
+    cleanup();
+    routed(project(), { tasks: [writing()] }, hash);
+    panel = await screen.findByRole("region", { name: "Implementer" });
+    expect(box(panel).value).toBe("Keep the old API working");
+    fireEvent.click(
+      within(panel).getByRole("button", { name: "Send to Implementer" }),
+    );
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it("prompts by the kind of role, never lowercasing a member's name", () => {
+    const roles = [
+      { name: "Ada", kinds: ["implementer"], engine: "claude", member: "m1" },
+      { name: "Rune", kinds: ["reviewer"], engine: "codex", member: "m2" },
+      { name: "QA", kinds: ["qa"], engine: "codex" },
+    ];
+    const tasks = [writing({ roles })];
+    show(project(), { tasks }, { request: "t1", seat: "Ada" });
+    expect(screen.getByLabelText("Message").getAttribute("placeholder")).toBe(
+      "Tell the implementer what to change",
+    );
+    cleanup();
+    show(project(), { tasks }, { request: "t1", seat: "Rune" });
+    expect(screen.getByLabelText("Message").getAttribute("placeholder")).toBe(
+      "Ask the reviewer to check something",
+    );
+    expect(screen.getByRole("button", { name: "Send to Rune" })).toBeTruthy();
+  });
+
+  it("lists a seat that only researches or keeps the list, with nothing to send it", () => {
+    const researcher = {
+      name: "Researcher",
+      kinds: ["researcher"],
+      engine: "claude",
+    };
+    const pia = { name: "Pia", kinds: ["pm"], engine: "claude" };
+    const ada = {
+      name: "Ada",
+      kinds: ["implementer", "researcher"],
+      engine: "claude",
+    };
+    const researching = started({
+      status: "researching",
+      stage: "researching",
+      checking: "Researcher",
+      roles: [researcher, ada, ...codeTeam().roles.slice(1), pia],
+    });
+    show(project(), { tasks: [researching] }, { request: "t1" });
+    expect(within(seatButton("Researcher")).getByText("Up next")).toBeTruthy();
+    expect(
+      within(seatButton("Ada")).getByText("Researcher and implementer"),
+    ).toBeTruthy();
+    expect(seatButton("Pia")).toBeTruthy();
+    cleanup();
+    for (const seat of ["Researcher", "Pia"]) {
+      show(project(), { tasks: [researching] }, { request: "t1", seat });
+      expect(screen.queryByLabelText("Message")).toBeNull();
+      expect(
+        screen.getByText(
+          "Only the seats that write and check the work take messages.",
+        ),
+      ).toBeTruthy();
+      cleanup();
+    }
+    show(project(), { tasks: [researching] }, { request: "t1", seat: "Ada" });
+    expect(screen.getByText("Goes into the first round.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send to Ada" })).toBeTruthy();
   });
 });
 
@@ -2408,57 +2709,58 @@ describe("faces of the team at work", () => {
     expect(faces(card("Waits"))).toEqual([]);
   });
 
-  it("shows the member beside its verdicts and the messages sent to it", () => {
-    show(
-      project({ playbook: { ...codeTeam(), roles } }),
-      {
-        members: [ada, rune],
-        tasks: [
-          staffed({
-            status: "reviewing",
-            stage: "qa",
-            revisions: [{ n: 1, brief_version: 2, files: [] }],
-            verdicts: [
-              {
-                revision: 1,
-                role: "Rune",
-                brief_version: 2,
-                outcome: "pass",
-                summary: "Fine.",
-              },
-              {
-                revision: 1,
-                role: "QA",
-                brief_version: 2,
-                outcome: "revise",
-                summary: "Fails.",
-              },
-            ],
-            messages: [
-              {
-                id: "x1",
-                to: "Ada",
-                kind: "implementer",
-                direction: 0,
-                from: "owner",
-                text: "Rename it.",
-                status: "waiting",
-              },
-              {
-                id: "x2",
-                to: "QA",
-                kind: "qa",
-                direction: 0,
-                from: "owner",
-                text: "Run it again.",
-                status: "waiting",
-              },
-            ],
-          }),
-        ],
-      },
-      { request: "t1" },
-    );
+  it("shows the member beside its verdicts, its place on the team and the messages sent to it", () => {
+    const at = (seat?: string) =>
+      show(
+        project({ playbook: { ...codeTeam(), roles } }),
+        {
+          members: [ada, rune],
+          tasks: [checked],
+        },
+        { request: "t1", seat },
+      );
+    const checked = staffed({
+      status: "reviewing",
+      stage: "qa",
+      revisions: [{ n: 1, brief_version: 2, files: [] }],
+      verdicts: [
+        {
+          revision: 1,
+          role: "Rune",
+          brief_version: 2,
+          outcome: "pass",
+          summary: "Fine.",
+        },
+        {
+          revision: 1,
+          role: "QA",
+          brief_version: 2,
+          outcome: "revise",
+          summary: "Fails.",
+        },
+      ],
+      messages: [
+        {
+          id: "x1",
+          to: "Ada",
+          kind: "implementer",
+          direction: 0,
+          from: "owner",
+          text: "Rename it.",
+          status: "waiting",
+        },
+        {
+          id: "x2",
+          to: "QA",
+          kind: "qa",
+          direction: 0,
+          from: "owner",
+          text: "Run it again.",
+          status: "waiting",
+        },
+      ],
+    });
+    at();
     const chip = (text: string) =>
       screen.getByText(
         (_, el) =>
@@ -2471,9 +2773,23 @@ describe("faces of the team at work", () => {
       chip("Rune: Passed").querySelector("img")?.getAttribute("width"),
     ).toBe("16");
     expect(faces(chip("QA: Asked for changes"))).toEqual([]);
-    const who = [...document.querySelectorAll<HTMLElement>(".thread-who")];
-    expect(who.map((w) => w.textContent)).toEqual(["You → Ada", "You → QA"]);
-    expect(faces(who[0])).toEqual([`/api/avatars/${"a".repeat(32)}/small`]);
-    expect(faces(who[1])).toEqual([]);
+    const seat = (name: string) =>
+      document.querySelector<HTMLElement>(`button[data-seat="${name}"]`)!;
+    expect(faces(seat("Ada"))).toEqual([
+      `/api/avatars/${"a".repeat(32)}/small`,
+    ]);
+    expect(faces(seat("QA"))).toEqual([]);
+    const who = () => [
+      ...document.querySelectorAll<HTMLElement>(".thread-who"),
+    ];
+    expect(who()).toEqual([]);
+    cleanup();
+    at("Ada");
+    expect(who().map((w) => w.textContent)).toEqual(["You → Ada"]);
+    expect(faces(who()[0])).toEqual([`/api/avatars/${"a".repeat(32)}/small`]);
+    cleanup();
+    at("QA");
+    expect(who().map((w) => w.textContent)).toEqual(["You → QA"]);
+    expect(faces(who()[0])).toEqual([]);
   });
 });

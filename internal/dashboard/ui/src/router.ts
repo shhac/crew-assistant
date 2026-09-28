@@ -10,7 +10,14 @@ export const projectTabs: ProjectTab[] = [
 export type Route =
   | { page: "inbox" }
   | { page: "projects" }
-  | { page: "project"; id: string; tab: ProjectTab; request?: string }
+  | {
+      page: "project";
+      id: string;
+      tab: ProjectTab;
+      request?: string;
+      /** The seat whose panel is open over the request. */
+      seat?: string;
+    }
   | { page: "team" }
   | { page: "member"; id: string }
   | { page: "assistant"; id: string }
@@ -32,8 +39,13 @@ export function parseRoute(hash: string): Route {
     case "projects": {
       const id = parts[1] && decode(parts[1]);
       if (!id) return { page: "projects" };
-      if (parts[2] === "requests" && parts[3])
-        return { page: "project", id, tab: "board", request: decode(parts[3]) };
+      if (parts[2] === "requests" && parts[3]) {
+        const request = decode(parts[3]);
+        const seat = parts[4] === "team" && parts[5] && decode(parts[5]);
+        return seat
+          ? { page: "project", id, tab: "board", request, seat }
+          : { page: "project", id, tab: "board", request };
+      }
       const tab = projectTabs.find((t) => t === parts[2]) ?? "board";
       return { page: "project", id, tab };
     }
@@ -71,8 +83,12 @@ export function href(route: Route): string {
       return route.section ? `#/settings/${route.section}` : "#/settings";
     case "project": {
       const base = `#/projects/${encodeURIComponent(route.id)}`;
-      if (route.request)
-        return `${base}/requests/${encodeURIComponent(route.request)}`;
+      if (route.request) {
+        const request = `${base}/requests/${encodeURIComponent(route.request)}`;
+        return route.seat
+          ? `${request}/team/${encodeURIComponent(route.seat)}`
+          : request;
+      }
       return route.tab === "board" ? base : `${base}/${route.tab}`;
     }
   }
@@ -83,6 +99,10 @@ export const projectHref = (id: string, tab: ProjectTab = "board") =>
 
 export const requestHref = (projectID: string, taskID: string) =>
   href({ page: "project", id: projectID, tab: "board", request: taskID });
+
+/** A request with one team member's panel open over it. */
+export const seatHref = (projectID: string, taskID: string, seat: string) =>
+  href({ page: "project", id: projectID, tab: "board", request: taskID, seat });
 
 export const memberHref = (id: string) => `#/team/${encodeURIComponent(id)}`;
 

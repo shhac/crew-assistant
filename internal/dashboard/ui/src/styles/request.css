@@ -106,14 +106,146 @@
   gap: 8px;
 }
 
-.thread-to {
+/* The team, one entry per seat, and a member's panel */
+.seats {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 
-.thread-to .field {
-  width: auto;
+.seats > li + li {
+  border-top: 1px solid var(--line);
+}
+
+.seat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.seat:hover {
+  background: var(--sunken);
+}
+
+.seat-name {
+  font-weight: 600;
+}
+
+.seat-note {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.member-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.member-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.member-header h2 {
+  font-size: 19px;
+  line-height: 1.3;
+}
+
+.member-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.step > details > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.step-prompt,
+.step-tool {
+  font-size: 13px;
+  color: var(--soft);
+}
+
+.step-label {
+  font-weight: 600;
+}
+
+.step-gist {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.step-tool.tool-failed .tool-mark,
+.step-tool.tool-interrupted .tool-mark {
+  color: var(--block);
+}
+
+.step-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0 0 20px;
+}
+
+.step-pre {
+  margin: 6px 0 0;
+  max-height: 320px;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: var(--radius);
+  background: var(--sunken);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+}
+
+.step-reply {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.step-text .link-button {
+  margin-top: 4px;
 }
 
 .draft > summary {
