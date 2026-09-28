@@ -299,8 +299,13 @@ func offer(v *Snapshot, t *Task, busy map[string]bool, admit Admit, now time.Tim
 			return out
 		}
 	case TaskLanding:
+		// One landing at a time, counting one a stop cut off whose delivery
+		// has yet to be settled.
 		if slices.ContainsFunc(v.Tasks, func(o Task) bool {
-			return o.ProjectID == t.ProjectID && o.ID != t.ID && slices.ContainsFunc(o.Claims, func(c Claim) bool { return c.Step == TaskLanding })
+			if o.ProjectID != t.ProjectID || o.ID == t.ID {
+				return false
+			}
+			return (o.Finished() && o.Delivering != nil) || slices.ContainsFunc(o.Claims, func(c Claim) bool { return c.Step == TaskLanding })
 		}) {
 			return nil
 		}

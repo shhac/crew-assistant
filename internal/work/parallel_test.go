@@ -3,6 +3,7 @@ package work
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -462,6 +463,84 @@ func TestStoppingOneTaskLeavesTheOthersWorking(t *testing.T) {
 	}
 }
 
+// staleRunner is a writing team whose writer, on A, ignores being
+// cancelled: once stopped it still leaves a note through its tools, and
+// returns only when released. Other turns run as parallelRunner's.
+type staleRunner struct {
+	parallelRunner
+	inTurn, stopped, called, release chan struct{}
+	late                             error
+}
+
+func (r *staleRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
+	if !spec.Write || objectiveOf(spec.Prompt) != "A" {
+		return r.parallelRunner.Run(ctx, spec)
+	}
+	close(r.inTurn)
+	<-r.stopped
+	result, err := spec.Handler.CallTool(context.Background(), session.ToolCall{Name: "add_note", Arguments: []byte(`{"text": "After the stop"}`)})
+	if err == nil && result.IsError {
+		err = errors.New(result.Content)
+	}
+	r.late = err
+	close(r.called)
+	<-r.release
+	return roles.Result{Text: "Wrote A.", Session: sessionRef("A", 1)}, nil
+}
+
+// Stopping a task ends its claims at once: a turn that ignores being
+// cancelled has its later tool calls refused as stale, and its seat is free
+// for other work while it still runs.
+func TestAStoppedTurnThatRunsOnHoldsNoSeatAndRecordsNothing(t *testing.T) {
+	runner := &staleRunner{inTurn: make(chan struct{}), stopped: make(chan struct{}), called: make(chan struct{}), release: make(chan struct{})}
+	a, p := parallelApp(t, runner, 2)
+	// Claude has room for a second turn, so only the seat could hold B back.
+	two := 2
+	cfg := config.Default()
+	cfg.Engines.Claude.RoleRuns = &two
+	a.Config = func() config.Config { return cfg }
+	ctx := context.Background()
+	var stopOnce, releaseOnce sync.Once
+	stop := func() { stopOnce.Do(func() { close(runner.stopped) }) }
+	release := func() { releaseOnce.Do(func() { close(runner.release) }) }
+	defer release()
+	defer stop()
+	first := queue(t, a, p, "A")
+	_, started, err := a.pass(ctx, true)
+	if err != nil || len(started) != 1 {
+		t.Fatalf("started %d: %v", len(started), err)
+	}
+	if !within(runner.inTurn) {
+		t.Fatal("A's turn never started")
+	}
+	if _, err = a.StopTask(ctx, p.ID, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := taskByID(t, a, first.ID); got.Status != core.TaskStopped || len(got.Claims) != 0 {
+		t.Fatalf("the stop should end the task's claims at once: %+v", got)
+	}
+	stop()
+	if !within(runner.called) {
+		t.Fatal("the stopped turn made no late call")
+	}
+	if runner.late == nil || !strings.Contains(runner.late.Error(), core.ErrStale.Error()) {
+		t.Fatalf("the late call should be refused as stale: %v", runner.late)
+	}
+	// While A's turn still runs, the writer's seat takes the next task.
+	second := queue(t, a, p, "B")
+	settle(t, a)
+	if b := taskByID(t, a, second.ID); b.Status != core.TaskWaiting || len(b.Revisions) != 1 || runner.turnsOf("Writer: B") != 1 {
+		t.Fatalf("B should be written while A's turn runs on: %+v", b)
+	}
+	release()
+	if r := <-started[0]; r != nil {
+		t.Fatal(r)
+	}
+	if got := taskByID(t, a, first.ID); got.Status != core.TaskStopped || len(got.Revisions) != 0 || len(got.Notes) != 0 || len(got.Claims) != 0 || got.Failures != 0 {
+		t.Fatalf("the stopped task should record nothing of its late turn: %+v", got)
+	}
+}
+
 // A restart resumes each task at its step without running a step twice: a
 // turn the old daemon left that can't be confirmed ended keeps its task
 // held, and the rest are claimed afresh and run once.
@@ -663,15 +742,18 @@ func TestARestartRunsThePMsLookOnceOrHoldsIt(t *testing.T) {
 }
 
 // askRunner plays the team from a script and runs onAsked while the PM
-// answers the assistant.
+// answers the assistant, and onRoute while it decides where a task goes.
 type askRunner struct {
 	*scriptedRunner
-	onAsked func()
+	onAsked, onRoute func()
 }
 
 func (r *askRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
 	if r.onAsked != nil && strings.Contains(spec.Prompt, "The owner's assistant asks you") {
 		r.onAsked()
+	}
+	if r.onRoute != nil && strings.Contains(spec.Prompt, "Decide where this task goes next") {
+		r.onRoute()
 	}
 	return r.scriptedRunner.Run(ctx, spec)
 }
@@ -743,6 +825,76 @@ func TestTheAssistantsQuestionTakesThePMsSeatAndATurn(t *testing.T) {
 	}
 	if !a.take("claude", true) {
 		t.Fatal("the question's turn was not given back")
+	}
+}
+
+// The PM deciding where a task goes holds the PM's seat and a turn on its
+// engine, as its look at the list does: the assistant's question meanwhile
+// is refused as busy, whether the seat or only the turn is taken.
+func TestTheAssistantsQuestionWaitsForTheTaskThePMIsDeciding(t *testing.T) {
+	warmer := `{"outcome":"pass","summary":"Fine.","findings":[],"question":"","next":"revise","note":"I want the closing warmer"}`
+	for _, c := range []struct {
+		name     string
+		roleRuns int
+		// elsewhere asks the same member as PM of another project, whose
+		// seat is free, so only the engine's bound holds the question back.
+		elsewhere bool
+	}{
+		{"the seat is taken", 2, false},
+		{"the engine's turns are taken", 1, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			scripted := &scriptedRunner{reviews: []string{warmer, pass, pass, pass}, route: []string{`{"next": "revise", "reason": "the closing matters to the owner"}`}}
+			a, p, task, _ := pmTeam(t, scripted)
+			runner := &askRunner{scriptedRunner: scripted}
+			a.runner = runner
+			cfg := config.Default()
+			cfg.Engines.Claude.RoleRuns = &c.roleRuns
+			a.Config = func() config.Config { return cfg }
+			ctx := context.Background()
+			pm, _ := p.PMSeat()
+			routed := false
+			var asked, otherFree error
+			runner.onRoute = func() {
+				routed = true
+				target := p.ID
+				if c.elsewhere {
+					other, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Other", Template: "draft", Brief: core.BriefInput{Goal: "Other notes"}})
+					if err == nil {
+						other, err = a.SetTeam(ctx, other.ID, TeamChoice{Template: "draft", PM: pm.Member})
+					}
+					if err != nil {
+						otherFree = err
+						return
+					}
+					target = other.ID
+					// Its seat is free: only the turn is taken.
+					look, _, ok, err := a.Core.ClaimPMQuestion(ctx, other.ID, func(core.Role) bool { return true })
+					if err != nil || !ok {
+						otherFree = fmt.Errorf("the other project's PM seat was not free: %v %v", ok, err)
+						return
+					}
+					a.Core.ReleaseProjectClaim(ctx, other.ID, look.Token)
+				} else if !a.take("claude", true) {
+					// A turn is free: only the seat is taken.
+					otherFree = errors.New("no turn was free beside the PM's decision")
+					return
+				} else {
+					a.free("claude")
+				}
+				_, asked = a.AskPM(ctx, target, "Why?")
+			}
+			task = stepUntil(t, a, task.ID, func(t core.Task) bool { return t.Status == core.TaskWaiting })
+			if !routed || otherFree != nil {
+				t.Fatalf("the PM decided %v: %v", routed, otherFree)
+			}
+			if n := len(turns(scripted, "The owner's assistant asks you")); !errors.Is(asked, core.ErrConflict) || !strings.Contains(asked.Error(), "busy") || n != 0 {
+				t.Fatalf("asked a PM busy deciding a task: %v, %d asks", asked, n)
+			}
+			if len(task.Revisions) != 2 || len(task.Claims) != 0 {
+				t.Fatalf("the PM's decision should stand: %+v", task)
+			}
+		})
 	}
 }
 

@@ -243,6 +243,43 @@ func TestAProjectLandsOneTaskAtATime(t *testing.T) {
 	}
 }
 
+// A landing stopped while its delivery is still going out ends its claim at
+// once, but the next task lands only once that delivery is settled.
+func TestALandingWaitsForAStoppedDeliveryToSettle(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	playbook := *p.Playbook
+	playbook.MaxActive = 2
+	s.SetPlaybook(testContext, p.ID, playbook)
+	tasks := queueAll(t, s, p, "A", "B")
+	claimed(t, s)
+	finish(t, s, tasks[0].ID, TaskLanding)
+	claimed(t, s)
+	finish(t, s, tasks[1].ID, TaskLanding)
+	finish(t, s, tasks[0].ID, TaskLanding)
+	if got := claimed(t, s); !slices.Equal(got, []string{"A: landing by "}) {
+		t.Fatalf("A should land first: %v", got)
+	}
+	// A is stopped mid-delivery: its claim goes, its delivery doesn't.
+	stopped, err := s.UpdateTask(testContext, tasks[0].ID, func(t *Task, _ *Project) (string, error) {
+		t.Status, t.Delivering = TaskStopped, &Delivering{Revision: 1}
+		return "", nil
+	})
+	if err != nil || len(stopped.Claims) != 0 {
+		t.Fatalf("stopped %+v %v", stopped, err)
+	}
+	if got := claimed(t, s); len(got) != 0 {
+		t.Fatalf("B landed beside A's delivery: %v", got)
+	}
+	s.UpdateTask(testContext, tasks[0].ID, func(t *Task, _ *Project) (string, error) {
+		t.Delivering = nil
+		return "", nil
+	})
+	if got := claimed(t, s); !slices.Equal(got, []string{"B: landing by "}) {
+		t.Fatalf("once A's delivery settled: %v", got)
+	}
+}
+
 // A turn whose claim has gone records nothing, anywhere; a restart clears
 // every claim onto a fresh attempt, except one whose turn may still run,
 // which keeps holding its task and seat.
