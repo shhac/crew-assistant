@@ -226,6 +226,51 @@ describe("the board", () => {
     expect(lane("Reviewing").classList.contains("quiet")).toBe(false);
     expect(screen.queryByRole("region", { name: "Ready to land" })).toBeNull();
   });
+  it("keeps requests in triage below To do, marked as not yet ready to start", () => {
+    const roles = [
+      ...codeTeam().roles,
+      { name: "Pim", kinds: ["pm"], engine: "claude" },
+    ];
+    show(project({ playbook: { ...codeTeam(), roles } }), {
+      tasks: [
+        task({ id: "t1", objective: "Ready one" }),
+        task({
+          id: "t2",
+          objective: "Being shaped",
+          status: "triage",
+          stage: "triage",
+          checking: "Pim",
+        }),
+      ],
+    });
+    const columns = [...document.querySelectorAll(".board-column")].map((c) =>
+      [...c.querySelectorAll(".board-lane")].map((l) =>
+        l.getAttribute("aria-label"),
+      ),
+    );
+    expect(columns[0]).toEqual(["To do", "Triage"]);
+    const lane = (name: string) => screen.getByRole("listitem", { name });
+    expect(
+      within(lane("To do"))
+        .getAllByRole("link")
+        .map((a) => a.textContent),
+    ).toEqual(["Ready one"]);
+    const shaped = within(lane("Triage"))
+      .getByRole("link", { name: "Being shaped" })
+      .closest(".board-card");
+    expect(shaped?.classList.contains("triage")).toBe(true);
+    expect(shaped?.querySelector(".board-card-step")?.textContent).toBe(
+      "With Pim for triage",
+    );
+    // Triage isn't the to-do list: nothing there can be moved in line.
+    expect(
+      within(lane("Triage")).queryByRole("button", { name: /Move/ }),
+    ).toBeNull();
+    const ready = within(lane("To do"))
+      .getByRole("link", { name: "Ready one" })
+      .closest(".board-card");
+    expect(ready?.classList.contains("triage")).toBe(false);
+  });
   it("shows a request being researched in its own column, with its researcher", () => {
     const researcher: Member = {
       id: "m1",

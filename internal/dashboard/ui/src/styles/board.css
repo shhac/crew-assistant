@@ -112,6 +112,16 @@
   border-color: var(--line-strong);
 }
 
+/* In triage: asked for, but not yet ready to start. */
+.board-card.triage {
+  border-style: dashed;
+  background: none;
+}
+
+.board-card.triage .board-card-link {
+  color: var(--soft);
+}
+
 .board-card.needs:hover {
   border-color: var(--needs);
 }

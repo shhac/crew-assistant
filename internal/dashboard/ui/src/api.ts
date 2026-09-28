@@ -252,6 +252,7 @@ export interface TaskInput {
 }
 export type TaskStatus =
   | "queued"
+  | "triage"
   | "researching"
   | "designing"
   | "writing"
@@ -265,6 +266,7 @@ export type TaskStatus =
   | "stopped";
 export type Stage =
   | "todo"
+  | "triage"
   | "researching"
   | "designing"
   | "implementing"

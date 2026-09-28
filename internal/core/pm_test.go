@@ -19,6 +19,20 @@ func pmProject(t *testing.T, s *Service) Project {
 	return p
 }
 
+// ask is a task the owner asked for, which the PM sent on from triage to
+// the to-do list.
+func ask(t *testing.T, s *Service, projectID, objective string) Task {
+	t.Helper()
+	out, err := s.QueueTask(testContext, projectID, TaskInput{Objective: objective})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyPM(testContext, projectID, PMAnswer{Triage: []TriageRelease{{Task: out.ID, To: TriageToResearch}}}); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 func queuedOrder(t *testing.T, s *Service, projectID string) ([]string, Project) {
 	t.Helper()
 	snap, _ := s.Snapshot(testContext)
@@ -91,7 +105,7 @@ func TestThePMLooksAgainWhenWorkIsPlannedOrFinishes(t *testing.T) {
 	playbook := *planned.Playbook
 	playbook.Roles = append(playbook.Roles, Role{Name: "Pim", Kinds: []string{RolePM}, Engine: "claude"})
 	planned, _ = s.SetPlaybook(testContext, planned.ID, playbook)
-	b, _ := s.QueueTask(testContext, planned.ID, TaskInput{Objective: "b"})
+	b := ask(t, s, planned.ID, "b")
 	s.NextTask(testContext)
 	s.ApplyPM(testContext, planned.ID, PMAnswer{})
 	if _, err := s.RecordPlan(testContext, b.ID, Plan{Summary: "Do b"}, nil); err != nil {
@@ -105,8 +119,7 @@ func TestThePMLooksAgainWhenWorkIsPlannedOrFinishes(t *testing.T) {
 func TestThePMOrdersTheListAndSetsWhatWaitsForWhat(t *testing.T) {
 	s, _ := fixture(t)
 	p := pmProject(t, s)
-	a, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "a"})
-	b, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "b"})
+	a, b := ask(t, s, p.ID, "a"), ask(t, s, p.ID, "b")
 	changed, err := s.ApplyPM(testContext, p.ID, PMAnswer{Order: []string{b.ID, a.ID}, Depends: map[string][]string{a.ID: {b.ID}}, Note: "b unblocks a"})
 	if err != nil || changed == "" {
 		t.Fatalf("changed %q, %v", changed, err)
@@ -125,7 +138,7 @@ func TestThePMOrdersTheListAndSetsWhatWaitsForWhat(t *testing.T) {
 	}
 	// An impossible id beside a good one keeps the good one; an empty list
 	// releases the task.
-	c, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "c"})
+	c := ask(t, s, p.ID, "c")
 	if _, err := s.ApplyPM(testContext, p.ID, PMAnswer{Depends: map[string][]string{c.ID: {"not-a-task", b.ID}, a.ID: {}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -142,8 +155,7 @@ func TestTheOwnersOrderStandsOverThePM(t *testing.T) {
 	s, _ := fixture(t)
 	start := s.now()
 	p := pmProject(t, s)
-	a, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "a"})
-	b, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "b"})
+	a, b := ask(t, s, p.ID, "a"), ask(t, s, p.ID, "b")
 	if _, err := s.OrderTasks(testContext, p.ID, []string{b.ID, a.ID}, OrderedByOwner); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +163,7 @@ func TestTheOwnersOrderStandsOverThePM(t *testing.T) {
 		t.Fatalf("the PM overruled the owner: %s", changed)
 	}
 	s.now = func() time.Time { return start.Add(time.Hour) }
-	c, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "c"})
+	c := ask(t, s, p.ID, "c")
 	// A reply naming one task for every place changes nothing.
 	if changed, err := s.ApplyPM(testContext, p.ID, PMAnswer{Order: []string{a.ID, a.ID, a.ID}}); err != nil || changed != "" {
 		t.Fatalf("a repeated task changed %q: %v", changed, err)

@@ -12,6 +12,11 @@ describe("activity presentation", () => {
     // What the PM decided about landing is shown, not folded away.
     expect(activityLabel("task.pm_landing")).toBe("PM decided");
     expect(isRoutineActivity("task.pm_landing")).toBe(false);
+    // Arriving in triage is asking, like queuing; where the PM sent it is shown.
+    expect(activityLabel("task.triage")).toBe("Asked");
+    expect(isRoutineActivity("task.triage")).toBe(true);
+    expect(activityLabel("task.triaged")).toBe("Triage");
+    expect(isRoutineActivity("task.triaged")).toBe(false);
     expect(activityLabel("memory.corrected")).toBe("Memory");
     expect(activityLabel("some.future_kind")).toBe("Update");
     expect(activityLabel("some.future_kind")).not.toContain("future");

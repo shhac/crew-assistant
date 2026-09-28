@@ -301,6 +301,36 @@ func TestTheOwnerLinksTasks(t *testing.T) {
 	}
 }
 
+// What the owner asks for on the dashboard goes to the team's PM for triage
+// first, and straight to the to-do list on a team without one.
+func TestTheOwnersRequestGoesToTriageWhenTheTeamHasAPM(t *testing.T) {
+	s, call := ownerServer(t)
+	ask := func(pm bool) core.Task {
+		var project core.Project
+		w := call("POST", "/api/projects", `{"title":"Export","brief":{"goal":"CSV","criteria":["Valid CSV"]},"template":"draft"}`)
+		_ = json.Unmarshal(w.Body.Bytes(), &project)
+		if pm {
+			playbook := *project.Playbook
+			playbook.Roles = append(playbook.Roles, core.Role{Name: "Pim", Kinds: []string{core.RolePM}, Engine: "claude"})
+			if _, err := s.SetPlaybook(context.Background(), project.ID, playbook); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var task core.Task
+		w = call("POST", "/api/projects/"+project.ID+"/tasks", `{"objective":"Schema","criteria":[]}`)
+		if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &task) != nil {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		return task
+	}
+	if task := ask(true); task.Status != core.TaskTriage || task.Stage != core.StageTriage {
+		t.Fatalf("with a PM the request is %s in %s", task.Status, task.Stage)
+	}
+	if task := ask(false); task.Status != core.TaskQueued {
+		t.Fatalf("without a PM the request is %s", task.Status)
+	}
+}
+
 // The owner leaves notes on a task and undoes a change the team made to its
 // requirements.
 func TestTheOwnerLeavesNotesAndUndoesATeamsEdit(t *testing.T) {

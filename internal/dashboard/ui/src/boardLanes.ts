@@ -27,8 +27,9 @@ const hasLane = (project: Project, tasks: Task[], kind: string, stage: Stage) =>
   );
 
 /**
- * The board's columns; research, design and QA show only for teams that have
- * them. Work ready to land sits above the board, not in a column.
+ * The board's columns; triage, research, design and QA show only for teams
+ * that have them. Triage sits below To do, in the same column. Work ready to
+ * land sits above the board, not in a column.
  */
 export function boardColumns(project: Project, tasks: Task[]): Column[] {
   const lane = (kind: string, stage: Stage, label: string): Lane[] =>
@@ -39,7 +40,13 @@ export function boardColumns(project: Project, tasks: Task[]): Column[] {
   ];
   const implementing = isCode(project.playbook) ? "Implementing" : "Writing";
   return [
-    { key: "todo", lanes: [{ stage: "todo", label: "To do" }] },
+    {
+      key: "todo",
+      lanes: [
+        { stage: "todo", label: "To do" },
+        ...lane("pm", "triage", "Triage"),
+      ],
+    },
     ...(research.length ? [{ key: "research", lanes: research }] : []),
     {
       key: "implementing",

@@ -255,7 +255,7 @@ func conversationOverview(v *Snapshot) string {
 	for _, t := range v.Tasks {
 		switch {
 		case t.Finished():
-		case t.Status == TaskQueued:
+		case t.Status == TaskQueued || t.Status == TaskTriage:
 			queued++
 		default:
 			running = append(running, fmt.Sprintf("- %s (%s): %s", t.Objective, titles[t.ProjectID], t.Status))

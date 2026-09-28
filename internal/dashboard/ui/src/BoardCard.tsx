@@ -47,7 +47,9 @@ export function BoardCard({
   const blocks = task.blocks?.length ?? 0;
   const pm = pmLandingLine(task);
   return (
-    <article className={`board-card${needsYou(task) ? " needs" : ""}`}>
+    <article
+      className={`board-card${needsYou(task) ? " needs" : ""}${task.stage === "triage" ? " triage" : ""}`}
+    >
       <TaskRef task={task} />
       <a
         className="board-card-link"

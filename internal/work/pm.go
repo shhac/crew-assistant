@@ -16,13 +16,20 @@ import (
 // managePM gives the team's PM one look at a project's to-do list after
 // something changed it: work queued, planned or finished. The PM sets the
 // order work starts in and what waits for what; it directs no one, and the
-// owner's or the assistant's order stands over it.
+// owner's or the assistant's order stands over it. A project with no PM
+// sends what waits in triage straight on, so nothing waits on a missing role.
 func (lp *Loop) managePM(ctx context.Context, snap core.Snapshot) (bool, error) {
 	for _, p := range snap.Projects {
+		seat, ok := p.PMSeat()
+		if !ok && snap.HasTriage(p.ID) {
+			if err := lp.Core.ReleaseTriage(ctx, p.ID, "the team has no PM"); err != nil {
+				return true, err
+			}
+			return true, lp.Core.SkipPM(ctx, p.ID, "")
+		}
 		if !p.PMDue || pmAsking(snap, p.ID) {
 			continue
 		}
-		seat, ok := p.PMSeat()
 		if !ok {
 			return true, lp.Core.SkipPM(ctx, p.ID, "")
 		}
@@ -59,15 +66,29 @@ func (lp *Loop) pmTurn(ctx context.Context, snap core.Snapshot, p core.Project, 
 		return err
 	})
 	if err != nil {
-		return lp.Core.SkipPM(ctx, p.ID, text.Clip(err.Error(), 300))
+		return lp.skipPM(ctx, p.ID, text.Clip(err.Error(), 300))
 	}
 	if parseErr != nil {
-		return lp.Core.SkipPM(ctx, p.ID, "its reply could not be read")
+		return lp.skipPM(ctx, p.ID, "its reply could not be read")
 	}
 	if _, err := lp.Core.ApplyPM(ctx, p.ID, answer); err != nil {
 		return err
 	}
 	return lp.askPMQuestions(ctx, p, seat, questions)
+}
+
+// skipPM goes on without the PM when it could not look: the list stays as
+// it is, and what waited in triage goes on to the team rather than wait on
+// a PM that failed.
+func (lp *Loop) skipPM(ctx context.Context, projectID, why string) error {
+	if err := lp.Core.SkipPM(ctx, projectID, why); err != nil {
+		return err
+	}
+	// Shutting down is not the PM failing: triage waits for its next look.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return lp.Core.ReleaseTriage(ctx, projectID, "the PM couldn't look: "+why)
 }
 
 // askPMQuestions brings what the PM couldn't settle about the order to the
@@ -101,9 +122,14 @@ Decide the order the queued tasks start in, and what each unfinished task has to
 		fmt.Fprintf(&b, "\nThe owner told you: %s\n", p.PMDirection)
 	}
 	pmTasks(&b, snap, p)
+	if pmTriage(&b, snap, p) {
+		b.WriteString(`
+Tasks in triage are new work from the owner or the assistant, waiting for you before the team takes them. For each one: tidy its title and requirements with edit_task so the researcher starts from a clear ask, and link it with link_tasks where it depends on or relates to other work. Then send it on to the team, "to": "research", which puts it on the to-do list, where the order below may place it; or, only when you cannot shape it without the owner, keep it in triage and ask them, "to": "owner", with the question. A task left out stays in triage until you next look.
+`)
+	}
 	b.WriteString(`
 Name each task by one id: its readable id, such as CA-3, or its canonical id. Reply with only this JSON object:
-{"order": ["every queued task id, in the order they should start"], "depends": [{"task": "id", "on": ["ids it must wait for; the full list, replacing what it has"]}], "note": "one line on what you changed and why", "questions": ["only what the owner must decide"]}`)
+{"triage": [{"task": "id of a task in triage", "to": "research or owner", "question": "for the owner only: what you need them to decide"}], "order": ["every queued task id, in the order they should start, with any you send on from triage"], "depends": [{"task": "id", "on": ["ids it must wait for; the full list, replacing what it has"]}], "note": "one line on what you changed and why", "questions": ["only what the owner must decide about the order"]}`)
 	return b.String()
 }
 
@@ -112,7 +138,7 @@ Name each task by one id: its readable id, such as CA-3, or its canonical id. Re
 func pmTasks(b *strings.Builder, snap core.Snapshot, p core.Project) {
 	b.WriteString("\nUnfinished tasks, queued ones in their current order:\n")
 	for _, t := range snap.Tasks {
-		if t.ProjectID != p.ID || t.Finished() {
+		if t.ProjectID != p.ID || t.Finished() || t.Status == core.TaskTriage {
 			continue
 		}
 		fmt.Fprintf(b, "- %s (%s): %s\n", t.Label(), t.Status, text.Clip(t.Objective, 300))
@@ -126,6 +152,32 @@ func pmTasks(b *strings.Builder, snap core.Snapshot, p core.Project) {
 			fmt.Fprintf(b, "  waits for: %s\n", waitsLine(snap.Tasks, t))
 		}
 	}
+}
+
+// pmTriage lists the tasks waiting in triage, with their requirements, and
+// reports whether there are any.
+func pmTriage(b *strings.Builder, snap core.Snapshot, p core.Project) bool {
+	found := false
+	for _, t := range snap.Tasks {
+		if t.ProjectID != p.ID || t.Status != core.TaskTriage {
+			continue
+		}
+		if !found {
+			b.WriteString("\nIn triage, oldest first:\n")
+			found = true
+		}
+		fmt.Fprintf(b, "- %s: %s\n", t.Label(), text.Clip(t.Objective, 300))
+		for _, c := range t.Criteria {
+			fmt.Fprintf(b, "  requirement: %s\n", text.Clip(c, 300))
+		}
+		if len(t.DependsOn) > 0 {
+			fmt.Fprintf(b, "  waits for: %s\n", waitsLine(snap.Tasks, t))
+		}
+		if t.Answered {
+			b.WriteString("  the owner has answered your question about it\n")
+		}
+	}
+	return found
 }
 
 // waitsLine is what a task waits for, marking what the owner set: the team
@@ -176,6 +228,7 @@ func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (string, 
 	var b strings.Builder
 	fmt.Fprintf(&b, "You keep the to-do list for the project %s. Goal: %s\n", p.Title, p.Brief.Goal)
 	pmTasks(&b, snap, p)
+	pmTriage(&b, snap, p)
 	fmt.Fprintf(&b, "\nThe owner's assistant asks you:\n\n%s\n\nAnswer in a few plain sentences from what you know of the list. You change nothing by answering; say what you would change, if anything, and why.", question)
 	spec := lp.baseSpec(seat, dir, b.String())
 	lp.withTools(&spec, lp.answerTools(p.ID, seat))
@@ -194,6 +247,11 @@ func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (string, 
 // parsePM reads the PM's JSON answer, tolerating a fenced block or prose.
 func parsePM(reply string) (core.PMAnswer, []string, error) {
 	var in struct {
+		Triage []struct {
+			Task     string `json:"task"`
+			To       string `json:"to"`
+			Question string `json:"question"`
+		} `json:"triage"`
 		Order   []string `json:"order"`
 		Depends []struct {
 			Task string   `json:"task"`
@@ -208,6 +266,9 @@ func parsePM(reply string) (core.PMAnswer, []string, error) {
 	answer := core.PMAnswer{Order: in.Order, Depends: map[string][]string{}, Note: text.Clip(strings.TrimSpace(in.Note), 300)}
 	for _, d := range in.Depends {
 		answer.Depends[strings.TrimSpace(d.Task)] = d.On
+	}
+	for _, r := range in.Triage {
+		answer.Triage = append(answer.Triage, core.TriageRelease{Task: strings.TrimSpace(r.Task), To: strings.ToLower(strings.TrimSpace(r.To)), Question: strings.TrimSpace(r.Question)})
 	}
 	return answer, listed(in.Questions, 5), nil
 }

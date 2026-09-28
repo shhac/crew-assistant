@@ -12,7 +12,8 @@ import (
 )
 
 // pmTeam is a writing project whose team has Pim as its PM, with the first
-// task queued before Pim joined and a second queued after.
+// task queued before Pim joined and a second asked for after, which waits
+// in triage for Pim.
 func pmTeam(t *testing.T, runner *scriptedRunner) (*Loop, core.Project, core.Task, core.Task) {
 	t.Helper()
 	ctx := context.Background()
@@ -41,7 +42,7 @@ func step(t *testing.T, a *Loop) {
 func TestThePMOrdersTheListBeforeTheNextTaskStarts(t *testing.T) {
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, first, second := pmTeam(t, runner)
-	runner.pm = []string{fmt.Sprintf(`{"order": [%q, %q], "depends": [], "note": "the second is smaller", "questions": []}`, second.ID, first.ID)}
+	runner.pm = []string{fmt.Sprintf(`{"triage": [{"task": %q, "to": "research"}], "order": [%q, %q], "depends": [], "note": "the second is smaller", "questions": []}`, second.ID, second.ID, first.ID)}
 	step(t, a)
 	if len(runner.seen) != 1 || runner.seen[0].Write || !strings.Contains(runner.seen[0].Prompt, "Second note") {
 		t.Fatalf("the PM's turn %+v", runner.seen)
@@ -230,5 +231,104 @@ func TestTheAssistantCanAskThePMAndItChangesNothing(t *testing.T) {
 	a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft"})
 	if _, err := a.AskPM(ctx, p.ID, "Anything?"); err == nil || !strings.Contains(err.Error(), "has no PM") {
 		t.Fatalf("a project without a PM: %v", err)
+	}
+}
+
+func statusOf(t *testing.T, a *Loop, id string) core.Task {
+	t.Helper()
+	snap, _ := a.Core.Snapshot(context.Background())
+	task, ok := findTask(snap, "", id)
+	if !ok {
+		t.Fatalf("no task %s", id)
+	}
+	return task
+}
+
+func TestTriageGoesOnWhenThePMLeftOrCouldNotLook(t *testing.T) {
+	ctx := context.Background()
+	// The PM left after the work was asked for.
+	runner := &scriptedRunner{reviews: []string{pass, pass}}
+	a, p, _, second := pmTeam(t, runner)
+	if second.Status != core.TaskTriage {
+		t.Fatalf("the owner's task with a PM is %s", second.Status)
+	}
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "draft"}); err != nil {
+		t.Fatal(err)
+	}
+	step(t, a)
+	if got := statusOf(t, a, second.ID); got.Status != core.TaskQueued {
+		t.Fatalf("with the PM gone the task is %s", got.Status)
+	}
+	if !activityHas(t, a, "the team has no PM") {
+		t.Fatal("the release isn't in the activity")
+	}
+	// The PM's turn failed, or its reply could not be read.
+	for _, runner := range []*scriptedRunner{
+		{reviews: []string{pass, pass}, fail: []error{errors.New("usage limit")}},
+		{reviews: []string{pass, pass}, pm: []string{"no idea", "still no idea"}},
+	} {
+		a, _, _, second := pmTeam(t, runner)
+		step(t, a)
+		if got := statusOf(t, a, second.ID); got.Status != core.TaskQueued {
+			t.Fatalf("after the PM couldn't look the task is %s", got.Status)
+		}
+	}
+}
+
+func TestAProjectWithoutAPMNeverUsesTriage(t *testing.T) {
+	runner := &scriptedRunner{reviews: []string{pass, pass}}
+	a, p, _ := loopApp(t, runner, "")
+	task, err := a.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Another note"}, core.LinkedByAssistant)
+	if err != nil || task.Status != core.TaskQueued {
+		t.Fatalf("task %s: %v", task.Status, err)
+	}
+}
+
+func TestThePMAsksTheOwnerAboutATaskInTriageThroughTheLoop(t *testing.T) {
+	runner := &scriptedRunner{reviews: []string{pass, pass}}
+	a, p, _, second := pmTeam(t, runner)
+	ctx := context.Background()
+	runner.pm = []string{fmt.Sprintf(`{"triage": [{"task": %q, "to": "owner", "question": "Which team is it for?"}], "order": [], "depends": [], "note": "", "questions": []}`, second.Ref)}
+	step(t, a)
+	got := statusOf(t, a, second.ID)
+	if got.Status != core.TaskTriage || got.DecisionID == "" {
+		t.Fatalf("task %s decision %q", got.Status, got.DecisionID)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	i := slices.IndexFunc(snap.Decisions, func(d core.Decision) bool { return d.ID == got.DecisionID })
+	if i < 0 || snap.Decisions[i].Kind != core.DecisionPMQuestion || snap.Decisions[i].Context != "Which team is it for?" {
+		t.Fatalf("decisions %+v", snap.Decisions)
+	}
+	// Stopping the task closes the question.
+	if _, err := a.StopTask(ctx, p.ID, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ = a.Core.Snapshot(ctx)
+	if d := snap.Decisions[i]; d.Status != core.DecisionDismissed {
+		t.Fatalf("the question is %s", d.Status)
+	}
+}
+
+func TestThePMIsToldWhatWaitsInTriage(t *testing.T) {
+	answer, _, err := parsePM(`{"triage": [{"task": " S-3 ", "to": " Research "}, {"task": "S-4", "to": "owner", "question": " Which? "}], "order": []}`)
+	if err != nil || !slices.Equal(answer.Triage, []core.TriageRelease{{Task: "S-3", To: core.TriageToResearch}, {Task: "S-4", To: core.TriageToOwner, Question: "Which?"}}) {
+		t.Fatalf("answer %+v: %v", answer.Triage, err)
+	}
+	p := core.Project{ID: "p", Title: "Site", Brief: core.Brief{Goal: "Ship"}}
+	snap := core.Snapshot{Tasks: []core.Task{
+		{ID: "a", Ref: "S-1", ProjectID: "p", Status: core.TaskQueued, Objective: "Search"},
+		{ID: "c", Ref: "S-3", ProjectID: "p", Status: core.TaskTriage, Objective: "Shortcuts", Criteria: []string{"Works with a keyboard"}},
+	}}
+	prompt := pmPrompt(snap, p)
+	for _, want := range []string{"In triage, oldest first:\n- S-3 (c): Shortcuts", "requirement: Works with a keyboard", "Tasks in triage are new work", `"triage": [`} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("the PM isn't told %q", want)
+		}
+	}
+	if strings.Contains(prompt, "(triage)") {
+		t.Error("a task in triage is listed with the queued work")
+	}
+	if prompt := pmPrompt(core.Snapshot{Tasks: snap.Tasks[:1]}, p); strings.Contains(prompt, "Tasks in triage are new work") {
+		t.Error("the PM is told about triage with nothing in it")
 	}
 }

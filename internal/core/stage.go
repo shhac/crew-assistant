@@ -7,6 +7,7 @@ import "slices"
 // so a board can never disagree with what the loop is doing.
 const (
 	StageTodo         = "todo"
+	StageTriage       = "triage"
 	StageResearching  = "researching"
 	StageDesigning    = "designing"
 	StageImplementing = "implementing"
@@ -40,6 +41,13 @@ func deriveWith(v *Snapshot, t *Task, index map[string][]string) {
 	if !t.Finished() {
 		t.WaitsFor = waitsFor(v, *t)
 	}
+	if t.Status == TaskTriage {
+		if p := project(v, t.ProjectID); p != nil {
+			if pm, ok := p.PMSeat(); ok {
+				t.Checking = pm.Name
+			}
+		}
+	}
 	if t.Status == TaskResearching {
 		if researcher, ok := t.Researcher(); ok {
 			t.Checking = researcher.Name
@@ -51,7 +59,8 @@ func deriveWith(v *Snapshot, t *Task, index map[string][]string) {
 			t.Checking = designer.Name
 		}
 	}
-	if t.Status == TaskWaiting {
+	// A task in triage may wait on the owner's answer to the PM too.
+	if t.Status == TaskWaiting || (t.Status == TaskTriage && t.DecisionID != "") {
 		d := decision(v, t.DecisionID)
 		t.Answered = d != nil && d.Status != DecisionOpen
 	}
@@ -67,6 +76,8 @@ func stageOf(v *Snapshot, t Task) string {
 	switch t.Status {
 	case TaskQueued:
 		return StageTodo
+	case TaskTriage:
+		return StageTriage
 	case TaskResearching:
 		return StageResearching
 	case TaskDesigning:

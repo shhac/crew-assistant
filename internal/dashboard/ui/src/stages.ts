@@ -35,7 +35,10 @@ const active = (task: Task) =>
 
 /** Started and not yet back with the owner or finished. */
 export const underWay = (task: Task) =>
-  !finished(task) && task.status !== "waiting" && task.status !== "queued";
+  !finished(task) &&
+  task.status !== "waiting" &&
+  task.status !== "queued" &&
+  task.status !== "triage";
 
 export const projectTasks = (project: Project, tasks: Task[]) =>
   tasks.filter((t) => t.project_id === project.id);
@@ -226,6 +229,12 @@ export function requestStep(
   switch (task.status) {
     case "queued":
       return "Waiting to start";
+    case "triage": {
+      const pm = task.checking || "the PM";
+      if (decision) return `Waiting on your answer for ${pm}`;
+      if (task.answered) return `Your answer is in; ${pm} looks again next`;
+      return `With ${pm} for triage`;
+    }
     case "researching": {
       if (idle)
         return `With ${seatWords(task, task.checking || roleName(task, "researcher", "Researcher"))}`;
@@ -281,7 +290,12 @@ export function requestTone(task: Task): Tone {
   if (needsYou(task)) return "needs";
   if (active(task)) return "work";
   if (task.status === "landed" || task.status === "delivered") return "done";
-  if (task.status === "awaiting" || task.status === "queued" || task.answered)
+  if (
+    task.status === "awaiting" ||
+    task.status === "queued" ||
+    task.status === "triage" ||
+    task.answered
+  )
     return "wait";
   return "";
 }
@@ -313,6 +327,7 @@ const groupOrder: Record<Task["status"], number> = {
   deciding: 1,
   awaiting: 2,
   queued: 3,
+  triage: 3,
   delivered: 4,
   landed: 4,
   stopped: 5,

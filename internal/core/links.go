@@ -238,12 +238,13 @@ func pair(v *Snapshot, l Link) (*Task, *Task, error) {
 
 // mayWait refuses to hold back a task that cannot wait any more: one that
 // has finished, and for the team, one whose work has begun, since the team
-// would be stopping work the owner already has under way.
+// would be stopping work the owner already has under way. A task still in
+// triage has not begun.
 func mayWait(t Task, by string) error {
 	if t.Finished() {
 		return fmt.Errorf("“%s” has finished, so it waits for nothing: %w", t.Objective, ErrConflict)
 	}
-	if !overrules(by) && t.Status != TaskQueued && t.Status != TaskResearching {
+	if !overrules(by) && t.Status != TaskQueued && t.Status != TaskTriage && t.Status != TaskResearching {
 		return fmt.Errorf("“%s” has begun its work; only the owner or assistant can make it wait now: %w", t.Objective, ErrConflict)
 	}
 	return nil

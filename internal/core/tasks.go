@@ -29,8 +29,8 @@ type Task struct {
 	Stage string `json:"stage,omitempty"`
 	// Checking names who is at work in a stage someone else leads: the
 	// checker while the task is checked, the researcher while it is
-	// researched, the designer while it is with the designer. Derived with
-	// Stage.
+	// researched, the designer while it is with the designer, the PM while
+	// it is in triage. Derived with Stage.
 	Checking string `json:"checking,omitempty"`
 	// WithDesigner is a task handed to the designer for design input, which
 	// stays in the stage of the role that handed it over. Derived with Stage.
@@ -158,7 +158,11 @@ type Task struct {
 // Task statuses. Writing, reviewing and deciding are the loop's own; waiting
 // means an owner decision is open; the rest are final.
 const (
-	TaskQueued  = "queued"
+	TaskQueued = "queued"
+	// TaskTriage is a task the owner or the assistant asked for, with the
+	// PM to shape before it joins the to-do list; see pm.go. It never
+	// starts from here.
+	TaskTriage  = "triage"
 	TaskWriting = "writing"
 	// TaskResearching is the researcher working out what the task needs,
 	// before anything is written. Older state calls it planning.
@@ -299,7 +303,9 @@ func (s *Service) QueueTask(ctx context.Context, projectID string, in TaskInput)
 }
 
 // QueueTaskAs asks for an outcome on behalf of by, who holds what it says
-// the task waits for.
+// the task waits for. What the owner or the assistant asks for goes to the
+// project's PM for triage first, when it has one; what the team asks for
+// joins the to-do list directly.
 func (s *Service) QueueTaskAs(ctx context.Context, projectID string, in TaskInput, by string) (Task, error) {
 	if !required(in.Objective) {
 		return Task{}, errors.New("a task needs an objective")
@@ -324,9 +330,12 @@ func (s *Service) QueueTaskAs(ctx context.Context, projectID string, in TaskInpu
 		out.DependsOn = deps
 		markAll(&out, deps, by, now)
 		numberTask(p, &out)
+		if _, pm := p.PMSeat(); pm && overrules(by) {
+			out.Status, out.Stage = TaskTriage, StageTriage
+		}
 		v.Tasks = append(v.Tasks, out)
 		p.listChanged()
-		recordTask(v, now, &out, "task.queued", out.Objective)
+		recordTask(v, now, &out, "task."+out.Status, out.Objective)
 		return nil
 	})
 	return out, err

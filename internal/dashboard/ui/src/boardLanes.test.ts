@@ -107,6 +107,16 @@ describe("the board's lanes", () => {
       has([task({ status: "landed", stage: "done", roles: planned().roles })]),
     ).toBe(false);
   });
+  it("shows triage below To do, when the team has a PM or a request is still in triage", () => {
+    const pim = { name: "Pim", kinds: ["pm"], engine: "claude" };
+    expect(
+      lanes(project({ ...code(), roles: [...code().roles, pim] })),
+    ).toEqual([["To do", "Triage"], ["Implementing"], ["QA", "Reviewing"]]);
+    const has = (tasks: Task[]) => hasLane(project(code()), tasks, "triage");
+    expect(has([])).toBe(false);
+    expect(has([task({ status: "triage", stage: "triage" })])).toBe(true);
+    expect(has([task({ status: "stopped", stage: "stopped" })])).toBe(false);
+  });
   it("shows design below research, when the team designs or a request is with the designer", () => {
     const dee = { name: "Dee", kinds: ["designer"], engine: "claude" };
     const designs = { ...code(), roles: [...code().roles, dee] };

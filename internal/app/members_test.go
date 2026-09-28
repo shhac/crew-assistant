@@ -32,6 +32,22 @@ func TestTheAssistantCanStaffATeamAndRecordALearning(t *testing.T) {
 	}
 }
 
+func TestWhatTheAssistantQueuesGoesToThePMFirst(t *testing.T) {
+	a := testApp(t)
+	ctx := context.Background()
+	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Notes", Brief: core.BriefInput{Goal: "Notes", Criteria: []string{"Short"}}, Template: "draft"})
+	playbook := *p.Playbook
+	playbook.Roles = append(playbook.Roles, core.Role{Name: "Pim", Kinds: []string{core.RolePM}, Engine: "claude"})
+	if _, err := a.Core.SetPlaybook(ctx, p.ID, playbook); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"project_id": p.ID, "objective": "First", "criteria": []string{}, "depends_on": []string{}})
+	out, err := a.Execute(ctx, "queue_task", raw)
+	if err != nil || out.(core.Task).Status != core.TaskTriage {
+		t.Fatalf("queue_task %+v: %v", out, err)
+	}
+}
+
 func TestTheAssistantQueuesWorkThatWaitsAndReadsItsPlanOnlyWhenItAsks(t *testing.T) {
 	a := testApp(t)
 	ctx := context.Background()

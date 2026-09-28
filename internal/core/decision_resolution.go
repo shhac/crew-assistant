@@ -63,10 +63,19 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 			d.Answer = answer
 			recordOn(v, now, d.ProjectID, d.TaskID, "decision.resolved", d.Title+": "+answer)
 		}
-		// The owner's answer to the PM goes to its next look at the list.
+		// The owner's answer to the PM goes to its next look at the list;
+		// an answer about one task in triage says which, and answers that
+		// come in before the PM looks are all kept.
 		if d.Kind == DecisionPMQuestion && d.Status == DecisionResolved {
 			if p := project(v, d.ProjectID); p != nil {
-				p.PMDirection, p.PMDue = d.Answer, true
+				answer := d.Answer
+				if t := task(v, d.TaskID); t != nil {
+					answer = fmt.Sprintf("About %s (“%s”), you asked: %s The owner answered: %s", t.Label(), t.Objective, d.Context, d.Answer)
+				}
+				if p.PMDue && p.PMDirection != "" {
+					answer = p.PMDirection + "\n" + answer
+				}
+				p.PMDirection, p.PMDue = answer, true
 			}
 		}
 		out = *d

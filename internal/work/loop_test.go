@@ -3,6 +3,7 @@ package work
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,7 +39,7 @@ type scriptedRunner struct {
 	// designs answer designer turns in order; after them, plain design input.
 	designs []string
 	// pm answers the PM's looks at the to-do list in order; after them, an
-	// answer that changes nothing.
+	// answer that sends on what is in triage and changes nothing else.
 	pm []string
 	// pmLand answers the PM's decisions to land in order; after them, land.
 	// onPMLand runs before each, to change the world meanwhile.
@@ -47,6 +48,21 @@ type scriptedRunner struct {
 	// route answers the PM's choices of where a task goes after its checks,
 	// in order; after them, a reply that can't be read.
 	route []string
+}
+
+// sendOn is the PM's plain answer to what waits in triage: every task sent
+// on to the team, as the PM's prompt lists them.
+func sendOn(prompt string) string {
+	var out []string
+	_, triage, ok := strings.Cut(prompt, "\nIn triage, oldest first:\n")
+	for _, line := range strings.Split(triage, "\n") {
+		if !ok || !strings.HasPrefix(line, "- ") {
+			continue
+		}
+		id, _, _ := strings.Cut(strings.TrimPrefix(line, "- "), " ")
+		out = append(out, fmt.Sprintf(`{"task": %q, "to": "research"}`, strings.TrimSuffix(id, ":")))
+	}
+	return "[" + strings.Join(out, ", ") + "]"
 }
 
 const (
@@ -97,7 +113,7 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 		return roles.Result{Text: reply}, nil
 	}
 	if !spec.Write && strings.Contains(spec.Prompt, "You keep the to-do list") {
-		reply := `{"order": [], "depends": [], "note": "", "questions": []}`
+		reply := fmt.Sprintf(`{"triage": %s, "order": [], "depends": [], "note": "", "questions": []}`, sendOn(spec.Prompt))
 		if len(r.pm) > 0 {
 			reply, r.pm = r.pm[0], r.pm[1:]
 		}

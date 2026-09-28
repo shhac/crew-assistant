@@ -179,6 +179,28 @@ describe("the board", () => {
       ),
     ).toBe("Waiting for codex subscription headroom");
   });
+  it("says a request in triage is with the PM, or waits on the owner's answer", () => {
+    const triage = (t: Partial<Task> = {}) =>
+      task({ status: "triage", stage: "triage", ...t });
+    expect(requestStep(triage({ checking: "Pim" }))).toBe(
+      "With Pim for triage",
+    );
+    expect(requestStep(triage())).toBe("With the PM for triage");
+    expect(
+      requestStep(
+        triage({ checking: "Pim", decision_id: "d" }),
+        decision("pm-question"),
+      ),
+    ).toBe("Waiting on your answer for Pim");
+    expect(
+      requestStep(
+        triage({ checking: "Pim", decision_id: "d", answered: true }),
+      ),
+    ).toBe("Your answer is in; Pim looks again next");
+    expect(requestTone(triage())).toBe("wait");
+    expect(underWay(triage())).toBe(false);
+    expect(needsYou(triage())).toBe(false);
+  });
   it("colours a request by what it needs", () => {
     expect(requestTone(task({ status: "waiting" }))).toBe("needs");
     // An answered task waits only for the loop, not for the owner.

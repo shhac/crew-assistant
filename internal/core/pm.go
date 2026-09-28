@@ -5,20 +5,39 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
+
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // DecisionPMQuestion is a question the team's PM asked the owner about the
 // order of work. The owner's answer goes to the PM's next look.
 const DecisionPMQuestion = "pm-question"
 
-// PMAnswer is what the team's PM decided about the to-do list: the queued
-// tasks in order, and the full list of what a task waits for, for any task
-// it changes.
+// PMAnswer is what the team's PM decided about the to-do list: where each
+// task in triage goes, the queued tasks in order, and the full list of what
+// a task waits for, for any task it changes.
 type PMAnswer struct {
+	Triage  []TriageRelease
 	Order   []string
 	Depends map[string][]string
 	Note    string
 }
+
+// TriageRelease is where the PM sends a task in triage: on to the team's
+// to-do list, or to the owner with a question, keeping it in triage until
+// the PM has the answer.
+type TriageRelease struct {
+	Task     string
+	To       string
+	Question string
+}
+
+// Where a task leaves triage for.
+const (
+	TriageToResearch = "research"
+	TriageToOwner    = "owner"
+)
 
 // ApplyPM puts the PM's decision into effect and marks the list looked at.
 // What each task waits for is checked like any other dependency: the same
@@ -26,9 +45,10 @@ type PMAnswer struct {
 // tasks. The owner's or the assistant's order stands: while it is newer than
 // every task queued since, the PM changes only what waits for what, and once
 // new work arrives it may place the new tasks but keeps their order for the
-// rest. It reports what it changed.
+// rest. Tasks leave triage first, so the order may place those sent on.
+// It reports what it changed.
 func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (string, error) {
-	var changed []string
+	var triaged, changed []string
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		p := project(v, projectID)
 		if p == nil {
@@ -36,6 +56,11 @@ func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (s
 		}
 		p.PMDue, p.PMDirection = false, ""
 		now := s.now().UTC()
+		for _, r := range in.Triage {
+			if line := triage(v, p, r, now); line != "" {
+				triaged = append(triaged, line)
+			}
+		}
 		// The PM may name tasks by their readable IDs.
 		depends := make(map[string][]string, len(in.Depends))
 		for id, deps := range in.Depends {
@@ -63,9 +88,13 @@ func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (s
 				changed = append(changed, "the order")
 			}
 		}
-		summary := "The to-do list stays as it is"
+		parts := slices.Clone(triaged)
 		if len(changed) > 0 {
-			summary = "Changed " + strings.Join(changed, " and ")
+			parts = append(parts, "Changed "+strings.Join(changed, " and "))
+		}
+		summary := "The to-do list stays as it is"
+		if len(parts) > 0 {
+			summary = strings.Join(parts, "; ")
 		}
 		if note := strings.TrimSpace(in.Note); note != "" {
 			summary += ": " + note
@@ -73,7 +102,80 @@ func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (s
 		record(v, now, projectID, "task.ordered", summary)
 		return nil
 	})
-	return strings.Join(changed, ", "), err
+	return strings.Join(append(triaged, changed...), ", "), err
+}
+
+// triage sends one task in triage where the PM chose, within a change, and
+// says what it did, or "" when it did nothing: the task must still be in
+// triage, and a question for the owner must say something.
+func triage(v *Snapshot, p *Project, r TriageRelease, now time.Time) string {
+	t := task(v, strings.TrimSpace(r.Task))
+	if t == nil || t.ProjectID != p.ID || t.Status != TaskTriage {
+		return ""
+	}
+	switch strings.TrimSpace(r.To) {
+	case TriageToResearch:
+		release(v, t, now)
+		recordTask(v, now, t, "task.triaged", "Sent on to the team: "+t.Objective)
+		return "Sent “" + t.Objective + "” on to the team"
+	case TriageToOwner:
+		question := text.Clip(strings.TrimSpace(r.Question), 2000)
+		if question == "" {
+			return ""
+		}
+		if d := decision(v, t.DecisionID); d != nil && d.Status == DecisionOpen {
+			return ""
+		}
+		pm := "The PM"
+		if seat, ok := p.PMSeat(); ok {
+			pm = seat.Name
+		}
+		d := Decision{ID: uid(), Kind: DecisionPMQuestion, TaskID: t.ID, ProjectID: p.ID, Title: fmt.Sprintf("%s asks about “%s” before it starts", pm, text.Clip(t.Objective, 120)), Context: question, Recommendation: "Answer, or let the PM use its judgment", Choices: []string{"Use your judgment", "Send it on as it is"}, Status: DecisionOpen, CreatedAt: now}
+		v.Decisions = append(v.Decisions, d)
+		t.DecisionID, t.UpdatedAt = d.ID, now
+		recordTask(v, now, t, "decision.opened", d.Title)
+		derive(v, t)
+		return "Asked you about “" + t.Objective + "”"
+	}
+	return ""
+}
+
+// release moves a task out of triage onto the to-do list, where it starts
+// with the researcher, closing any question it still waits on.
+func release(v *Snapshot, t *Task, now time.Time) {
+	if d := decision(v, t.DecisionID); d != nil && d.Status == DecisionOpen {
+		dismiss(v, d, now, "No longer needed: the task went on to the team")
+	}
+	t.Status, t.DecisionID, t.UpdatedAt = TaskQueued, "", now
+	derive(v, t)
+}
+
+// ReleaseTriage sends every task in a project's triage on to its to-do
+// list, when there is no PM to shape them or its PM could not look, so
+// nothing waits on a missing role. It says why in one line.
+func (s *Service) ReleaseTriage(ctx context.Context, projectID, why string) error {
+	return s.store.update(ctx, func(v *Snapshot) error {
+		if project(v, projectID) == nil {
+			return ErrNotFound
+		}
+		now := s.now().UTC()
+		released := 0
+		for i := range v.Tasks {
+			if t := &v.Tasks[i]; t.ProjectID == projectID && t.Status == TaskTriage {
+				release(v, t, now)
+				released++
+			}
+		}
+		if released > 0 {
+			record(v, now, projectID, "task.triaged", fmt.Sprintf("Sent on to the team without triage (%d): %s", released, why))
+		}
+		return nil
+	})
+}
+
+// HasTriage says whether any of a project's tasks wait in triage.
+func (v Snapshot) HasTriage(projectID string) bool {
+	return slices.ContainsFunc(v.Tasks, func(t Task) bool { return t.ProjectID == projectID && t.Status == TaskTriage })
 }
 
 // pmOrder is the order the PM may set, or nil to leave it. It must name

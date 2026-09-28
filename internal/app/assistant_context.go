@@ -216,7 +216,7 @@ func (a *App) sessionContext(ctx context.Context, reason session.ContextReason) 
 // turns: things it would put to the owner, not how the work is done.
 var ownerLevel = map[string]bool{
 	"project.created": true, "brief.updated": true, "playbook.set": true, "coordination.paused": true,
-	"task.queued": true, "task.started": true, "task.landed": true, "task.delivered": true, "task.stopped": true, "task.ordered": true, "task.reordered": true,
+	"task.queued": true, "task.triage": true, "task.triaged": true, "task.started": true, "task.landed": true, "task.delivered": true, "task.stopped": true, "task.ordered": true, "task.reordered": true,
 	"decision.opened": true, "decision.resolved": true, "decision.dismissed": true,
 }
 
