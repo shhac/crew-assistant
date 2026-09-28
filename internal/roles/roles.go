@@ -302,6 +302,14 @@ func Permanent(err error) bool {
 	return errors.As(err, &capability)
 }
 
+// KeychainLocked says a role could not start because its engine's login is
+// in a locked keychain. It clears when the owner unlocks it, so it is neither
+// permanent nor a failure to count.
+func KeychainLocked(err error) bool {
+	facts, ok := harness.ErrorFacts(err)
+	return ok && facts.Code == harness.CodeKeychainUnavailable
+}
+
 // VerifySandbox runs the proof a role's session makes before it starts,
 // without starting one or performing inference.
 func VerifySandbox(ctx context.Context, spec Spec) error {

@@ -3,6 +3,8 @@ github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMF
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
+github.com/ebitengine/purego v0.11.1 h1:2zpWRSQNVKN4eKsKO9eM1ILDgWfYMY9GwqRmK6XeQ/0=
+github.com/ebitengine/purego v0.11.1/go.mod h1:DCHPP08djqhNSoTfImcnHYQRZmd0qhakvrozqaEYhGQ=
 github.com/go-test/deep v1.1.1 h1:0r/53hagsehfO4bzD2Pgr/+RgHqhmf+k1Bpse2cTu1U=
 github.com/go-test/deep v1.1.1/go.mod h1:5C2ZWiW0ErCdrYzpqxLbTX7MG14M9iiw8DgHncVwcsE=
 github.com/godbus/dbus/v5 v5.2.2 h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=
@@ -28,10 +30,10 @@ github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qq
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/shhac/lib-agent-cli v0.27.0 h1:dqrNn5QlXB5i3i8ScZ/Qf0ZxVhh6max9U3XUqLKsZOI=
 github.com/shhac/lib-agent-cli v0.27.0/go.mod h1:+f4RsI2kX5rkh/BQW2Sr5KFXeZud/vL9RmwsUjeH7Fc=
-github.com/shhac/lib-agent-harness v0.11.0 h1:nea2shLvYGAijrVAiI4oufq4U5sA/lj0AIiRdQdG/xM=
-github.com/shhac/lib-agent-harness v0.11.0/go.mod h1:T1HWREtCnXLMzr68WCEifmSFNrSNZp9TRd8JRrjfjek=
-github.com/shhac/lib-agent-keyring v0.1.1 h1:cAwFr0UzlQ0xsgO0zY607lmwhvSamPN6Tp1DCNJO7hg=
-github.com/shhac/lib-agent-keyring v0.1.1/go.mod h1:nTk+YfRDc2dc8Nghd1o9w4c40xU8Pqx/UgToN0yGvZ8=
+github.com/shhac/lib-agent-harness v0.12.0 h1:HgvE1znVL1OhFS+i8pEm1oqp19i/7cv04+nEqyobNy0=
+github.com/shhac/lib-agent-harness v0.12.0/go.mod h1:M5i63Tc8wvQfEcxmaYUrgaDqFq0aV5nSAdvIkDiM9OU=
+github.com/shhac/lib-agent-keyring v0.2.0 h1:GHiApF03bDg8YMYEGI8uAFfLllqW0eA90sWppgMVoJc=
+github.com/shhac/lib-agent-keyring v0.2.0/go.mod h1:Q2f8HpDLb1tJkTgfWvqWHIdqRsCN5OcHmcgY3Upyh4A=
 github.com/shhac/lib-agent-mcp v0.23.1 h1:7VSbZcLPtOUUeef95Wanv7hL0rZAPxerqfwoF8vcSQ0=
 github.com/shhac/lib-agent-mcp v0.23.1/go.mod h1:kJfGbLYVhEvntawEHFDf0+u7bbL4tr4jx+uupVUqpGg=
 github.com/shhac/lib-agent-output v0.12.0 h1:Xlfvjew68PGwc3oMPp58AHfiSsHaaY/gULe11Cc0Ft8=

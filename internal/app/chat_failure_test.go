@@ -23,6 +23,7 @@ func TestChatFailureGivesSafeNextStep(t *testing.T) {
 		{fmt.Errorf("PRIVATE-DIAGNOSTIC: %w", &completion.RequestError{Engine: harness.OpenAICompatible, Cause: harness.CauseModelUnavailable, Phase: completion.PhaseResponse}), "isn't available"},
 		{&completion.RequestError{Engine: harness.Claude, Cause: harness.CauseRateLimited, Phase: completion.PhaseResponse}, "rate-limited"},
 		{errors.New("private backend diagnostic PRIVATE-DIAGNOSTIC"), "could not finish"},
+		{fmt.Errorf("PRIVATE-DIAGNOSTIC: %w", &completion.RequestError{Engine: harness.Claude, Code: harness.CodeKeychainUnavailable, Phase: completion.PhasePreflight}), "keychain is locked"},
 	} {
 		got := chatFailureReason(tc.err)
 		if !strings.Contains(got, tc.want) || strings.Contains(got, "PRIVATE-DIAGNOSTIC") || !strings.Contains(got, "preserved") {

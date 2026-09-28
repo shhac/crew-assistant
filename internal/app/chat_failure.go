@@ -13,6 +13,9 @@ import (
 // into durable conversation metadata.
 func chatFailureReason(err error) string {
 	facts, classified := harness.ErrorFacts(err)
+	if classified && facts.Code == harness.CodeKeychainUnavailable {
+		return "Your login keychain is locked, so the model's CLI wasn't started. Unlock it, then send again. Recorded actions were preserved; no automatic replay was attempted."
+	}
 	if classified {
 		switch facts.Cause {
 		case harness.CauseOverloaded, harness.CauseUnavailable, harness.CauseRateLimited:

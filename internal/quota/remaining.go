@@ -101,6 +101,8 @@ func Describe(r Reading, h config.Harness, floors Floors, now time.Time) Remaini
 	out.Credits = credits(r.Credits, now)
 	if len(out.Windows) == 0 {
 		switch {
+		case failureCode(r.Err) == harness.CodeKeychainUnavailable:
+			out.Missing = "keychain locked; unlock it to check usage"
 		case errors.Is(r.Err, context.DeadlineExceeded) || failureCode(r.Err) == account.CodeTimedOut:
 			out.Missing = "usage check timed out"
 		case r.Err != nil:

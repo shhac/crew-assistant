@@ -310,6 +310,27 @@ func TestTypedAnswersAreDirectionNotChoices(t *testing.T) {
 	}
 }
 
+// A locked keychain is the owner's to unlock, not a failure: the task waits
+// and checks again, however often, without counting failures or asking.
+func TestALockedKeychainWaitsWithoutCountingFailures(t *testing.T) {
+	locked := &session.UnsupportedError{Engine: "claude", Operation: "login", Code: harness.CodeKeychainUnavailable}
+	runner := &scriptedRunner{fail: []error{locked, locked, locked, locked}, reviews: []string{pass}}
+	a, _, _ := loopApp(t, runner, "")
+	for range 4 {
+		task := settle(t, a)
+		if task.Status != core.TaskWriting || task.Failures != 0 || task.RetryAt.IsZero() || !strings.Contains(task.Detail, "keychain") || task.DecisionID != "" {
+			t.Fatalf("a locked keychain should wait quietly: %+v", task)
+		}
+		a.Core.UpdateTask(context.Background(), task.ID, func(t *core.Task, _ *core.Project) (string, error) {
+			t.RetryAt = time.Time{}
+			return "", nil
+		})
+	}
+	if task := settle(t, a); task.Status != core.TaskWaiting || openDecision(t, a, task).Kind != core.DecisionDelivery {
+		t.Fatalf("once unlocked the work should carry on: %+v", task)
+	}
+}
+
 func TestFailuresRetryQuietlyThenAskOnce(t *testing.T) {
 	boom := errors.New("provider unavailable")
 	runner := &scriptedRunner{fail: []error{boom}, reviews: []string{pass}}

@@ -17,6 +17,9 @@ import (
 // then brings the owner one decision. A sandbox or login problem will not
 // clear by itself and goes to the owner at once.
 func (lp *Loop) roleFailed(ctx context.Context, t core.Task, role string, cause error) error {
+	if roles.KeychainLocked(cause) {
+		return lp.awaitKeychain(ctx, t)
+	}
 	permanent := roles.Permanent(cause)
 	var failures int
 	updated, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
@@ -47,6 +50,19 @@ func (lp *Loop) roleFailed(ctx context.Context, t core.Task, role string, cause 
 		Context:        text.Clip(cause.Error(), 600),
 		Recommendation: choiceTryAgain + " once the cause is fixed",
 		Choices:        []string{choiceTryAgain, choiceStop},
+	})
+	return err
+}
+
+// awaitKeychain holds a task whose role could not start while the login
+// keychain is locked. Starting anything would raise an unlock prompt, so it
+// checks again in a minute, and it is not counted as a failure: the owner
+// unlocking the Mac is the fix, not a decision.
+func (lp *Loop) awaitKeychain(ctx context.Context, t core.Task) error {
+	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		t.RetryAt, t.HeldFor = time.Now().Add(time.Minute), ""
+		t.Detail = "Waiting for the login keychain to be unlocked"
+		return "", nil
 	})
 	return err
 }

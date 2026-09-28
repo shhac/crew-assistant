@@ -104,6 +104,7 @@ func TestDescribeSaysWhyNothingWasMeasured(t *testing.T) {
 		{"stale", func() Reading { q := fixture(10); q.ObservedAt = now.Add(-time.Hour); return Reading{Quota: q} }(), "usage not reported"},
 		{"failed", Reading{Err: errors.New("app-server exited")}, "usage check failed"},
 		{"timed out", Reading{Err: context.DeadlineExceeded}, "usage check timed out"},
+		{"keychain locked", Reading{Err: &account.Error{Engine: harness.Claude, Code: harness.CodeKeychainUnavailable, Family: harness.FailurePreflight}}, "keychain locked; unlock it to check usage"},
 		{"CLI timed out", Reading{Err: &account.Error{Engine: harness.Codex, Code: account.CodeTimedOut, Family: harness.FailureProcess}}, "usage check timed out"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
