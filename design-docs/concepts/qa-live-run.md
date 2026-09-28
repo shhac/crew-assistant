@@ -9,6 +9,7 @@ QA on a code project can start the app from the project's **run recipe**, reach 
 - A code project whose app serves over http on this machine, and whose check (`make check` or similar) already passes.
 - The app's dependencies already installed in your own repository, since QA's shell reaches nothing off this machine: setup can't download anything. List the ignored folders it needs (such as `node_modules`) under **Config → Workspace → Ignored folders to copy in**.
 - Chrome running with the Claude in Chrome extension connected. It is your real Chrome, with your logins; QA is told to open only the app's address, in tabs of its own, and to close them.
+- A start command whose server macOS lets accept connections. With the macOS application firewall on, a server binary it has not allowed may never start listening, and the app is then reported as never ready. On macOS 27 Homebrew's Python was held this way while Apple's `/usr/bin/python3` served at once; allow your dev server in **System Settings → Network → Firewall → Options**, or start it with an allowed binary.
 
 ## 1. Add the project's run recipe
 
@@ -45,6 +46,10 @@ On the request, under **Changes**, open the change QA checked. QA's check shows:
 Afterwards nothing QA started is still running: `lsof -iTCP -sTCP:LISTEN` shows no app on the port it used.
 
 A verdict that **revises** has a finding for each thing in the app that didn't work, with the same evidence beside it.
+
+## Run on 2026-09-28
+
+Checked on crew-assistant 0.28.0 and macOS 27 with a one-page static site served by `cd site && exec /usr/bin/python3 -m http.server "$PORT" --bind 127.0.0.1`, a Claude QA member with the browser on and no connected-browser name, and the request "Change the page heading to read 'Hello from QA'". QA's verdict was **Pass**: it served the page on the port it was given, read the heading through Chrome, attached one screenshot (JPEG, 13 KB) to the verdict, and recorded page, console ("only the expected 'demo page loaded'") and network findings. The reviewer's check cited the same screenshot, and nothing was left listening afterwards.
 
 ## What else you may see
 
