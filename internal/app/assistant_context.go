@@ -110,7 +110,7 @@ func recentlyFinished(tasks []core.Task, n int) map[string]bool {
 // taskOverview is an unfinished task as the assistant sees it each turn:
 // where it is and what it waits on, not how it is being built.
 func taskOverview(t core.Task) core.Task {
-	return core.Task{ID: t.ID, ProjectID: t.ProjectID, Objective: text.Clip(t.Objective, 300), Status: t.Status, Stage: t.Stage, Checking: t.Checking, Answered: t.Answered, WaitsFor: t.WaitsFor, DependsOn: t.DependsOn, Blocks: t.Blocks, RelatesTo: t.RelatesTo, Detail: text.Clip(t.Detail, 200), Round: t.Round, MaxRounds: t.MaxRounds, DecisionID: t.DecisionID, DirectionPending: t.DirectionPending, RetryAt: t.RetryAt, Proposal: t.Proposal, Branch: t.Branch, CreatedAt: t.CreatedAt, StartedAt: t.StartedAt, UpdatedAt: t.UpdatedAt}
+	return core.Task{ID: t.ID, ProjectID: t.ProjectID, Number: t.Number, Ref: t.Ref, Objective: text.Clip(t.Objective, 300), Status: t.Status, Stage: t.Stage, Checking: t.Checking, Answered: t.Answered, WaitsFor: t.WaitsFor, DependsOn: t.DependsOn, Blocks: t.Blocks, RelatesTo: t.RelatesTo, Detail: text.Clip(t.Detail, 200), Round: t.Round, MaxRounds: t.MaxRounds, DecisionID: t.DecisionID, DirectionPending: t.DirectionPending, RetryAt: t.RetryAt, Proposal: t.Proposal, Branch: t.Branch, CreatedAt: t.CreatedAt, StartedAt: t.StartedAt, UpdatedAt: t.UpdatedAt}
 }
 
 // projectOverview is a project without its team's standing instructions,
@@ -132,7 +132,7 @@ func projectOverview(p core.Project) core.Project {
 // finishedBrief is a finished task as the assistant sees it each turn: what
 // was asked, how it ended and where it went.
 func finishedBrief(t core.Task) core.Task {
-	return core.Task{ID: t.ID, ProjectID: t.ProjectID, Objective: text.Clip(t.Objective, 200), Status: t.Status, Stage: t.Stage, Detail: text.Clip(t.Detail, 200), DeliveredTo: t.DeliveredTo, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt}
+	return core.Task{ID: t.ID, ProjectID: t.ProjectID, Number: t.Number, Ref: t.Ref, Objective: text.Clip(t.Objective, 200), Status: t.Status, Stage: t.Stage, Detail: text.Clip(t.Detail, 200), DeliveredTo: t.DeliveredTo, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt}
 }
 
 // taskDetail is one task as read_task gives it: everything the assistant can

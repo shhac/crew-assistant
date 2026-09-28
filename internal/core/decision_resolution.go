@@ -61,7 +61,7 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 		} else {
 			d.Status = DecisionResolved
 			d.Answer = answer
-			record(v, now, d.ProjectID, "decision.resolved", d.Title+": "+answer)
+			recordOn(v, now, d.ProjectID, d.TaskID, "decision.resolved", d.Title+": "+answer)
 		}
 		// The owner's answer to the PM goes to its next look at the list.
 		if d.Kind == DecisionPMQuestion && d.Status == DecisionResolved {
@@ -79,5 +79,5 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 func dismiss(v *Snapshot, d *Decision, now time.Time, reason string) {
 	d.Status, d.Disposition, d.ResolvedAt = DecisionDismissed, DispositionDismissed, &now
 	d.ResolutionReason, d.Answer = reason, ""
-	record(v, now, d.ProjectID, "decision.dismissed", d.Title+": "+reason)
+	recordOn(v, now, d.ProjectID, d.TaskID, "decision.dismissed", d.Title+": "+reason)
 }

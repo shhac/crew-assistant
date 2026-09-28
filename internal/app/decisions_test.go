@@ -50,15 +50,21 @@ func TestTheAssistantReadsOneTaskInFullWithinItsProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Write it"})
-	read := func(projectID string) (any, error) {
-		raw, _ := json.Marshal(map[string]string{"project_id": projectID, "task_id": task.ID})
+	read := func(projectID, taskID string) (any, error) {
+		raw, _ := json.Marshal(map[string]string{"project_id": projectID, "task_id": taskID})
 		return a.Execute(ctx, "read_task", raw)
 	}
-	if out, err := read(p.ID); err != nil || out.(core.Task).Objective != "Write it" {
-		t.Fatalf("read %+v, %v", out, err)
+	for _, id := range []string{task.ID, task.Ref, strings.ToLower(task.Ref)} {
+		if out, err := read(p.ID, id); err != nil || out.(core.Task).Objective != "Write it" || out.(core.Task).Ref != "NOT-1" {
+			t.Fatalf("read %s: %+v, %v", id, out, err)
+		}
 	}
-	if _, err := read("another-project"); err == nil {
+	if _, err := read("another-project", task.Ref); err == nil {
 		t.Fatal("a task was read through the wrong project")
+	}
+	// Each turn's overview names tasks by their readable IDs too.
+	if raw, _, err := a.chatContext(ctx, ""); err != nil || !strings.Contains(string(raw), `"ref":"NOT-1"`) {
+		t.Fatalf("the overview has no readable ID: %s %v", raw, err)
 	}
 }
 

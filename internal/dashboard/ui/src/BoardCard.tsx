@@ -5,7 +5,7 @@ import { atWork } from "./members";
 import { decisionFor, isOpenMessage, needsYou, requestStep } from "./stages";
 import { TaskActivity } from "./TaskActivity";
 import { Avatar } from "./Avatar";
-import { Icon, Pill } from "./ui";
+import { Icon, Pill, TaskRef } from "./ui";
 import type { Decision, Member, State, Task, Turn } from "./api";
 
 export function CardList({ tasks, state }: { tasks: Task[]; state: State }) {
@@ -48,6 +48,7 @@ export function BoardCard({
   const pm = pmLandingLine(task);
   return (
     <article className={`board-card${needsYou(task) ? " needs" : ""}`}>
+      <TaskRef task={task} />
       <a
         className="board-card-link"
         href={requestHref(task.project_id, task.id)}

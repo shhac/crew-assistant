@@ -301,6 +301,47 @@ func TestTheOwnerLinksTasks(t *testing.T) {
 	}
 }
 
+// The owner renames a project's task ID prefix, and the routes that name a
+// task take its readable ID as well as its canonical one.
+func TestTheOwnerRenamesAPrefixAndNamesTasksByReadableID(t *testing.T) {
+	_, call := ownerServer(t)
+	var project, other core.Project
+	for _, p := range []*core.Project{&project, &other} {
+		w := call("POST", "/api/projects", `{"title":"Export","brief":{"goal":"CSV","criteria":["Valid CSV"]},"template":"draft"}`)
+		_ = json.Unmarshal(w.Body.Bytes(), p)
+	}
+	if project.Prefix != "EXP" || other.Prefix == "" || other.Prefix == project.Prefix {
+		t.Fatalf("prefixes %q and %q", project.Prefix, other.Prefix)
+	}
+	var schema, api core.Task
+	for _, task := range []*core.Task{&schema, &api} {
+		w := call("POST", "/api/projects/"+project.ID+"/tasks", `{"objective":"Work","criteria":[]}`)
+		_ = json.Unmarshal(w.Body.Bytes(), task)
+	}
+	if schema.Ref != "EXP-1" || api.Ref != "EXP-2" {
+		t.Fatalf("readable IDs %q and %q", schema.Ref, api.Ref)
+	}
+	w := call("PUT", "/api/projects/"+project.ID+"/prefix", `{"prefix":"csv"}`)
+	var renamed core.Project
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &renamed) != nil || renamed.Prefix != "CSV" {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := call("PUT", "/api/projects/"+other.ID+"/prefix", `{"prefix":"Csv"}`); w.Code != 409 {
+		t.Fatal("two projects share a prefix", w.Code, w.Body.String())
+	}
+	if w := call("PUT", "/api/projects/"+other.ID+"/prefix", `{"prefix":"no way"}`); w.Code != 400 {
+		t.Fatal("an invalid prefix was accepted", w.Code)
+	}
+	w = call("POST", "/api/projects/"+project.ID+"/tasks/csv-2/links", `{"relation":"depends_on","task":"CSV-1"}`)
+	var linked core.Task
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &linked) != nil || linked.ID != api.ID || len(linked.DependsOn) != 1 || linked.DependsOn[0] != schema.ID || linked.Ref != "CSV-2" {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := call("PUT", "/api/projects/"+project.ID+"/tasks/order", `{"task_ids":["CSV-2","`+schema.ID+`"]}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
 // A task's place is readable from the dashboard's API, and only a code
 // task's draft can be changed by hand.
 func TestATasksPlaceAndDraftsByHand(t *testing.T) {

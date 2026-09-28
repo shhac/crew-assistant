@@ -30,6 +30,10 @@ func deriveWith(v *Snapshot, t *Task, index map[string][]string) {
 	t.Stage, t.Checking, t.WithDesigner, t.Answered, t.WaitsFor = stageOf(v, *t), "", false, false, nil
 	t.PMDeciding = pmDeciding(v, *t)
 	t.Blocks = index[t.ID]
+	t.Ref = ""
+	if p := project(v, t.ProjectID); p != nil {
+		t.Ref = p.TaskRef(t.Number)
+	}
 	// A task under way can be made to wait too: then it can't land yet.
 	if !t.Finished() {
 		t.WaitsFor = waitsFor(v, *t)

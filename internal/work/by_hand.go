@@ -56,6 +56,14 @@ func (lp *Loop) Place(ctx context.Context, projectID, taskID string) (TaskPlace,
 // finish, and is refused while a step of the loop holds it, whose draft
 // would build on the one this replaces.
 func (lp *Loop) AdoptDraft(ctx context.Context, projectID, taskID, ref, note string, approve bool) (core.Task, error) {
+	// The loop holds a task by its canonical ID, whichever the owner used.
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return core.Task{}, err
+	}
+	if named, ok := findTask(snap, projectID, taskID); ok {
+		taskID = named.ID
+	}
 	if !lp.claim(taskID) {
 		return core.Task{}, fmt.Errorf("the team is at work on this task right now; adopt your change once its step ends: %w", core.ErrConflict)
 	}

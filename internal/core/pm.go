@@ -36,6 +36,12 @@ func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (s
 		}
 		p.PMDue, p.PMDirection = false, ""
 		now := s.now().UTC()
+		// The PM may name tasks by their readable IDs.
+		depends := make(map[string][]string, len(in.Depends))
+		for id, deps := range in.Depends {
+			depends[canonicalID(v, id)] = canonicalIDs(v, deps)
+		}
+		in.Depends, in.Order = depends, canonicalIDs(v, in.Order)
 		ids := make([]string, 0, len(in.Depends))
 		for id := range in.Depends {
 			ids = append(ids, id)

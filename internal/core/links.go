@@ -138,13 +138,13 @@ func (s *Service) LinkTasks(ctx context.Context, l Link) (Task, error) {
 			}
 			dependent.DependsOn = deps
 			mark(dependent, RelationDependsOn, dep.ID, l.By, now)
-			record(v, now, t.ProjectID, "task.linked", fmt.Sprintf("%s waits for %s", dependent.Objective, dep.Objective))
+			recordTask(v, now, dependent, "task.linked", fmt.Sprintf("%s waits for %s", dependent.Objective, dep.Objective))
 		case RelationRelatesTo:
 			t.RelatesTo = append(t.RelatesTo, other.ID)
 			other.RelatesTo = append(other.RelatesTo, t.ID)
 			mark(t, RelationRelatesTo, other.ID, l.By, now)
 			mark(other, RelationRelatesTo, t.ID, l.By, now)
-			record(v, now, t.ProjectID, "task.linked", fmt.Sprintf("%s relates to %s", t.Objective, other.Objective))
+			recordTask(v, now, t, "task.linked", fmt.Sprintf("%s relates to %s", t.Objective, other.Objective))
 		default:
 			return fmt.Errorf("a task depends on, blocks or relates to another, not %q", l.Relation)
 		}
@@ -191,7 +191,7 @@ func (s *Service) UnlinkTasks(ctx context.Context, l Link) (Task, error) {
 		}
 		now := s.now().UTC()
 		t.UpdatedAt, other.UpdatedAt = now, now
-		record(v, now, t.ProjectID, "task.unlinked", fmt.Sprintf("%s and %s are no longer linked", t.Objective, other.Objective))
+		recordTask(v, now, t, "task.unlinked", fmt.Sprintf("%s and %s are no longer linked", t.Objective, other.Objective))
 		linksChanged(v, t.ProjectID, l.By)
 		derive(v, t)
 		out = *t

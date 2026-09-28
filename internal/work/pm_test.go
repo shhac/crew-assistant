@@ -166,12 +166,12 @@ func TestThePMsAnswerAndWhatItIsTold(t *testing.T) {
 	}
 	p := core.Project{ID: "p", Title: "Site", OrderedBy: core.OrderedByOwner, PMDirection: "Docs first", Brief: core.Brief{Goal: "Ship"}}
 	snap := core.Snapshot{Tasks: []core.Task{
-		{ID: "a", ProjectID: "p", Status: core.TaskQueued, Objective: "Search", Plan: &core.Plan{Summary: "Add a box", Changes: []string{"search.go"}}},
-		{ID: "b", ProjectID: "p", Status: core.TaskQueued, Objective: "Docs", DependsOn: []string{"a"}},
+		{ID: "a", Ref: "S-1", ProjectID: "p", Status: core.TaskQueued, Objective: "Search", Plan: &core.Plan{Summary: "Add a box", Changes: []string{"search.go"}}},
+		{ID: "b", Ref: "S-2", ProjectID: "p", Status: core.TaskQueued, Objective: "Docs", DependsOn: []string{"a"}},
 		{ID: "x", ProjectID: "other", Status: core.TaskQueued, Objective: "Elsewhere"},
 	}}
 	prompt := pmPrompt(snap, p)
-	for _, want := range []string{"The owner set the current order", "The owner told you: Docs first", "plan: Add a box", "changes: search.go", "waits for: a"} {
+	for _, want := range []string{"The owner set the current order", "The owner told you: Docs first", "plan: Add a box", "changes: search.go", "- S-2 (b) (queued): Docs", "waits for: S-1 (a)"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("the PM isn't told %q", want)
 		}

@@ -4,7 +4,13 @@ import { LandingSettings } from "./ProjectLanding";
 import { TeamSettings } from "./TeamSettings";
 import { isCode } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
-import { setWorkspace, type Member, type Playbook, type Project } from "./api";
+import {
+  setPrefix,
+  setWorkspace,
+  type Member,
+  type Playbook,
+  type Project,
+} from "./api";
 
 const signing: Record<string, string> = {
   "": "Signed as your git config says",
@@ -38,7 +44,106 @@ export function ConfigTab({
         </>
       )}
       <Folders project={project} refresh={refresh} />
+      <TaskIDs project={project} refresh={refresh} />
     </div>
+  );
+}
+
+/**
+ * The prefix of the project's readable request IDs. Renaming it renames
+ * every request's ID; links keep working, since they hold the full ID.
+ */
+function TaskIDs({
+  project,
+  refresh,
+}: {
+  project: Project;
+  refresh: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [prefix, setPrefixText] = useState(project.prefix ?? "");
+  const { busy, error, run } = useAction();
+  const shown = prefix.trim().toUpperCase() || project.prefix || "CA";
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    await run(async () => {
+      await setPrefix(project.id, prefix);
+      await refresh();
+      setEditing(false);
+    });
+  }
+  if (editing)
+    return (
+      <section className="tab-panel card" aria-label="Request IDs">
+        <form className="form" aria-label="Request IDs" onSubmit={save}>
+          <h2>Request IDs</h2>
+          <label htmlFor="config-task-prefix">
+            Prefix
+            <input
+              id="config-task-prefix"
+              className="field"
+              value={prefix}
+              maxLength={6}
+              pattern="[A-Za-z][A-Za-z0-9]{0,5}"
+              onChange={(e) => setPrefixText(e.target.value)}
+              required
+            />
+            <span className="hint">
+              1 to 6 letters or digits, starting with a letter. Requests read as{" "}
+              {shown}-1, {shown}-2, and so on.
+            </span>
+          </label>
+          <ErrorNotice error={error} />
+          <div className="actions">
+            <button className="btn btn-primary" type="submit" disabled={busy}>
+              Save
+            </button>
+            <button
+              className="btn btn-quiet"
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setPrefixText(project.prefix ?? "");
+                setEditing(false);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </section>
+    );
+  return (
+    <section className="tab-panel card" aria-label="Request IDs">
+      <div className="panel-head">
+        <h2>Request IDs</h2>
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={() => {
+            setPrefixText(project.prefix ?? "");
+            setEditing(true);
+          }}
+        >
+          Edit
+        </button>
+      </div>
+      <dl className="facts">
+        <div className="fact-row">
+          <dt>Prefix</dt>
+          <dd>
+            {project.prefix ? (
+              <>
+                <code>{project.prefix}</code>, as in{" "}
+                <code>{project.prefix}-1</code>
+              </>
+            ) : (
+              "None yet"
+            )}
+          </dd>
+        </div>
+      </dl>
+    </section>
   );
 }
 

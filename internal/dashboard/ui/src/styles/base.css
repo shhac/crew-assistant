@@ -121,6 +121,13 @@ kbd {
   font-size: 12px;
 }
 
+/* A task's readable ID, such as CA-12. */
+.task-ref {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
 .label {
   font-size: 12px;
   font-weight: 600;

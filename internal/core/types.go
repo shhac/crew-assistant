@@ -35,8 +35,13 @@ type AssistantProfile struct {
 // Project is an ongoing area of the owner's work: what it is for (its brief),
 // how its work gets done (its playbook) and where it lives.
 type Project struct {
-	ID                string    `json:"id"`
-	Title             string    `json:"title"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	// Prefix starts the readable IDs of the project's tasks, as CA does
+	// CA-12; NextTask is the number the next task gets. A number is never
+	// given twice. See refs.go.
+	Prefix            string    `json:"prefix"`
+	NextTask          int       `json:"next_task,omitempty"`
 	Status            string    `json:"status"`
 	Brief             Brief     `json:"brief"`
 	Playbook          *Playbook `json:"playbook,omitempty"`
@@ -156,8 +161,10 @@ type Memory struct {
 	Assistant string `json:"assistant,omitempty"`
 }
 type Activity struct {
-	ID        string    `json:"id"`
-	ProjectID string    `json:"project_id,omitempty"`
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id,omitempty"`
+	// TaskID is the task an entry is about, where it is about one.
+	TaskID    string    `json:"task_id,omitempty"`
 	Kind      string    `json:"kind"`
 	Summary   string    `json:"summary"`
 	CreatedAt time.Time `json:"created_at"`

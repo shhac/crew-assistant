@@ -124,7 +124,7 @@ func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk) (
 			r.Decision = openTaskDecision(v, t, DecisionQuestion, ask.Owner, now).ID
 		} else {
 			t.Status, t.Detail = TaskDesigning, "With "+designer.Name+" for design input"
-			record(v, now, t.ProjectID, "task.designing", fmt.Sprintf("%s handed %s to %s for design input", ask.From, t.Objective, designer.Name))
+			recordTask(v, now, t, "task.designing", fmt.Sprintf("%s handed %s to %s for design input", ask.From, t.Objective, designer.Name))
 		}
 		t.Design = append(t.Design, r)
 		t.UpdatedAt = now
@@ -164,7 +164,7 @@ func (s *Service) RecordDesign(ctx context.Context, taskID, requestID, designer,
 		} else {
 			r.AnsweredAt = now
 			t.Status, t.Detail = r.Step, "Back from "+designer+" with design input"
-			record(v, now, t.ProjectID, "task.designed", fmt.Sprintf("%s gave design input on %s", designer, t.Objective))
+			recordTask(v, now, t, "task.designed", fmt.Sprintf("%s gave design input on %s", designer, t.Objective))
 		}
 		t.UpdatedAt = now
 		derive(v, t)

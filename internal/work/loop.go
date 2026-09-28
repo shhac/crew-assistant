@@ -205,13 +205,14 @@ func (lp *Loop) updateOpen(ctx context.Context, id string, fn func(*core.Task, *
 }
 
 // findTask finds a task in a project; an empty projectID matches any project.
+// findTask is the task taskID names, by its canonical or readable ID, in
+// projectID unless that is empty.
 func findTask(s core.Snapshot, projectID, taskID string) (core.Task, bool) {
-	for _, t := range s.Tasks {
-		if t.ID == taskID && (projectID == "" || t.ProjectID == projectID) {
-			return t, true
-		}
+	t, ok := s.FindTask(taskID)
+	if !ok || (projectID != "" && t.ProjectID != projectID) {
+		return core.Task{}, false
 	}
-	return core.Task{}, false
+	return t, true
 }
 
 func findProject(s core.Snapshot, id string) (core.Project, bool) {

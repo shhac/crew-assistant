@@ -44,7 +44,7 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 				t.StartedAt = now
 			}
 			out, found = *t, true
-			record(v, now, t.ProjectID, "task.started", t.Objective)
+			recordTask(v, now, t, "task.started", t.Objective)
 			return nil
 		}
 		return nil

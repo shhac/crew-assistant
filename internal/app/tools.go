@@ -72,10 +72,8 @@ var toolActions = map[string]toolAction{
 		if err != nil {
 			return nil, err
 		}
-		for _, t := range s.Tasks {
-			if t.ID == in.TaskID && t.ProjectID == in.ProjectID {
-				return taskDetail(t), nil
-			}
+		if t, ok := s.FindTask(in.TaskID); ok && t.ProjectID == in.ProjectID {
+			return taskDetail(t), nil
 		}
 		return nil, core.ErrNotFound
 	}),

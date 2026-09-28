@@ -23,6 +23,9 @@ func (s *Service) SeedDemo(ctx context.Context, sample Snapshot) (Snapshot, erro
 		if sample.Members != nil {
 			v.Members = sample.Members
 		}
+		// The sample's projects get prefixes and its tasks numbers as real
+		// state from before readable IDs does.
+		backfillRefs(v)
 		deriveStages(v)
 		out = *v
 		return nil

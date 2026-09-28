@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { groupActivity, isRoutineActivity } from "./activity";
-import { dateLabel } from "./ui";
+import { TaskRef, dateLabel } from "./ui";
 import type { Project, State } from "./api";
 
 export function ActivityTab({
@@ -12,6 +12,7 @@ export function ActivityTab({
 }) {
   const [everything, setEverything] = useState(false);
   const own = state.activity.filter((a) => a.project_id === project.id);
+  const refs = new Map(state.tasks.map((t) => [t.id, t.ref]));
   const routine = own.filter((a) => isRoutineActivity(a.kind)).length;
   const shown = groupActivity(
     everything ? own : own.filter((a) => !isRoutineActivity(a.kind)),
@@ -39,6 +40,13 @@ export function ActivityTab({
               </time>
               <span className="activity-kind label">{label}</span>
               <span>
+                {/* The task's current readable ID, so a renamed prefix
+                    shows in older entries too. */}
+                {entry.task_id && refs.get(entry.task_id) && (
+                  <>
+                    <TaskRef task={{ ref: refs.get(entry.task_id) }} />{" "}
+                  </>
+                )}
                 {entry.summary}
                 {count > 1 && (
                   <span className="muted small"> ({count} times)</span>

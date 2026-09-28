@@ -101,7 +101,7 @@ Decide the order the queued tasks start in, and what each unfinished task has to
 	}
 	pmTasks(&b, snap, p)
 	b.WriteString(`
-Reply with only this JSON object:
+Name each task by one id: its readable id, such as CA-3, or its canonical id. Reply with only this JSON object:
 {"order": ["every queued task id, in the order they should start"], "depends": [{"task": "id", "on": ["ids it must wait for; the full list, replacing what it has"]}], "note": "one line on what you changed and why", "questions": ["only what the owner must decide"]}`)
 	return b.String()
 }
@@ -114,7 +114,7 @@ func pmTasks(b *strings.Builder, snap core.Snapshot, p core.Project) {
 		if t.ProjectID != p.ID || t.Finished() {
 			continue
 		}
-		fmt.Fprintf(b, "- %s (%s): %s\n", t.ID, t.Status, text.Clip(t.Objective, 300))
+		fmt.Fprintf(b, "- %s (%s): %s\n", t.Label(), t.Status, text.Clip(t.Objective, 300))
 		if t.Plan != nil {
 			fmt.Fprintf(b, "  plan: %s\n", text.Clip(t.Plan.Summary, 400))
 			if len(t.Plan.Changes) > 0 {
@@ -122,17 +122,21 @@ func pmTasks(b *strings.Builder, snap core.Snapshot, p core.Project) {
 			}
 		}
 		if len(t.DependsOn) > 0 {
-			fmt.Fprintf(b, "  waits for: %s\n", waitsLine(t))
+			fmt.Fprintf(b, "  waits for: %s\n", waitsLine(snap.Tasks, t))
 		}
 	}
 }
 
 // waitsLine is what a task waits for, marking what the owner set: the team
-// leaves that in place, so a PM that leaves it out changes nothing.
-func waitsLine(t core.Task) string {
+// leaves that in place, so a PM that leaves it out changes nothing. Each is
+// named by its readable ID too, where it is among tasks.
+func waitsLine(tasks []core.Task, t core.Task) string {
 	parts := make([]string, len(t.DependsOn))
 	for i, id := range t.DependsOn {
 		parts[i] = id
+		if j := slices.IndexFunc(tasks, func(o core.Task) bool { return o.ID == id }); j >= 0 {
+			parts[i] = tasks[j].Label()
+		}
 		if t.HeldByOwner(core.RelationDependsOn, id) {
 			parts[i] += " (set by the owner)"
 		}

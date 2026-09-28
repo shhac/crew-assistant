@@ -126,7 +126,7 @@ func (s *Service) SendTeamMessage(ctx context.Context, projectID, taskID, to, fr
 		}
 		t.Messages = append(t.Messages, out)
 		t.UpdatedAt = now
-		record(v, now, projectID, "task.message", fmt.Sprintf("To %s about %s: %s", role.Name, t.Objective, text.Clip(message, 200)))
+		recordTask(v, now, t, "task.message", fmt.Sprintf("To %s about %s: %s", role.Name, t.Objective, text.Clip(message, 200)))
 		return nil
 	})
 	return out, err
@@ -198,7 +198,7 @@ func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
 		}
 	case open != nil:
 		open.Status, open.Disposition, open.Answer, open.ResolvedAt = DecisionResolved, DispositionCustom, m.Text, &now
-		record(v, now, open.ProjectID, "decision.resolved", open.Title+": "+m.Text)
+		recordOn(v, now, open.ProjectID, open.TaskID, "decision.resolved", open.Title+": "+m.Text)
 		// A design question goes back, in the same round, to the step that
 		// asked it.
 		if r := t.DesignDecision(open.ID); r != nil {
@@ -258,7 +258,7 @@ func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID strin
 		m.AnsweredAt = now
 		if verdict == nil {
 			m.Status, m.Reply = MessageFailed, text.Clip(failure, 1000)
-			record(v, now, t.ProjectID, "task.message_failed", fmt.Sprintf("%s could not answer about %s", m.To, t.Objective))
+			recordTask(v, now, t, "task.message_failed", fmt.Sprintf("%s could not answer about %s", m.To, t.Objective))
 			return nil
 		}
 		m.Status, m.Reply, m.Outcome, m.Revision = MessageAnswered, verdict.Summary, verdict.Outcome, verdict.Revision
@@ -277,7 +277,7 @@ func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID strin
 			}
 		}
 		t.UpdatedAt = now
-		record(v, now, t.ProjectID, "task.message_answered", fmt.Sprintf("%s answered about %s: %s", m.To, t.Objective, text.Clip(verdict.Summary, 200)))
+		recordTask(v, now, t, "task.message_answered", fmt.Sprintf("%s answered about %s: %s", m.To, t.Objective, text.Clip(verdict.Summary, 200)))
 		return nil
 	})
 }

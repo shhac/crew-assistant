@@ -132,6 +132,7 @@ func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (Project, 
 		if err := s.store.prepareProject(&out); err != nil {
 			return err
 		}
+		out.Prefix, out.NextTask = uniquePrefix(v, out.Title), 1
 		v.Projects = append(v.Projects, out)
 		record(v, now, out.ID, "project.created", out.Title)
 		return nil

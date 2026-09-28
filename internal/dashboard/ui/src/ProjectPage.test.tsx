@@ -2263,6 +2263,88 @@ describe("the project's tabs", () => {
   });
 });
 
+describe("readable request IDs", () => {
+  const cache = task({ ref: "SE-1", number: 1 });
+  const docs = task({
+    id: "t2",
+    ref: "SE-2",
+    number: 2,
+    objective: "Document the cache",
+    depends_on: ["t1"],
+  });
+
+  it("shows each request's ID on its card, linking by its full ID", () => {
+    show(project({ prefix: "SE" }), { tasks: [cache, docs] });
+    const card = screen
+      .getByRole("link", { name: "Cache the lookups" })
+      .closest("article")!;
+    expect(within(card as HTMLElement).getByText("SE-1")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("link", { name: "Cache the lookups" })
+        .getAttribute("href"),
+    ).toBe("#/projects/p1/requests/t1");
+  });
+
+  it("opens a request addressed by its readable ID, in any case", () => {
+    show(
+      project({ prefix: "SE" }),
+      { tasks: [cache, docs] },
+      { request: "se-2" },
+    );
+    const panel = screen.getByRole("complementary", {
+      name: "Document the cache",
+    });
+    expect(within(panel).getByText("SE-2")).toBeTruthy();
+    const relations = within(panel).getByRole("region", { name: "Relations" });
+    expect(within(relations).getByText("SE-1")).toBeTruthy();
+  });
+
+  it("names the request an activity entry is about by its current ID", () => {
+    show(
+      project({ prefix: "SE" }),
+      {
+        tasks: [cache],
+        activity: [
+          {
+            id: "a1",
+            project_id: "p1",
+            task_id: "t1",
+            kind: "task.landed",
+            summary: "Cache the lookups landed on main",
+            created_at: "2026-09-21T11:00:00Z",
+          },
+        ],
+      },
+      { tab: "activity" },
+    );
+    const entry = screen.getByText("Cache the lookups landed on main", {
+      exact: false,
+    });
+    expect(within(entry).getByText("SE-1")).toBeTruthy();
+  });
+
+  it("renames the prefix from Config", async () => {
+    show(project({ prefix: "SE" }), {}, { tab: "config" });
+    const ids = screen.getByRole("region", { name: "Request IDs" });
+    expect(within(ids).getByText("SE-1")).toBeTruthy();
+    fireEvent.click(within(ids).getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Prefix", { exact: false }), {
+      target: { value: "svc" },
+    });
+    expect(screen.getByText(/SVC-1, SVC-2/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/prefix",
+        method: "PUT",
+        body: { prefix: "svc" },
+      },
+    ]);
+  });
+});
+
 describe("faces of the team at work", () => {
   const face = (id: string, name: string, image: string): Member => ({
     id,

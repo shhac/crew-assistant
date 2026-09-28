@@ -40,6 +40,14 @@ export const underWay = (task: Task) =>
 export const projectTasks = (project: Project, tasks: Task[]) =>
   tasks.filter((t) => t.project_id === project.id);
 
+/**
+ * The request an address names: its id, or its readable ID in any case, so
+ * a link such as #/projects/<id>/requests/CA-12 opens it too.
+ */
+export const findRequest = (tasks: Task[], name: string) =>
+  tasks.find((t) => t.id === name) ??
+  tasks.find((t) => !!t.ref && t.ref.toLowerCase() === name.toLowerCase());
+
 /** The open decision a request is waiting on, if any. */
 export const decisionFor = (task: Task, decisions: Decision[]) =>
   pendingDecisions(decisions).find((d) => d.id === task.decision_id);

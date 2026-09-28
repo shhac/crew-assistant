@@ -53,7 +53,7 @@ func (s *Service) AdoptDraft(ctx context.Context, taskID string, r Revision, app
 		t.Status, t.DecisionID, t.ResumeStatus, t.Detail = TaskReviewing, "", "", "Checking the owner's draft"
 		t.Failures, t.RetryAt, t.HeldFor = 0, time.Time{}, ""
 		t.UpdatedAt = now
-		record(v, now, t.ProjectID, "task.drafted", fmt.Sprintf("The owner changed %s by hand: draft %d", t.Objective, r.N))
+		recordTask(v, now, t, "task.drafted", fmt.Sprintf("The owner changed %s by hand: draft %d", t.Objective, r.N))
 		derive(v, t)
 		out = *t
 		return nil

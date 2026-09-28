@@ -86,7 +86,17 @@ func uid() string {
 	return hex.EncodeToString(b[:])
 }
 func record(v *Snapshot, now time.Time, project, kind, summary string) {
-	v.Activity = append(v.Activity, Activity{ID: uid(), ProjectID: project, Kind: kind, Summary: summary, CreatedAt: now})
+	recordOn(v, now, project, "", kind, summary)
+}
+
+// recordTask records activity about a task, so the log can name it by its
+// current readable ID.
+func recordTask(v *Snapshot, now time.Time, t *Task, kind, summary string) {
+	recordOn(v, now, t.ProjectID, t.ID, kind, summary)
+}
+
+func recordOn(v *Snapshot, now time.Time, project, taskID, kind, summary string) {
+	v.Activity = append(v.Activity, Activity{ID: uid(), ProjectID: project, TaskID: taskID, Kind: kind, Summary: summary, CreatedAt: now})
 }
 func project(v *Snapshot, id string) *Project {
 	for i := range v.Projects {

@@ -18,6 +18,7 @@ import {
   ErrorNotice,
   Icon,
   Pill,
+  TaskRef,
   focusedElement,
   typingIn,
   useAction,
@@ -110,6 +111,7 @@ export function RequestPanel({
       ) : (
         <div className="request-body">
           <header className="request-header">
+            <TaskRef task={task} />
             <h2 id="request-title">{task.objective}</h2>
             <p className="request-status">
               <Pill tone={requestTone(task)} dot>

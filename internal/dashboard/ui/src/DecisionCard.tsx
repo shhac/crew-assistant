@@ -7,7 +7,7 @@ import {
   type DecisionKindWords,
 } from "./stages";
 import { reversibility } from "./landing";
-import { ErrorNotice, Pill, sinceLabel, useAction } from "./ui";
+import { ErrorNotice, Pill, TaskRef, sinceLabel, useAction } from "./ui";
 import {
   dismissDecision,
   resolveDecision,
@@ -113,6 +113,7 @@ export function DecisionCard({
         {project && !full && (
           <a href={projectHref(project.id)}>{project.title}</a>
         )}
+        {!full && <TaskRef task={task} />}
         {decision.created_at && (
           <span className="muted small">{sinceLabel(decision.created_at)}</span>
         )}

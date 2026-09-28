@@ -41,6 +41,14 @@ func TestTheSampleShowsWorkAtEveryStageAndNeverTouchesRealState(t *testing.T) {
 	if len(snap.Members) == 0 {
 		t.Error("the sample has no team members")
 	}
+	for _, task := range snap.Tasks {
+		if !strings.Contains(task.Ref, "-") {
+			t.Errorf("sample task %q has no readable ID", task.Objective)
+		}
+	}
+	if !slices.ContainsFunc(snap.Tasks, func(task core.Task) bool { return task.Ref == "CA-1" }) {
+		t.Error("the crew-assistant sample doesn't number its tasks from CA-1")
+	}
 	if !slices.ContainsFunc(snap.Projects, func(p core.Project) bool {
 		_, ok := p.PMSeat()
 		return ok && p.OrderedBy == core.OrderedByPM

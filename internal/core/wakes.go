@@ -94,17 +94,26 @@ func (s *Service) RegisterWake(ctx context.Context, in WakeInput) (Wake, error) 
 	now := s.now().UTC()
 	out := Wake{ID: "wake-" + uid()[:8], Owner: in.Owner, TaskID: in.TaskID, ProjectID: in.ProjectID, On: in.On, Target: strings.TrimSpace(in.Target), Match: strings.TrimSpace(in.Match), Prompt: strings.TrimSpace(in.Prompt), Baseline: in.Baseline, Status: WakeWaiting, CreatedAt: now, ExpiresAt: now.Add(timeout)}
 	err := s.store.update(ctx, func(v *Snapshot) error {
+		// A wake's task named by its readable ID keeps its canonical one.
+		if in.TaskID != "" {
+			t := task(v, in.TaskID)
+			if t == nil {
+				return ErrNotFound
+			}
+			out.TaskID = t.ID
+		}
 		waiting := 0
 		for _, w := range v.Wakes {
-			if w.Status == WakeWaiting && w.Owner == in.Owner && w.TaskID == in.TaskID {
+			if w.Status == WakeWaiting && w.Owner == in.Owner && w.TaskID == out.TaskID {
 				waiting++
 			}
 		}
 		if waiting >= MaxWaiting {
 			return fmt.Errorf("already waiting on %d things; cancel some first: %w", waiting, ErrConflict)
 		}
-		if in.TaskID != "" && task(v, in.TaskID) == nil {
-			return ErrNotFound
+		// So does a wake on a task.
+		if out.On == WakeOnTask {
+			out.Target = canonicalID(v, out.Target)
 		}
 		v.Wakes = append(v.Wakes, out)
 		return nil

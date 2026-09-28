@@ -58,7 +58,7 @@ func TestARoleSeesItsProjectsTasksAndLinksOnlyItsOwn(t *testing.T) {
 	if got := callTool(t, researcher, "list_tasks", map[string]string{"which": "", "related_to": second.ID, "text": ""}); !strings.Contains(got.Content, first.ID) || strings.Contains(got.Content, third.ID) {
 		t.Fatalf("related filter: %s", got.Content)
 	}
-	if got := callTool(t, researcher, "read_task", map[string]string{"task_id": first.ID}); !strings.Contains(got.Content, "- depends on "+second.ID) {
+	if got := callTool(t, researcher, "read_task", map[string]string{"task_id": first.ID}); !strings.Contains(got.Content, "- depends on "+second.Ref+" ("+second.ID+")") {
 		t.Fatalf("read shows links: %s", got.Content)
 	}
 
@@ -93,6 +93,32 @@ func TestARoleSeesItsProjectsTasksAndLinksOnlyItsOwn(t *testing.T) {
 	stale.status = core.TaskResearching
 	if got := callTool(t, stale, "link_tasks", map[string]string{"relation": "relates_to", "other_task_id": first.ID}); !got.IsError {
 		t.Fatal("a stopped task's turn changed its links")
+	}
+}
+
+// A role can name tasks by their readable IDs, which its tools show beside
+// the canonical ones.
+func TestARoleNamesTasksByTheirReadableIDs(t *testing.T) {
+	a, p, first := loopApp(t, &scriptedRunner{}, "")
+	ctx := context.Background()
+	second, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Write the follow-up", Criteria: []string{"Warm"}})
+	if second.Ref == "" {
+		t.Fatal("the task has no readable ID")
+	}
+	researcher := a.toolsFor(first, core.RoleResearcher, "")
+	if got := callTool(t, researcher, "link_tasks", map[string]string{"relation": "depends_on", "other_task_id": strings.ToLower(second.Ref)}); got.IsError {
+		t.Fatalf("link by readable ID: %s", got.Content)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	if linked, _ := findTask(snap, p.ID, first.ID); len(linked.DependsOn) != 1 || linked.DependsOn[0] != second.ID {
+		t.Fatalf("depends on %v", linked.DependsOn)
+	}
+	list := callTool(t, researcher, "list_tasks", map[string]string{"which": "", "related_to": second.Ref, "text": ""})
+	if want := "- " + first.Ref + " (" + first.ID + ") (queued) (your task)"; !strings.Contains(list.Content, want) || !strings.Contains(list.Content, "[depends on "+second.Ref+" ("+second.ID+")]") {
+		t.Fatalf("list: %s", list.Content)
+	}
+	if got := callTool(t, researcher, "read_task", map[string]string{"task_id": second.Ref}); got.IsError || !strings.HasPrefix(got.Content, second.Ref+" ("+second.ID+")") {
+		t.Fatalf("read by readable ID: %+v", got)
 	}
 }
 

@@ -56,7 +56,7 @@ func (lp *Loop) registerWake(ctx context.Context, owner, taskID string, in WakeR
 		if !ok {
 			return core.Wake{}, fmt.Errorf("there is no task %q", in.Target)
 		}
-		wake.Baseline, wake.ProjectID = t.Status, t.ProjectID
+		wake.Target, wake.Baseline, wake.ProjectID = t.ID, t.Status, t.ProjectID
 	case core.WakeOnBranch:
 		dir, err := projectRepo(snap, in.ProjectID)
 		if err != nil {

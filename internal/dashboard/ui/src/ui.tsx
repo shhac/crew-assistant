@@ -79,6 +79,12 @@ export function Pill({
   );
 }
 
+/** A task's readable ID, such as CA-12; nothing before it has one. */
+export function TaskRef({ task }: { task?: { ref?: string } }) {
+  if (!task?.ref) return null;
+  return <span className="task-ref muted small">{task.ref}</span>;
+}
+
 export function humanStatus(value: string) {
   return (value || "pending").replaceAll("_", " ");
 }

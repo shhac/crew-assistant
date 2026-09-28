@@ -141,7 +141,7 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 		t.LandDecision = &d
 		t.UpdatedAt = now
 		if !d.Land {
-			record(v, now, t.ProjectID, activityPMLanding, fmt.Sprintf("The PM held %s: %s", t.Objective, d.Reason))
+			recordTask(v, now, t, activityPMLanding, fmt.Sprintf("The PM held %s: %s", t.Objective, d.Reason))
 			openTaskDecision(v, t, DecisionDelivery, hold, now)
 			derive(v, t)
 			out = *t
@@ -154,7 +154,7 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 		t.Status, t.DecisionID, t.ResumeStatus, t.Detail = TaskLanding, "", "", "Landing"
 		// Only approved so far: catching up, QA on the merged result and the
 		// push are still to come, and "landed" is said once they succeed.
-		record(v, now, t.ProjectID, activityPMLanding, fmt.Sprintf("The PM approved %s to land %s: %s", t.Objective, d.How(), d.Reason))
+		recordTask(v, now, t, activityPMLanding, fmt.Sprintf("The PM approved %s to land %s: %s", t.Objective, d.How(), d.Reason))
 		derive(v, t)
 		out = *t
 		return nil
@@ -181,7 +181,7 @@ func (s *Service) LandAheadOfPM(ctx context.Context, projectID, taskID string) (
 		t.Approved = t.Revisions[len(t.Revisions)-1].N
 		t.LandDecision, t.LandingFailures = nil, nil
 		t.Status, t.DecisionID, t.ResumeStatus, t.Detail, t.UpdatedAt = TaskLanding, "", "", "Landing", now
-		record(v, now, t.ProjectID, "task.landing", "You're landing "+t.Objective+" ahead of the PM")
+		recordTask(v, now, t, "task.landing", "You're landing "+t.Objective+" ahead of the PM")
 		derive(v, t)
 		out = *t
 		return nil

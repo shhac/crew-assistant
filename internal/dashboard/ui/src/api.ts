@@ -195,6 +195,8 @@ export interface LandingInput {
 export interface Project {
   id: string;
   title: string;
+  /** Starts the readable IDs of the project's tasks, as CA does CA-12. */
+  prefix?: string;
   status: string;
   brief: Brief;
   playbook?: Playbook;
@@ -352,6 +354,9 @@ export interface Proposal {
 export interface Task {
   id: string;
   project_id: string;
+  /** The task's readable ID, such as CA-12; empty before it has one. */
+  ref?: string;
+  number?: number;
   objective: string;
   criteria: string[] | null;
   status: TaskStatus;
@@ -526,6 +531,8 @@ export interface Memory {
 export interface Activity {
   id: string;
   project_id?: string;
+  /** The task an entry is about, where it is about one. */
+  task_id?: string;
   kind?: string;
   summary: string;
   created_at?: string;
@@ -787,6 +794,14 @@ export function setDirectories(projectID: string, paths: string[]) {
   return api<Project>(`${projectPath(projectID)}/directories`, {
     method: "PUT",
     body: JSON.stringify({ directories: paths }),
+  });
+}
+
+/** Renames the prefix of a project's readable task IDs. */
+export function setPrefix(projectID: string, prefix: string) {
+  return api<Project>(`${projectPath(projectID)}/prefix`, {
+    method: "PUT",
+    body: JSON.stringify({ prefix }),
   });
 }
 

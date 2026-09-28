@@ -69,15 +69,15 @@ func (r roleTools) guide() string {
 
 func (r roleTools) Definitions() []session.ToolDefinition {
 	defs := []session.ToolDefinition{
-		{Name: "list_tasks", Description: "List this project's tasks, one line each with id, status and how it links to others. which is unfinished (the default when empty), finished or all. related_to is a task id to list only the tasks linked to it, or empty. text keeps only tasks whose objective contains it, or empty.", Schema: schema([]string{"which", "related_to", "text"})},
-		{Name: "read_task", Description: "Read one of this project's tasks: what it is for, its plan, where it is, its links and its latest draft and reviews. Use it for the tasks that bear on yours.", Schema: schema([]string{"task_id"})},
+		{Name: "list_tasks", Description: "List this project's tasks, one line each with its readable id (such as CA-12) and canonical id, status and how it links to others. which is unfinished (the default when empty), finished or all. related_to is a task id, readable or canonical, to list only the tasks linked to it, or empty. text keeps only tasks whose objective contains it, or empty.", Schema: schema([]string{"which", "related_to", "text"})},
+		{Name: "read_task", Description: "Read one of this project's tasks: what it is for, its plan, where it is, its links and its latest draft and reviews. task_id is its readable id (such as CA-12) or its canonical id. Use it for the tasks that bear on yours.", Schema: schema([]string{"task_id"})},
 	}
 	if len(r.relations) == 0 {
 		return defs
 	}
 	return append(defs,
-		session.ToolDefinition{Name: "link_tasks", Description: "Link your own task to another of this project's tasks. relation is " + relationGuide(r.relations) + " A pair has one link; the owner's links stay as they are.", Schema: schema([]string{"relation", "other_task_id"})},
-		session.ToolDefinition{Name: "unlink_tasks", Description: "Take away a link between your own task and another that your team set; links the owner or assistant set stay.", Schema: schema([]string{"other_task_id"})},
+		session.ToolDefinition{Name: "link_tasks", Description: "Link your own task to another of this project's tasks. relation is " + relationGuide(r.relations) + " other_task_id is its readable or canonical id. A pair has one link; the owner's links stay as they are.", Schema: schema([]string{"relation", "other_task_id"})},
+		session.ToolDefinition{Name: "unlink_tasks", Description: "Take away a link between your own task and another that your team set; links the owner or assistant set stay. other_task_id is its readable or canonical id.", Schema: schema([]string{"other_task_id"})},
 	)
 }
 
@@ -183,7 +183,7 @@ func (r roleTools) list(ctx context.Context, which, relatedTo, contains string) 
 		if t.ID == r.taskID {
 			mine = " (your task)"
 		}
-		fmt.Fprintf(&b, "- %s (%s)%s: %s%s\n", t.ID, t.Status, mine, text.Clip(t.Objective, 200), linksLine(t))
+		fmt.Fprintf(&b, "- %s (%s)%s: %s%s\n", t.Label(), t.Status, mine, text.Clip(t.Objective, 200), linksLine(snap, t))
 	}
 	if b.Len() == 0 {
 		return "No tasks match.", nil
@@ -205,11 +205,18 @@ func linkedTo(a, b core.Task) bool {
 	return slices.ContainsFunc(linkGroups(a), func(g linkGroup) bool { return slices.Contains(g.ids, b.ID) })
 }
 
-func linksLine(t core.Task) string {
+func linksLine(snap core.Snapshot, t core.Task) string {
 	var parts []string
 	for _, l := range linkGroups(t) {
 		if len(l.ids) > 0 {
-			parts = append(parts, l.name+" "+strings.Join(l.ids, ", "))
+			names := make([]string, len(l.ids))
+			for i, id := range l.ids {
+				names[i] = id
+				if o, ok := snap.FindTask(id); ok {
+					names[i] = o.Label()
+				}
+			}
+			parts = append(parts, l.name+" "+strings.Join(names, ", "))
 		}
 	}
 	if len(parts) == 0 {
@@ -228,14 +235,14 @@ func (r roleTools) read(ctx context.Context, id string) (string, error) {
 		return "", errNoTask
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s (%s, %s): %s\n", t.ID, t.Status, t.Stage, text.Clip(t.Objective, 600))
+	fmt.Fprintf(&b, "%s (%s, %s): %s\n", t.Label(), t.Status, t.Stage, text.Clip(t.Objective, 600))
 	for _, c := range t.Criteria {
 		fmt.Fprintf(&b, "- criterion: %s\n", text.Clip(c, 300))
 	}
 	for _, l := range linkGroups(t) {
 		for _, other := range l.ids {
 			if o, ok := findTask(snap, r.projectID, other); ok {
-				fmt.Fprintf(&b, "- %s %s (%s): %s\n", l.name, o.ID, o.Status, text.Clip(o.Objective, 200))
+				fmt.Fprintf(&b, "- %s %s (%s): %s\n", l.name, o.Label(), o.Status, text.Clip(o.Objective, 200))
 			}
 		}
 	}

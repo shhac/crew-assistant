@@ -52,19 +52,22 @@ func dependencies(v *Snapshot, t Task, ids []string) ([]string, error) {
 	var out []string
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
-		if id == "" || slices.Contains(out, id) {
+		if id == "" {
 			continue
 		}
+		// A task named by its readable ID is kept by its canonical one.
 		dep := task(v, id)
 		switch {
-		case id == t.ID:
+		case id == t.ID || (dep != nil && dep.ID == t.ID):
 			return nil, errors.New("a task cannot wait for itself")
 		case dep == nil || dep.ProjectID != t.ProjectID:
 			return nil, fmt.Errorf("there is no task %q in this project", id)
-		case reaches(v, id, t.ID, map[string]bool{}):
+		case slices.Contains(out, dep.ID):
+			continue
+		case reaches(v, dep.ID, t.ID, map[string]bool{}):
 			return nil, fmt.Errorf("“%s” already waits for this task, so this task cannot wait for it", dep.Objective)
 		}
-		out = append(out, id)
+		out = append(out, dep.ID)
 	}
 	return out, nil
 }
@@ -130,13 +133,13 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 		case len(waiting) > 0:
 			t.Status, t.Plan, t.Detail = TaskQueued, nil, ""
 			t.Base, t.From, t.Branch = "", "", ""
-			record(v, now, t.ProjectID, "task.queued", fmt.Sprintf("%s waits for %s", t.Objective, strings.Join(waiting, ", ")))
+			recordTask(v, now, t, "task.queued", fmt.Sprintf("%s waits for %s", t.Objective, strings.Join(waiting, ", ")))
 		case len(plan.Questions) > 0:
 			t.Plan = &plan
 		default:
 			t.Plan = &plan
 			t.Status, t.Detail = TaskWriting, ""
-			record(v, now, t.ProjectID, "task.planned", fmt.Sprintf("Planned %s", t.Objective))
+			recordTask(v, now, t, "task.planned", fmt.Sprintf("Planned %s", t.Objective))
 		}
 		if p := project(v, t.ProjectID); p != nil {
 			p.listChanged()

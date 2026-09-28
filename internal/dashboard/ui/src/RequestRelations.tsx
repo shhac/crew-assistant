@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { requestHref } from "./router";
 import { kindWord } from "./members";
 import { projectTasks } from "./stages";
-import { ErrorNotice, useAction } from "./ui";
+import { ErrorNotice, TaskRef, useAction } from "./ui";
 import {
   linkTasks,
   unlinkTasks,
@@ -112,6 +112,7 @@ export function RequestRelations({
               const name = other?.objective ?? "A request no longer here";
               return (
                 <li key={id} className="relation">
+                  <TaskRef task={other} />
                   {other ? (
                     <a href={requestHref(project.id, id)}>{name}</a>
                   ) : (

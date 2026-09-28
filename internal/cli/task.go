@@ -38,7 +38,7 @@ func registerTask(root *cobra.Command, o *options) {
 			if (!all && t.Finished()) || (project != "" && !strings.HasPrefix(t.ProjectID, project) && !strings.EqualFold(titles[t.ProjectID], project)) {
 				continue
 			}
-			if err := o.emit(map[string]string{"id": t.ID, "project": titles[t.ProjectID], "status": t.Status, "stage": t.Stage, "objective": t.Objective}); err != nil {
+			if err := o.emit(map[string]string{"ref": t.Ref, "id": t.ID, "project": titles[t.ProjectID], "status": t.Status, "stage": t.Stage, "objective": t.Objective}); err != nil {
 				return err
 			}
 		}
@@ -53,9 +53,10 @@ func registerTask(root *cobra.Command, o *options) {
 			return err
 		}
 		return o.emit(struct {
+			Ref       string `json:"ref,omitempty"`
 			Objective string `json:"objective"`
 			work.TaskPlace
-		}{t.Objective, place})
+		}{t.Ref, t.Objective, place})
 	}}
 
 	path := &cobra.Command{Use: "path <task>", Short: "Print the daemon's workspace for a task; each step resets it, so look but don't change", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
@@ -69,7 +70,7 @@ func registerTask(root *cobra.Command, o *options) {
 	var worktree, branch string
 	var force bool
 	checkout := &cobra.Command{Use: "checkout <task>", Short: "Put a task's latest draft in your repository as a branch, or a worktree, to change it by hand", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		place, _, err := o.place(args[0])
+		place, t, err := o.place(args[0])
 		if err != nil {
 			return err
 		}
@@ -92,7 +93,7 @@ func registerTask(root *cobra.Command, o *options) {
 			}
 			out["worktree"] = dir
 		}
-		out["next"] = fmt.Sprintf("Commit your change on %s, then run crew-assistant task adopt %s", into, short(place.TaskID))
+		out["next"] = fmt.Sprintf("Commit your change on %s, then run crew-assistant task adopt %s", into, cmp.Or(t.Ref, short(place.TaskID)))
 		return o.emit(out)
 	}}
 	checkout.Flags().StringVar(&worktree, "worktree", "", "Also check the branch out in a new worktree at this directory")
@@ -115,7 +116,7 @@ func registerTask(root *cobra.Command, o *options) {
 			return err
 		}
 		draft := adopted.Revisions[len(adopted.Revisions)-1]
-		return o.emit(map[string]any{"task": adopted.ID, "draft": draft.N, "commit": draft.Ref, "files": len(draft.Files), "approved": adopted.Approved == draft.N, "status": adopted.Status})
+		return o.emit(map[string]any{"task": adopted.ID, "ref": t.Ref, "draft": draft.N, "commit": draft.Ref, "files": len(draft.Files), "approved": adopted.Approved == draft.N, "status": adopted.Status})
 	}}
 	adopt.Flags().StringVar(&note, "note", "", "What you changed (default: the commit's subject)")
 	adopt.Flags().BoolVar(&approve, "approve", false, "Approve it as you adopt it: reviewers are skipped, QA still runs before it lands")
@@ -124,13 +125,17 @@ func registerTask(root *cobra.Command, o *options) {
 	root.AddCommand(cmd)
 }
 
-// findTask is the task an id or a unique start of one names.
+// findTask is the task an id, a readable id such as CA-12, or a unique
+// start of an id names.
 func (o *options) findTask(id string) (core.Task, error) {
 	snap, err := o.snapshot()
 	if err != nil {
 		return core.Task{}, err
 	}
 	id = strings.TrimSpace(id)
+	if t, ok := snap.FindTask(id); ok {
+		return t, nil
+	}
 	var matches []core.Task
 	for _, t := range snap.Tasks {
 		if t.ID == id {

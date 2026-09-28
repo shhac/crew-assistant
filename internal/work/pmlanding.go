@@ -179,7 +179,7 @@ Decide whether this change lands on %s now, or is held. Every reviewer and QA pa
 
 If it lands, choose how. "squash" lands it as one commit worded from the request, leaving the team's %d drafts and catch-up merges behind; it suits most changes. "fast-forward" moves %s onto the task's own commits as they are; choose it only when those commits are each worth keeping in the history. Either way the task's branch is cleaned up after.
 `, target, target, target, r.N, target)
-	fmt.Fprintf(&b, "\nThe change: %s (%s)\n", text.Clip(t.Objective, 300), t.ID)
+	fmt.Fprintf(&b, "\nThe change: %s (%s)\n", text.Clip(t.Objective, 300), t.Label())
 	for _, c := range t.Criteria {
 		fmt.Fprintf(&b, "- criterion: %s\n", text.Clip(c, 300))
 	}
@@ -199,9 +199,9 @@ If it lands, choose how. "squash" lands it as one commit worded from the request
 		if other.ProjectID != p.ID || other.ID == t.ID || other.Finished() {
 			continue
 		}
-		fmt.Fprintf(&b, "- %s (%s): %s\n", other.ID, other.Status, text.Clip(other.Objective, 300))
+		fmt.Fprintf(&b, "- %s (%s): %s\n", other.Label(), other.Status, text.Clip(other.Objective, 300))
 		if len(other.DependsOn) > 0 {
-			fmt.Fprintf(&b, "  waits for: %s\n", waitsLine(other))
+			fmt.Fprintf(&b, "  waits for: %s\n", waitsLine(snap.Tasks, other))
 		}
 	}
 	if p.PMDirection != "" {

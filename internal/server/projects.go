@@ -24,6 +24,20 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		}
 		respond(w, 200, v)
 	})
+	mux.HandleFunc("PUT /api/projects/{id}/prefix", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Prefix string `json:"prefix"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Core.SetProjectPrefix(r.Context(), r.PathValue("id"), in.Prefix)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
 	mux.HandleFunc("PUT /api/projects/{id}/team", func(w http.ResponseWriter, r *http.Request) {
 		var in work.TeamChoice
 		if decode(w, r, &in) != nil {

@@ -11,7 +11,13 @@ import {
   type ProjectTab,
   type Route,
 } from "./router";
-import { isCode, needsYou, projectKind, projectTasks } from "./stages";
+import {
+  findRequest,
+  isCode,
+  needsYou,
+  projectKind,
+  projectTasks,
+} from "./stages";
 import { landsBy } from "./landing";
 import { Icon, Pill } from "./ui";
 import type { Project, State } from "./api";
@@ -39,9 +45,7 @@ export function ProjectPage({
   const waiting = tasks.filter(needsYou).length;
   const code = isCode(project.playbook);
   const tab = route.tab;
-  const request = route.request
-    ? tasks.find((t) => t.id === route.request)
-    : undefined;
+  const request = route.request ? findRequest(tasks, route.request) : undefined;
   const folder = project.playbook?.repo || project.directories?.[0];
   return (
     <div className="page project-page">

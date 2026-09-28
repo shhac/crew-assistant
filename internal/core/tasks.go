@@ -12,8 +12,15 @@ import (
 // copied from the playbook when it starts, so a playbook change never reshapes
 // work already under way.
 type Task struct {
-	ID        string   `json:"id"`
-	ProjectID string   `json:"project_id"`
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+	// Number is the task's place in its project's creation order, from
+	// which its readable ID is made; see refs.go.
+	Number int `json:"number,omitempty"`
+	// Ref is the task's readable ID, such as CA-12: its project's prefix and
+	// its number. Derived with Stage, so it follows a renamed prefix, and
+	// never stored.
+	Ref       string   `json:"ref,omitempty"`
 	Objective string   `json:"objective"`
 	Criteria  []string `json:"criteria"`
 	Status    string   `json:"status"`
@@ -225,13 +232,15 @@ type TaskInput struct {
 	DependsOn []string `json:"depends_on,omitempty"`
 }
 
+// task is the task id names: its canonical ID, or failing that its
+// readable ID.
 func task(v *Snapshot, id string) *Task {
 	for i := range v.Tasks {
 		if v.Tasks[i].ID == id {
 			return &v.Tasks[i]
 		}
 	}
-	return nil
+	return taskByRef(v, id)
 }
 
 func decision(v *Snapshot, id string) *Decision {
@@ -274,9 +283,10 @@ func (s *Service) QueueTaskAs(ctx context.Context, projectID string, in TaskInpu
 		}
 		out.DependsOn = deps
 		markAll(&out, deps, by, now)
+		numberTask(p, &out)
 		v.Tasks = append(v.Tasks, out)
 		p.listChanged()
-		record(v, now, projectID, "task.queued", out.Objective)
+		recordTask(v, now, &out, "task.queued", out.Objective)
 		return nil
 	})
 	return out, err
@@ -322,7 +332,7 @@ func reorder(v *Snapshot, projectID string, ids []string) ([]Task, error) {
 		return nil, changed
 	}
 	var out []Task
-	for _, id := range ids {
+	for _, id := range canonicalIDs(v, ids) {
 		t, ok := queued[id]
 		if !ok {
 			return nil, changed
@@ -370,7 +380,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Pro
 			}
 		}
 		if activity != "" {
-			record(v, t.UpdatedAt, t.ProjectID, "task."+t.Status, activity)
+			recordTask(v, t.UpdatedAt, t, "task."+t.Status, activity)
 		}
 		derive(v, t)
 		out = *t
@@ -411,6 +421,6 @@ func openTaskDecision(v *Snapshot, t *Task, kind string, in DecisionInput, now t
 	t.DecisionID = d.ID
 	t.UpdatedAt = now
 	v.Decisions = append(v.Decisions, d)
-	record(v, now, t.ProjectID, "decision.opened", in.Title)
+	recordTask(v, now, t, "decision.opened", in.Title)
 	return d
 }

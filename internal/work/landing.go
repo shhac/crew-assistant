@@ -135,7 +135,7 @@ func (lp *Loop) LandTask(ctx context.Context, projectID, taskID string) (core.Ta
 	// A signed-off change waiting on the PM's decision lands on the owner's
 	// say-so instead, through the same landing.
 	if t.Status == core.TaskDeciding {
-		landing, err := lp.Core.LandAheadOfPM(ctx, projectID, taskID)
+		landing, err := lp.Core.LandAheadOfPM(ctx, projectID, t.ID)
 		lp.Nudge()
 		return landing, err
 	}

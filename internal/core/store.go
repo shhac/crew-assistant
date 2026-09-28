@@ -107,6 +107,7 @@ func Open(path string) (*Store, error) {
 				return err
 			}
 		}
+		backfillRefs(v)
 		return nil
 	}); err != nil {
 		db.Close()
@@ -194,7 +195,9 @@ func (s *Store) update(ctx context.Context, fn func(*Snapshot) error) error {
 	// A task's status can pass through a value within one change; checking
 	// here, not by polling, means a wake waiting on it never misses it.
 	settleTaskWakes(&state, time.Now().UTC())
-	data, err := json.Marshal(diskState{Schema: stateSchema, ChatCheckpoint: state.ChatCheckpoint, ChatSession: state.ChatSession, ConversationID: state.ConversationID, Conversations: state.Conversations, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: state, ModelCalls: state.ModelCalls, ModelWindows: state.ModelWindows, Events: state.Events})
+	stored := state
+	stored.Tasks = withoutRefs(state.Tasks)
+	data, err := json.Marshal(diskState{Schema: stateSchema, ChatCheckpoint: state.ChatCheckpoint, ChatSession: state.ChatSession, ConversationID: state.ConversationID, Conversations: state.Conversations, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: stored, ModelCalls: state.ModelCalls, ModelWindows: state.ModelWindows, Events: state.Events})
 	if err != nil {
 		return err
 	}
