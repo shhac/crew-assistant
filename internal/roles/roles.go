@@ -36,6 +36,10 @@ type Spec struct {
 	// Resume continues an earlier session of this role, when it still matches
 	// this configuration. The prompt must stand on its own either way.
 	Resume json.RawMessage
+	// FreshPrompt, when set, replaces Prompt if the turn starts a fresh
+	// session instead of resuming one: it brings in what the session would
+	// have remembered.
+	FreshPrompt string
 	// Compact has a resumed session compact its context before the turn, on
 	// an engine that can be asked to; a fresh session has nothing to compact.
 	Compact bool
@@ -157,7 +161,11 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 			return Result{}, err
 		}
 	}
-	turn, err := s.StartTurn(ctx, session.Input{Text: spec.Prompt})
+	prompt := spec.Prompt
+	if !resumed && spec.FreshPrompt != "" {
+		prompt = spec.FreshPrompt
+	}
+	turn, err := s.StartTurn(ctx, session.Input{Text: prompt})
 	if err != nil {
 		return Result{}, err
 	}

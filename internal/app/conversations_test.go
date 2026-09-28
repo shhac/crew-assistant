@@ -427,7 +427,7 @@ func TestTheAssistantCanTellATaskImplementerToCompactOrStartAfresh(t *testing.T)
 	if _, err := a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Status = core.TaskReviewing
 		t.Roles = []core.Role{{Name: "Writer", Kinds: []string{core.RoleImplementer}, Engine: "claude"}}
-		t.WriterSession = []byte(`{"engine":"claude","id":"writer"}`)
+		t.KeepThread(core.RoleImplementer, t.Roles[0], []byte(`{"engine":"claude","id":"writer"}`))
 		return "", nil
 	}); err != nil {
 		t.Fatal(err)

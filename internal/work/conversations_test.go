@@ -8,26 +8,34 @@ import (
 )
 
 // askImplementer makes a request of the task's implementer the way the
-// assistant's tool does. Compacting needs a Codex implementer, so it makes the
-// writer one.
+// assistant's tool does.
 func askImplementer(t *testing.T, a *Loop, task core.Task, next string) {
 	t.Helper()
-	ctx := context.Background()
-	if next == core.WriterCompact {
-		if _, err := a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
-			for i := range t.Roles {
-				if t.Roles[i].Holds(core.RoleImplementer) {
-					t.Roles[i].Engine = "codex"
-				}
-			}
-			return "", nil
-		}); err != nil {
-			t.Error(err)
-		}
-	}
-	if _, err := a.Core.SetWriterNext(ctx, task.ProjectID, task.ID, next); err != nil {
+	if _, err := a.Core.SetWriterNext(context.Background(), task.ProjectID, task.ID, next); err != nil {
 		t.Error(err)
 	}
+}
+
+// writerFor seats a writer that can carry out the request before the task
+// starts: compacting needs a Codex implementer. A task's implementer that
+// changed engine mid-task would start afresh instead.
+func writerFor(t *testing.T, a *Loop, p core.Project, next string) core.Project {
+	t.Helper()
+	if next != core.WriterCompact {
+		return p
+	}
+	playbook := *p.Playbook
+	playbook.Roles = append([]core.Role(nil), playbook.Roles...)
+	for i := range playbook.Roles {
+		if playbook.Roles[i].Holds(core.RoleImplementer) {
+			playbook.Roles[i].Engine = "codex"
+		}
+	}
+	p, err := a.Core.SetPlaybook(context.Background(), p.ID, playbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 // An implementer told to start afresh or compact does so at its next round.
@@ -36,7 +44,8 @@ func TestTheImplementerStartsAfreshOrCompactsAtItsNextRound(t *testing.T) {
 	for _, next := range []string{core.WriterFresh, core.WriterCompact} {
 		t.Run(next, func(t *testing.T) {
 			runner := &scriptedRunner{reviews: []string{revise, revise, pass}}
-			a, _, task := loopApp(t, runner, "")
+			a, p, task := loopApp(t, runner, "")
+			writerFor(t, a, p, next)
 			runner.onWriter = func(string) {
 				if runner.writes == 2 {
 					askImplementer(t, a, task, next) // Mid-round.
@@ -60,7 +69,7 @@ func TestTheImplementerStartsAfreshOrCompactsAtItsNextRound(t *testing.T) {
 					t.Fatalf("the next round did not compact: %+v", after)
 				}
 			}
-			if done.WriterNext != "" || len(done.WriterSession) == 0 {
+			if _, kept := done.Thread(core.RoleImplementer, done.Roles[0]); done.WriterNext != "" || !kept {
 				t.Fatalf("the request was not settled: %+v", done)
 			}
 		})
@@ -75,6 +84,7 @@ func TestTheSameRequestMadeMidRoundAppliesToTheNextRoundToo(t *testing.T) {
 		t.Run(next, func(t *testing.T) {
 			runner := &scriptedRunner{reviews: []string{revise, revise, revise, pass}}
 			a, p, task := loopApp(t, runner, "")
+			p = writerFor(t, a, p, next)
 			playbook := *p.Playbook
 			playbook.MaxRounds = 5
 			if _, err := a.Core.SetPlaybook(context.Background(), p.ID, playbook); err != nil {

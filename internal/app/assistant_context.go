@@ -138,7 +138,7 @@ func finishedBrief(t core.Task) core.Task {
 // taskDetail is one task as read_task gives it: everything the assistant can
 // use, without the team's sessions and setup.
 func taskDetail(t core.Task) core.Task {
-	t.WriterSession, t.Playbook, t.Roles = nil, nil, nil
+	t.Threads, t.Playbook, t.Roles = nil, nil, nil
 	if n := len(t.Revisions); n > 3 {
 		t.Revisions = t.Revisions[n-3:]
 	}

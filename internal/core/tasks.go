@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -76,10 +75,12 @@ type Task struct {
 	// Blocks names the tasks that depend on this one. Derived with Stage.
 	Blocks   []string  `json:"blocks,omitempty"`
 	Verdicts []Verdict `json:"verdicts"`
-	// WriterSession resumes the implementer across rounds. Reviewers always
-	// start fresh, so no earlier judgement anchors the next.
-	WriterSession json.RawMessage `json:"writer_session,omitempty"`
-	// WriterNext is what to do with that session at the implementer's next
+	// Threads are the team members' conversations on this task, one per
+	// member and kind of role; see threads.go. Only the implementer resumes
+	// one across rounds. Reviewers always start fresh, so no earlier
+	// judgement anchors the next.
+	Threads []Thread `json:"threads,omitempty"`
+	// WriterNext is what to do with the implementer's thread at its next
 	// round: WriterCompact or WriterFresh, or empty to resume it as it is.
 	// WriterRequest numbers each request, so a round clears only the one it
 	// carried out and not the same request made again while it ran.

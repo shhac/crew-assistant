@@ -316,7 +316,13 @@ func (s *Service) SetWriterNext(ctx context.Context, projectID, taskID, next str
 			return "", fmt.Errorf("the task is finished; its implementer won't run again: %w", ErrConflict)
 		}
 		writers := t.RolesOf(RoleImplementer)
-		if len(writers) != 1 || len(t.WriterSession) == 0 {
+		// The request is for the thread the implementer now seated would
+		// carry on; one another member left on the task isn't its to act on.
+		started := len(writers) == 1
+		if started {
+			_, started = t.Thread(RoleImplementer, writers[0])
+		}
+		if !started {
 			return "", fmt.Errorf("the implementer has no conversation yet; its first round starts one: %w", ErrConflict)
 		}
 		if next == WriterCompact && !config.Supports(writers[0].Engine, config.UseCompact) {

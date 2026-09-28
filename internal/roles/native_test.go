@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -107,6 +108,46 @@ func TestAFreshSessionOrOneNotAskedToCompactGoesStraightToItsTurn(t *testing.T) 
 				t.Fatalf("got %q, want %q", s.calls, want)
 			}
 		})
+	}
+}
+
+// A turn that can't carry its conversation on is given what the
+// conversation would have remembered; one that does is not told it twice.
+func TestAFreshSessionIsGivenItsFreshPrompt(t *testing.T) {
+	for _, resumed := range []bool{true, false} {
+		s := &fakeSession{}
+		spec := codexRound
+		spec.FreshPrompt = "Everything so far, then revise the draft"
+		if _, err := native(s, resumed).Run(context.Background(), spec); err != nil {
+			t.Fatal(err)
+		}
+		want := "turn: " + spec.FreshPrompt
+		if resumed {
+			want = "turn: " + spec.Prompt
+		}
+		if s.calls[0] != want {
+			t.Fatalf("resumed %v: got %q", resumed, s.calls)
+		}
+	}
+}
+
+// What a stored conversation may be resumed under is the harness's to
+// judge: the reference names the working directory and a digest of the
+// model, effort, instructions and sandbox, and nothing names the seat. A
+// reference that doesn't match is refused before anything is launched, and
+// a role then starts afresh. So seats that share a member, a task and a
+// workspace can carry on one conversation, and nothing else can.
+func TestAStoredConversationResumesOnlyWhereItWasStarted(t *testing.T) {
+	work := t.TempDir()
+	spec := Spec{Engine: "claude", Binary: filepath.Join(t.TempDir(), "claude"), Home: t.TempDir(), WorkDir: work, Write: true, Model: "a-model", Instructions: "Be brief."}
+	stored := session.Ref{Engine: "claude", ID: "conversation", Home: spec.Home, WorkDir: filepath.Join(t.TempDir(), "another-task")}
+	if _, err := session.Resume(context.Background(), options(spec), stored); !errors.Is(err, session.ErrIncompatibleResume) {
+		t.Fatalf("a conversation from another working directory: %v", err)
+	}
+	stored.WorkDir = work
+	stored.ConfigHash = "another-configuration"
+	if _, err := session.Resume(context.Background(), options(spec), stored); !errors.Is(err, session.ErrIncompatibleResume) {
+		t.Fatalf("a conversation under another configuration: %v", err)
 	}
 }
 

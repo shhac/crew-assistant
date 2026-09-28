@@ -40,17 +40,28 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 		return err
 	}
 	seen := len(t.Direction)
-	spec, cleanup, err := lp.roleSpec(t, writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp)+prompt+learnedGuide(writers[0], false))
+	guide := learnedGuide(writers[0], false)
+	spec, cleanup, err := lp.roleSpec(t, writers[0], m.workspace(), true, m, writerPrompt(p, t, caughtUp, false)+prompt+guide)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
 	defer cleanup()
-	spec.Resume = t.WriterSession
+	// The implementer carries on its own conversation on this task, and
+	// never another task's or another member's. Starting afresh, whether
+	// asked to or because it can't carry it on, it gets the task's record
+	// in its place.
+	spec.Resume = t.Resumable(core.RoleImplementer, writers[0])
 	switch t.WriterNext {
 	case core.WriterFresh:
 		spec.Resume = nil
 	case core.WriterCompact:
 		spec.Compact = true
+	}
+	fresh := writerPrompt(p, t, caughtUp, true) + prompt + guide
+	if len(spec.Resume) == 0 {
+		spec.Prompt = fresh
+	} else {
+		spec.FreshPrompt = fresh
 	}
 	result, err := lp.runner.Run(ctx, spec)
 	if err != nil {
@@ -96,11 +107,16 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 		reply, question = splitBlock(reply, "design")
 	}
 	// The round carried out the request it started with; one made while it
-	// ran, even for the same thing, waits for the next round.
+	// ran, even for the same thing, waits for the next round. Where its
+	// conversation got to is kept in the same change as what the round
+	// produced, so a restart carries on from the last round recorded.
 	applied := t.WriterRequest
 	took := func(t *core.Task) {
 		if t.WriterRequest == applied {
 			t.WriterNext = ""
+		}
+		if ok {
+			t.KeepThread(core.RoleImplementer, r, result.Session)
 		}
 	}
 	// Asking for design input ends the turn without a draft: whatever it
@@ -108,7 +124,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	// resumes with the answer.
 	if question != "" {
 		return lp.askDesign(ctx, t, writer, question, func(t *core.Task) {
-			t.WriterSession, t.WakeErrors = result.Session, wakeErrors
+			t.WakeErrors = wakeErrors
 			took(t)
 		})
 	}
@@ -116,7 +132,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	revision, err := m.snapshot(ctx, t, n)
 	if errors.Is(err, gitrepo.ErrNoChange) && proposed(t) {
 		_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-			t.WriterSession, t.WakeErrors, t.Failures, t.RetryAt = result.Session, wakeErrors, 0, time.Time{}
+			t.WakeErrors, t.Failures, t.RetryAt = wakeErrors, 0, time.Time{}
 			took(t)
 			t.AnswerDirection(seen, 0, "No change needed: "+reply, time.Now().UTC())
 			if t.DirectionPending > 0 {
@@ -140,7 +156,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 		revision.BriefVersion, revision.Summary, revision.At = p.Brief.Version, text.Clip(reply, 2000), time.Now().UTC()
 		t.Revisions = append(t.Revisions, revision)
 		t.AnswerDirection(seen, n, reply, revision.At)
-		t.WriterSession, t.WakeErrors = result.Session, wakeErrors
+		t.WakeErrors = wakeErrors
 		took(t)
 		t.Failures, t.RetryAt = 0, time.Time{}
 		t.Status, t.Detail = core.TaskReviewing, ""

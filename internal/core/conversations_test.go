@@ -394,10 +394,21 @@ func TestOnlyAnImplementerWithAConversationCanBeToldToCompactOrStartAfresh(t *te
 	if _, err := s.SetWriterNext(ctx, p.ID, task.ID, WriterFresh); !errors.Is(err, ErrConflict) {
 		t.Fatal("no conversation yet, but accepted", err)
 	}
+	// Another member's thread on the task isn't the seated implementer's.
+	ada := Role{Name: "Ada", Kinds: []string{RoleImplementer}, Engine: "claude", Member: "ada"}
 	if _, err := s.UpdateTask(ctx, task.ID, func(t *Task, _ *Project) (string, error) {
 		t.Status = TaskReviewing
 		t.Roles = []Role{{Name: "Writer", Kinds: []string{RoleImplementer}, Engine: "claude"}}
-		t.WriterSession = []byte(`{"engine":"claude","id":"writer"}`)
+		t.KeepThread(RoleImplementer, ada, []byte(`{"engine":"claude","id":"ada"}`))
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetWriterNext(ctx, p.ID, task.ID, WriterFresh); !errors.Is(err, ErrConflict) {
+		t.Fatal("another member's conversation was taken as the implementer's", err)
+	}
+	if _, err := s.UpdateTask(ctx, task.ID, func(t *Task, _ *Project) (string, error) {
+		t.KeepThread(RoleImplementer, t.Roles[0], []byte(`{"engine":"claude","id":"writer"}`))
 		return "", nil
 	}); err != nil {
 		t.Fatal(err)

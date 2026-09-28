@@ -155,7 +155,7 @@ func TestTheTeamIsToldADraftIsTheOwners(t *testing.T) {
 	if got := checkerPrompt(p, task, task.Revisions[1], reviewer, p.Playbook); !strings.Contains(got, "owner made this draft by hand (Tidy Feature by hand)") {
 		t.Fatalf("reviewer prompt: %s", got)
 	}
-	if got := writerPrompt(p, task, ""); !strings.Contains(got, "changed draft 2 by hand") {
+	if got := writerPrompt(p, task, "", false); !strings.Contains(got, "changed draft 2 by hand") {
 		t.Fatalf("writer prompt: %s", got)
 	}
 }
