@@ -62,6 +62,14 @@ export const verdictOutcome: Record<string, { label: string; tone: Tone }> = {
   pass: { label: "Passed", tone: "done" },
   revise: { label: "Asked for changes", tone: "needs" },
   question: { label: "Asked a question", tone: "needs" },
+  research: { label: "Asked for research", tone: "needs" },
+};
+
+/** What a checker's recommended next step means. */
+export const nextStep: Record<string, string> = {
+  land: "Recommends it goes on",
+  revise: "Recommends another revision",
+  research: "Recommends more research",
 };
 
 const when = (at?: string) => (at ? Date.parse(at) || 0 : 0);

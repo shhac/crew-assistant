@@ -62,6 +62,9 @@ func (lp *Loop) answerMessage(ctx context.Context, snap core.Snapshot) (bool, er
 		return failed(err)
 	}
 	verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, role.Name, p.Brief.Version, time.Now().UTC()
+	// The verdict judged the text the checker was shown, not whatever it
+	// became while the checker worked.
+	verdict.TextVersion = t.TextVersion
 	return true, lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, &verdict, "")
 }
 

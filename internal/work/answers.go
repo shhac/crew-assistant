@@ -112,12 +112,20 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 		return err
 	}
 	// Anything else is direction for another round: the owner asked for
-	// changes, answered a reviewer's question or wants one more attempt.
+	// changes, answered a question or wants one more attempt.
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		// The owner stepped in: landings the PM approved count afresh.
 		t.LandingFailures = nil
 		if d.Kind == core.DecisionQuestion || (!chose(choiceAnotherRound) && !chose(choiceChanges)) {
 			t.AddDirection(&d, answer)
+		}
+		// A role's question goes back to whoever asked it, in the same round,
+		// with the owner's answer in its direction: the researcher plans
+		// again, a checker judges the draft again, and either decides where
+		// the task goes next.
+		if a := t.BackToAsker(d.ID); a != nil {
+			t.Detail = "Going on with your answer"
+			return fmt.Sprintf("%s goes on with your answer about %s", a.From, t.Objective), nil
 		}
 		// A design question goes back to the step that asked it, in the same
 		// round, with the owner's answer in its direction.

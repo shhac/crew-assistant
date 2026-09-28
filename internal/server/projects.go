@@ -155,6 +155,28 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		}
 		respond(w, 200, v)
 	})
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/notes", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Text string `json:"text"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Core.AddNote(r.Context(), core.NoteInput{Project: r.PathValue("id"), Task: r.PathValue("task"), By: core.FromOwner, Kind: core.FromOwner, Text: in.Text})
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 201, v)
+	})
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/edits/{edit}/undo", func(w http.ResponseWriter, r *http.Request) {
+		v, err := a.Core.UndoTaskEdit(r.Context(), r.PathValue("id"), r.PathValue("task"), r.PathValue("edit"))
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
 	mux.HandleFunc("PUT /api/projects/{id}/tasks/order", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			TaskIDs []string `json:"task_ids"`

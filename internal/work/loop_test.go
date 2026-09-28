@@ -44,6 +44,9 @@ type scriptedRunner struct {
 	// onPMLand runs before each, to change the world meanwhile.
 	pmLand   []string
 	onPMLand func()
+	// route answers the PM's choices of where a task goes after its checks,
+	// in order; after them, a reply that can't be read.
+	route []string
 }
 
 const (
@@ -83,6 +86,13 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 		reply := `{"land": true, "reason": "it is signed off and nothing waits on it"}`
 		if len(r.pmLand) > 0 {
 			reply, r.pmLand = r.pmLand[0], r.pmLand[1:]
+		}
+		return roles.Result{Text: reply}, nil
+	}
+	if !spec.Write && strings.Contains(spec.Prompt, "Decide where this task goes next") {
+		reply := "no choice"
+		if len(r.route) > 0 {
+			reply, r.route = r.route[0], r.route[1:]
 		}
 		return roles.Result{Text: reply}, nil
 	}
@@ -230,7 +240,7 @@ func TestLoopRevisesUntilReviewersPassThenDeliversOnApproval(t *testing.T) {
 }
 
 func TestOwnerChangesQuestionsAndRoundLimits(t *testing.T) {
-	runner := &scriptedRunner{reviews: []string{ask, revise, revise, revise, pass}}
+	runner := &scriptedRunner{reviews: []string{ask, revise, revise, revise, revise, pass}}
 	a, _, _ := loopApp(t, runner, "")
 	ctx := context.Background()
 	task := settle(t, a)
@@ -240,14 +250,15 @@ func TestOwnerChangesQuestionsAndRoundLimits(t *testing.T) {
 	}
 	a.Core.AnswerDecision(ctx, d.ID, "The whole team")
 	task = settle(t, a)
-	// Round 2 answered the question; rounds 2 and 3 were revised; the limit
-	// of three rounds then comes to the owner rather than a fourth attempt.
+	// The reviewer that asked judged draft 1 again with the answer; rounds
+	// 1 to 3 were revised; the limit of three rounds then comes to the
+	// owner rather than a fourth attempt.
 	d = openDecision(t, a, task)
 	if d.Kind != core.DecisionEscalation || task.Round != 3 {
 		t.Fatalf("expected an escalation at the round limit, got %+v / %+v", d, task)
 	}
-	if !strings.Contains(runner.seen[2].Prompt, "The whole team") {
-		t.Fatal("the owner's answer did not reach the writer")
+	if runner.seen[2].Write || !strings.Contains(runner.seen[2].Prompt, "The whole team") || !strings.Contains(runner.seen[3].Prompt, "The whole team") {
+		t.Fatal("the owner's answer did not reach the reviewer that asked, then the writer")
 	}
 	a.Core.ChooseDecision(ctx, d.ID, choiceAnotherRound)
 	task = settle(t, a)
@@ -389,10 +400,21 @@ func TestPausedAndNoDispatchDoNothing(t *testing.T) {
 }
 
 func TestParseVerdictRejectsUnusableReviews(t *testing.T) {
-	for _, bad := range []string{"", "no json here", `{"outcome":"maybe","summary":"x"}`, `{"outcome":"revise","summary":"x","findings":[]}`, `{"outcome":"question","summary":"x","question":""}`, `{"outcome":"pass","summary":""}`} {
-		if _, err := parseVerdict(bad); err == nil {
+	for _, bad := range []string{"", "no json here", `{"outcome":"maybe","summary":"x"}`, `{"outcome":"revise","summary":"x","findings":[]}`, `{"outcome":"question","summary":"x","question":""}`, `{"outcome":"pass","summary":""}`, `{"outcome":"research","summary":"x","question":""}`} {
+		if _, err := parseVerdict(bad, true); err == nil {
 			t.Errorf("accepted %q", bad)
 		}
+	}
+	research := `{"outcome":"research","summary":"x","question":"Which API?","next":"land","note":"I want to see it again"}`
+	if _, err := parseVerdict(research, false); err == nil {
+		t.Error("research was accepted from a team with no researcher")
+	}
+	v, err := parseVerdict(research, true)
+	if err != nil || v.Outcome != core.VerdictResearch || v.Question != "Which API?" || v.Next != core.NextLand || v.Note != "I want to see it again" {
+		t.Fatalf("research verdict %+v %v", v, err)
+	}
+	if v, _ := parseVerdict(`{"outcome":"pass","summary":"x","next":"research","note":"a\nb"}`, false); v.Next != "" || v.Note != "a b" {
+		t.Fatalf("a recommendation the team can't follow is dropped and the note kept to a line: %+v", v)
 	}
 }
 

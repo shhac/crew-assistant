@@ -13,13 +13,16 @@ import (
 // written: what already exists, what will change, what stays out, and what
 // is unclear. What the task waits for is kept on the task itself.
 type Plan struct {
-	Summary    string    `json:"summary"`
-	Exists     []string  `json:"exists,omitempty"`
-	Changes    []string  `json:"changes,omitempty"`
-	OutOfScope []string  `json:"out_of_scope,omitempty"`
-	Questions  []string  `json:"questions,omitempty"`
-	Role       string    `json:"role"`
-	At         time.Time `json:"at"`
+	Summary    string   `json:"summary"`
+	Exists     []string `json:"exists,omitempty"`
+	Changes    []string `json:"changes,omitempty"`
+	OutOfScope []string `json:"out_of_scope,omitempty"`
+	Questions  []string `json:"questions,omitempty"`
+	Role       string   `json:"role"`
+	// Answered marks a plan whose questions the owner answered: the
+	// researcher plans again with the answer rather than going on with it.
+	Answered bool      `json:"answered,omitempty"`
+	At       time.Time `json:"at"`
 }
 
 // unfinished reports a task that has not landed, been delivered or stopped.
@@ -110,8 +113,10 @@ func reaches(v *Snapshot, from, to string, seen map[string]bool) bool {
 // What it waits for comes first: a task with unlanded work to wait for goes
 // back to the queue, keeping neither this plan nor its branch point, so it is
 // researched again on top of the landed work. Then the researcher's
-// questions, which the loop brings to the owner. Otherwise the implementer
-// starts.
+// questions, which the loop brings to the owner. Then a checker's request
+// for more research, which goes back to that checker. Otherwise the
+// implementer starts. A task whose work has begun is never sent back to the
+// queue, nor made to wait for more: its drafts and branch stay.
 func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, dependsOn []string) (Task, error) {
 	var out Task
 	err := s.store.update(ctx, func(v *Snapshot) error {
@@ -123,19 +128,30 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 		if t.Status != TaskResearching {
 			return fmt.Errorf("the task is no longer being researched: %w", ErrConflict)
 		}
+		begun := len(t.Revisions) > 0
+		if begun {
+			dependsOn = nil
+		}
 		deps := possibleDependencies(v, *t, append(slices.Clone(t.DependsOn), dependsOn...))
 		now := s.now().UTC()
 		t.DependsOn, t.UpdatedAt = deps, now
 		markAll(t, deps, researcherLinker(*t), now)
 		plan.At = now
 		waiting := waitsFor(v, *t)
+		request := t.OpenResearch()
 		switch {
-		case len(waiting) > 0:
+		case len(waiting) > 0 && !begun:
 			t.Status, t.Plan, t.Detail = TaskQueued, nil, ""
 			t.Base, t.From, t.Branch = "", "", ""
 			recordTask(v, now, t, "task.queued", fmt.Sprintf("%s waits for %s", t.Objective, strings.Join(waiting, ", ")))
 		case len(plan.Questions) > 0:
 			t.Plan = &plan
+		case request != nil:
+			t.Plan = &plan
+			request.Researcher, request.AnsweredAt = plan.Role, now
+			t.reopen(request.From, request.Revision)
+			t.Status, t.Detail = TaskReviewing, "Back from "+plan.Role+" with more research"
+			recordTask(v, now, t, "task.researched", fmt.Sprintf("%s researched %s again for %s", plan.Role, t.Objective, request.From))
 		default:
 			t.Plan = &plan
 			t.Status, t.Detail = TaskWriting, ""

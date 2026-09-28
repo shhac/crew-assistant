@@ -49,8 +49,9 @@ func (lp *Loop) pmTurn(ctx context.Context, snap core.Snapshot, p core.Project, 
 	}
 	base := pmPrompt(snap, p)
 	// The PM reads only what its prompt carries: no repository, no writing.
+	// Its tools tidy tasks, link them and queue new ones.
 	spec := lp.baseSpec(seat, dir, base)
-	lp.withTools(&spec, lp.projectTools(p.ID))
+	lp.withTools(&spec, lp.managerTools(p.ID, seat))
 	var answer core.PMAnswer
 	var questions []string
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
@@ -90,7 +91,7 @@ func pmPrompt(snap core.Snapshot, p core.Project) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You keep the to-do list for the project %s. Goal: %s\n", p.Title, p.Brief.Goal)
 	b.WriteString(`
-Decide the order the queued tasks start in, and what each unfinished task has to wait for. A task waits for another when it builds on what the other will change; without stacking, a task never starts before what it waits for has landed. Put first what unblocks the most, then what the owner most needs. Do not plan or build anything yourself, and do not direct the team; only order the list.
+Decide the order the queued tasks start in, and what each unfinished task has to wait for. A task waits for another when it builds on what the other will change; without stacking, a task never starts before what it waits for has landed. Put first what unblocks the most, then what the owner most needs. Keep the tasks themselves in order too: where a title or requirements are messy, tidy them; where a task should be split or needs a sibling, queue it; where one task depends on another, link them. Do not plan or build anything yourself, and do not direct, stop or land anyone's work.
 `)
 	switch p.OrderedBy {
 	case core.OrderedByOwner, core.OrderedByAssistant:
@@ -177,7 +178,7 @@ func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (string, 
 	pmTasks(&b, snap, p)
 	fmt.Fprintf(&b, "\nThe owner's assistant asks you:\n\n%s\n\nAnswer in a few plain sentences from what you know of the list. You change nothing by answering; say what you would change, if anything, and why.", question)
 	spec := lp.baseSpec(seat, dir, b.String())
-	lp.withTools(&spec, lp.projectTools(p.ID))
+	lp.withTools(&spec, lp.answerTools(p.ID, seat))
 	result, err := lp.runner.Run(ctx, spec)
 	if err != nil {
 		return "", err

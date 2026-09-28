@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { sinceLabel } from "./ui";
-import type { DesignRequest, Plan } from "./api";
+import type { DesignRequest, Plan, ResearchRequest } from "./api";
 
 /** Beyond this many points, the plan opens folded to its summary. */
 const foldAfter = 3;
@@ -78,6 +78,35 @@ export function RequestDesign({
       ))}
     </section>
   );
+}
+
+/**
+ * Each time a checker sent the request back to the researcher, and where
+ * that stands: researched and back with the checker, with you, or still
+ * being researched.
+ */
+export function RequestResearch({ research }: { research: ResearchRequest[] }) {
+  return (
+    <section className="section plan" aria-label="Research asked for">
+      <h3>Research asked for</h3>
+      {research.map((r) => (
+        <div key={r.id} className="plan-part">
+          <p className="label">
+            {r.from} asked, checking draft {r.revision}
+          </p>
+          <p>{r.question}</p>
+          <p className="muted small">{researchState(r)}</p>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function researchState(r: ResearchRequest) {
+  if (r.decision) return "Brought to you";
+  if (r.answered_at)
+    return `${r.researcher ?? "The researcher"} updated the plan; back with ${r.from}`;
+  return "Being researched";
 }
 
 /** Where a request with no designer's input stands. */

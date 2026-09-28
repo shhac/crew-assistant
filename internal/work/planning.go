@@ -19,8 +19,10 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	if !ok {
 		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
 	}
-	// A plan recorded before a restart is not paid for twice.
-	if t.Plan != nil {
+	// A plan recorded before a restart is not paid for twice. A plan whose
+	// questions were answered, or one made before a checker asked for more
+	// research, is worked out again.
+	if planned(t) {
 		return lp.askPlanQuestions(ctx, t)
 	}
 	if held, err := lp.holdForUsage(ctx, t, researcher); held || err != nil {
@@ -70,14 +72,28 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	return lp.askPlanQuestions(ctx, planned)
 }
 
-// askPlanQuestions brings the researcher's questions to the owner before
-// anything is written.
+// planned reports a task whose researcher has already done what it is
+// researching for now.
+func planned(t core.Task) bool {
+	if t.Plan == nil || t.Plan.Answered {
+		return false
+	}
+	request := t.OpenResearch()
+	return request == nil || !t.Plan.At.Before(request.At)
+}
+
+// askPlanQuestions brings the researcher's questions to the owner, and
+// their answer comes back to the researcher.
 func (lp *Loop) askPlanQuestions(ctx context.Context, t core.Task) error {
 	if t.Plan == nil || len(t.Plan.Questions) == 0 {
 		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
 	}
-	_, err := lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionQuestion, core.DecisionInput{
-		Title:          fmt.Sprintf("%s has questions about “%s” before starting", t.Plan.Role, t.Objective),
+	title := fmt.Sprintf("%s has questions about “%s” before starting", t.Plan.Role, t.Objective)
+	if len(t.Revisions) > 0 {
+		title = fmt.Sprintf("%s has questions about “%s”", t.Plan.Role, t.Objective)
+	}
+	_, err := lp.Core.AskQuestion(ctx, t.ID, core.Asker{From: t.Plan.Role, Step: core.TaskResearching}, core.DecisionInput{
+		Title:          title,
 		Context:        strings.TrimSpace(numbered(t.Plan.Questions)),
 		Recommendation: "Answer what you can, or let the team use its judgment",
 		Choices:        []string{"Use your judgment", choiceStop},

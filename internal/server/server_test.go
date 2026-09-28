@@ -301,6 +301,34 @@ func TestTheOwnerLinksTasks(t *testing.T) {
 	}
 }
 
+// The owner leaves notes on a task and undoes a change the team made to its
+// requirements.
+func TestTheOwnerLeavesNotesAndUndoesATeamsEdit(t *testing.T) {
+	a, call := ownerServer(t)
+	var project core.Project
+	w := call("POST", "/api/projects", `{"title":"Export","brief":{"goal":"CSV","criteria":["Valid CSV"]},"template":"draft"}`)
+	_ = json.Unmarshal(w.Body.Bytes(), &project)
+	var task core.Task
+	w = call("POST", "/api/projects/"+project.ID+"/tasks", `{"objective":"Schema","criteria":["Owner's words"]}`)
+	_ = json.Unmarshal(w.Body.Bytes(), &task)
+	var note core.Note
+	if w := call("POST", "/api/projects/"+project.ID+"/tasks/"+task.ID+"/notes", `{"text":"Keep the old columns"}`); w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &note) != nil || note.By != core.FromOwner {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	edited, err := a.EditTask(context.Background(), core.EditInput{Project: project.ID, Task: task.ID, By: "Rhea", Kind: core.RoleResearcher, Criteria: []string{"Reworded"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var undone core.Task
+	w = call("POST", "/api/projects/"+project.ID+"/tasks/"+task.ID+"/edits/"+edited.Edits[0].ID+"/undo", "")
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &undone) != nil || len(undone.Criteria) != 1 || undone.Criteria[0] != "Owner's words" || len(undone.Notes) != 1 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := call("POST", "/api/projects/"+project.ID+"/tasks/"+task.ID+"/edits/nope/undo", ""); w.Code != 404 {
+		t.Fatal("undid an edit that doesn't exist", w.Code)
+	}
+}
+
 // The owner renames a project's task ID prefix, and the routes that name a
 // task take its readable ID as well as its canonical one.
 func TestTheOwnerRenamesAPrefixAndNamesTasksByReadableID(t *testing.T) {

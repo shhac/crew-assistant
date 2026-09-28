@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/shhac/lib-agent-harness/session"
@@ -15,69 +16,141 @@ import (
 )
 
 // roleTools are what a role can look up about its project while it works,
-// and the links between tasks it may make. Everything it may reach is
-// captured when its turn starts, never taken from what the model asks for:
-// the project, its own task, and who it is. Its handler runs while the turn
-// runs and calls Core, which takes the store's lock; that holds only because
-// no turn ever runs inside a store update.
+// and the changes to tasks it may make: links, its task's requirements and
+// notes. Everything it may reach is captured when its turn starts, never
+// taken from what the model asks for: the project, its own task, and who it
+// is. Its handler runs while the turn runs and calls Core, which takes the
+// store's lock; that holds only because no turn ever runs inside a store
+// update.
 type roleTools struct {
 	lp        *Loop
 	projectID string
 	taskID    string
-	// status is the task's status when the turn started. A link is made
+	// status is the task's status when the turn started. A change is made
 	// only while the task is still there, since a turn the owner stopped
 	// runs on but must change nothing; core checks it in the same change.
 	status string
-	// by is how its links are marked.
-	by string
+	// by is how its links are marked; name signs its edits and notes, and
+	// kind, the role it plays, decides what it may edit.
+	by, name, kind string
 	// relations are the links it may make from its own task: the
-	// researcher decides what a task waits for; the others only point at
-	// related work.
+	// researcher and QA decide what a task waits for; the others only point
+	// at related work.
 	relations []string
+	// manages is the PM looking after the whole list: it names the task in
+	// every change, and may queue new ones, at most maxPMQueued a look.
+	manages bool
+	queued  *int
+	// notesOnly limits the PM to leaving notes, for a turn that answers a
+	// question and so changes nothing else.
+	notesOnly bool
 }
 
-func (lp *Loop) toolsFor(t core.Task, kind, memberID string) roleTools {
-	return roleTools{lp: lp, projectID: t.ProjectID, taskID: t.ID, status: t.Status, by: core.TeamLinker(memberID, kind), relations: relationsFor(kind)}
+// maxPMQueued is how many tasks the PM may queue in one look at the list.
+const maxPMQueued = 3
+
+func (lp *Loop) toolsFor(t core.Task, kind string, r core.Role) roleTools {
+	return roleTools{lp: lp, projectID: t.ProjectID, taskID: t.ID, status: t.Status, by: core.TeamLinker(r.Member, kind), name: seatName(r, kind), kind: kind, relations: relationsFor(kind)}
 }
 
-// relationsFor is what a role may link its task as: the researcher decides
-// what a task waits for; the others only point at related work.
+// seatName is how a seat signs what it changes.
+func seatName(r core.Role, kind string) string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return kind
+}
+
+// relationsFor is what a role may link its task as: the researcher and QA
+// decide what a task waits for; the others only point at related work.
 func relationsFor(kind string) []string {
-	if kind == core.RoleResearcher {
+	if kind == core.RoleResearcher || kind == core.RoleQA {
 		return []string{core.RelationDependsOn, core.RelationBlocks, core.RelationRelatesTo}
 	}
 	return []string{core.RelationRelatesTo}
 }
 
-// projectTools are the PM's: it looks across the list rather than working
-// on one task, and changes links only through its answer.
-func (lp *Loop) projectTools(projectID string) roleTools {
-	return roleTools{lp: lp, projectID: projectID}
+// managerTools are the PM's in every turn where it decides something: its
+// look at the list, where a task goes after its checks, and whether a
+// change lands. It looks across the list rather than working on one task,
+// and may tidy any unfinished task's title and requirements, link tasks,
+// queue a split or a sibling task, and leave notes.
+func (lp *Loop) managerTools(projectID string, seat core.Role) roleTools {
+	return roleTools{lp: lp, projectID: projectID, by: core.LinkedByPM, name: seatName(seat, core.RolePM), kind: core.RolePM, manages: true, queued: new(int)}
+}
+
+// answerTools are the PM's when the assistant asks it something: answering
+// changes nothing, so it may look tasks up and leave notes, but not edit,
+// link or queue.
+func (lp *Loop) answerTools(projectID string, seat core.Role) roleTools {
+	r := lp.managerTools(projectID, seat)
+	r.notesOnly = true
+	return r
 }
 
 // guide tells the role what its tools are for.
 func (r roleTools) guide() string {
-	guide := "While you work you can look up this project's other tasks: list_tasks lists them, filtered by which, related_to or text, and read_task reads one, with its plan, links and latest reviews. Look up the ones that bear on yours rather than guessing what they change."
+	guide := "While you work you can look up this project's other tasks: list_tasks lists them, filtered by which, related_to or text, and read_task reads one, with its plan, links, latest notes and latest reviews; read_notes reads all of a task's notes, a page at a time. Look up the ones that bear on yours rather than guessing what they change."
+	if r.notesOnly {
+		return guide + " add_note leaves a note on a task for the team and the owner. Answering changes nothing else, so say what you would change instead of changing it."
+	}
+	if r.manages {
+		return guide + fmt.Sprintf(" You also look after the tasks themselves. Where a task's title or requirements are messy, tidy them with edit_task; every change is kept and the owner can undo it. Where one task depends on another, set that up with link_tasks, and take back a link the team set with unlink_tasks. Where a task should be split, or needs a sibling, ask for the new one with queue_task (at most %d each time you look). add_note leaves a note on a task for the team and the owner.", maxPMQueued)
+	}
+	if r.taskID == "" {
+		return guide
+	}
 	switch {
 	case slices.Contains(r.relations, core.RelationDependsOn):
-		guide += " With link_tasks you can say your task depends on another, blocks another, or relates to one; unlink_tasks takes back a link your team set."
+		guide += " With link_tasks you can say your task depends on another, blocks another, or relates to one; unlink_tasks takes back a link your team set. Where there is a dependency, set it up rather than leave it to be found later."
 	case len(r.relations) > 0:
 		guide += " With link_tasks you can mark another task as related to yours, so whoever works on either knows to look; unlink_tasks takes it back."
 	}
-	return guide
+	switch r.kind {
+	case core.RoleResearcher:
+		guide += " With edit_task you can reword your task's title and requirements, or remove ones that no longer apply, as your findings show they should read; your plan stays the main record of what you found. Every change is kept and the owner can undo it."
+	case core.RoleReviewer, core.RoleQA:
+		guide += " If you find a gap in your task's requirements, add the missing one with edit_task."
+	default:
+		guide += " If your task is missing a requirement, add it with edit_task."
+	}
+	return guide + " add_note leaves a note on your task for the rest of the team and the owner, such as something whoever works on it next should know; it sits beside your reply and never replaces it."
 }
 
 func (r roleTools) Definitions() []session.ToolDefinition {
 	defs := []session.ToolDefinition{
 		{Name: "list_tasks", Description: "List this project's tasks, one line each with its readable id (such as CA-12) and canonical id, status and how it links to others. which is unfinished (the default when empty), finished or all. related_to is a task id, readable or canonical, to list only the tasks linked to it, or empty. text keeps only tasks whose objective contains it, or empty.", Schema: schema([]string{"which", "related_to", "text"})},
-		{Name: "read_task", Description: "Read one of this project's tasks: what it is for, its plan, where it is, its links and its latest draft and reviews. task_id is its readable id (such as CA-12) or its canonical id. Use it for the tasks that bear on yours.", Schema: schema([]string{"task_id"})},
+		{Name: "read_task", Description: "Read one of this project's tasks: what it is for, its plan, where it is, its links, notes and its latest draft and reviews. task_id is its readable id (such as CA-12) or its canonical id. Use it for the tasks that bear on yours.", Schema: schema([]string{"task_id"})},
+		{Name: "read_notes", Description: fmt.Sprintf("Read a task's notes, numbered from 1, oldest first, up to %d at a time. task_id is its readable or canonical id. from is the number of the first note to read, or empty for the latest.", maxNotesPage), Schema: schema([]string{"task_id", "from"})},
 	}
-	if len(r.relations) == 0 {
+	note := session.ToolDefinition{Name: "add_note", Description: "Leave a note on one of this project's tasks, for the team and the owner to read. task_id is its readable or canonical id.", Schema: schema([]string{"task_id", "text"})}
+	if r.notesOnly {
+		return append(defs, note)
+	}
+	if r.manages {
+		return append(defs,
+			session.ToolDefinition{Name: "edit_task", Description: "Tidy an unfinished task of this project. task_id is its readable or canonical id. title replaces its title, or empty to keep it. requirements replaces all its requirements, one to a line; none removes them all; empty keeps them. Every change is kept and the owner can undo it.", Schema: schema([]string{"task_id", "title", "requirements"})},
+			session.ToolDefinition{Name: "link_tasks", Description: "Link two of this project's tasks. relation is what task_id is to other_task_id: " + relationGuide([]string{core.RelationDependsOn, core.RelationBlocks, core.RelationRelatesTo}) + " A pair has one link; the owner's links stay as they are, and a task whose work has begun can't be made to wait.", Schema: schema([]string{"task_id", "relation", "other_task_id"})},
+			session.ToolDefinition{Name: "unlink_tasks", Description: "Take away a link between two of this project's tasks that the team set; links the owner or assistant set stay.", Schema: schema([]string{"task_id", "other_task_id"})},
+			session.ToolDefinition{Name: "queue_task", Description: "Ask for a new task in this project, such as part of a task split off or a sibling task. title is what it is for; requirements are its requirements, one to a line, or empty. depends_on is the ids of tasks it must wait for, separated by commas, or empty.", Schema: schema([]string{"title", "requirements", "depends_on"})},
+			note,
+		)
+	}
+	if r.taskID == "" {
 		return defs
 	}
-	return append(defs,
-		session.ToolDefinition{Name: "link_tasks", Description: "Link your own task to another of this project's tasks. relation is " + relationGuide(r.relations) + " other_task_id is its readable or canonical id. A pair has one link; the owner's links stay as they are.", Schema: schema([]string{"relation", "other_task_id"})},
-		session.ToolDefinition{Name: "unlink_tasks", Description: "Take away a link between your own task and another that your team set; links the owner or assistant set stay. other_task_id is its readable or canonical id.", Schema: schema([]string{"other_task_id"})},
+	if len(r.relations) > 0 {
+		defs = append(defs,
+			session.ToolDefinition{Name: "link_tasks", Description: "Link your own task to another of this project's tasks. relation is " + relationGuide(r.relations) + " other_task_id is its readable or canonical id. A pair has one link; the owner's links stay as they are.", Schema: schema([]string{"relation", "other_task_id"})},
+			session.ToolDefinition{Name: "unlink_tasks", Description: "Take away a link between your own task and another that your team set; links the owner or assistant set stay. other_task_id is its readable or canonical id.", Schema: schema([]string{"other_task_id"})},
+		)
+	}
+	edit := session.ToolDefinition{Name: "edit_task", Description: "Add a requirement your own task is missing. add_requirement is the requirement, in one line.", Schema: schema([]string{"add_requirement"})}
+	if core.Rewrites(r.kind) {
+		edit = session.ToolDefinition{Name: "edit_task", Description: "Change your own task's title and requirements. title replaces its title, or empty to keep it. requirements replaces all its requirements, one to a line; none removes them all; empty keeps them. add_requirement adds one, or empty. Every change is kept and the owner can undo it.", Schema: schema([]string{"title", "requirements", "add_requirement"})}
+	}
+	return append(defs, edit,
+		session.ToolDefinition{Name: "add_note", Description: "Leave a note on your own task for the rest of the team and the owner to read.", Schema: schema([]string{"text"})},
 	)
 }
 
@@ -127,21 +200,96 @@ func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (
 		return r.list(ctx, in["which"], in["related_to"], in["text"])
 	case "read_task":
 		return r.read(ctx, in["task_id"])
+	case "read_notes":
+		return r.notes(ctx, in["task_id"], in["from"])
+	}
+	if (!r.manages && r.taskID == "") || (r.notesOnly && name != "add_note") {
+		return "", fmt.Errorf("there is no tool %q", name)
+	}
+	// A role changes only its own task, and only while it is still there;
+	// the PM names the task it changes.
+	taskID, while := r.taskID, r.status
+	if r.manages {
+		taskID, while = in["task_id"], ""
+	}
+	var err error
+	done := "Done."
+	switch name {
 	case "link_tasks", "unlink_tasks":
-		if len(r.relations) == 0 {
+		if !r.manages && len(r.relations) == 0 {
 			return "", errors.New("you cannot change links")
 		}
-		l := core.Link{Project: r.projectID, Task: r.taskID, Relation: in["relation"], Other: in["other_task_id"], By: r.by, Relations: r.relations, While: r.status}
-		change, done := r.lp.LinkTasks, "Linked."
+		l := core.Link{Project: r.projectID, Task: taskID, Relation: in["relation"], Other: in["other_task_id"], By: r.by, Relations: r.relations, While: while}
+		change := r.lp.LinkTasks
+		done = "Linked."
 		if name == "unlink_tasks" {
 			change, done = r.lp.UnlinkTasks, "Unlinked."
 		}
-		if _, err := change(ctx, l); err != nil {
-			return "", hideProjects(err)
+		_, err = change(ctx, l)
+	case "edit_task":
+		e := core.EditInput{Project: r.projectID, Task: taskID, By: r.name, Kind: r.kind, While: while, Objective: in["title"], Criteria: replacement(in["requirements"])}
+		if add := strings.TrimSpace(in["add_requirement"]); add != "" {
+			e.Add = []string{add}
 		}
-		return done, nil
+		if strings.TrimSpace(e.Objective) == "" && e.Criteria == nil && e.Add == nil {
+			return "", errors.New("say what to change")
+		}
+		_, err = r.lp.Core.EditTask(ctx, e)
+		done = "Edited."
+	case "add_note":
+		_, err = r.lp.Core.AddNote(ctx, core.NoteInput{Project: r.projectID, Task: taskID, By: r.name, Kind: r.kind, While: while, Text: in["text"]})
+		done = "Noted."
+	case "queue_task":
+		if !r.manages {
+			return "", fmt.Errorf("there is no tool %q", name)
+		}
+		return r.queue(ctx, in["title"], in["requirements"], in["depends_on"])
+	default:
+		return "", fmt.Errorf("there is no tool %q", name)
 	}
-	return "", fmt.Errorf("there is no tool %q", name)
+	if err != nil {
+		return "", hideProjects(err)
+	}
+	return done, nil
+}
+
+// queue asks for a new task on the PM's behalf, which waits for what the PM
+// says it does.
+func (r roleTools) queue(ctx context.Context, title, requirements, dependsOn string) (string, error) {
+	if *r.queued >= maxPMQueued {
+		return "", fmt.Errorf("you can queue at most %d tasks each time you look", maxPMQueued)
+	}
+	deps := strings.FieldsFunc(dependsOn, func(c rune) bool { return c == ',' || c == ' ' || c == '\n' })
+	t, err := r.lp.Core.QueueTaskAs(ctx, r.projectID, core.TaskInput{Objective: title, Criteria: lines(requirements), DependsOn: deps}, core.LinkedByPM)
+	if err != nil {
+		return "", hideProjects(err)
+	}
+	*r.queued++
+	return "Queued " + t.Label() + ".", nil
+}
+
+// lines is one item a line, or nil for none.
+func lines(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "-*•")); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// clearAll is what a role writes as requirements to remove them all, since
+// an empty value keeps them.
+const clearAll = "none"
+
+// replacement is the requirements an edit puts in place: nil keeps them,
+// and an empty list, written as clearAll, removes them all.
+func replacement(s string) []string {
+	if strings.EqualFold(strings.TrimSpace(s), clearAll) {
+		return []string{}
+	}
+	return lines(s)
 }
 
 // hideProjects keeps a refusal from saying anything about tasks outside
@@ -225,6 +373,26 @@ func linksLine(snap core.Snapshot, t core.Task) string {
 	return " [" + strings.Join(parts, "; ") + "]"
 }
 
+// notes reads a page of a task's notes: from the one numbered from, or the
+// latest.
+func (r roleTools) notes(ctx context.Context, id, from string) (string, error) {
+	snap, err := r.lp.Core.Snapshot(ctx)
+	if err != nil {
+		return "", err
+	}
+	t, ok := findTask(snap, r.projectID, id)
+	if !ok {
+		return "", errNoTask
+	}
+	first := len(t.Notes) - maxNotesPage + 1
+	if from = strings.TrimSpace(from); from != "" {
+		if first, err = strconv.Atoi(from); err != nil || first < 1 {
+			return "", errors.New("from is the number of a note, such as 1, or empty for the latest")
+		}
+	}
+	return notesPage(t, first, maxNotesPage), nil
+}
+
 func (r roleTools) read(ctx context.Context, id string) (string, error) {
 	snap, err := r.lp.Core.Snapshot(ctx)
 	if err != nil {
@@ -238,6 +406,9 @@ func (r roleTools) read(ctx context.Context, id string) (string, error) {
 	fmt.Fprintf(&b, "%s (%s, %s): %s\n", t.Label(), t.Status, t.Stage, text.Clip(t.Objective, 600))
 	for _, c := range t.Criteria {
 		fmt.Fprintf(&b, "- criterion: %s\n", text.Clip(c, 300))
+	}
+	if n := len(t.Edits); n > 0 {
+		fmt.Fprintf(&b, "- title or requirements changed %d times, last by %s\n", n, t.Edits[n-1].By)
 	}
 	for _, l := range linkGroups(t) {
 		for _, other := range l.ids {
@@ -255,14 +426,24 @@ func (r roleTools) read(ctx context.Context, id string) (string, error) {
 			fmt.Fprintf(&b, "- out of scope: %s\n", text.Clip(o, 300))
 		}
 	}
+	for _, q := range t.Research {
+		fmt.Fprintf(&b, "- %s asked for more research on draft %d: %s\n", q.From, q.Revision, text.Clip(q.Question, 300))
+	}
 	if n := len(t.Revisions); n > 0 {
 		last := t.Revisions[n-1]
 		fmt.Fprintf(&b, "Latest draft %d: %s\n", last.N, text.Clip(last.Summary, 800))
 		for _, v := range t.Verdicts {
-			if v.Revision == last.N {
-				fmt.Fprintf(&b, "- %s: %s %s\n", v.Role, v.Outcome, text.Clip(v.Summary, 300))
+			if v.Revision != last.N || v.Answered {
+				continue
+			}
+			fmt.Fprintf(&b, "- %s: %s %s\n", v.Role, v.Outcome, text.Clip(v.Summary, 300))
+			if v.Next != "" || v.Note != "" {
+				fmt.Fprintf(&b, "  recommends %s: %s\n", orDash(v.Next), orDash(v.Note))
 			}
 		}
+	}
+	if len(t.Notes) > 0 {
+		b.WriteString("Notes:\n" + latestNotes(t))
 	}
 	if t.Branch != "" {
 		fmt.Fprintf(&b, "Branch: %s\n", t.Branch)

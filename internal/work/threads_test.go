@@ -333,7 +333,8 @@ func crashingSettle(t *testing.T, a *Loop) {
 // nor recorded twice, and never in another task's conversation.
 func TestARestartCarriesEachTaskOnInItsOwnConversation(t *testing.T) {
 	runner := &threadRunner{reviews: map[string][]string{
-		"Picnic note":  {ask, pass},
+		// The reviewer that asked judges the draft again with the answer.
+		"Picnic note":  {ask, revise, pass},
 		"Harbour note": {revise, pass},
 	}}
 	a, p, _ := threadsApp(t, runner)

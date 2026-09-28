@@ -292,12 +292,55 @@ export interface Verdict {
   revision: number;
   role: string;
   brief_version: number;
-  outcome: "pass" | "revise" | "question" | (string & {});
+  outcome: "pass" | "revise" | "question" | "research" | (string & {});
   summary: string;
   findings?: Finding[];
   question?: string;
   asked?: string;
+  /** Where the checker recommends the task goes next, and a line on why. */
+  next?: "land" | "revise" | "research" | (string & {});
+  note?: string;
+  /** Its question or research request came back; it judged the draft again. */
+  answered?: boolean;
   at?: string;
+}
+/** A checker sending the task back to the researcher, and back again. */
+export interface ResearchRequest {
+  id: string;
+  from: string;
+  round: number;
+  revision: number;
+  question: string;
+  researcher?: string;
+  /** The owner's decision it went to instead, past the limit. */
+  decision?: string;
+  at?: string;
+  answered_at?: string;
+}
+export interface TaskText {
+  objective: string;
+  criteria: string[] | null;
+}
+/** One change the team or the owner made to a task's title or requirements. */
+export interface TaskEdit {
+  id: string;
+  /** Who made it: a seat's name, or "owner". */
+  by: string;
+  /** The role it was made as, or "owner". */
+  kind: string;
+  before: TaskText;
+  after: TaskText;
+  /** The edit this one undoes. */
+  undoes?: string;
+  at: string;
+}
+/** A note left on a task for whoever works on it. */
+export interface Note {
+  id: string;
+  by: string;
+  kind: string;
+  text: string;
+  at: string;
 }
 export interface TeamMessage {
   id: string;
@@ -380,6 +423,9 @@ export interface Task {
   messages?: TeamMessage[];
   plan?: Plan;
   design?: DesignRequest[];
+  research?: ResearchRequest[];
+  edits?: TaskEdit[];
+  notes?: Note[];
   /** Ids of the tasks that must land before this one starts. */
   depends_on?: string[];
   /** The objectives of its unfinished dependencies. */
@@ -887,6 +933,23 @@ export function unlinkTasks(projectID: string, taskID: string, other: string) {
   return api<Task>(
     `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/links/${encodeURIComponent(other)}`,
     { method: "DELETE" },
+  );
+}
+export function addNote(projectID: string, taskID: string, text: string) {
+  return api<Note>(
+    `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/notes`,
+    { method: "POST", body: JSON.stringify({ text }) },
+  );
+}
+/** Puts the title and requirements back as they were before one edit. */
+export function undoTaskEdit(
+  projectID: string,
+  taskID: string,
+  editID: string,
+) {
+  return api<Task>(
+    `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/edits/${encodeURIComponent(editID)}/undo`,
+    { method: "POST", body: "{}" },
   );
 }
 export function stopTask(projectID: string, taskID: string) {

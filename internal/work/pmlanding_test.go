@@ -77,6 +77,19 @@ func (w pmPush) asked() int {
 	return n
 }
 
+// landingTools names the tools of the PM's latest turn deciding a landing.
+func (w pmPush) landingTools() string {
+	w.runner.mu.Lock()
+	defer w.runner.mu.Unlock()
+	last := ""
+	for _, spec := range w.runner.seen {
+		if strings.Contains(spec.Prompt, "Decide whether this change lands") {
+			last = strings.Join(specTools(spec), " ")
+		}
+	}
+	return last
+}
+
 // commitOnMain is the owner committing a file to main meanwhile.
 func (w pmPush) commitOnMain(t *testing.T, name, body string) {
 	os.WriteFile(filepath.Join(w.source, name), []byte(body), 0600)
@@ -140,6 +153,9 @@ func TestThePMLandsASignedOffChangeOnAPushProject(t *testing.T) {
 	// and its checks.
 	if w.asked() != 1 {
 		t.Fatalf("the PM was asked %d times", w.asked())
+	}
+	if got := w.landingTools(); got != pmToolNames {
+		t.Fatalf("the PM deciding a landing should have its task tools: %s", got)
 	}
 	for _, spec := range w.runner.seen {
 		if strings.Contains(spec.Prompt, "Decide whether this change lands") {

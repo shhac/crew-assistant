@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { ConversationMarkdown } from "./ConversationMarkdown";
-import { isCode, roleName, taskPlaybook, verdictOutcome } from "./stages";
+import {
+  isCode,
+  nextStep,
+  roleName,
+  taskPlaybook,
+  verdictOutcome,
+} from "./stages";
 import { roleMember, taskRoles } from "./members";
 import { Avatar } from "./Avatar";
 import { ErrorNotice, Pill, dateLabel } from "./ui";
@@ -166,14 +172,29 @@ function DraftDetail({
 }
 
 function VerdictView({ verdict, asked }: { verdict: Verdict; asked: boolean }) {
+  const recommends = verdict.next ? nextStep[verdict.next] : undefined;
   return (
     <div className="check-note">
       <p>
         <strong>{verdict.role}</strong>
-        {asked && <span className="muted small"> (asked directly)</span>}{" "}
+        {asked && <span className="muted small"> (asked directly)</span>}
+        {verdict.answered && (
+          <span className="muted small"> (answered, then checked again)</span>
+        )}{" "}
         {verdict.summary}
       </p>
-      {verdict.question && <p className="soft">Question: {verdict.question}</p>}
+      {verdict.question && (
+        <p className="soft">
+          {verdict.outcome === "research" ? "Research: " : "Question: "}
+          {verdict.question}
+        </p>
+      )}
+      {(recommends || verdict.note) && (
+        <p className="soft">
+          {recommends && `${recommends}${verdict.note ? ": " : "."}`}
+          {verdict.note}
+        </p>
+      )}
       {!!verdict.findings?.length && (
         <ul className="findings">
           {verdict.findings.map((f, i) => (

@@ -210,6 +210,14 @@ func TestThePMsLandIsRefusedWhenTheSignOffLapsesMeanwhile(t *testing.T) {
 			},
 			want: "the owner's direction",
 		},
+		"the PM edits its requirements while it decides": {
+			lapse: func(t *testing.T, s *Service, p Project, task Task) {
+				if _, err := s.EditTask(testContext, EditInput{Project: p.ID, Task: task.ID, By: "Pim", Kind: RolePM, Add: []string{"Handles errors"}}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "Reviewer has not passed draft 1",
+		},
 		"it comes to depend on a change that hasn't landed": {
 			lapse: func(t *testing.T, s *Service, p Project, task Task) {
 				dep, err := s.QueueTask(testContext, p.ID, TaskInput{Objective: "Schema"})

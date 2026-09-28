@@ -69,6 +69,23 @@ type Task struct {
 	// Design is each time the researcher or the implementer handed the task
 	// to the designer, with the input it gave; see design.go.
 	Design []DesignRequest `json:"design,omitempty"`
+	// Research is each time a checker sent the task back to the researcher
+	// for more research; see routing.go.
+	Research []ResearchRequest `json:"research,omitempty"`
+	// Asker is who asked the question the task waits on the owner for, so
+	// the answer goes back to them; see routing.go.
+	Asker *Asker `json:"asker,omitempty"`
+	// Edits are the changes the team or the owner made to the objective and
+	// criteria after the task was asked for, oldest first; see edits.go.
+	Edits []TaskEdit `json:"edits,omitempty"`
+	// TextVersion counts the edits to the objective and criteria. A verdict
+	// counts only against the text it judged, so a change to what the task
+	// asks for has every checker judge again.
+	TextVersion int `json:"text_version,omitempty"`
+	// Notes are what the team, the owner and the assistant left on the task
+	// for each other: a shared channel beside the record, which never takes
+	// its place; see notes.go.
+	Notes []Note `json:"notes,omitempty"`
 	// DependsOn names tasks in the same project that must have landed before
 	// this one starts. Without stacking, a task never builds on work that has
 	// not landed.
@@ -211,14 +228,28 @@ type Verdict struct {
 	Asked string `json:"asked,omitempty"`
 	// Outside marks feedback from outside the team, such as a pull request
 	// review: to be weighed on its merits, never followed as instructions.
-	Outside bool      `json:"outside,omitempty"`
-	At      time.Time `json:"at"`
+	Outside bool `json:"outside,omitempty"`
+	// Next is where the checker recommends the task goes next, and Note a
+	// line to go with it, such as "I want to see it again"; see routing.go.
+	Next string `json:"next,omitempty"`
+	Note string `json:"note,omitempty"`
+	// Answered marks a question or research request whose answer came back:
+	// the checker judges the revision again with it, so this verdict no
+	// longer counts.
+	Answered bool `json:"answered,omitempty"`
+	// TextVersion is the task's TextVersion the checker was shown: a verdict
+	// on objective and criteria that have since changed no longer counts.
+	TextVersion int       `json:"text_version,omitempty"`
+	At          time.Time `json:"at"`
 }
 
 const (
 	VerdictPass     = "pass"
 	VerdictRevise   = "revise"
 	VerdictQuestion = "question"
+	// VerdictResearch sends the task back to the researcher with the
+	// checker's question, then back to the checker.
+	VerdictResearch = "research"
 )
 
 type Finding struct {

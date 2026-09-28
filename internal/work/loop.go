@@ -256,7 +256,7 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + learned.index)
 	}
 	kind := turnKind(t, r)
-	lp.withTools(&spec, lp.toolsFor(t, kind, r.Member))
+	lp.withTools(&spec, lp.toolsFor(t, kind, r))
 	spec.Observer = lp.watchTurn(t, kind, r, workDir, write)
 	// Research is the one step that looks outward; nothing its shell runs
 	// reaches the network either way.

@@ -216,6 +216,9 @@ func TestTheAssistantCanAskThePMAndItChangesNothing(t *testing.T) {
 	if asked.Write || !strings.Contains(asked.Prompt, "The owner's assistant asks you") || !strings.Contains(asked.Prompt, first.ID) || !strings.Contains(asked.Prompt, second.ID) {
 		t.Fatalf("the PM was asked %q", asked.Prompt)
 	}
+	if got := strings.Join(specTools(asked), " "); got != "list_tasks read_task read_notes add_note" {
+		t.Fatalf("a PM answering the assistant may only leave notes: %s", got)
+	}
 	snap, _ := a.Core.Snapshot(ctx)
 	project, _ := findProject(snap, p.ID)
 	if project.OrderedBy != "" || !slices.ContainsFunc(snap.Activity, func(e core.Activity) bool { return e.Kind == "pm.asked" }) {

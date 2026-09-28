@@ -77,7 +77,7 @@ func signedOff(v *Snapshot, t Task) []string {
 	for _, checker := range t.Checkers() {
 		passed := t.Judged(checker.Name, r.N, brief)
 		for _, verdict := range t.Verdicts {
-			if verdict.Role == checker.Name && verdict.Revision == r.N && verdict.BriefVersion == brief && verdict.Outcome != VerdictPass {
+			if verdict.Role == checker.Name && verdict.Revision == r.N && t.Counts(verdict, brief) && verdict.Outcome != VerdictPass {
 				passed = false
 			}
 		}

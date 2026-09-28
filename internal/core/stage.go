@@ -1,5 +1,7 @@
 package core
 
+import "slices"
+
 // Stages place a task on its project's board. They are derived from the
 // loop's own state whenever the state is read or written, never set directly,
 // so a board can never disagree with what the loop is doing.
@@ -122,14 +124,18 @@ func (t Task) Checkers() []Role {
 }
 
 // Judged is whether a role has judged a revision against this version of the
-// brief; a brief change asks every checker again.
+// brief and of the task's objective and criteria; a change to either asks
+// every checker again.
 func (t Task) Judged(role string, revision, briefVersion int) bool {
-	for _, v := range t.Verdicts {
-		if v.Role == role && v.Revision == revision && v.BriefVersion == briefVersion {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(t.Verdicts, func(v Verdict) bool {
+		return v.Role == role && v.Revision == revision && t.Counts(v, briefVersion)
+	})
+}
+
+// Counts reports whether a verdict still counts: made against this version
+// of the brief and the task's current text, and not set aside by an answer.
+func (t Task) Counts(v Verdict, briefVersion int) bool {
+	return v.BriefVersion == briefVersion && v.TextVersion == t.TextVersion && !v.Answered
 }
 
 // nextChecker is the first checker still to judge the latest revision.
@@ -200,6 +206,16 @@ func waitingStage(v *Snapshot, t Task) string {
 		// A design question stays with the step that asked for design input.
 		if r := t.DesignDecision(t.DecisionID); r != nil {
 			return stageOf(v, Task{Status: r.Step})
+		}
+		// A question stays with whoever asked it, where that is recorded.
+		if a := t.Asker; a != nil && a.Decision == t.DecisionID {
+			if a.Step == TaskResearching {
+				return StageResearching
+			}
+			if r, ok := t.Role(a.From); ok && r.Holds(RoleQA) {
+				return StageQA
+			}
+			return StageReviewing
 		}
 		// Otherwise, before anything is written, only the researcher asks.
 		if len(t.Revisions) == 0 {

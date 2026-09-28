@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import { DecisionCard } from "./DecisionCard";
 import { Drafts } from "./Drafts";
 import { pmLandingLine } from "./landing";
-import { RequestDesign, RequestPlan } from "./RequestPlan";
+import { RequestEdits, RequestNotes } from "./RequestNotes";
+import { RequestDesign, RequestPlan, RequestResearch } from "./RequestPlan";
 import { RequestRelations } from "./RequestRelations";
 import { TaskActivity } from "./TaskActivity";
 import { TeamThread } from "./TeamThread";
@@ -144,7 +145,11 @@ export function RequestPanel({
             waitingOn={decision?.kind}
             refresh={refresh}
           />
+          <RequestNotes task={task} closed={finished(task)} refresh={refresh} />
           {task.plan && <RequestPlan plan={task.plan} />}
+          {!!task.research?.length && (
+            <RequestResearch research={task.research} />
+          )}
           {!!task.design?.length && (
             <RequestDesign
               design={task.design}
@@ -173,6 +178,7 @@ export function RequestPanel({
               )}
             </section>
           )}
+          <RequestEdits task={task} closed={finished(task)} refresh={refresh} />
           <RequestRelations
             project={project}
             task={task}

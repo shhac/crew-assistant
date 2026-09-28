@@ -39,7 +39,7 @@ func TestARoleSeesItsProjectsTasksAndLinksOnlyItsOwn(t *testing.T) {
 	other, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Elsewhere", Template: "draft", Brief: core.BriefInput{Goal: "Other", Criteria: []string{"x"}}})
 	hidden, _ := a.Core.QueueTask(ctx, other.ID, core.TaskInput{Objective: "Secret elsewhere", Criteria: []string{"x"}})
 
-	researcher := a.toolsFor(first, core.RoleResearcher, "")
+	researcher := a.toolsFor(first, core.RoleResearcher, core.Role{})
 	if got := callTool(t, researcher, "list_tasks", map[string]string{"which": "", "related_to": "", "text": ""}); got.IsError || !strings.Contains(got.Content, second.ID) || strings.Contains(got.Content, hidden.ID) || !strings.Contains(got.Content, "(your task)") {
 		t.Fatalf("list: %+v", got)
 	}
@@ -62,7 +62,7 @@ func TestARoleSeesItsProjectsTasksAndLinksOnlyItsOwn(t *testing.T) {
 		t.Fatalf("read shows links: %s", got.Content)
 	}
 
-	reviewer := a.toolsFor(second, core.RoleReviewer, "member-one")
+	reviewer := a.toolsFor(second, core.RoleReviewer, core.Role{Member: "member-one"})
 	if got := callTool(t, reviewer, "link_tasks", map[string]string{"relation": "depends_on", "other_task_id": third.ID}); !got.IsError {
 		t.Fatal("a reviewer decided what a task waits for")
 	}
@@ -83,13 +83,13 @@ func TestARoleSeesItsProjectsTasksAndLinksOnlyItsOwn(t *testing.T) {
 		t.Fatalf("the researcher couldn't take back its own link: %s", got.Content)
 	}
 
-	pm := a.projectTools(p.ID)
-	if names := toolNames(pm); len(names) != 2 {
-		t.Fatalf("the PM links through its answer, not tools: %v", names)
+	pm := a.answerTools(p.ID, core.Role{Name: "Pim"})
+	if names := toolNames(pm); strings.Join(names, " ") != "list_tasks read_task read_notes add_note" {
+		t.Fatalf("a PM answering a question only leaves notes: %v", names)
 	}
 
 	a.StopTask(ctx, p.ID, third.ID)
-	stale := a.toolsFor(third, core.RoleResearcher, "")
+	stale := a.toolsFor(third, core.RoleResearcher, core.Role{})
 	stale.status = core.TaskResearching
 	if got := callTool(t, stale, "link_tasks", map[string]string{"relation": "relates_to", "other_task_id": first.ID}); !got.IsError {
 		t.Fatal("a stopped task's turn changed its links")
@@ -105,7 +105,7 @@ func TestARoleNamesTasksByTheirReadableIDs(t *testing.T) {
 	if second.Ref == "" {
 		t.Fatal("the task has no readable ID")
 	}
-	researcher := a.toolsFor(first, core.RoleResearcher, "")
+	researcher := a.toolsFor(first, core.RoleResearcher, core.Role{})
 	if got := callTool(t, researcher, "link_tasks", map[string]string{"relation": "depends_on", "other_task_id": strings.ToLower(second.Ref)}); got.IsError {
 		t.Fatalf("link by readable ID: %s", got.Content)
 	}
@@ -130,9 +130,9 @@ func TestEachRoleGetsItsTools(t *testing.T) {
 		web   bool
 		tools []string
 	}{
-		core.TaskResearching: {true, []string{"list_tasks", "read_task", "link_tasks", "unlink_tasks"}},
-		core.TaskWriting:     {false, []string{"list_tasks", "read_task", "link_tasks", "unlink_tasks"}},
-		core.TaskReviewing:   {false, []string{"list_tasks", "read_task", "link_tasks", "unlink_tasks"}},
+		core.TaskResearching: {true, []string{"list_tasks", "read_task", "read_notes", "link_tasks", "unlink_tasks", "edit_task", "add_note"}},
+		core.TaskWriting:     {false, []string{"list_tasks", "read_task", "read_notes", "link_tasks", "unlink_tasks", "edit_task", "add_note"}},
+		core.TaskReviewing:   {false, []string{"list_tasks", "read_task", "read_notes", "link_tasks", "unlink_tasks", "edit_task", "add_note"}},
 	} {
 		task.Status = status
 		spec, cleanup, err := a.roleSpec(task, core.Role{Name: "Seat", Kinds: []string{core.RoleResearcher, core.RoleImplementer}, Engine: "claude"}, t.TempDir(), false, docsMedium{}, "prompt")
@@ -149,7 +149,7 @@ func TestEachRoleGetsItsTools(t *testing.T) {
 		if spec.Web != want.web || strings.Join(names, " ") != strings.Join(want.tools, " ") || !strings.Contains(spec.Instructions, "list_tasks") || spec.Observer == nil {
 			t.Errorf("%s: web %v tools %v", status, spec.Web, names)
 		}
-		link := spec.Tools[2].Description
+		link := spec.Tools[3].Description
 		if (status == core.TaskResearching) != strings.Contains(link, "depends_on") {
 			t.Errorf("%s may link as: %s", status, link)
 		}
