@@ -197,6 +197,37 @@ func TestTheOwnerFillsARoleAndSetsWhereACodeTeamWorks(t *testing.T) {
 	}
 }
 
+// The owner adds and removes seats filled like another, and sets how many
+// tasks may be under way at once, which the project then shows.
+func TestTheOwnerAddsSeatsAndSetsHowMuchRunsAtOnce(t *testing.T) {
+	s, call := ownerServer(t)
+	p, err := s.CreateProject(context.Background(), core.ProjectInput{Title: "Notes", Template: "draft", Brief: core.BriefInput{Goal: "Notes"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	added := call("POST", "/api/projects/"+p.ID+"/team/seats", `{"seat":"Writer"}`)
+	if added.Code != 200 || !strings.Contains(added.Body.String(), `"name":"Writer #2"`) {
+		t.Fatal(added.Code, added.Body.String())
+	}
+	if missing := call("POST", "/api/projects/"+p.ID+"/team/seats", `{"seat":"Nobody"}`); missing.Code != 404 {
+		t.Fatal(missing.Code, missing.Body.String())
+	}
+	set := call("PUT", "/api/projects/"+p.ID+"/parallel", `{"max_active":3}`)
+	if set.Code != 200 || !strings.Contains(set.Body.String(), `"max_active":3`) {
+		t.Fatal(set.Code, set.Body.String())
+	}
+	if bad := call("PUT", "/api/projects/"+p.ID+"/parallel", `{"max_active":-1}`); bad.Code == 200 {
+		t.Fatal("a negative cap was taken")
+	}
+	removed := call("DELETE", "/api/projects/"+p.ID+"/team/seats/Writer%20%232", "")
+	if removed.Code != 200 || strings.Contains(removed.Body.String(), "Writer #2") {
+		t.Fatal(removed.Code, removed.Body.String())
+	}
+	if last := call("DELETE", "/api/projects/"+p.ID+"/team/seats/Writer", ""); last.Code == 200 {
+		t.Fatal("the team's only writer was removed")
+	}
+}
+
 func TestErrorsReachTheOwnerWithoutTheirInternalLabels(t *testing.T) {
 	for err, want := range map[error]string{
 		fmt.Errorf("this request has already finished: %w", core.ErrConflict): "This request has already finished",

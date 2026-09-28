@@ -61,8 +61,13 @@ type Project struct {
 	// something that changes it: work queued, planned or finished.
 	PMDue bool `json:"pm_due,omitempty"`
 	// PMDirection is what the owner told the PM, for its next look.
-	PMDirection string    `json:"pm_direction,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	PMDirection string `json:"pm_direction,omitempty"`
+	// Claims are the project's own steps a seat has taken and not yet
+	// finished, such as the PM's look at the to-do list; Attempt numbers
+	// them, and only goes up. See claims.go.
+	Claims    []Claim   `json:"claims,omitempty"`
+	Attempt   int       `json:"attempt,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Who set a project's to-do order.

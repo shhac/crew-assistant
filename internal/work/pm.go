@@ -18,27 +18,49 @@ import (
 // order work starts in and what waits for what; it directs no one, and the
 // owner's or the assistant's order stands over it. A project with no PM
 // sends what waits in triage straight on, so nothing waits on a missing role.
-func (lp *Loop) managePM(ctx context.Context, snap core.Snapshot) (bool, error) {
+//
+// The PM's look is a step of the project, claimed as a task's steps are: it
+// takes the PM's seat, which is busy meanwhile for anything else the seat
+// holds, and a turn on its engine; it runs in a goroutine of its own, fenced
+// by its claim; and a restart reclaims it rather than run it beside one
+// still going. It returns the looks it started, and whether it changed the
+// record itself.
+func (lp *Loop) managePM(ctx context.Context, snap core.Snapshot, waited bool) ([]<-chan any, bool, error) {
+	var started []<-chan any
 	for _, p := range snap.Projects {
 		seat, ok := p.PMSeat()
 		if !ok && snap.HasTriage(p.ID) {
 			if err := lp.Core.ReleaseTriage(ctx, p.ID, "the team has no PM"); err != nil {
-				return true, err
+				return started, true, err
 			}
-			return true, lp.Core.SkipPM(ctx, p.ID, "")
+			return started, true, lp.Core.SkipPM(ctx, p.ID, "")
 		}
-		if !p.PMDue || pmAsking(snap, p.ID) {
+		if !p.PMDue || pmAsking(snap, p.ID) || len(p.Claims) > 0 {
 			continue
 		}
 		if !ok {
-			return true, lp.Core.SkipPM(ctx, p.ID, "")
+			return started, true, lp.Core.SkipPM(ctx, p.ID, "")
 		}
 		if wait, _ := lp.usageWait(ctx, seat); !wait.IsZero() {
 			continue
 		}
-		return true, lp.pmTurn(ctx, snap, p, seat)
+		// The PM's look waits for its seat and a free turn on its engine
+		// rather than hold up the rest of the work waiting for them.
+		taken := &slots{lp: lp}
+		c, seat, ok, err := lp.Core.ClaimPM(ctx, p.ID, taken.admit)
+		if err != nil {
+			taken.giveBack()
+			return started, false, err
+		}
+		if !ok {
+			continue
+		}
+		id, token := p.ID, c.Token
+		started = append(started, lp.run(ctx, claimed{project: id, token: token, seat: seat}, waited,
+			func(ctx context.Context) error { return lp.pmTurn(core.FencedProject(ctx, id, token), id, seat) },
+			func(ctx context.Context) error { return lp.Core.ReleaseProjectClaim(ctx, id, token) }))
 	}
-	return false, nil
+	return started, false, nil
 }
 
 // pmAsking says whether the PM is waiting on the owner's answer, which
@@ -49,7 +71,16 @@ func pmAsking(snap core.Snapshot, projectID string) bool {
 	})
 }
 
-func (lp *Loop) pmTurn(ctx context.Context, snap core.Snapshot, p core.Project, seat core.Role) error {
+// pmTurn is the PM's look at the list as it stands when the look starts.
+func (lp *Loop) pmTurn(ctx context.Context, projectID string, seat core.Role) error {
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	p, ok := findProject(snap, projectID)
+	if !ok {
+		return core.ErrNotFound
+	}
 	dir := filepath.Join(lp.Core.StateDirectory(), "roles", "pm-work")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -232,7 +263,24 @@ func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (string, 
 	fmt.Fprintf(&b, "\nThe owner's assistant asks you:\n\n%s\n\nAnswer in a few plain sentences from what you know of the list. You change nothing by answering; say what you would change, if anything, and why.", question)
 	spec := lp.baseSpec(seat, dir, b.String())
 	lp.withTools(&spec, lp.answerTools(p.ID, seat))
-	result, err := lp.runner.Run(ctx, spec)
+	// The PM answers from its seat, which works on one thing at a time, and
+	// within its engine's bound on turns at once. The chat asking never
+	// waits for either: a busy PM is said to be busy, to ask again shortly.
+	taken := &slots{lp: lp, forOwner: true}
+	c, held, ok, err := lp.Core.ClaimPMQuestion(ctx, p.ID, taken.admit)
+	if err != nil {
+		taken.giveBack()
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("%s is busy with other work right now; ask again shortly: %w", seat.Name, core.ErrConflict)
+	}
+	defer func() {
+		taken.giveBack()
+		_ = lp.Core.ReleaseProjectClaim(context.WithoutCancel(ctx), p.ID, c.Token)
+	}()
+	ctx = context.WithValue(context.WithValue(core.FencedProject(ctx, p.ID, c.Token), slotKey{}, held.Engine), ownerAskedKey{}, true)
+	result, err := lp.runRole(ctx, spec)
 	if err != nil {
 		return "", err
 	}

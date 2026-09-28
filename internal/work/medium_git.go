@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/media"
@@ -25,6 +26,19 @@ type gitMedium struct {
 	way      landWay
 }
 
+// projectLocks keep changes to each project's clone one at a time: fetching
+// the owner's work, handing drafts to it, making checks' copies from it,
+// landing from it and tidying it. Steps of several tasks run at once, and
+// each task's own clone is its own.
+var projectLocks sync.Map
+
+// locked holds the project's clone until the returned func is called.
+func (m gitMedium) locked() func() {
+	mu, _ := projectLocks.LoadOrStore(m.repo.Workspace(), &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	return mu.(*sync.Mutex).Unlock
+}
+
 // url is where a pull request's branch is pushed and its base fetched from.
 func (m gitMedium) url() string { return m.remote(m.playbook.Land.GitHub) }
 
@@ -40,6 +54,7 @@ func (m gitMedium) clone(ctx context.Context, t core.Task) (gitrepo.Repo, error)
 }
 
 func (m gitMedium) begin(ctx context.Context, t core.Task) (core.Task, error) {
+	defer m.locked()()
 	if t.Base != "" {
 		return t, nil
 	}
@@ -50,6 +65,7 @@ func (m gitMedium) begin(ctx context.Context, t core.Task) (core.Task, error) {
 }
 
 func (m gitMedium) behind(ctx context.Context, t core.Task) (*line, error) {
+	defer m.locked()()
 	tip := tipOf(t)
 	if tip == "" {
 		return nil, nil
@@ -125,6 +141,7 @@ func (m gitMedium) conflictMerge(ctx context.Context, t core.Task, l line) (core
 }
 
 func (m gitMedium) alreadyLanded(ctx context.Context, t core.Task, r core.Revision) (bool, error) {
+	defer m.locked()()
 	if r.Ref == "" {
 		return false, nil
 	}
@@ -153,10 +170,12 @@ func (m gitMedium) snapshot(ctx context.Context, t core.Task, n int) (core.Revis
 }
 
 func (m gitMedium) publish(ctx context.Context, t core.Task, ref, name string) error {
+	defer m.locked()()
 	return m.repo.Publish(ctx, m.repo.Task(t.ID), ref, name)
 }
 
 func (m gitMedium) published(ctx context.Context, t core.Task, h core.Handoff) (string, bool, error) {
+	defer m.locked()()
 	at, err := m.repo.RefAt(ctx, h.Name)
 	if err != nil {
 		return "", false, err
@@ -171,6 +190,7 @@ func (m gitMedium) published(ctx context.Context, t core.Task, h core.Handoff) (
 // or, where the team's check has to write into the tree it runs in, runs in
 // a writable copy of it there.
 func (m gitMedium) check(ctx context.Context, t core.Task, r core.Revision, qa bool) (checkout, error) {
+	defer m.locked()()
 	inCopy := qa && m.playbook.CheckInCopy
 	c, err := m.repo.Checkout(ctx, r.Ref, inCopy)
 	if err != nil {
@@ -193,6 +213,7 @@ func (m gitMedium) preview(ctx context.Context, t core.Task, r core.Revision) ([
 }
 
 func (m gitMedium) deliver(ctx context.Context, t core.Task, r core.Revision) (string, error) {
+	defer m.locked()()
 	return m.way.deliver(ctx, m, t, r)
 }
 
@@ -209,6 +230,7 @@ func (m gitMedium) deliveryNote(t core.Task) string {
 // is neither a recorded revision nor named by a handoff under way, left by
 // one that never finished, goes too; only when nothing else is running.
 func (m gitMedium) tidy(ctx context.Context, tasks []core.Task, settled func(core.Task) bool, strays bool) error {
+	defer m.locked()()
 	byID := map[string]core.Task{}
 	for _, t := range tasks {
 		byID[t.ID] = t
@@ -246,7 +268,10 @@ func keeps(t core.Task, ref, commit string) bool {
 	return slices.ContainsFunc(t.Revisions, func(r core.Revision) bool { return r.Ref == commit })
 }
 
-func (m gitMedium) removeChecks() error { return m.repo.RemoveChecks() }
+func (m gitMedium) removeChecks() error {
+	defer m.locked()()
+	return m.repo.RemoveChecks()
+}
 
 func (m gitMedium) branchName(t core.Task) string {
 	return m.playbook.BranchPrefix + slugify(t.Objective)

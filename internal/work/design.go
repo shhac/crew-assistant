@@ -44,11 +44,11 @@ func (lp *Loop) askDesign(ctx context.Context, t core.Task, from, question strin
 // design runs the designer on the question it was handed. The designer only
 // reads, starts afresh every time, and its input is recorded in the same
 // change that hands the task back, so a restart runs it again only if it
-// never finished.
-func (lp *Loop) design(ctx context.Context, p core.Project, t core.Task, m medium) error {
-	designer, ok := t.Designer()
+// never finished. designer is the seat that claimed the step, if the team
+// has one.
+func (lp *Loop) design(ctx context.Context, p core.Project, t core.Task, m medium, designer core.Role) error {
 	request := t.OpenDesign()
-	if !ok || request == nil {
+	if designer.Name == "" || request == nil {
 		// Nothing to ask the designer: go back to whichever step can go on.
 		back := core.TaskWriting
 		if _, researches := t.Researcher(); researches && t.Plan == nil {

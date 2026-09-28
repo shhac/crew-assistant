@@ -66,6 +66,16 @@ type Task struct {
 	// Attempt counts the handoffs the task has started, and only goes up.
 	Handoff *Handoff `json:"handoff,omitempty"`
 	Attempt int      `json:"attempt,omitempty"`
+	// Claims are the steps of the task seats have taken and not yet
+	// finished; see claims.go.
+	Claims []Claim `json:"claims,omitempty"`
+	// Beside names the project's tasks that were under way at the same
+	// time as this one, which it was built beside rather than after.
+	Beside []string `json:"beside,omitempty"`
+	// Delivering is the revision a landing is taking where it lands, set
+	// before the push or merge and cleared once its outcome is recorded; a
+	// task stopped or restarted meanwhile is settled from where it went.
+	Delivering *Delivering `json:"delivering,omitempty"`
 	// Plan is what the researcher worked out before anything was written. It
 	// is kept on the task, so everyone who works on it reads the same plan
 	// rather than inheriting a conversation.
@@ -211,6 +221,12 @@ type Proposal struct {
 	// ChecksFor the commit whose failing checks were.
 	Seen      time.Time `json:"seen,omitzero"`
 	ChecksFor string    `json:"checks_for,omitempty"`
+}
+
+// Delivering is a landing under way: the revision going out, and when.
+type Delivering struct {
+	Revision int       `json:"revision"`
+	At       time.Time `json:"at"`
 }
 
 // Revision is one snapshot of the artifact, stamped with the brief it answers.
@@ -434,6 +450,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Pro
 			for i := range t.Roles {
 				t.Roles[i].Learnings = nil
 			}
+		}
+		// Stopping a task takes back every step it holds: its seats are
+		// free, and whatever its turns return late records nothing.
+		if t.Status == TaskStopped {
+			t.Claims = nil
 		}
 		if activity != "" {
 			recordTask(v, t.UpdatedAt, t, "task."+t.Status, activity)

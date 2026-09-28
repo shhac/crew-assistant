@@ -192,6 +192,10 @@ func (s *Store) update(ctx context.Context, fn func(*Snapshot) error) error {
 	if err != nil {
 		return err
 	}
+	// A turn whose claim has gone changes nothing; see claims.go.
+	if err = checkFence(ctx, &state); err != nil {
+		return err
+	}
 	if err = fn(&state); err != nil {
 		return err
 	}

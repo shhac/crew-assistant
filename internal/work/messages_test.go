@@ -113,11 +113,10 @@ func TestAMessageToSomeoneNoLongerOnTheTeamFailsWithoutACheck(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	snap, _ := a.Core.Snapshot(ctx)
-	if progressed, err := a.answerMessage(ctx, snap); !progressed || err != nil {
+	if progressed, err := a.loopStep(ctx, false); !progressed || err != nil {
 		t.Fatalf("progressed %v, err %v", progressed, err)
 	}
-	snap, _ = a.Core.Snapshot(ctx)
+	snap, _ := a.Core.Snapshot(ctx)
 	got := snap.Tasks[0].Messages[0]
 	if got.ID != m.ID || got.Status != core.MessageFailed || !strings.Contains(got.Reply, m.To) {
 		t.Fatalf("message %+v", got)

@@ -1936,7 +1936,7 @@ describe("the project's tabs", () => {
     expect(within(team).queryByText("make check")).toBeNull();
     expect(within(team).queryByRole("button", { name: "Edit" })).toBeNull();
     expect(
-      within(team)
+      within(within(team).getByRole("list", { name: "Roles" }))
         .getAllByRole("listitem")
         .map((li) => li.querySelector(".seat-role")?.textContent),
     ).toEqual([
@@ -2314,6 +2314,51 @@ describe("the project's tabs", () => {
     expect(
       within(implementer).getByRole("button", { name: "Unassign Implementer" }),
     ).toBeTruthy();
+  });
+  it("adds a seat filled like another, and removes one only while another holds its roles", async () => {
+    const seats = () =>
+      within(screen.getByRole("list", { name: "Seats" })).getAllByRole(
+        "listitem",
+      );
+    show(staffed(), { members: crew }, { tab: "team" });
+    expect(
+      seats().map((li) => li.querySelector(".seat-role")?.textContent),
+    ).toEqual(["Ada", "Reviewer", "QA"]);
+    expect(screen.queryByRole("button", { name: /^Remove / })).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add a seat like Ada" }),
+    );
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/team/seats",
+        method: "POST",
+        body: { seat: "Ada" },
+      },
+    ]);
+    cleanup();
+    const [ada, reviewer, qa] = staffed().playbook!.roles;
+    show(
+      project({
+        playbook: {
+          ...codeTeam(),
+          roles: [ada, { ...ada, name: "Ada #2" }, reviewer, qa],
+        },
+      }),
+      { members: crew },
+      { tab: "team" },
+    );
+    expect(screen.getByRole("button", { name: "Remove Ada" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Ada #2" }));
+    await waitFor(() =>
+      expect(writes().at(-1)).toMatchObject({
+        path: "/api/projects/p1/team/seats/Ada%20%232",
+        method: "DELETE",
+      }),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Remove Reviewer" }),
+    ).toBeNull();
   });
   it("offers no QA for a writing team and asks the engine only of roles no member fills", async () => {
     show(

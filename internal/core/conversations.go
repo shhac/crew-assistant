@@ -315,24 +315,21 @@ func (s *Service) SetWriterNext(ctx context.Context, projectID, taskID, next str
 		if t.Finished() {
 			return "", fmt.Errorf("the task is finished; its implementer won't run again: %w", ErrConflict)
 		}
-		writers := t.RolesOf(RoleImplementer)
-		// The request is for the thread the implementer now seated would
-		// carry on; one another member left on the task isn't its to act on.
-		started := len(writers) == 1
-		if started {
-			_, started = t.Thread(RoleImplementer, writers[0])
-		}
+		// The request is for the thread an implementer seat now on the task
+		// would carry on; one another member left on the task isn't its to
+		// act on.
+		writer, started := t.Writer()
 		if !started {
 			return "", fmt.Errorf("the implementer has no conversation yet; its first round starts one: %w", ErrConflict)
 		}
-		if next == WriterCompact && !config.Supports(writers[0].Engine, config.UseCompact) {
-			return "", fmt.Errorf("%s runs on %s, which can't be compacted from outside; start its conversation afresh instead, which loses nothing its next round needs: %w", writers[0].Name, writers[0].Engine, ErrConflict)
+		if next == WriterCompact && !config.Supports(writer.Engine, config.UseCompact) {
+			return "", fmt.Errorf("%s runs on %s, which can't be compacted from outside; start its conversation afresh instead, which loses nothing its next round needs: %w", writer.Name, writer.Engine, ErrConflict)
 		}
 		t.WriterNext = next
 		t.WriterRequest++
 		if next == WriterCompact {
-			return fmt.Sprintf("%s will compact its conversation at its next round of %s", writers[0].Name, t.Objective), nil
+			return fmt.Sprintf("%s will compact its conversation at its next round of %s", writer.Name, t.Objective), nil
 		}
-		return fmt.Sprintf("%s will start afresh at its next round of %s", writers[0].Name, t.Objective), nil
+		return fmt.Sprintf("%s will start afresh at its next round of %s", writer.Name, t.Objective), nil
 	})
 }

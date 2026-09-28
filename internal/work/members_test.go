@@ -167,6 +167,31 @@ func TestAPinnedWhenCannotForgeAnIndexEntry(t *testing.T) {
 	}
 }
 
+// Two of a member's seats at work on one task at once read one copy of its
+// learnings, which stays until the last of them ends.
+func TestLearningsStayWhileAnotherSeatOfTheMemberReadsThem(t *testing.T) {
+	a := testLoop(t)
+	role := core.Role{Name: "Ada", Member: "m", Learnings: []core.Learning{{When: "Writing", Text: "Be brief."}}}
+	first, err := a.prepareLearnings(core.Task{ID: "t"}, role)
+	if err != nil {
+		t.Fatal(err)
+	}
+	role.Name = "Ada #2"
+	second, err := a.prepareLearnings(core.Task{ID: "t"}, role)
+	if err != nil || second.dir != first.dir {
+		t.Fatalf("%v, %s / %s", err, first.dir, second.dir)
+	}
+	first.cleanup()
+	first.cleanup()
+	if _, err = os.Stat(filepath.Join(second.dir, "01.md")); err != nil {
+		t.Fatalf("one seat's turn ending removed the other's learnings: %v", err)
+	}
+	second.cleanup()
+	if _, err = os.Stat(second.dir); !os.IsNotExist(err) {
+		t.Fatalf("learnings left once no turn reads them: %v", err)
+	}
+}
+
 // A member keeps what a turn taught it, on the owner's rule: never about one
 // project. A learning naming the project's own folder is dropped, and the
 // work itself stands either way.
@@ -451,7 +476,7 @@ func TestUnassigningNeverLeavesTwoRolesWithOneName(t *testing.T) {
 		t.Fatal(err)
 	}
 	roles := project.Playbook.Roles
-	if roles[0].Name != "Writer 2" || roles[0].Member != "" || roles[1].Name != "Writer" || roles[1].Member != writer.ID {
+	if roles[0].Name != "Writer #2" || roles[0].Member != "" || roles[1].Name != "Writer" || roles[1].Member != writer.ID {
 		t.Fatalf("roles %+v", roles)
 	}
 	// The other way round: the template's Writer gives way to the member.
@@ -461,7 +486,7 @@ func TestUnassigningNeverLeavesTwoRolesWithOneName(t *testing.T) {
 	if project, err = a.SetSeat(ctx, p.ID, core.RoleReviewer, writer.ID); err != nil {
 		t.Fatal(err)
 	}
-	if roles = project.Playbook.Roles; roles[0].Name != "Writer 2" || roles[1].Name != "Writer" || roles[1].Member != writer.ID {
+	if roles = project.Playbook.Roles; roles[0].Name != "Writer #2" || roles[1].Name != "Writer" || roles[1].Member != writer.ID {
 		t.Fatalf("roles %+v", roles)
 	}
 }
@@ -588,7 +613,7 @@ func TestSavingATeamKeepsATemplateSeatClearOfAMembersName(t *testing.T) {
 		t.Fatal(err)
 	}
 	roles := project.Playbook.Roles
-	if project.Playbook.MaxRounds != 5 || roles[0].Name != "Writer 2" || roles[0].Member != "" || roles[1].Name != "Writer" || roles[1].Member != writer.ID {
+	if project.Playbook.MaxRounds != 5 || roles[0].Name != "Writer #2" || roles[0].Member != "" || roles[1].Name != "Writer" || roles[1].Member != writer.ID {
 		t.Fatalf("team %+v", project.Playbook)
 	}
 }

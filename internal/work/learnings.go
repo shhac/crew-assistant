@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -38,12 +39,31 @@ func (lp *Loop) prepareLearnings(t core.Task, r core.Role) (learnings, error) {
 		return learnings{cleanup: func() {}}, nil
 	}
 	dir := filepath.Join(lp.learningsRoot(), t.ID, r.Member)
+	// Two of the member's seats can be at work on the task at once, such as
+	// a check and a message answered beside it: the folder goes only once
+	// neither needs it.
+	lp.learnedMu.Lock()
+	if lp.learnedUse == nil {
+		lp.learnedUse = map[string]int{}
+	}
+	lp.learnedUse[dir]++
+	lp.learnedMu.Unlock()
+	var once sync.Once
 	cleanup := func() {
-		os.RemoveAll(dir)
-		// The task's folder goes too once no role's copy is left in it.
-		os.Remove(filepath.Dir(dir))
+		once.Do(func() {
+			lp.learnedMu.Lock()
+			defer lp.learnedMu.Unlock()
+			if lp.learnedUse[dir]--; lp.learnedUse[dir] > 0 {
+				return
+			}
+			delete(lp.learnedUse, dir)
+			os.RemoveAll(dir)
+			// The task's folder goes too once no role's copy is left in it.
+			os.Remove(filepath.Dir(dir))
+		})
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
+		cleanup()
 		return learnings{}, err
 	}
 	var b strings.Builder

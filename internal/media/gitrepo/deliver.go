@@ -54,6 +54,32 @@ func (r Repo) Deliver(ctx context.Context, commit, name string) (string, error) 
 	return "", errors.New("no free branch name")
 }
 
+// Delivered finds the branch Deliver put commit on under name, or a
+// numbered name after it, without delivering anything: for settling a
+// delivery whose outcome was never recorded. It reports false when no such
+// branch is at commit.
+func (r Repo) Delivered(ctx context.Context, commit, name string) (string, bool, error) {
+	for attempt := 1; attempt <= 100; attempt++ {
+		candidate := name
+		if attempt > 1 {
+			candidate = fmt.Sprintf("%s-%d", name, attempt)
+		}
+		existing, err := run(ctx, r.source, "rev-parse", "--verify", "--quiet", "refs/heads/"+candidate)
+		if err != nil {
+			// Deliver skips only names that exist, or the one checked out;
+			// past the first free name, it never went further.
+			if current, _ := run(ctx, r.source, "symbolic-ref", "--quiet", "--short", "HEAD"); strings.TrimSpace(current) == candidate {
+				continue
+			}
+			return "", false, nil
+		}
+		if strings.TrimSpace(existing) == commit {
+			return candidate, true, nil
+		}
+	}
+	return "", false, nil
+}
+
 // Why a push to a branch the project does not own was refused. None of them
 // is ever answered by forcing: the branch moved, or the owner's checkout of it
 // is theirs to deal with.

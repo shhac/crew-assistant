@@ -83,11 +83,11 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 		if c.Carry {
 			reviewers := map[string]bool{}
 			for _, role := range t.RolesOf(core.RoleReviewer) {
-				reviewers[role.Name] = true
+				reviewers[t.CheckerGroup(role.Name)] = true
 			}
 			t.Base, t.From = c.Base, c.From
 			r.CleanMergeOf = prev.N
-			t.Verdicts = append(t.Verdicts, carriedOver(t.Verdicts, prev.N, r.N, reviewers, p.Brief.Version, r.At)...)
+			t.Verdicts = append(t.Verdicts, carriedOver(t.Verdicts, prev.N, r.N, t.CheckerGroup, reviewers, p.Brief.Version, r.At)...)
 		}
 		t.Revisions = append(t.Revisions, r)
 		t.DecisionID, t.Failures, t.RetryAt = "", 0, time.Time{}
@@ -109,20 +109,26 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 }
 
 // resume settles what a daemon stopped mid-step left behind, before any step
-// runs: handoffs are finished or undone, the copies checks were given are
-// deleted, and so is anything kept for tasks that have settled.
+// runs. Turns it left running are ended first, where the harness can prove
+// they are its own; a task whose turn can't be confirmed ended stays held.
+// Then handoffs are finished or undone, the steps it claimed are cleared on
+// to fresh attempts, so nothing a late turn reports is recorded, the copies
+// checks were given are deleted, and so is anything kept for tasks that
+// have settled. A step not finished is claimed again as usual.
 func (lp *Loop) resume(ctx context.Context) error {
 	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
 		return err
 	}
+	held := lp.reclaimTurns(ctx, snap)
 	var errs []error
 	for _, t := range snap.Tasks {
-		if t.Handoff == nil || t.Finished() {
+		if t.Handoff == nil || t.Finished() || heldTask(t, held) {
 			continue
 		}
 		errs = append(errs, lp.resumeHandoff(ctx, snap, t))
 	}
+	errs = append(errs, lp.Core.RecoverClaims(ctx, held))
 	for _, p := range snap.Projects {
 		if m, ok := lp.keptMedium(ctx, p); ok {
 			errs = append(errs, m.removeChecks())

@@ -232,8 +232,10 @@ func vacate(p *Project, memberID string) (bool, error) {
 	if k < 0 {
 		return false, nil
 	}
+	// Every seat filled from the member goes, and the template's seats for
+	// what the first held take their place.
 	kinds := playbook.Roles[k].Kinds
-	playbook.Roles = slices.Delete(playbook.Roles, k, k+1)
+	playbook.Roles = slices.DeleteFunc(playbook.Roles, func(r Role) bool { return r.Member == memberID })
 	for _, kind := range kinds {
 		if seat, ok := playbook.TemplateSeat(kind); ok {
 			playbook.Roles = slices.Insert(playbook.Roles, k, seat)

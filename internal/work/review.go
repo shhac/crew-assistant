@@ -15,34 +15,46 @@ import (
 	"github.com/shhac/crew-assistant/internal/text"
 )
 
-// review runs each checking role that has not yet judged the latest revision
-// against the current brief, one per step: reviewers first, then QA.
-func (lp *Loop) review(ctx context.Context, p core.Project, t core.Task, m medium) error {
+// review moves a task whose latest revision every checker group has judged
+// against the current brief on to deciding. The checks themselves each run
+// as a step of their own, side by side; see check.
+func (lp *Loop) review(ctx context.Context, p core.Project, t core.Task) error {
 	r := t.Revisions[len(t.Revisions)-1]
 	for _, checker := range t.Checkers() {
-		if t.Judged(checker.Name, r.N, p.Brief.Version) {
-			continue
+		if !t.Judged(checker.Name, r.N, p.Brief.Version) {
+			return nil
 		}
-		if held, err := lp.holdForUsage(ctx, t, checker); held || err != nil {
-			return err
-		}
-		verdict, err := lp.runChecker(ctx, p, t, r, checker, m, "")
-		if err != nil {
-			return lp.roleFailed(ctx, t, checker.Name, err)
-		}
-		// The verdict judged the text the checker was shown: if it or anyone
-		// changed the objective or criteria meanwhile, it judges again.
-		verdict.TextVersion = t.TextVersion
-		_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
-			// Ref is what the checker's own copy held, set with the verdict.
-			verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, checker.Name, p.Brief.Version, time.Now().UTC()
-			t.Verdicts = append(t.Verdicts, verdict)
-			t.Failures, t.RetryAt = 0, time.Time{}
-			return fmt.Sprintf("%s checked version %d of %s: %s", checker.Name, r.N, t.Objective, outcomeWords[verdict.Outcome]), nil
-		})
-		return err
 	}
 	return lp.setStatus(ctx, t.ID, core.TaskDeciding, "Checks are in")
+}
+
+// check runs one checker seat on the latest revision, for its group: a
+// reviewer and QA check the same draft at once, each in a copy of its own.
+// A group that judged it meanwhile, such as by answering a message, is not
+// asked again.
+func (lp *Loop) check(ctx context.Context, p core.Project, t core.Task, m medium, checker core.Role) error {
+	r := t.Revisions[len(t.Revisions)-1]
+	if t.Judged(checker.Name, r.N, p.Brief.Version) {
+		return nil
+	}
+	if held, err := lp.holdForUsage(ctx, t, checker); held || err != nil {
+		return err
+	}
+	verdict, err := lp.runChecker(ctx, p, t, r, checker, m, "")
+	if err != nil {
+		return lp.roleFailed(ctx, t, checker.Name, err)
+	}
+	// The verdict judged the text the checker was shown: if it or anyone
+	// changed the objective or criteria meanwhile, it judges again.
+	verdict.TextVersion = t.TextVersion
+	_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
+		// Ref is what the checker's own copy held, set with the verdict.
+		verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, checker.Name, p.Brief.Version, time.Now().UTC()
+		t.Verdicts = append(t.Verdicts, verdict)
+		t.Failures, t.RetryAt = 0, time.Time{}
+		return fmt.Sprintf("%s checked version %d of %s: %s", checker.Name, r.N, t.Objective, outcomeWords[verdict.Outcome]), nil
+	})
+	return err
 }
 
 // runChecker gives a fresh checking session the revision to judge, in a copy
@@ -96,7 +108,7 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 func (lp *Loop) askForJSON(ctx context.Context, spec roles.Spec, parse func(reply string) error) (reply, learned string, parseErr, runErr error) {
 	base := spec.Prompt
 	for attempt := 0; attempt < 2; attempt++ {
-		result, err := lp.runner.Run(ctx, spec)
+		result, err := lp.runRole(ctx, spec)
 		if err != nil {
 			return reply, learned, parseErr, err
 		}
@@ -155,7 +167,10 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 		})
 		return err
 	}
-	next = lp.route(ctx, p, t, current, next)
+	next, busy := lp.route(ctx, p, t, current, next)
+	if busy != "" {
+		return lp.waitForSeat(ctx, t, busy)
+	}
 	// The PM's tools can change the task while it chooses. Checks against
 	// requirements that have since changed no longer count, so the task is
 	// checked again before it goes anywhere; one that moved on is left.
@@ -236,8 +251,10 @@ func (lp *Loop) askResearch(ctx context.Context, t core.Task, r core.Revision, c
 // route is where the checks send the task next. Where a checker recommends
 // a step other than the one the checks lead to, the project's PM, if it has
 // one, chooses between them; otherwise, or when the PM can't say, the checks
-// decide as they always do.
-func (lp *Loop) route(ctx context.Context, p core.Project, t core.Task, current []core.Verdict, next string) string {
+// decide as they always do. A PM at work on something else is waited for:
+// it reports the PM's seat as busy, and the task is decided again once the
+// seat is free.
+func (lp *Loop) route(ctx context.Context, p core.Project, t core.Task, current []core.Verdict, next string) (string, string) {
 	options := []string{next}
 	_, researches := t.Researcher()
 	for _, v := range current {
@@ -247,14 +264,17 @@ func (lp *Loop) route(ctx context.Context, p core.Project, t core.Task, current 
 	}
 	seat, ok := p.PMSeat()
 	if len(options) == 1 || !ok {
-		return next
+		return next, ""
 	}
 	if wait, _ := lp.usageWait(ctx, seat); !wait.IsZero() {
-		return next
+		return next, ""
+	}
+	if held, err := lp.holdSeat(ctx, t.ID, seat.Name); err != nil || !held {
+		return next, seat.Name
 	}
 	dir := filepath.Join(lp.Core.StateDirectory(), "roles", "pm-work")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return next
+		return next, ""
 	}
 	spec := lp.baseSpec(seat, dir, routePrompt(p, t, current, options))
 	lp.withTools(&spec, lp.managerTools(p.ID, seat))
@@ -264,10 +284,10 @@ func (lp *Loop) route(ctx context.Context, p core.Project, t core.Task, current 
 		return err
 	})
 	if err != nil || parseErr != nil {
-		return next
+		return next, ""
 	}
 	_ = lp.Core.RecordRoute(ctx, t.ID, seat.Name, nextWords[choice.Next], choice.Reason)
-	return choice.Next
+	return choice.Next, ""
 }
 
 type routeChoice struct {

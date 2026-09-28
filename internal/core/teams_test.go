@@ -28,10 +28,10 @@ func TestPlaybookValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string]func(*Playbook){
-		"no reviewer": func(p *Playbook) { p.Roles = p.Roles[:1] },
-		"two writers": func(p *Playbook) {
-			p.Roles = append(p.Roles, Role{Name: "Second", Kinds: []string{RoleImplementer}, Engine: "codex"})
-		},
+		"no reviewer":        func(p *Playbook) { p.Roles = p.Roles[:1] },
+		"no writer":          func(p *Playbook) { p.Roles = p.Roles[1:] },
+		"negative cap":       func(p *Playbook) { p.MaxActive = -1 },
+		"cap past the limit": func(p *Playbook) { p.MaxActive = maxActiveLimit + 1 },
 		"unknown engine":     func(p *Playbook) { p.Roles[1].Engine = "other" },
 		"duplicate names":    func(p *Playbook) { p.Roles[1].Name = p.Roles[0].Name },
 		"no rounds":          func(p *Playbook) { p.MaxRounds = 0 },

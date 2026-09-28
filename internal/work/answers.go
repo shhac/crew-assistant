@@ -114,7 +114,7 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 	case d.Approves() && chose(choiceApprove),
 		d.Kind == core.DecisionEscalation && chose(choiceAcceptDraft):
 		return lp.approve(ctx, t)
-	case d.Kind == core.DecisionFailure && chose(choiceTryAgain):
+	case d.Kind == core.DecisionFailure && (chose(choiceTryAgain) || chose(choiceResolve)):
 		_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.Status, t.ResumeStatus = t.ResumeStatus, ""
 			if t.Status == "" {
@@ -123,6 +123,10 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 			// The owner's retry starts the count of catch-ups afresh.
 			t.Failures, t.RetryAt, t.DecisionID, t.Detail, t.CatchUps = 0, time.Time{}, "", "Trying again", 0
 			t.LandingFailures = nil
+			if chose(choiceResolve) {
+				t.Detail = "Resolving the conflict"
+				return t.Objective + " is resolving its conflict with what landed", nil
+			}
 			return "Trying " + t.Objective + " again", nil
 		})
 		return err
@@ -173,9 +177,10 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 	return err
 }
 
-// StopTask ends a task at the owner's request. A turn already running
-// finishes, but nothing it reports can restart the task, and any decision the
-// task was waiting on is closed as no longer needed.
+// StopTask ends a task at the owner's request. Its steps running now are
+// cancelled and their seats freed; nothing they report can restart the task
+// or be recorded, and any decision the task was waiting on is closed as no
+// longer needed. Other tasks' steps go on.
 func (lp *Loop) StopTask(ctx context.Context, projectID, taskID string) (core.Task, error) {
 	var decisionID string
 	stopped, err := lp.Core.UpdateTask(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
@@ -192,6 +197,7 @@ func (lp *Loop) StopTask(ctx context.Context, projectID, taskID string) (core.Ta
 	if err != nil {
 		return stopped, err
 	}
+	lp.jobs.cancelTask(stopped.ID)
 	if decisionID != "" {
 		if _, dismissErr := lp.Core.DismissDecision(ctx, decisionID, "The task was stopped"); dismissErr != nil && !errors.Is(dismissErr, core.ErrConflict) {
 			return stopped, dismissErr

@@ -12,19 +12,18 @@ import (
 	"github.com/shhac/crew-assistant/internal/text"
 )
 
-// write runs the implementer for this round and records what it produced.
-// The workspace is first reset to the last revision, so nothing a crashed or
-// failed turn left behind is ever mistaken for a draft.
-func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium) error {
-	writers := t.RolesOf(core.RoleImplementer)
-	if len(writers) != 1 {
+// write runs the implementer seat that claimed this round and records what
+// it produced. The workspace is first reset to the last revision, so nothing
+// a crashed or failed turn left behind is ever mistaken for a draft.
+func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium, writer core.Role) error {
+	if writer.Name == "" {
 		return lp.stopTask(ctx, t, "This task's team has no writer")
 	}
 	t, err := lp.prepareWorkspace(ctx, t, m)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
-	if held, err := lp.holdForUsage(ctx, t, writers[0]); held || err != nil {
+	if held, err := lp.holdForUsage(ctx, t, writer); held || err != nil {
 		return err
 	}
 	t, caughtUp, err := lp.takeInLanded(ctx, t, m)
@@ -40,17 +39,17 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 		return err
 	}
 	seen := len(t.Direction)
-	guide := learnedGuide(writers[0], false)
-	spec, cleanup, err := lp.roleSpec(t, writers[0], m.workspace(t), true, m, writerPrompt(p, t, caughtUp, false)+prompt+guide)
+	guide := learnedGuide(writer, false)
+	spec, cleanup, err := lp.roleSpec(t, writer, m.workspace(t), true, m, writerPrompt(p, t, caughtUp, false)+prompt+guide)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
 	defer cleanup()
-	// The implementer carries on its own conversation on this task, and
-	// never another task's or another member's. Starting afresh, whether
-	// asked to or because it can't carry it on, it gets the task's record
-	// in its place.
-	spec.Resume = t.Resumable(core.RoleImplementer, writers[0])
+	// The implementer carries on its member's conversation on this task,
+	// whichever of the member's seats had it, and never another task's or
+	// another member's. Starting afresh, whether asked to or because it
+	// can't carry it on, it gets the task's record in its place.
+	spec.Resume = t.Resumable(core.RoleImplementer, writer)
 	switch t.WriterNext {
 	case core.WriterFresh:
 		spec.Resume = nil
@@ -63,11 +62,11 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 	} else {
 		spec.FreshPrompt = fresh
 	}
-	result, err := lp.runner.Run(ctx, spec)
+	result, err := lp.runRole(ctx, spec)
 	if err != nil {
-		return lp.roleFailed(ctx, t, writers[0].Name, err)
+		return lp.roleFailed(ctx, t, writer.Name, err)
 	}
-	return lp.recordDraft(ctx, p, t, m, writers[0].Name, result, seen)
+	return lp.recordDraft(ctx, p, t, m, writer.Name, result, seen)
 }
 
 // prepareWorkspace starts the task's workspace on its first round, then puts

@@ -52,6 +52,10 @@ type Spec struct {
 	Handler session.ToolHandler
 	// Observer hears how the turn goes while it runs, or nil.
 	Observer Observer
+	// LaunchDir is where a turn with tools records its launch, so a daemon
+	// started after this one stopped can find a harness still running and
+	// end it; empty is a folder of the turn's own that nothing looks for.
+	LaunchDir string
 }
 
 // Observer hears a turn from when it starts to when it ends, with the prompt
@@ -141,12 +145,15 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 		opener = open
 	}
 	o := options(spec)
+	// The launch folder is kept while its harness can't be confirmed gone,
+	// so the next start finds it.
+	confirmed := false
 	if len(spec.Tools) > 0 {
 		host, cleanup, err := toolHost(spec)
 		if err != nil {
 			return Result{}, err
 		}
-		defer cleanup()
+		defer func() { cleanup(confirmed) }()
 		o.Sandbox.Tools = host
 	}
 	s, resumed, err := opener(ctx, o, spec.Resume)
@@ -191,7 +198,9 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 	}
 	ref, _ := json.Marshal(s.Ref())
 	released = true
-	if _, releaseErr := s.Release(context.WithoutCancel(ctx)); releaseErr != nil && err == nil {
+	reclaimed, releaseErr := s.Release(context.WithoutCancel(ctx))
+	confirmed = releaseErr == nil && reclaimed.Confirmed
+	if releaseErr != nil && err == nil {
 		err = releaseErr
 	}
 	if err != nil {
@@ -220,6 +229,10 @@ func options(spec Spec) session.Options {
 	if o.Provider.Engine != harness.Codex {
 		o.RuntimeHome = ""
 	}
+	// Roles yield the machine to the owner's own use, and so does whatever
+	// they start, where the harness can run them so; elsewhere it would
+	// refuse the session.
+	o.Background = harness.Support(o.Provider.Engine, harness.Session, harness.Background).Usable()
 	if o.Provider.Engine == harness.Grok {
 		o.Policy = grokPolicy(spec.Write)
 	}
@@ -245,18 +258,29 @@ func grokPolicy(write bool) session.Policy {
 }
 
 // toolHost serves a turn's tools from a folder of its own, since turns run
-// side by side and the folder holds the channel's lease; it is removed once
-// the turn is over.
-func toolHost(spec Spec) (*session.ToolHost, func(), error) {
+// side by side and the folder holds the channel's lease and the record of
+// the launch. Once the turn is over it is removed, unless it is the turn's
+// LaunchDir and its harness wasn't confirmed gone.
+func toolHost(spec Spec) (*session.ToolHost, func(confirmed bool), error) {
 	bridge, err := Bridge()
 	if err != nil {
 		return nil, nil, err
 	}
-	dir, err := os.MkdirTemp("", "crew-role-tools-")
+	dir := spec.LaunchDir
+	if dir == "" {
+		dir, err = os.MkdirTemp("", "crew-role-tools-")
+	} else {
+		err = os.MkdirAll(dir, 0o700)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
-	return &session.ToolHost{Server: "crew", Tools: spec.Tools, Handler: spec.Handler, Dir: dir, Bridge: bridge, MaxResultBytes: 128 << 10}, func() { os.RemoveAll(dir) }, nil
+	cleanup := func(confirmed bool) {
+		if confirmed || spec.LaunchDir == "" {
+			os.RemoveAll(dir)
+		}
+	}
+	return &session.ToolHost{Server: "crew", Tools: spec.Tools, Handler: spec.Handler, Dir: dir, Bridge: bridge, MaxResultBytes: 128 << 10}, cleanup, nil
 }
 
 // open resumes the recorded session when it can and otherwise starts a fresh

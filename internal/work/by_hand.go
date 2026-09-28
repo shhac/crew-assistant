@@ -58,7 +58,8 @@ func (lp *Loop) Place(ctx context.Context, projectID, taskID string) (TaskPlace,
 // task's next draft, made by the owner; see core.AdoptDraft. The commit
 // must build on where the task started. It holds the task from start to
 // finish, and is refused while a step of the loop holds it, whose draft
-// would build on the one this replaces.
+// would build on the one this replaces; the loop claims none of its steps
+// meanwhile.
 func (lp *Loop) AdoptDraft(ctx context.Context, projectID, taskID, ref, note string, approve bool) (core.Task, error) {
 	// The loop holds a task by its canonical ID, whichever the owner used.
 	snap, err := lp.Core.Snapshot(ctx)
@@ -68,10 +69,18 @@ func (lp *Loop) AdoptDraft(ctx context.Context, projectID, taskID, ref, note str
 	if named, ok := findTask(snap, projectID, taskID); ok {
 		taskID = named.ID
 	}
-	if !lp.claim(taskID) {
+	held, err := lp.Core.ClaimTask(ctx, taskID, core.StepAdopt)
+	if errors.Is(err, core.ErrConflict) {
 		return core.Task{}, fmt.Errorf("the team is at work on this task right now; adopt your change once its step ends: %w", core.ErrConflict)
 	}
-	defer lp.release(taskID)
+	if err != nil {
+		return core.Task{}, err
+	}
+	defer func() {
+		_ = lp.Core.ReleaseClaim(context.WithoutCancel(ctx), taskID, held.Token)
+		lp.Nudge()
+	}()
+	ctx = core.Fenced(ctx, taskID, held.Token)
 	t, _, m, err := lp.taskAt(ctx, projectID, taskID)
 	if err != nil {
 		return core.Task{}, err
@@ -80,17 +89,20 @@ func (lp *Loop) AdoptDraft(ctx context.Context, projectID, taskID, ref, note str
 	if !ok {
 		return core.Task{}, errors.New("only a code task's draft can be changed by hand")
 	}
+	unlock := g.locked()
 	r, err := ownersRevision(ctx, g, t, ref, note)
 	if err != nil {
+		unlock()
 		return core.Task{}, err
 	}
 	// Kept as any revision is before it is recorded. One the record then
 	// refuses is removed when the loop next starts.
 	name, err := lp.nextRef(ctx, t.ID)
-	if err != nil {
-		return core.Task{}, err
+	if err == nil {
+		err = g.repo.Publish(ctx, g.repo, r.Ref, name)
 	}
-	if err = g.repo.Publish(ctx, g.repo, r.Ref, name); err != nil {
+	unlock()
+	if err != nil {
 		return core.Task{}, err
 	}
 	out, err := lp.Core.AdoptDraft(ctx, t.ID, r, approve)

@@ -105,6 +105,30 @@ func TestDeletingAMemberGivesItsRoleBackButNotTheWorkUnderWay(t *testing.T) {
 	}
 }
 
+// A member in several seats leaves every one of them, and the template's
+// seat takes their place once.
+func TestDeletingAMemberEmptiesEverySeatItHeld(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	rune, _ := s.SaveMember(testContext, "", MemberInput{Name: "Rune", Kinds: []string{RoleReviewer}, Engine: "claude"})
+	team := Templates["draft"]
+	team.Roles = slices.Clone(team.Roles)
+	team.Roles[1] = Role{Name: "Rune", Kinds: []string{RoleReviewer}, Engine: "claude", Member: rune.ID}
+	if _, err := team.AddSeat("Rune"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetPlaybook(testContext, p.ID, team); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteMember(testContext, rune.ID); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := s.Snapshot(testContext)
+	if roles := snap.Projects[0].Playbook.Roles; !reflect.DeepEqual(roles, Templates["draft"].Roles) {
+		t.Fatalf("the member's seats should all go, for the template's one: %+v", roles)
+	}
+}
+
 func TestARoleGivenBackNeverTakesAnotherRolesName(t *testing.T) {
 	s, _ := fixture(t)
 	p := newProject(t, s)
@@ -129,7 +153,7 @@ func TestARoleGivenBackNeverTakesAnotherRolesName(t *testing.T) {
 	if err = playbook.Validate(); err != nil {
 		t.Fatalf("the team left behind is broken: %v", err)
 	}
-	if got := []string{playbook.Roles[0].Name, playbook.Roles[1].Name}; !reflect.DeepEqual(got, []string{"Writer 2", "writer"}) {
+	if got := []string{playbook.Roles[0].Name, playbook.Roles[1].Name}; !reflect.DeepEqual(got, []string{"Writer #2", "writer"}) {
 		t.Fatalf("roles: %v", got)
 	}
 	if playbook.Roles[0].Member != "" || playbook.Roles[0].Instructions != Templates["draft"].Roles[0].Instructions {

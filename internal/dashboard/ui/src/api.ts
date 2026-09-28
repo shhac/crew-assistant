@@ -131,6 +131,11 @@ export interface Playbook {
   prepare?: string[];
   sign?: string;
   land?: LandPolicy;
+  /**
+   * How many tasks may be under way at once; absent is one per implementer
+   * seat.
+   */
+  max_active?: number;
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -866,6 +871,8 @@ export interface ConfigDefaults {
   choices?: EngineChoice[];
   usage_floor?: number;
   on_unknown_usage?: "allow" | "pause";
+  /** How many role turns run on an engine at once when unset. */
+  role_runs?: number;
   openai_base_url?: string;
 }
 export function getConfigDefaults() {
@@ -931,6 +938,27 @@ export function setSeat(projectID: string, kind: MemberKind, member: string) {
     `${projectPath(projectID)}/team/${encodeURIComponent(kind)}`,
     { method: "PUT", body: JSON.stringify({ member }) },
   );
+}
+/** Adds a seat filled like the named one: Claudius gains Claudius #2. */
+export function addSeat(projectID: string, seat: string) {
+  return api<Project>(`${projectPath(projectID)}/team/seats`, {
+    method: "POST",
+    body: JSON.stringify({ seat }),
+  });
+}
+/** Takes the named seat off the team. */
+export function removeSeat(projectID: string, seat: string) {
+  return api<Project>(
+    `${projectPath(projectID)}/team/seats/${encodeURIComponent(seat)}`,
+    { method: "DELETE" },
+  );
+}
+/** Sets how many tasks may be under way at once; 0 is one per implementer. */
+export function setParallel(projectID: string, maxActive: number) {
+  return api<Project>(`${projectPath(projectID)}/parallel`, {
+    method: "PUT",
+    body: JSON.stringify({ max_active: maxActive }),
+  });
 }
 export function setWorkspace(projectID: string, input: WorkspaceInput) {
   return api<Project>(`${projectPath(projectID)}/workspace`, {

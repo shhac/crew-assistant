@@ -24,6 +24,7 @@ func configDefaults() map[string]any {
 		"choices":          engineChoices(),
 		"usage_floor":      config.DefaultUsageFloor,
 		"on_unknown_usage": config.OnUnknownUsageAllow,
+		"role_runs":        config.DefaultRoleRuns,
 		"openai_base_url":  baseURL,
 	}
 }

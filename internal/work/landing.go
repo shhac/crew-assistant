@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -43,7 +44,22 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 	if l != nil {
 		return lp.catchUpRound(ctx, t, c, *l)
 	}
-	target, err := m.deliver(ctx, t, r)
+	// The intent is recorded before anything moves where the change lands,
+	// and the delivery, once begun, goes to its end: a task stopped or a
+	// daemon restarted meanwhile is settled from where the change went,
+	// never left half done or landed unrecorded.
+	if _, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		t.Delivering = &core.Delivering{Revision: r.N, At: time.Now().UTC()}
+		return "", nil
+	}); err != nil {
+		return err
+	}
+	target, err := m.deliver(context.WithoutCancel(ctx), t, r)
+	if err != nil {
+		if cleared := lp.notDelivering(ctx, t.ID); cleared != nil {
+			return cleared
+		}
+	}
 	if errors.Is(err, gitrepo.ErrTargetMoved) {
 		if c, l, lagErr := lag(ctx, m, t); lagErr == nil && l != nil {
 			return lp.catchUpRound(ctx, t, c, *l)
@@ -61,29 +77,111 @@ func proposed(t core.Task) bool { return t.Proposal != nil && t.Proposal.Number 
 
 func (lp *Loop) recordLanded(ctx context.Context, t core.Task, r core.Revision, target, note string) error {
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
-		t.Status, t.DecisionID, t.DeliveredTo, t.CatchUps, t.LandingFailures = core.TaskDelivered, "", target, 0, nil
-		// Where it went is said by the stage; the detail keeps only a note.
-		t.Detail = note
-		if r.Ref != "" {
-			p.Landed = &core.Landing{TaskID: t.ID, Objective: t.Objective, Commit: r.Ref, Branch: target, At: time.Now().UTC()}
-		}
-		if t.Playbook != nil && t.Playbook.Land.Way() != core.LandBranch {
-			t.Status = core.TaskLanded
-			// Said only now that it is there, however the landing went.
-			if pmApproved(*t) {
-				return fmt.Sprintf("The PM landed %s on %s %s: %s", t.Objective, target, t.LandDecision.How(), t.LandDecision.Reason), nil
-			}
-			return fmt.Sprintf("%s landed on %s", t.Objective, target), nil
-		}
-		if target != "" {
-			return fmt.Sprintf("%s delivered to %s", t.Objective, target), nil
-		}
-		return t.Objective + " approved", nil
+		return landedOn(t, p, r, target, note), nil
 	})
 	if err != nil || r.Ref == "" {
 		return err
 	}
 	return lp.supersedeStaleApprovals(ctx, t.ProjectID)
+}
+
+// landedOn records a task's change as where it landed, within a change, and
+// says so.
+func landedOn(t *core.Task, p *core.Project, r core.Revision, target, note string) string {
+	t.Status, t.DecisionID, t.DeliveredTo, t.CatchUps, t.LandingFailures = core.TaskDelivered, "", target, 0, nil
+	t.Delivering = nil
+	// Where it went is said by the stage; the detail keeps only a note.
+	t.Detail = note
+	if r.Ref != "" {
+		p.Landed = &core.Landing{TaskID: t.ID, Objective: t.Objective, Commit: r.Ref, Branch: target, At: time.Now().UTC()}
+	}
+	if t.Playbook != nil && t.Playbook.Land.Way() != core.LandBranch {
+		t.Status = core.TaskLanded
+		// Said only now that it is there, however the landing went.
+		if pmApproved(*t) {
+			return fmt.Sprintf("The PM landed %s on %s %s: %s", t.Objective, target, t.LandDecision.How(), t.LandDecision.Reason)
+		}
+		return fmt.Sprintf("%s landed on %s", t.Objective, target)
+	}
+	if target != "" {
+		return fmt.Sprintf("%s delivered to %s", t.Objective, target)
+	}
+	return t.Objective + " approved"
+}
+
+// notDelivering clears a landing's intent once it is known to have gone
+// nowhere.
+func (lp *Loop) notDelivering(ctx context.Context, taskID string) error {
+	_, err := lp.updateOpen(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
+		t.Delivering = nil
+		return "", nil
+	})
+	return err
+}
+
+// settleDeliveries settles the landings a stop or a restart cut off between
+// starting to deliver and recording where the change went, once no step of
+// the task is running: a change that landed is recorded as landed, however
+// the task was stopped meanwhile, and one that didn't leaves the task as it
+// stands. A task still landing needs nothing: its landing looks first for a
+// change already there.
+func (lp *Loop) settleDeliveries(ctx context.Context, snap core.Snapshot) error {
+	var errs []error
+	for _, t := range snap.Tasks {
+		if t.Delivering == nil || !t.Finished() || len(t.Claims) > 0 || lp.jobs.hasTask(t.ID) {
+			continue
+		}
+		p, ok := findProject(snap, t.ProjectID)
+		if !ok {
+			continue
+		}
+		errs = append(errs, lp.settleDelivery(ctx, p, t))
+	}
+	return errors.Join(errs...)
+}
+
+func (lp *Loop) settleDelivery(ctx context.Context, p core.Project, t core.Task) error {
+	i := slices.IndexFunc(t.Revisions, func(r core.Revision) bool { return r.N == t.Delivering.Revision })
+	target, landed := "", false
+	if i >= 0 {
+		r := t.Revisions[i]
+		m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
+		if err != nil {
+			return err
+		}
+		if target, landed, err = delivered(ctx, m, t, r); err != nil {
+			return err
+		}
+	}
+	_, err := lp.Core.UpdateTask(ctx, t.ID, func(task *core.Task, p *core.Project) (string, error) {
+		if task.Delivering == nil {
+			return "", nil
+		}
+		task.Delivering = nil
+		if !landed {
+			return "", nil
+		}
+		landedOn(task, p, t.Revisions[i], target, "It landed as you stopped it")
+		return fmt.Sprintf("%s had already landed when it was stopped", task.Objective), nil
+	})
+	if err != nil || !landed {
+		return err
+	}
+	return lp.supersedeStaleApprovals(ctx, t.ProjectID)
+}
+
+// delivered reports whether revision r of t already went where it lands,
+// and where, without delivering anything.
+func delivered(ctx context.Context, m medium, t core.Task, r core.Revision) (string, bool, error) {
+	g, ok := m.(gitMedium)
+	if !ok || r.Ref == "" {
+		return "", false, nil
+	}
+	if g.playbook.Land.Way() == core.LandBranch {
+		return g.repo.Delivered(ctx, r.Ref, g.branchName(t))
+	}
+	there, err := g.alreadyLanded(ctx, t, r)
+	return g.playbook.Land.Target, there, err
 }
 
 // landingFailed brings the owner a decision rather than retrying on a timer: a

@@ -35,9 +35,9 @@ func TestConfigKeysCoverTheFile(t *testing.T) {
 		t.Fatalf("directive %v", directive)
 	}
 	c := config.Default()
-	floor := 10
+	floor, runs := 10, 2
 	for _, engine := range []*config.CLIEngine{&c.Engines.Codex, &c.Engines.Claude} {
-		*engine = config.CLIEngine{Bin: "x", Home: "/x", UsageFloor: config.UsageFloor{FiveHourPercent: &floor, WeekPercent: &floor}, OnUnknownUsage: "pause"}
+		*engine = config.CLIEngine{Bin: "x", Home: "/x", UsageFloor: config.UsageFloor{FiveHourPercent: &floor, WeekPercent: &floor}, OnUnknownUsage: "pause", RoleRuns: &runs}
 	}
 	// Grok reports no usage windows, so it has no floors to set.
 	c.Engines.Grok = config.CLIEngine{Bin: "x", Home: "/x"}

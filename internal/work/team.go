@@ -192,6 +192,10 @@ func (lp *Loop) SetTeam(ctx context.Context, projectID string, in TeamChoice) (c
 	// The template's seats are made afresh, so one named like a member gives
 	// way again, as it did when the member was given its seat.
 	playbook.NameSeats()
+	// How much of the project's work runs at once is its own setting.
+	if p, ok := findProject(snap, projectID); ok && p.Playbook != nil {
+		playbook.MaxActive = p.Playbook.MaxActive
+	}
 	if playbook.Medium == core.MediumGit {
 		p, ok := findProject(snap, projectID)
 		if !ok {
@@ -237,8 +241,9 @@ func sameKinds(a, b []string) bool {
 // SetSeat gives one kind of role to a member, or with no member back to the
 // template's seat for it; NoResearcher as the researcher leaves research
 // out, and as the designer leaves the team without one. A member already on
-// the team takes the role in the seat it has. Every other seat keeps the copy
-// it has, and requests under way keep the team they started with.
+// the team takes the role in the seat it has. A role held in several seats
+// is given as many again, filled like the first. Every other seat keeps the
+// copy it has, and requests under way keep the team they started with.
 func (lp *Loop) SetSeat(ctx context.Context, projectID, kind, memberID string) (core.Project, error) {
 	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
@@ -265,12 +270,23 @@ func (lp *Loop) SetSeat(ctx context.Context, projectID, kind, memberID string) (
 	if memberID == NoResearcher && kind != core.RoleResearcher {
 		return core.Project{}, fmt.Errorf("only research can be left out of a team")
 	}
+	// The role keeps as many seats as it had, so the work it runs at once
+	// stays as the owner set it: Claudius and Claudius #2 given back to the
+	// template become Implementer and Implementer #2.
+	seats := 0
+	for _, r := range playbook.Roles {
+		if r.Holds(kind) {
+			seats++
+		}
+	}
 	at := playbook.Unseat(kind)
+	filled := ""
 	switch memberID {
 	case NoResearcher:
 	case "":
 		if templated {
 			playbook.Roles = slices.Insert(playbook.Roles, at, base)
+			filled = base.Name
 		}
 	default:
 		m, err := memberFor(kind, memberID, snap)
@@ -279,10 +295,17 @@ func (lp *Loop) SetSeat(ctx context.Context, projectID, kind, memberID string) (
 		}
 		if seat := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Member == m.ID }); seat >= 0 {
 			playbook.Rekind(seat, slices.Concat(playbook.Roles[seat].Kinds, []string{kind}))
+			filled = playbook.Roles[seat].Name
 			break
 		}
 		playbook.Roles = slices.Insert(playbook.Roles, at, memberSeat(m, []string{kind}, base.Instructions))
 		playbook.NameSeats()
+		filled = playbook.Roles[slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Member == m.ID })].Name
+	}
+	for ; filled != "" && seats > 1; seats-- {
+		if _, err := playbook.AddSeat(filled); err != nil {
+			return core.Project{}, err
+		}
 	}
 	if err = playbook.Validate(); err != nil {
 		return core.Project{}, err
@@ -294,6 +317,62 @@ func (lp *Loop) SetSeat(ctx context.Context, projectID, kind, memberID string) (
 		lp.Nudge()
 	}
 	return p, err
+}
+
+// AddSeat adds another seat filled like the named one: Claudius gains
+// Claudius #2, then Claudius #3. Each seat takes one step at a time, so a
+// project runs as many steps of a kind at once as it has free seats for
+// it. Requests under way keep the team they started with.
+func (lp *Loop) AddSeat(ctx context.Context, projectID, seat string) (core.Project, error) {
+	return lp.changeSeats(ctx, projectID, func(playbook *core.Playbook) error {
+		_, err := playbook.AddSeat(seat)
+		return err
+	})
+}
+
+// RemoveSeat takes the named seat off a project's team. The team must
+// still have an implementer and a reviewer.
+func (lp *Loop) RemoveSeat(ctx context.Context, projectID, seat string) (core.Project, error) {
+	return lp.changeSeats(ctx, projectID, func(playbook *core.Playbook) error {
+		return playbook.RemoveSeat(seat)
+	})
+}
+
+func (lp *Loop) changeSeats(ctx context.Context, projectID string, change func(*core.Playbook) error) (core.Project, error) {
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return core.Project{}, err
+	}
+	p, ok := findProject(snap, projectID)
+	if !ok {
+		return core.Project{}, core.ErrNotFound
+	}
+	if p.Playbook == nil {
+		return core.Project{}, errors.New("choose a team first")
+	}
+	playbook := *p.Playbook
+	if err = change(&playbook); err != nil {
+		return core.Project{}, err
+	}
+	if err = playbook.Validate(); err != nil {
+		return core.Project{}, err
+	}
+	// A seat added may be free for work waiting on one.
+	p, err = lp.Core.SetPlaybook(ctx, projectID, playbook)
+	if err == nil {
+		lp.Nudge()
+	}
+	return p, err
+}
+
+// SetParallel sets how many of a project's tasks may be under way at once:
+// 1 or more, or 0 for one per implementer seat. Tasks past it stay on the
+// to-do list, in order, until one finishes or waits on the owner.
+func (lp *Loop) SetParallel(ctx context.Context, projectID string, maxActive int) (core.Project, error) {
+	return lp.changeSeats(ctx, projectID, func(playbook *core.Playbook) error {
+		playbook.MaxActive = maxActive
+		return nil
+	})
 }
 
 // Workspace is where a code team works and how its work is kept there.

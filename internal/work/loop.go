@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shhac/lib-agent-harness/session"
+
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
@@ -29,14 +31,17 @@ const (
 	choiceAcceptDraft  = "Accept this draft"
 	choiceStop         = "Stop"
 	choiceTryAgain     = "Try again"
+	choiceResolve      = "Let the implementer resolve it"
 	// A role that fails is retried this many times, with growing waits,
 	// before the owner hears about it.
 	roleRetries = 2
 )
 
-// Loop runs the teams' tasks. One task step runs at a time, across every
-// project. Each task's work is in a workspace of its own, and each check in
-// a copy of the revision of its own.
+// Loop runs the teams' tasks. Steps run side by side, each claimed by a
+// seat that takes one step at a time, within each project's cap on tasks
+// under way and each engine's bound on role turns at once. Each task's work
+// is in a workspace of its own, and each check in a copy of the revision of
+// its own.
 type Loop struct {
 	Core   *core.Service
 	Config func() config.Config
@@ -52,19 +57,17 @@ type Loop struct {
 	prSeen    sync.Map
 	loopWake  chan struct{}
 	turns     turnRegister
-	// claims are the tasks a step or the owner is changing right now; each
-	// holds its task for the whole change, so neither builds on a draft the
-	// other is replacing.
-	claims sync.Map
+	// gate bounds role turns per engine and holds them back while the owner
+	// is busy; jobs are the claimed steps running now.
+	gate gate
+	jobs jobs
+	// learnedUse counts the turns reading each folder of learnings.
+	learnedMu  sync.Mutex
+	learnedUse map[string]int
+	// reclaim ends a turn a stopped daemon left running; empty is the
+	// harness's own. Replaced in tests.
+	reclaim func(ctx context.Context, dir string) (session.Reclamation, error)
 }
-
-// claim holds a task for a change, and says whether it could.
-func (lp *Loop) claim(taskID string) bool {
-	_, held := lp.claims.LoadOrStore(taskID, struct{}{})
-	return !held
-}
-
-func (lp *Loop) release(taskID string) { lp.claims.Delete(taskID) }
 
 func New(s *core.Service, cfg func() config.Config, demo bool) *Loop {
 	return &Loop{Core: s, Config: cfg, Demo: demo, runner: roles.Native{}, meter: &quota.Meter{}, github: github.New(), githubURL: github.URL, loopWake: make(chan struct{}, 1)}
@@ -79,11 +82,12 @@ func (lp *Loop) Nudge() {
 	}
 }
 
-// Run works tasks one step at a time. Each step is one role turn or one
-// state transition, and every step is recorded before the next begins, so a
-// restart resumes at the step it was on. A step is taken only while
-// stop.Graceful lasts and runs on stop.Force, so a stop lets the step in
-// progress finish and starts no other.
+// Run works tasks, several steps at once. Each step is one role turn or one
+// state transition, claimed before it starts and recorded before its claim
+// is cleared, so a restart resumes each task at the step it was on without
+// running a step twice. A step is started only while stop.Graceful lasts and
+// runs on stop.Force, so a stop lets the steps in progress finish and starts
+// no other.
 func (lp *Loop) Run(stop lifecycle.Stop, noDispatch bool) {
 	// Learnings are copied out only while a turn runs; any left here were
 	// left by a daemon that stopped mid-turn.
@@ -93,11 +97,12 @@ func (lp *Loop) Run(stop lifecycle.Stop, noDispatch bool) {
 			lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_resume"}, err)
 		}
 	}
+	defer lp.jobs.wg.Wait()
 	tick := time.NewTicker(15 * time.Second)
 	defer tick.Stop()
 	for {
-		for !stop.Stopping() {
-			progressed, err := lp.loopStep(stop.Force, noDispatch)
+		for !stop.Stopping() && !lp.Demo && !noDispatch {
+			progressed, _, err := lp.pass(stop.Force, false)
 			if err != nil && stop.Force.Err() == nil {
 				lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_loop"}, err)
 			}
@@ -105,7 +110,7 @@ func (lp *Loop) Run(stop lifecycle.Stop, noDispatch bool) {
 				break
 			}
 		}
-		// With nothing to do, what finished tasks kept goes.
+		// With nothing more to start, what finished tasks kept goes.
 		if !lp.Demo && !noDispatch && !stop.Stopping() {
 			if err := lp.tidy(stop.Force, false); err != nil {
 				lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_cleanup"}, err)
@@ -120,74 +125,23 @@ func (lp *Loop) Run(stop lifecycle.Stop, noDispatch bool) {
 	}
 }
 
+// loopStep is one pass that waits for the steps it started to end, for
+// callers that take the work a pass at a time.
 func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 	if lp.Demo || noDispatch {
 		return false, nil
 	}
-	snap, err := lp.Core.Snapshot(ctx)
-	if err != nil {
-		return false, err
+	progressed, started, err := lp.pass(ctx, true)
+	var crashed any
+	for _, done := range started {
+		if r := <-done; r != nil && crashed == nil {
+			crashed = r
+		}
 	}
-	if snap.Paused {
-		return false, nil
+	if crashed != nil {
+		panic(crashed)
 	}
-	if progressed, err := lp.settleAnswers(ctx, snap); progressed || err != nil {
-		return progressed, err
-	}
-	if progressed, err := lp.answerMessage(ctx, snap); progressed || err != nil {
-		return progressed, err
-	}
-	if progressed, err := lp.managePM(ctx, snap); progressed || err != nil {
-		return progressed, err
-	}
-	if err := lp.releaseUsageHolds(ctx, snap); err != nil {
-		return false, err
-	}
-	t, ok, err := lp.Core.NextTask(ctx)
-	if err != nil {
-		return false, err
-	}
-	if !ok {
-		return false, nil
-	}
-	// The owner is handing it a draft; it is looked at again once they have.
-	if !lp.claim(t.ID) {
-		return false, nil
-	}
-	defer lp.release(t.ID)
-	if t.RetryAt.After(time.Now()) {
-		return false, nil
-	}
-	snap, err = lp.Core.Snapshot(ctx)
-	if err != nil {
-		return false, err
-	}
-	p, ok := findProject(snap, t.ProjectID)
-	if !ok {
-		return false, core.ErrNotFound
-	}
-	m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
-	if err != nil {
-		return true, lp.roleFailed(ctx, t, "The workspace", err)
-	}
-	if sent, err := lp.backToWriter(ctx, t); sent {
-		return true, err
-	}
-	switch t.Status {
-	case core.TaskResearching:
-		return true, lp.researchTask(ctx, p, t, m)
-	case core.TaskDesigning:
-		return true, lp.design(ctx, p, t, m)
-	case core.TaskWriting:
-		return true, lp.write(ctx, p, t, m)
-	case core.TaskReviewing:
-		return true, lp.review(ctx, p, t, m)
-	case core.TaskDeciding:
-		return true, lp.decide(ctx, p, t)
-	case core.TaskLanding:
-		return true, lp.land(ctx, p, t, m)
-	}
-	return false, nil
+	return progressed, err
 }
 
 // backToWriter sends a task past writing back to the implementer when it has

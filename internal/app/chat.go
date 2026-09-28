@@ -42,6 +42,8 @@ func (a *App) EnqueueChat(ctx context.Context, id, message string) (core.ChatTur
 	}
 	t, err := a.Core.EnqueueChat(ctx, id, message)
 	if err == nil {
+		// Team roles start nothing new while the message waits its turn.
+		a.Work.NoteInteractive()
 		select {
 		case a.chatWake <- struct{}{}:
 		default:
@@ -55,6 +57,8 @@ func (a *App) EnqueueChat(ctx context.Context, id, message string) (core.ChatTur
 func (a *App) CancelChat(ctx context.Context, id string) (core.ChatTurn, error) {
 	turn, err := a.Core.CancelChat(ctx, id)
 	if err == nil {
+		// Team work held back for the message looks again.
+		a.Work.Nudge()
 		if waiter, ok := a.chatWaiters.Load(id); ok {
 			select {
 			case waiter.(chan chatOutcome) <- chatOutcome{err: errors.New("queued message was cancelled")}:
@@ -179,7 +183,11 @@ func (a *App) processNextChat(stop lifecycle.Stop) (bool, error) {
 		return true, a.runChatCommand(ctx, turn)
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+	// No new team role turn starts while the assistant answers; those
+	// already running go on.
+	done := a.Work.Interactive()
 	result, runErr := a.runChatTurn(runCtx, turn)
+	done()
 	cancel()
 	saveCtx, saveCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer saveCancel()

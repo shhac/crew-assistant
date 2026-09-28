@@ -167,13 +167,15 @@ func TestADraftCountsOnlyOnceTheProjectsCloneHoldsIt(t *testing.T) {
 		step(t, a)
 		_, task = a.testMedium(t, p.ID, task.ID)
 	}
-	// Something already holds the name the first attempt would use.
+	// Something already holds the name the first attempt would use: the
+	// round's claim takes one attempt, and its handoff the next.
 	project := filepath.Join(p.ScratchDirectory, "clone")
-	taken := gitrepo.TaskRef(task.ID, 1, 1)
+	first := task.Attempt + 2
+	taken := gitrepo.TaskRef(task.ID, 1, first)
 	ownerGit(t, project, "update-ref", taken, ownerGit(t, project, "rev-parse", "HEAD"))
 	step(t, a)
 	_, task = a.testMedium(t, p.ID, task.ID)
-	if len(task.Revisions) != 0 || task.Handoff != nil || task.Failures != 1 || task.Attempt != 1 {
+	if len(task.Revisions) != 0 || task.Handoff != nil || task.Failures != 1 || task.Attempt != first {
 		t.Fatalf("a draft the project's clone does not hold was recorded: %+v", task)
 	}
 	a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
@@ -182,7 +184,7 @@ func TestADraftCountsOnlyOnceTheProjectsCloneHoldsIt(t *testing.T) {
 	})
 	step(t, a)
 	_, task = a.testMedium(t, p.ID, task.ID)
-	name := gitrepo.TaskRef(task.ID, 1, 2)
+	name := gitrepo.TaskRef(task.ID, 1, first+2)
 	if len(task.Revisions) != 1 || task.Handoff != nil || task.Status != core.TaskReviewing {
 		t.Fatalf("the round did not run again: %+v", task)
 	}
@@ -623,7 +625,7 @@ func TestDocumentQAThatChangesItsCopyIsDiscarded(t *testing.T) {
 func TestACarriedOverPassNamesWhatItChecked(t *testing.T) {
 	now := time.Now()
 	checked := strings.Repeat("a", 40)
-	carried := carriedOver([]core.Verdict{{Revision: 1, Ref: checked, Role: "Reviewer", Outcome: core.VerdictPass, BriefVersion: 1, Summary: "Fine."}}, 1, 2, map[string]bool{"Reviewer": true}, 1, now)
+	carried := carriedOver([]core.Verdict{{Revision: 1, Ref: checked, Role: "Reviewer", Outcome: core.VerdictPass, BriefVersion: 1, Summary: "Fine."}}, 1, 2, func(seat string) string { return seat }, map[string]bool{"Reviewer": true}, 1, now)
 	if len(carried) != 1 || carried[0].Revision != 2 || carried[0].Ref != checked {
 		t.Fatalf("carried %+v", carried)
 	}

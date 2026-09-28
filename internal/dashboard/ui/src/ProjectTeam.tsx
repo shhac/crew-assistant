@@ -13,6 +13,8 @@ import {
 import { Avatar } from "./Avatar";
 import { ErrorNotice, useAction } from "./ui";
 import {
+  addSeat,
+  removeSeat,
   setSeat,
   type Member,
   type MemberKind,
@@ -115,12 +117,91 @@ function Seats({
           />
         ))}
       </ul>
+      <SeatCopies
+        playbook={playbook}
+        members={members}
+        busy={busy}
+        onAdd={(seat) =>
+          void run(async () => {
+            await addSeat(project.id, seat);
+            await refresh();
+          })
+        }
+        onRemove={(seat) =>
+          void run(async () => {
+            await removeSeat(project.id, seat);
+            await refresh();
+          })
+        }
+      />
       <ErrorNotice error={error} />
       <p className="hint">
         Add or remove people on <a href={href({ page: "team" })}>your team</a>.
         Requests already under way keep the team they started with.
       </p>
     </>
+  );
+}
+
+/**
+ * Every seat on the team. A seat works on one step at a time, so another
+ * seat filled like one lets more of that work run at once: Claudius gains
+ * Claudius #2. A seat can go while another holds the same roles.
+ */
+function SeatCopies({
+  playbook,
+  members,
+  busy,
+  onAdd,
+  onRemove,
+}: {
+  playbook: Playbook;
+  members: Member[];
+  busy: boolean;
+  onAdd: (seat: string) => void;
+  onRemove: (seat: string) => void;
+}) {
+  const alike = (a: Role, b: Role) =>
+    a.kinds.length === b.kinds.length &&
+    a.kinds.every((kind) => b.kinds.includes(kind));
+  return (
+    <div className="section">
+      <p className="label">Seats</p>
+      <ul className="seats rows" aria-label="Seats">
+        {playbook.roles.map((role) => (
+          <li key={role.name} className="seat">
+            <span className="seat-role">
+              <RoleName role={role} members={members} />
+            </span>
+            <span className="seat-who muted small">{seatSummary(role)}</span>
+            <span className="seat-actions">
+              <button
+                type="button"
+                className="btn btn-quiet btn-sm"
+                disabled={busy}
+                onClick={() => onAdd(role.name)}
+              >
+                Add a seat like {role.name}
+              </button>
+              {playbook.roles.some((o) => o !== role && alike(o, role)) && (
+                <button
+                  type="button"
+                  className="btn btn-quiet btn-sm"
+                  disabled={busy}
+                  onClick={() => onRemove(role.name)}
+                >
+                  Remove {role.name}
+                </button>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="hint">
+        Each seat works on one step at a time. Seats filled from one member
+        check a draft as one.
+      </p>
+    </div>
   );
 }
 

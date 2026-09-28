@@ -42,6 +42,27 @@ func (t Task) Thread(kind string, r Role) (Thread, bool) {
 	return Thread{}, false
 }
 
+// Writer is the implementer seat whose thread on the task carries on: the
+// seat that last used it if it is still on the task, or else another seat
+// of the same member. It reports false when no implementer seat has one.
+func (t Task) Writer() (Role, bool) {
+	var found Role
+	ok := false
+	for _, r := range t.RolesOf(RoleImplementer) {
+		th, has := t.Thread(RoleImplementer, r)
+		if !has {
+			continue
+		}
+		if th.Seat == r.Name {
+			return r, true
+		}
+		if !ok {
+			found, ok = r, true
+		}
+	}
+	return found, ok
+}
+
 // Resumable is the session a seat carries its thread on with, or nil when
 // it has none or it ran on another engine or model and so starts afresh.
 func (t Task) Resumable(kind string, r Role) json.RawMessage {

@@ -3,6 +3,7 @@ package work
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -18,93 +19,87 @@ func (lp *Loop) MessageTeam(ctx context.Context, projectID, taskID, to, from, te
 	return m, err
 }
 
-// answerMessage runs the oldest message to a reviewer or QA: a check of the
-// latest revision, with the message in the prompt. It runs ahead of the
-// task's own next step, so the owner need not wait for the loop to get there.
-// A message sent while the implementer is working waits for the revision it
-// is making; one whose role is over its usage threshold waits too. It holds
-// the task while the check runs, so no draft replaces the one it checks.
-func (lp *Loop) answerMessage(ctx context.Context, snap core.Snapshot) (bool, error) {
-	t, m, ok := nextCheckerMessage(snap)
-	if !ok {
-		return false, nil
-	}
-	// The owner is handing it a draft; the message is answered on that one.
-	if !lp.claim(t.ID) {
-		return false, nil
-	}
-	defer lp.release(t.ID)
-	// A draft recorded before the hold is the one to check.
-	snap, err := lp.Core.Snapshot(ctx)
-	if err != nil {
-		return false, err
-	}
-	now, next, ok := nextCheckerMessage(snap)
-	if !ok || now.ID != t.ID || next.ID != m.ID {
-		return false, nil
-	}
-	t = now
-	role, ok := t.Role(m.To)
-	if !ok {
-		return true, lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, nil, m.To+" is not on this task's team")
-	}
-	if wait, _ := lp.usageWait(ctx, role); !wait.IsZero() {
-		return false, nil
-	}
-	p, ok := findProject(snap, t.ProjectID)
-	if !ok {
-		return false, core.ErrNotFound
-	}
-	if _, err := lp.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		for i := range t.Messages {
-			if t.Messages[i].ID == m.ID && t.Messages[i].Status == core.MessageWaiting {
-				t.Messages[i].Status = core.MessageWorking
+// answerMessages starts answering open messages to reviewers and QA, oldest
+// first: each is a check of the latest revision, with the message in the
+// prompt, by the seat it was sent to once that seat is free. They go ahead
+// of the tasks' own next steps, so the owner need not wait for the loop to
+// get there. A message sent while the implementer is working waits for the
+// revision it is making; one whose role is over its usage threshold waits
+// too. Each holds its seat while it runs, and no draft replaces the one it
+// checks meanwhile.
+func (lp *Loop) answerMessages(ctx context.Context, snap core.Snapshot, waited bool) ([]<-chan any, error) {
+	var started []<-chan any
+	for _, open := range checkerMessages(snap) {
+		t, m := open.task, open.message
+		if role, ok := t.Role(m.To); ok {
+			if wait, _ := lp.usageWait(ctx, role); !wait.IsZero() {
+				continue
 			}
 		}
-		return "", nil
-	}); err != nil {
-		return false, err
+		taken := &slots{lp: lp}
+		s, ok, err := lp.Core.ClaimMessage(ctx, t.ID, m.ID, taken.admit)
+		if err != nil {
+			taken.giveBack()
+			return started, err
+		}
+		if ok {
+			started = append(started, lp.launch(ctx, s, waited))
+		}
 	}
-	failed := func(err error) (bool, error) {
-		return true, lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, nil, err.Error())
+	return started, nil
+}
+
+// answerMessage runs the check a claimed message asks for and answers it.
+func (lp *Loop) answerMessage(ctx context.Context, p core.Project, t core.Task, s core.Scheduled) error {
+	i := slices.IndexFunc(t.Messages, func(m core.TeamMessage) bool { return m.ID == s.Claim.Message })
+	if i < 0 || !t.Messages[i].Open() {
+		return nil
+	}
+	m := t.Messages[i]
+	if s.Seat.Name == "" {
+		return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, nil, m.To+" is not on this task's team")
+	}
+	failed := func(err error) error {
+		return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, nil, err.Error())
 	}
 	medium, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
 	if err != nil {
 		return failed(err)
 	}
 	r := t.Revisions[len(t.Revisions)-1]
-	verdict, err := lp.runChecker(ctx, p, t, r, role, medium, messageNote(m))
+	verdict, err := lp.runChecker(ctx, p, t, r, s.Seat, medium, messageNote(m))
 	if err != nil {
 		return failed(err)
 	}
 	// Ref is what the checker's own copy held, set with the verdict.
-	verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, role.Name, p.Brief.Version, time.Now().UTC()
+	verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, s.Seat.Name, p.Brief.Version, time.Now().UTC()
 	// The verdict judged the text the checker was shown, not whatever it
 	// became while the checker worked.
 	verdict.TextVersion = t.TextVersion
-	return true, lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, &verdict, "")
+	return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, &verdict, "")
 }
 
-// nextCheckerMessage is the oldest open message to a reviewer or QA on a task
-// with a revision to check that is not being rewritten.
-func nextCheckerMessage(snap core.Snapshot) (core.Task, core.TeamMessage, bool) {
-	var task core.Task
-	var next core.TeamMessage
-	found := false
+type openMessage struct {
+	task    core.Task
+	message core.TeamMessage
+}
+
+// checkerMessages are the open messages to reviewers or QA on tasks with a
+// revision to check that is not being rewritten, oldest first.
+func checkerMessages(snap core.Snapshot) []openMessage {
+	var out []openMessage
 	for _, t := range snap.Tasks {
 		if t.Finished() || t.Status == core.TaskQueued || t.Status == core.TaskWriting || len(t.Revisions) == 0 {
 			continue
 		}
 		for _, m := range t.Messages {
-			if m.Kind == core.RoleImplementer || !m.Open() {
-				continue
-			}
-			if !found || m.At.Before(next.At) {
-				task, next, found = t, m, true
+			if m.Kind != core.RoleImplementer && m.Open() {
+				out = append(out, openMessage{t, m})
 			}
 		}
 	}
-	return task, next, found
+	slices.SortStableFunc(out, func(a, b openMessage) int { return a.message.At.Compare(b.message.At) })
+	return out
 }
 
 func messageNote(m core.TeamMessage) string {

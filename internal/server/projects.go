@@ -64,6 +64,42 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		}
 		respond(w, 200, v)
 	})
+	mux.HandleFunc("POST /api/projects/{id}/team/seats", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Seat string `json:"seat"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.AddSeat(r.Context(), r.PathValue("id"), in.Seat)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
+	mux.HandleFunc("DELETE /api/projects/{id}/team/seats/{seat}", func(w http.ResponseWriter, r *http.Request) {
+		v, err := a.Work.RemoveSeat(r.Context(), r.PathValue("id"), r.PathValue("seat"))
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
+	mux.HandleFunc("PUT /api/projects/{id}/parallel", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			MaxActive int `json:"max_active"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.SetParallel(r.Context(), r.PathValue("id"), in.MaxActive)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
 	mux.HandleFunc("PUT /api/projects/{id}/workspace", func(w http.ResponseWriter, r *http.Request) {
 		var in work.Workspace
 		if decode(w, r, &in) != nil {

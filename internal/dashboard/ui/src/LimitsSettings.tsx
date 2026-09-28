@@ -139,10 +139,31 @@ function SubscriptionUse({
             <option value="pause">Wait until it can be</option>
           </select>
         </label>
+        <label htmlFor={`engines-${engine}-role_runs`}>
+          Team turns at once
+          <input
+            id={`engines-${engine}-role_runs`}
+            type="number"
+            min={1}
+            max={8}
+            step={1}
+            value={numberOrEmpty(settings.role_runs)}
+            placeholder={defaults?.role_runs?.toString()}
+            onChange={(e) =>
+              onChange(
+                withEngine(config, engine, {
+                  role_runs:
+                    e.target.value === "" ? undefined : Number(e.target.value),
+                }),
+              )
+            }
+          />
+        </label>
       </div>
       <p className="hint">
         {label} teams wait while less than this is left, and carry on when the
-        window resets. Blank uses the default; 0 never waits.
+        window resets. Blank uses the default; 0 never waits. Team turns at once
+        counts every project's; none starts while you chat.
       </p>
     </Panel>
   );

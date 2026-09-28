@@ -120,8 +120,9 @@ func TestAChangeByHandIsRefusedWhenItCantCount(t *testing.T) {
 		t.Fatal("a missing ref was taken")
 	}
 	ownerGit(t, source, "checkout", "-q", "main")
-	a.claim(task.ID)
-	defer a.release(task.ID)
+	if _, err := a.Core.ClaimTask(ctx, task.ID, core.TaskDeciding); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := a.AdoptDraft(ctx, p.ID, task.ID, "main", "", false); err == nil || !strings.Contains(err.Error(), "at work") {
 		t.Fatalf("taken while a step held the task: %v", err)
 	}

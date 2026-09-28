@@ -37,6 +37,25 @@ type CLIEngine struct {
 	// OnUnknownUsage is what roles do while usage can't be read: allow, the
 	// default, or pause.
 	OnUnknownUsage string `json:"on_unknown_usage,omitempty"`
+	// RoleRuns is how many team role turns may run on the engine at once,
+	// across every project; nil is DefaultRoleRuns.
+	RoleRuns *int `json:"role_runs,omitempty"`
+}
+
+// DefaultRoleRuns is how many role turns run on an engine at once when the
+// owner hasn't said, and MaxRoleRuns the most they may say.
+const (
+	DefaultRoleRuns = 1
+	MaxRoleRuns     = 8
+)
+
+// RoleRuns is how many team role turns may run on engine at once.
+func (e Engines) RoleRuns(engine string) int {
+	cli, _ := e.CLI(engine)
+	if cli.RoleRuns == nil {
+		return DefaultRoleRuns
+	}
+	return *cli.RoleRuns
 }
 
 // UsageFloor is the share of each usage window, in percent, that team roles
@@ -277,6 +296,9 @@ func (cli *CLIEngine) validate(prefix string) error {
 		if floor.percent != nil && (*floor.percent < 0 || *floor.percent > 100) {
 			return fmt.Errorf("%s.usage_floor.%s must be between 0 and 100; 0 turns it off", prefix, floor.window)
 		}
+	}
+	if cli.RoleRuns != nil && (*cli.RoleRuns < 1 || *cli.RoleRuns > MaxRoleRuns) {
+		return fmt.Errorf("%s.role_runs must be between 1 and %d", prefix, MaxRoleRuns)
 	}
 	switch cli.OnUnknownUsage {
 	case "", OnUnknownUsageAllow, OnUnknownUsagePause:

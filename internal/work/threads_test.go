@@ -359,6 +359,9 @@ func TestARestartCarriesEachTaskOnInItsOwnConversation(t *testing.T) {
 	runner.onWriter = nil
 	restarted := New(a.Core, a.Config, false)
 	restarted.runner, restarted.meter = runner, a.meter
+	if err := restarted.resume(ctx); err != nil {
+		t.Fatal(err)
+	}
 	settle(t, restarted)
 	for _, c := range []struct{ id, task string }{{picnic.ID, "Picnic note"}, {harbour.ID, "Harbour note"}} {
 		done := taskByID(t, restarted, c.id)

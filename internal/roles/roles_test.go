@@ -5,9 +5,11 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"testing"
 
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
 )
 
@@ -25,6 +27,24 @@ func TestEveryRoleRunsSandboxedWithOnlyWhatItWasGiven(t *testing.T) {
 	reviewer := options(Spec{Engine: "claude", RuntimeHome: "/runtime", WorkDir: "/work"})
 	if reviewer.Sandbox == nil || reviewer.Sandbox.Write || reviewer.RuntimeHome != "" || reviewer.Instructions.Text != "" {
 		t.Fatalf("a read-only Claude role got more than it was given: %+v", reviewer)
+	}
+}
+
+// Role turns, and what they start, run at background priority wherever the
+// harness can run them so, so the owner's own use of the machine comes
+// first; where it can't, asking would refuse the session, so they don't ask.
+func TestRolesRunAtBackgroundPriorityWhereTheHarnessCan(t *testing.T) {
+	for _, engine := range []string{"claude", "codex", "grok"} {
+		usable := harness.Support(harness.Engine(engine), harness.Session, harness.Background).Usable()
+		if got := options(Spec{Engine: engine, WorkDir: "/work"}).Background; got != usable {
+			t.Fatalf("%s: background %v, where the harness says %v", engine, got, usable)
+		}
+	}
+	if runtime.GOOS != "windows" && !options(Spec{Engine: "claude", WorkDir: "/work"}).Background {
+		t.Fatal("a Claude role should run at background priority here")
+	}
+	if options(Spec{Engine: "openai-compatible", WorkDir: "/work"}).Background {
+		t.Fatal("an API engine has no process to lower")
 	}
 }
 

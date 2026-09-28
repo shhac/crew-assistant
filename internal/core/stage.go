@@ -129,17 +129,24 @@ func (t Task) Role(name string) (Role, bool) {
 	return Role{}, false
 }
 
-// Checkers judge each revision in this order: every reviewer, then QA.
+// Checkers judge each revision in this order: every reviewer, then QA. Seats
+// filled from one team member judge as one, so each checker group appears
+// once, as its first seat.
 func (t Task) Checkers() []Role {
-	return append(t.RolesOf(RoleReviewer), t.RolesOf(RoleQA)...)
+	var out []Role
+	for _, g := range t.CheckerGroups() {
+		out = append(out, g.Seats[0])
+	}
+	return out
 }
 
-// Judged is whether a role has judged a revision against this version of the
-// brief and of the task's objective and criteria; a change to either asks
-// every checker again.
+// Judged is whether a role, or any seat in its checker group, has judged a
+// revision against this version of the brief and of the task's objective
+// and criteria; a change to either asks every checker again.
 func (t Task) Judged(role string, revision, briefVersion int) bool {
+	group := t.CheckerGroup(role)
 	return slices.ContainsFunc(t.Verdicts, func(v Verdict) bool {
-		return v.Role == role && v.Revision == revision && t.Counts(v, briefVersion)
+		return v.Revision == revision && t.CheckerGroup(v.Role) == group && t.Counts(v, briefVersion)
 	})
 }
 

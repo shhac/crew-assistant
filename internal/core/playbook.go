@@ -13,7 +13,7 @@ import (
 )
 
 // Role is one seat on a project team: a name, the kinds of role it holds,
-// and how it runs. Exactly one implementer produces the artifact; reviewers
+// and how it runs. An implementer produces the artifact; reviewers
 // judge it against the brief and never change it; a researcher works out
 // what a task needs before anything is written; a designer gives design
 // input when the researcher or the implementer hands it the task. A seat can
@@ -115,6 +115,9 @@ type Playbook struct {
 	// Land says what landing an approved change means for this project. Only
 	// the owner or the assistant sets it; nothing inside the project can.
 	Land LandPolicy `json:"land,omitzero"`
+	// MaxActive is how many of the project's tasks may be under way at once;
+	// 0 is one for each implementer seat. See ActiveCap.
+	MaxActive int `json:"max_active,omitempty"`
 }
 
 // LandPolicy is what "landing" means for a code project: prose for people and
@@ -312,11 +315,17 @@ func (p Playbook) Validate() error {
 			return fmt.Errorf("role %s runs the check, but the team has no check command", r.Name)
 		}
 	}
-	if implementers != 1 || reviewers < 1 {
-		return errors.New("a playbook needs exactly one implementer and at least one reviewer")
+	if implementers < 1 || reviewers < 1 {
+		return errors.New("a playbook needs at least one implementer and at least one reviewer")
+	}
+	if p.MaxActive < 0 || p.MaxActive > maxActiveLimit {
+		return fmt.Errorf("max_active must be between 1 and %d, or 0 for one per implementer seat", maxActiveLimit)
 	}
 	return nil
 }
+
+// maxActiveLimit bounds how many tasks a project may have under way at once.
+const maxActiveLimit = 10
 
 // seatKinds checks what one seat holds: known kinds, each once, and at most
 // one of implementer, reviewer and QA. Verdicts and messages name the seat,
@@ -345,21 +354,83 @@ func seatKinds(r Role) error {
 	return nil
 }
 
-// Unseat takes a kind of role from the seat that holds it; the seat goes if
-// that was all it held. It returns where a seat for the kind belongs. The
-// roles are copied first, so a team a task started with never changes.
+// Unseat takes a kind of role from every seat that holds it; a seat goes if
+// that was all it held. It returns where a seat for the kind belongs: where
+// the first of them was. The roles are copied first, so a team a task
+// started with never changes.
 func (p *Playbook) Unseat(kind string) int {
 	p.Roles = slices.Clone(p.Roles)
-	at := slices.IndexFunc(p.Roles, func(r Role) bool { return r.Holds(kind) })
-	switch {
-	case at < 0:
-		return len(p.Roles)
-	case len(p.Roles[at].Kinds) == 1:
-		p.Roles = slices.Delete(p.Roles, at, at+1)
-		return at
+	at := -1
+	for k := 0; k < len(p.Roles); {
+		switch {
+		case !p.Roles[k].Holds(kind):
+			k++
+			continue
+		case len(p.Roles[k].Kinds) == 1:
+			p.Roles = slices.Delete(p.Roles, k, k+1)
+			if at < 0 {
+				at = k
+			}
+			continue
+		}
+		p.Rekind(k, slices.DeleteFunc(slices.Clone(p.Roles[k].Kinds), func(k string) bool { return k == kind }))
+		if at < 0 {
+			at = k + 1
+		}
+		k++
 	}
-	p.Rekind(at, slices.DeleteFunc(slices.Clone(p.Roles[at].Kinds), func(k string) bool { return k == kind }))
-	return at + 1
+	if at < 0 {
+		return len(p.Roles)
+	}
+	return at
+}
+
+// AddSeat adds another seat filled like the named one, after the last seat
+// filled like it: Claudius gains Claudius #2, then Claudius #3. Each seat
+// takes one step at a time, so more seats let more work run at once.
+func (p *Playbook) AddSeat(name string) (Role, error) {
+	k := slices.IndexFunc(p.Roles, func(r Role) bool { return strings.EqualFold(strings.TrimSpace(r.Name), strings.TrimSpace(name)) })
+	if k < 0 {
+		return Role{}, fmt.Errorf("the team has no seat named %q: %w", name, ErrNotFound)
+	}
+	p.Roles = slices.Clone(p.Roles)
+	seat := p.Roles[k]
+	seat.Kinds = slices.Clone(seat.Kinds)
+	seat.Learnings = nil
+	seat.Name = p.FreeName(-1, SeatBase(seat.Name))
+	last := k
+	for i, r := range p.Roles {
+		if sameSeat(r, p.Roles[k]) {
+			last = i
+		}
+	}
+	p.Roles = slices.Insert(p.Roles, last+1, seat)
+	return seat, nil
+}
+
+// RemoveSeat takes the named seat off the team. Tasks under way keep the
+// team they started with.
+func (p *Playbook) RemoveSeat(name string) error {
+	k := slices.IndexFunc(p.Roles, func(r Role) bool { return strings.EqualFold(strings.TrimSpace(r.Name), strings.TrimSpace(name)) })
+	if k < 0 {
+		return fmt.Errorf("the team has no seat named %q: %w", name, ErrNotFound)
+	}
+	p.Roles = slices.Delete(slices.Clone(p.Roles), k, k+1)
+	return nil
+}
+
+// sameSeat reports seats filled alike: from the same member, or the same
+// template seat, holding the same kinds of role.
+func sameSeat(a, b Role) bool {
+	return a.Member == b.Member && SeatBase(a.Name) == SeatBase(b.Name) && slices.Equal(a.Kinds, b.Kinds)
+}
+
+var seatNumber = regexp.MustCompile(` #\d+$`)
+
+// SeatBase is a seat's name without the number another seat filled like it
+// carries: Claudius for Claudius #2.
+func SeatBase(name string) string {
+	return seatNumber.ReplaceAllString(strings.TrimSpace(name), "")
 }
 
 // TemplateInstructions is what the template says about how each of these
@@ -429,7 +500,7 @@ func (p Playbook) TemplateSeat(kind string) (Role, bool) {
 	return seat, true
 }
 
-// FreeName is name, or name with a number after it, whichever no seat but
+// FreeName is name, or name numbered as Claudius #2, whichever no seat but
 // the k-th has. Seat names must differ by more than case.
 func (p Playbook) FreeName(k int, name string) string {
 	taken := func(candidate string) bool {
@@ -442,7 +513,7 @@ func (p Playbook) FreeName(k int, name string) string {
 	}
 	candidate := name
 	for n := 2; taken(candidate); n++ {
-		candidate = fmt.Sprintf("%s %d", name, n)
+		candidate = fmt.Sprintf("%s #%d", name, n)
 	}
 	return candidate
 }

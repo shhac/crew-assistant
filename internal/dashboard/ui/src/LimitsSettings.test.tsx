@@ -132,6 +132,40 @@ it("keeps the model call limits where they are", () => {
   });
 });
 
+it("sets how many team turns run on one engine at once, blank for the default", () => {
+  const changed = vi.fn();
+  render(
+    <LimitsSettings
+      config={config}
+      defaults={{ ...defaults, role_runs: 1 }}
+      onChange={changed}
+    />,
+  );
+  const runs = panel("Claude subscription").getByLabelText<HTMLInputElement>(
+    "Team turns at once",
+  );
+  expect(runs.value).toBe("");
+  expect(runs.placeholder).toBe("1");
+  fireEvent.change(runs, { target: { value: "2" } });
+  expect(changed).toHaveBeenLastCalledWith({
+    ...config,
+    engines: { ...engines, claude: { ...engines.claude, role_runs: 2 } },
+  });
+  cleanup();
+  const set = {
+    ...config,
+    engines: { ...engines, claude: { ...engines.claude, role_runs: 2 } },
+  } as Config;
+  render(
+    <LimitsSettings config={set} defaults={defaults} onChange={changed} />,
+  );
+  fireEvent.change(
+    panel("Claude subscription").getByLabelText("Team turns at once"),
+    { target: { value: "" } },
+  );
+  expect(changed.mock.lastCall![0].engines.claude).toEqual(engines.claude);
+});
+
 it("sets floors only for engines that report subscription usage", () => {
   rememberChoices([
     ...testChoices,

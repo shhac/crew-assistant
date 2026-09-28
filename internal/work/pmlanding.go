@@ -73,6 +73,9 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 	if held, err := lp.holdForUsage(ctx, t, seat); held || err != nil {
 		return err
 	}
+	if held, err := lp.holdSeat(ctx, t.ID, seat.Name); err != nil || !held {
+		return errors.Join(err, lp.waitForSeat(ctx, t, seat.Name))
+	}
 	dir := filepath.Join(lp.Core.StateDirectory(), "roles", "pm-work")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err

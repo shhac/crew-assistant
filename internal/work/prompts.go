@@ -134,7 +134,8 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string, fresh bool) stri
 			b.WriteString("\nThe brief has changed since that draft. Make sure the revision meets the brief above.\n")
 		}
 	}
-	if writers := t.RolesOf(core.RoleImplementer); len(writers) == 1 {
+	// Implementer seats are told alike, whichever of them takes the round.
+	if writers := t.RolesOf(core.RoleImplementer); len(writers) > 0 {
 		if guide := designGuide(t, writers[0], core.TaskWriting, "ask before you change anything: reply with only a ```design block holding your question. Whatever you change in a turn that asks is set aside."); guide != "" {
 			b.WriteString("\n" + strings.TrimSpace(guide) + "\n")
 		}

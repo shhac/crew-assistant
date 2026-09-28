@@ -5,10 +5,11 @@ import (
 	"time"
 )
 
-// NextTask returns the task the loop should work on: the active task furthest
-// along, or else the first queued task that waits for nothing, which it
-// starts. The loop works on one task at a time; while every active task is
-// waiting to retry, it waits with them rather than start another.
+// NextTask returns the one task to work on when tasks are worked one at a
+// time: the active task furthest along, or else the first queued task that
+// waits for nothing, which it starts; while every active task is waiting to
+// retry, it waits with them rather than start another. The loop itself
+// schedules several steps at once; see Schedule.
 func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 	var out Task
 	found := false
@@ -26,30 +27,36 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 			if p == nil || p.Playbook == nil {
 				continue
 			}
-			now := s.now().UTC()
-			pinned := *p.Playbook
-			pinned.Roles = append([]Role(nil), p.Playbook.Roles...)
-			pinned.Prepare = append([]string(nil), p.Playbook.Prepare...)
-			t.Playbook = &pinned
-			t.Roles = withLearnings(v, p.Playbook.Roles)
-			t.MaxRounds = p.Playbook.MaxRounds
-			t.Round = 1
-			t.Status = TaskWriting
-			if _, researches := t.Researcher(); researches && t.Plan == nil {
-				t.Status = TaskResearching
-			}
-			t.Detail = ""
-			t.UpdatedAt = now
-			if t.StartedAt.IsZero() {
-				t.StartedAt = now
-			}
+			startTask(v, p, t, s.now().UTC())
 			out, found = *t, true
-			recordTask(v, now, t, "task.started", t.Objective)
 			return nil
 		}
 		return nil
 	})
 	return out, found, err
+}
+
+// startTask takes a queued task off the to-do list: it pins the playbook,
+// copies the roles with their members' learnings and starts round 1, with
+// the researcher if the team has one and the task has no plan yet.
+func startTask(v *Snapshot, p *Project, t *Task, now time.Time) {
+	pinned := *p.Playbook
+	pinned.Roles = append([]Role(nil), p.Playbook.Roles...)
+	pinned.Prepare = append([]string(nil), p.Playbook.Prepare...)
+	t.Playbook = &pinned
+	t.Roles = withLearnings(v, p.Playbook.Roles)
+	t.MaxRounds = p.Playbook.MaxRounds
+	t.Round = 1
+	t.Status = TaskWriting
+	if _, researches := t.Researcher(); researches && t.Plan == nil {
+		t.Status = TaskResearching
+	}
+	t.Detail = ""
+	t.UpdatedAt = now
+	if t.StartedAt.IsZero() {
+		t.StartedAt = now
+	}
+	recordTask(v, now, t, "task.started", t.Objective)
 }
 
 // progress is how far along each active status is, from working out what a

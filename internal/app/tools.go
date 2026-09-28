@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -88,6 +89,19 @@ var toolActions = map[string]toolAction{
 	}),
 	"set_landing": with(func(a *App, ctx context.Context, in engine.SetLandingArgs) (any, error) {
 		return a.Work.SetLanding(ctx, in.ProjectID, core.LandPolicy{Means: in.Means, Via: in.Via, Target: in.Target, Method: in.Method, GitHub: in.GitHub, Approve: in.Approve})
+	}),
+	"add_team_seat": with(func(a *App, ctx context.Context, in engine.TeamSeatArgs) (any, error) {
+		return a.Work.AddSeat(ctx, in.ProjectID, in.Seat)
+	}),
+	"remove_team_seat": with(func(a *App, ctx context.Context, in engine.TeamSeatArgs) (any, error) {
+		return a.Work.RemoveSeat(ctx, in.ProjectID, in.Seat)
+	}),
+	"set_parallel": with(func(a *App, ctx context.Context, in engine.SetParallelArgs) (any, error) {
+		n, err := strconv.Atoi(strings.TrimSpace(in.MaxActive))
+		if err != nil {
+			return nil, errors.New("max_active must be a number: 1 or more, or 0 for one per implementer seat")
+		}
+		return a.Work.SetParallel(ctx, in.ProjectID, n)
 	}),
 	"queue_task": with(func(a *App, ctx context.Context, in engine.QueueTaskArgs) (any, error) {
 		return a.Work.QueueTask(ctx, in.ProjectID, core.TaskInput{Objective: in.Objective, Criteria: in.Criteria, DependsOn: in.DependsOn}, core.LinkedByAssistant)

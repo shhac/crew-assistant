@@ -109,6 +109,9 @@ func configKeys(o *options) []libcli.ConfigKey {
 			libcli.StringKey(b, prefix+"bin", "The "+name+" executable; empty is "+name+" on PATH", func(c *config.Config) *string { return &engine(c).Bin }, nil),
 			libcli.PathKey(b, prefix+"home", "The "+name+" login home; empty is the default", func(c *config.Config) *string { return &engine(c).Home }),
 		)
+		if config.Supports(name, config.UseRoles) {
+			keys = append(keys, libcli.OptionalIntKey(b, prefix+"role_runs", "How many team role turns run on "+name+" at once, across every project", func(c *config.Config) **int { return &engine(c).RoleRuns }, 1, config.MaxRoleRuns))
+		}
 		if !config.Supports(name, config.UseUsage) {
 			continue
 		}

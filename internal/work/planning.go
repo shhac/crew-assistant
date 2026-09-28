@@ -14,9 +14,9 @@ import (
 // anything is written. The researcher only reads, starts afresh every time,
 // and leaves its plan on the task, where the implementer and the reviewers
 // read it. It may hand the task to the designer first, for design input.
-func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m medium) error {
-	researcher, ok := t.Researcher()
-	if !ok {
+// researcher is the seat that claimed the step, if the team has one.
+func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m medium, researcher core.Role) error {
+	if researcher.Name == "" {
 		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
 	}
 	// A plan recorded before a restart is not paid for twice. A plan whose

@@ -33,6 +33,9 @@ type smallModels struct {
 	// recheck reads a login's usage again after its model refused a
 	// request; nil reads nothing.
 	recheck func(config.Harness)
+	// busy marks a request in flight until the func it returns is called,
+	// so team roles start no new turn meanwhile; nil marks nothing.
+	busy    func() func()
 	workDir func() string // Resolved per call; the service may be absent.
 	attempt time.Duration // Bound on one engine's discovery and reply.
 	rest    time.Duration // How long a failed engine is skipped.
@@ -91,6 +94,9 @@ func (f *smallModelFailure) notOffered() bool {
 // ask returns the first reply from the approved models in order. No tools are
 // offered. The reply is the caller's to validate.
 func (s *smallModels) ask(ctx context.Context, models []config.Harness, prompt []engine.Message, reserve func(context.Context) error) (engine.Message, error) {
+	if s.busy != nil {
+		defer s.busy()()
+	}
 	failure := &smallModelFailure{}
 	for _, m := range models {
 		// Only an engine that can do small jobs is ever reached, whatever
