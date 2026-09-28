@@ -42,6 +42,8 @@ type engineChoice struct {
 	Usage     bool   `json:"usage"`
 	Models    bool   `json:"models"`
 	Efforts   bool   `json:"efforts"`
+	// Browser is whether QA on it can use the browser the engine ships.
+	Browser bool `json:"browser"`
 }
 
 func engineChoices() []engineChoice {
@@ -53,7 +55,7 @@ func engineChoices() []engineChoice {
 			Assistant: config.Supports(name, config.UseAssistant), Roles: config.Supports(name, config.UseRoles),
 			Small: config.Supports(name, config.UseSmall), Compact: config.Supports(name, config.UseCompact),
 			Usage: config.Supports(name, config.UseUsage), Models: config.Supports(name, config.UseModels),
-			Efforts: config.Supports(name, config.UseEfforts),
+			Efforts: config.Supports(name, config.UseEfforts), Browser: config.Supports(name, config.UseBrowser),
 		})
 	}
 	return choices

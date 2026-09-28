@@ -16,6 +16,8 @@ func TestEnginesAreOfferedForWhatTheHarnessSupports(t *testing.T) {
 		UseUsage:     {"codex", "claude"},
 		UseModels:    {"codex", "claude", "grok", "openai-compatible"},
 		UseEfforts:   {"codex", "claude", "grok"},
+		UseBrowser:   {"claude"},
+		UseLoopback:  {"claude"},
 	} {
 		if got := EnginesFor(use); !slices.Equal(got, want) {
 			t.Errorf("%s: got %v, want %v", use, got, want)

@@ -43,3 +43,30 @@ func TestProjectToolsTrackAndRefineDirectoryMetadata(t *testing.T) {
 		t.Fatalf("team=%+v", p.Playbook)
 	}
 }
+
+// The assistant sets how QA runs a code project's app as the owner says, and
+// takes it away with nothing given.
+func TestTheAssistantSetsHowQARunsTheApp(t *testing.T) {
+	a := testApp(t)
+	ctx := context.Background()
+	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Shop", Directories: []string{t.TempDir()}, Brief: core.BriefInput{Goal: "Sell"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(map[string]any{"project_id": p.ID, "template": "code", "writer_engine": "", "reviewer_engine": "", "max_rounds": "", "deliver_to": "", "repo": "", "branch_prefix": "", "check": "make check", "sign": "", "check_in_copy": "", "implementer_member": "", "reviewer_member": "", "qa_member": "", "researcher_member": "", "designer_member": "", "pm_member": "", "prepare": []string{}})
+	if _, err := a.Execute(ctx, "set_team", payload); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ = json.Marshal(map[string]any{"project_id": p.ID, "setup": "", "start": "npm start", "url": "http://localhost:{port}/", "ready": ""})
+	result, err := a.Execute(ctx, "set_run_recipe", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p = result.(core.Project); p.Playbook.Run == nil || p.Playbook.Run.Start != "npm start" {
+		t.Fatalf("recipe %+v", p.Playbook.Run)
+	}
+	payload, _ = json.Marshal(map[string]any{"project_id": p.ID, "setup": "", "start": "", "url": "", "ready": ""})
+	if result, err = a.Execute(ctx, "set_run_recipe", payload); err != nil || result.(core.Project).Playbook.Run != nil {
+		t.Fatalf("taking it away: %v", err)
+	}
+}

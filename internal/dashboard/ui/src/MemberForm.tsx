@@ -5,7 +5,8 @@ import { ModelFields } from "./ModelFields";
 import { PersonalityField, SuggestedLook } from "./ProfileFields";
 import type { Suggestion } from "./SuggestIdentity";
 import { ErrorNotice, useAction } from "./ui";
-import { saveMember, type Member, type MemberKind } from "./api";
+import { BrowserFields, useBrowserOffered } from "./QABrowser";
+import { saveMember, type Browser, type Member, type MemberKind } from "./api";
 
 export function MemberForm({
   member,
@@ -47,6 +48,12 @@ export function MemberForm({
   const [instructions, setInstructions] = useState(member?.instructions ?? "");
   const [description, setDescription] = useState(member?.description ?? "");
   const [personality, setPersonality] = useState(member?.personality ?? "");
+  const [browser, setBrowser] = useState<Browser>(member?.browser ?? {});
+  const qa = kinds.includes("qa");
+  // The browser is QA's, and only an engine with one can have it on.
+  const browserOffered = useBrowserOffered(choice.engine);
+  const browserOn = qa && !!browser.on;
+  const browserProblem = browserOn && !browserOffered;
   useEffect(() => {
     if (!suggestion) return;
     setName(suggestion.name);
@@ -66,6 +73,7 @@ export function MemberForm({
         instructions: instructions.trim(),
         description: description.trim(),
         personality: personality.trim(),
+        browser: { on: browserOn, name: (browser.name ?? "").trim() },
         ...(!member && suggestion ? { avatar: suggestion.avatar } : {}),
       });
       await onSaved(saved);
@@ -119,6 +127,14 @@ export function MemberForm({
         saved={member}
         onChange={setChoice}
       />
+      {qa && (
+        <BrowserFields
+          id="member"
+          engine={choice.engine}
+          value={browser}
+          onChange={setBrowser}
+        />
+      )}
       <PersonalityField
         id="member-personality"
         value={personality}
@@ -159,7 +175,13 @@ export function MemberForm({
         <button
           className="btn btn-primary"
           type="submit"
-          disabled={busy || !name.trim() || !!problem || !choice.engine}
+          disabled={
+            busy ||
+            !name.trim() ||
+            !!problem ||
+            !choice.engine ||
+            browserProblem
+          }
         >
           {member ? "Save" : "Add member"}
         </button>

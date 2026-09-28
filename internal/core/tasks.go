@@ -275,9 +275,37 @@ type Verdict struct {
 	Answered bool `json:"answered,omitempty"`
 	// TextVersion is the task's TextVersion the checker was shown: a verdict
 	// on objective and criteria that have since changed no longer counts.
-	TextVersion int       `json:"text_version,omitempty"`
-	At          time.Time `json:"at"`
+	TextVersion int `json:"text_version,omitempty"`
+	// ID names a verdict that kept screenshots, which are attached to the
+	// task with it as their origin.
+	ID string `json:"id,omitempty"`
+	// Evidence is what QA saw using the app: screenshots, and what it found
+	// in the page, its console and its network requests.
+	Evidence []Evidence `json:"evidence,omitempty"`
+	At       time.Time  `json:"at"`
 }
+
+// Evidence is one thing QA saw while it used the app: a screenshot, kept as
+// one of the task's attachments, or a finding in words.
+type Evidence struct {
+	Kind       string `json:"kind"`
+	Text       string `json:"text,omitempty"`
+	Attachment string `json:"attachment,omitempty"`
+}
+
+// Kinds of evidence, and how much of it a verdict keeps.
+const (
+	EvidenceConsole    = "console"
+	EvidenceNetwork    = "network"
+	EvidencePage       = "page"
+	EvidenceScreenshot = "screenshot"
+	// MaxEvidence is how many findings in words a verdict keeps, and
+	// MaxEvidenceText how long each can be; MaxScreenshots is how many of
+	// the turn's screenshots it keeps, the last ones taken.
+	MaxEvidence     = 12
+	MaxEvidenceText = 1000
+	MaxScreenshots  = 4
+)
 
 const (
 	VerdictPass     = "pass"

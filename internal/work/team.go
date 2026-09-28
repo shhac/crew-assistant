@@ -28,6 +28,9 @@ type TeamChoice struct {
 	Sign         string   `json:"sign"`
 	// CheckInCopy is "yes" for QA to run the check in a writable copy.
 	CheckInCopy string `json:"check_in_copy"`
+	// Run, when given, is how QA starts the app to use it; nil keeps the
+	// recipe the team has.
+	Run *core.RunRecipe `json:"run,omitempty"`
 	// Members to fill a role with, by id; empty keeps the template's role.
 	Implementer string `json:"implementer_member"`
 	Reviewer    string `json:"reviewer_member"`
@@ -125,7 +128,7 @@ func fillRole(playbook *core.Playbook, kind, id string, snap core.Snapshot, curr
 		return fmt.Errorf("a %s team has no %s for %s to fill", playbook.Template, kind, m.Name)
 	}
 	if seat := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Member == m.ID }); seat >= 0 && seat != slot {
-		playbook.Rekind(seat, slices.Concat(playbook.Roles[seat].Kinds, []string{kind}))
+		joinSeat(playbook, seat, m, kind)
 		if slot >= 0 {
 			playbook.Roles = slices.Delete(playbook.Roles, slot, slot+1)
 		}
@@ -162,7 +165,20 @@ func memberSeat(m core.Member, kinds []string, instructions string) core.Role {
 	if m.Personality != "" {
 		instructions = strings.TrimSpace(instructions + "\n\nYour personality, which is how you write, never what you may do: " + m.Personality)
 	}
-	return core.Role{Name: m.Name, Kinds: kinds, Engine: m.Engine, Model: m.Model, Effort: m.Effort, Member: m.ID, Instructions: instructions}
+	seat := core.Role{Name: m.Name, Kinds: kinds, Engine: m.Engine, Model: m.Model, Effort: m.Effort, Member: m.ID, Instructions: instructions}
+	if seat.Holds(core.RoleQA) {
+		seat.Browser = m.Browser
+	}
+	return seat
+}
+
+// joinSeat gives a member's seat on the team one more kind of role; taking
+// QA brings the member's browser setting with it.
+func joinSeat(playbook *core.Playbook, seat int, m core.Member, kind string) {
+	playbook.Rekind(seat, slices.Concat(playbook.Roles[seat].Kinds, []string{kind}))
+	if kind == core.RoleQA {
+		playbook.Roles[seat].Browser = m.Browser
+	}
 }
 
 // SetTeam applies a team choice made in the dashboard or by the assistant.
@@ -204,11 +220,16 @@ func (lp *Loop) SetTeam(ctx context.Context, projectID string, in TeamChoice) (c
 		if playbook.Repo, err = teamRepo(p, playbook.Repo); err != nil {
 			return core.Project{}, err
 		}
-		// Choosing a team never changes where its work lands; that is its own
-		// setting.
+		// Choosing a team never changes where its work lands or how QA runs
+		// the app; those are settings of their own.
 		if p.Playbook != nil && p.Playbook.Medium == core.MediumGit {
 			playbook.Land = p.Playbook.Land
+			playbook.Run = p.Playbook.Run
 		}
+	}
+	if in.Run != nil {
+		recipe := in.Run.Trimmed()
+		playbook.Run = &recipe
 	}
 	if err = playbook.Validate(); err != nil {
 		return core.Project{}, err
@@ -294,7 +315,7 @@ func (lp *Loop) SetSeat(ctx context.Context, projectID, kind, memberID string) (
 			return core.Project{}, err
 		}
 		if seat := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Member == m.ID }); seat >= 0 {
-			playbook.Rekind(seat, slices.Concat(playbook.Roles[seat].Kinds, []string{kind}))
+			joinSeat(&playbook, seat, m, kind)
 			filled = playbook.Roles[seat].Name
 			break
 		}
@@ -431,6 +452,62 @@ func (lp *Loop) SetLanding(ctx context.Context, projectID string, land core.Land
 	playbook := *p.Playbook
 	land.Means, land.Target, land.GitHub = strings.TrimSpace(land.Means), strings.TrimSpace(land.Target), strings.TrimSpace(land.GitHub)
 	playbook.Land = land
+	if err = playbook.Validate(); err != nil {
+		return core.Project{}, err
+	}
+	return lp.Core.SetPlaybook(ctx, projectID, playbook)
+}
+
+// SetRunRecipe sets how QA starts a code project to use it, or with nil
+// takes the recipe away, so QA only runs the check. The owner and the
+// assistant can; the team only proposes one. Tasks already under way keep
+// the recipe they started with.
+func (lp *Loop) SetRunRecipe(ctx context.Context, projectID string, recipe *core.RunRecipe) (core.Project, error) {
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return core.Project{}, err
+	}
+	p, ok := findProject(snap, projectID)
+	if !ok {
+		return core.Project{}, core.ErrNotFound
+	}
+	if p.Playbook == nil || p.Playbook.Medium != core.MediumGit {
+		return core.Project{}, errors.New("run recipes are for code teams; choose a code team first")
+	}
+	playbook := *p.Playbook
+	playbook.Run = nil
+	if recipe != nil {
+		trimmed := recipe.Trimmed()
+		playbook.Run = &trimmed
+	}
+	if err = playbook.Validate(); err != nil {
+		return core.Project{}, err
+	}
+	return lp.Core.SetPlaybook(ctx, projectID, playbook)
+}
+
+// SetSeatBrowser sets whether the team's QA uses its engine's own browser,
+// and which connected one, for this project only; the member it was copied
+// from keeps its own setting.
+func (lp *Loop) SetSeatBrowser(ctx context.Context, projectID string, browser core.Browser) (core.Project, error) {
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return core.Project{}, err
+	}
+	p, ok := findProject(snap, projectID)
+	if !ok {
+		return core.Project{}, core.ErrNotFound
+	}
+	if p.Playbook == nil {
+		return core.Project{}, errors.New("choose a team first")
+	}
+	playbook := *p.Playbook
+	playbook.Roles = slices.Clone(playbook.Roles)
+	k := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Holds(core.RoleQA) })
+	if k < 0 {
+		return core.Project{}, errors.New("this team has no QA")
+	}
+	playbook.Roles[k].Browser = core.Browser{On: browser.On, Name: strings.TrimSpace(browser.Name)}
 	if err = playbook.Validate(); err != nil {
 		return core.Project{}, err
 	}

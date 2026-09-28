@@ -43,7 +43,8 @@ func (m docsMedium) published(_ context.Context, t core.Task, h core.Handoff) (s
 
 // check is a read-only copy of the revision of the checker's own. A reviewer
 // reads it where it is; QA runs in a scratch folder beside it, and reads it.
-func (m docsMedium) check(_ context.Context, t core.Task, r core.Revision, qa bool) (checkout, error) {
+// A draft has no app to run, so it is never given a writable copy.
+func (m docsMedium) check(_ context.Context, t core.Task, r core.Revision, qa, _ bool) (checkout, error) {
 	c, err := m.docs.Checkout(t.ID, r.N, r.Ref)
 	if err != nil {
 		return checkout{}, err

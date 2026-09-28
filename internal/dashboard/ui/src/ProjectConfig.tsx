@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Folders } from "./ProjectFolders";
+import { RunRecipeSettings } from "./RunRecipe";
 import { LandingSettings } from "./ProjectLanding";
 import { TeamSettings } from "./TeamSettings";
 import { isCode } from "./stages";
@@ -41,6 +42,11 @@ export function ConfigTab({
             refresh={refresh}
           />
           <Workspace project={project} playbook={playbook} refresh={refresh} />
+          <RunRecipeSettings
+            project={project}
+            playbook={playbook}
+            refresh={refresh}
+          />
         </>
       )}
       <Folders project={project} refresh={refresh} />

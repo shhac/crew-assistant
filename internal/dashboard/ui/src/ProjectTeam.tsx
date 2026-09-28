@@ -11,6 +11,7 @@ import {
   seatMember,
 } from "./members";
 import { Avatar } from "./Avatar";
+import { QABrowser } from "./QABrowser";
 import { ErrorNotice, useAction } from "./ui";
 import {
   addSeat,
@@ -65,6 +66,13 @@ export function TeamTab({
               refresh={refresh}
             />
             <MemberRoles playbook={playbook} members={members} />
+            {isCode(playbook) && (
+              <QABrowser
+                project={project}
+                playbook={playbook}
+                refresh={refresh}
+              />
+            )}
           </>
         ) : (
           <p className="muted">

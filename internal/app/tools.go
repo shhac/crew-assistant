@@ -90,6 +90,13 @@ var toolActions = map[string]toolAction{
 	"set_landing": with(func(a *App, ctx context.Context, in engine.SetLandingArgs) (any, error) {
 		return a.Work.SetLanding(ctx, in.ProjectID, core.LandPolicy{Means: in.Means, Via: in.Via, Target: in.Target, Method: in.Method, GitHub: in.GitHub, Approve: in.Approve})
 	}),
+	"set_run_recipe": with(func(a *App, ctx context.Context, in engine.SetRunRecipeArgs) (any, error) {
+		recipe := &core.RunRecipe{Setup: in.Setup, Start: in.Start, URL: in.URL, Ready: in.Ready}
+		if strings.TrimSpace(in.Setup+in.Start+in.URL+in.Ready) == "" {
+			recipe = nil
+		}
+		return a.Work.SetRunRecipe(ctx, in.ProjectID, recipe)
+	}),
 	"add_team_seat": with(func(a *App, ctx context.Context, in engine.TeamSeatArgs) (any, error) {
 		return a.Work.AddSeat(ctx, in.ProjectID, in.Seat)
 	}),

@@ -46,6 +46,13 @@ type Spec struct {
 	// Web lets the role search and fetch the web. What it runs in its shell
 	// still reaches no network.
 	Web bool
+	// Loopback lets what the role runs bind and reach this machine's own
+	// addresses, such as an app it starts to use, and nothing else: every
+	// other host stays closed. The harness proves it before launch.
+	Loopback bool
+	// Browser turns on the browser the engine ships, such as Claude in
+	// Chrome, which drives the owner's real browser outside the sandbox.
+	Browser bool
 	// Tools are what the role may call on the daemon while it works, such as
 	// looking up the project's other tasks, answered by Handler.
 	Tools   []session.ToolDefinition
@@ -223,8 +230,9 @@ func options(spec Spec) session.Options {
 		WorkDir:     spec.WorkDir,
 		Model:       spec.Model,
 		Effort:      spec.Effort,
-		Sandbox:     &session.Sandbox{Write: spec.Write, Read: spec.Read, Web: spec.Web},
+		Sandbox:     &session.Sandbox{Write: spec.Write, Read: spec.Read, Web: spec.Web, Loopback: spec.Loopback},
 		Env:         spec.Env,
+		Browser:     spec.Browser,
 	}
 	if o.Provider.Engine != harness.Codex {
 		o.RuntimeHome = ""

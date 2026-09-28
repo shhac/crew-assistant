@@ -33,6 +33,8 @@ type Role struct {
 	Member string `json:"member,omitempty"`
 	// Learnings are the member's, as they were when the task started.
 	Learnings []Learning `json:"learnings,omitempty"`
+	// Browser is whether QA in this seat uses its engine's own browser.
+	Browser Browser `json:"browser,omitzero"`
 }
 
 // roleKinds are the kinds of role a member or seat can hold, in the order a
@@ -109,6 +111,9 @@ type Playbook struct {
 	// Otherwise it runs in the read-only checkout itself. Either way the
 	// revision checked stays exactly as it was recorded.
 	CheckInCopy bool `json:"check_in_copy,omitempty"`
+	// Run is how QA starts the project and reaches it on this machine, to
+	// use the app as well as run the check; nil keeps QA to the check.
+	Run *RunRecipe `json:"run,omitempty"`
 	// Sign is whether the team's commits are signed: "" as the owner's git
 	// config for the repository says, SignAlways or SignNever.
 	Sign string `json:"sign,omitempty"`
@@ -260,6 +265,9 @@ func (p Playbook) Validate() error {
 		if p.Land != (LandPolicy{}) {
 			return errors.New("landing policies are for code teams")
 		}
+		if p.Run != nil {
+			return errors.New("run recipes are for code teams")
+		}
 	case MediumGit:
 		if !filepath.IsAbs(p.Repo) {
 			return errors.New("a code team needs the repository it works on")
@@ -277,6 +285,11 @@ func (p Playbook) Validate() error {
 		}
 		if err := p.Land.validate(); err != nil {
 			return err
+		}
+		if p.Run != nil {
+			if err := p.Run.validate(); err != nil {
+				return err
+			}
 		}
 	default:
 		return fmt.Errorf("unsupported medium %q", p.Medium)
@@ -305,6 +318,9 @@ func (p Playbook) Validate() error {
 		}
 		if err := seatKinds(r); err != nil {
 			return err
+		}
+		if err := r.Browser.validate(r.Engine, r.Holds(RoleQA)); err != nil {
+			return fmt.Errorf("role %s: %w", r.Name, err)
 		}
 		switch {
 		case r.Holds(RoleImplementer):
@@ -455,6 +471,10 @@ func (p *Playbook) Rekind(k int, kinds []string) {
 	own := p.ownInstructions(*r)
 	r.Kinds = kinds
 	r.Instructions = strings.TrimSpace(p.TemplateInstructions(kinds) + "\n\n" + own)
+	// The browser is QA's, so it goes with the role.
+	if !r.Holds(RoleQA) {
+		r.Browser = Browser{}
+	}
 }
 
 // ownInstructions is what a seat was told beyond the template's instructions

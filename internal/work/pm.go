@@ -89,7 +89,7 @@ func (lp *Loop) pmTurn(ctx context.Context, projectID string, seat core.Role) er
 	// The PM reads only what its prompt carries: no repository, no writing.
 	// Its tools tidy tasks, link them and queue new ones.
 	spec := lp.baseSpec(seat, dir, base)
-	lp.withTools(&spec, lp.managerTools(p.ID, seat))
+	lp.withTools(&spec, lp.managerTools(p.ID, seat).proposing(p.Playbook))
 	var answer core.PMAnswer
 	var questions []string
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {

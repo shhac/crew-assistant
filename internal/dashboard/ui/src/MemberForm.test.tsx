@@ -139,7 +139,50 @@ it("chooses a new member's model from the models its engine offers", async () =>
       instructions: "",
       description: "Tall, silver-haired, fond of tidy diffs.",
       personality: "Dry wit, short sentences.",
+      browser: { on: false, name: "" },
     },
+  });
+});
+
+it("lets QA on an engine with a browser use it, and says whose browser it is", async () => {
+  const onSaved = vi.fn();
+  render(<MemberForm onSaved={onSaved} onCancel={() => {}} />);
+  await screen.findByRole("option", { name: "Test Sonnet (recommended)" });
+  // Only QA uses the browser.
+  expect(screen.queryByText("QA uses the browser to try the app")).toBeNull();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Implementer" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "QA" }));
+  fireEvent.click(
+    screen.getByRole("checkbox", {
+      name: "QA uses the browser to try the app",
+    }),
+  );
+  expect(
+    screen.getByText("This is your real Chrome, with its logins."),
+  ).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/^Connected browser/), {
+    target: { value: " Work laptop " },
+  });
+  fireEvent.change(screen.getByLabelText("Name"), {
+    target: { value: "Quinn" },
+  });
+  // Codex has no browser QA can use, so it can't be saved with it on.
+  fireEvent.change(screen.getByLabelText("Engine"), {
+    target: { value: "codex" },
+  });
+  expect(screen.getByText(/QA on Codex can't use the browser/)).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Add member" }).hasAttribute("disabled"),
+  ).toBe(true);
+  fireEvent.change(screen.getByLabelText("Engine"), {
+    target: { value: "claude" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+  await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  expect(saved().body).toMatchObject({
+    kinds: ["qa"],
+    engine: "claude",
+    browser: { on: true, name: "Work laptop" },
   });
 });
 
@@ -242,6 +285,7 @@ it("keeps a member's saved model that the engine no longer lists", async () => {
       instructions: "",
       description: "Quiet, exact, wears a green cap.",
       personality: "Terse.",
+      browser: { on: false, name: "" },
     },
   });
 });

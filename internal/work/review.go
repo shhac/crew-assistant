@@ -62,14 +62,26 @@ func (lp *Loop) check(ctx context.Context, p core.Project, t core.Task, m medium
 // scratch folder, to run the check. The copy must still be exactly the
 // revision afterwards, or the verdict is discarded and the check fails, to
 // run again. A reply that is not a usable verdict gets one plain retry.
+// Where the project has a run recipe, QA also starts the app and uses it, on
+// a port of its own, and the screenshots it takes are kept with its verdict.
 func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium, note string) (core.Verdict, error) {
-	c, err := m.check(ctx, t, r, checker.Holds(core.RoleQA))
+	playbook := taskPlaybook(p, t)
+	app, err := lp.planApp(checker, playbook)
 	if err != nil {
 		return core.Verdict{}, err
 	}
-	defer c.remove()
-	playbook := taskPlaybook(p, t)
-	base := checkerPrompt(p, t, r, checker, playbook) + c.note + note + learnedGuide(checker, true)
+	c, err := m.check(ctx, t, r, checker.Holds(core.RoleQA), app.running())
+	if err != nil {
+		app.release()
+		return core.Verdict{}, err
+	}
+	app.tree = c.tree
+	// The port is held until the copy the app ran from is gone.
+	defer func() {
+		c.remove()
+		app.release()
+	}()
+	base := checkerPrompt(p, t, r, checker, playbook) + c.note + appPrompt(app) + note + learnedGuide(checker, true)
 	spec, cleanupLearnings, err := lp.roleSpec(t, checker, c.workDir, c.write, m, base)
 	if err != nil {
 		return core.Verdict{}, err
@@ -79,6 +91,12 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 		spec.Env = c.env
 	}
 	spec.Read = append(append([]string(nil), spec.Read...), c.read...)
+	app.apply(&spec)
+	var shots *screenshots
+	if app.running() && app.images {
+		shots = &screenshots{next: spec.Observer}
+		spec.Observer = shots
+	}
 	var verdict core.Verdict
 	_, researches := t.Researcher()
 	_, learned, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
@@ -96,6 +114,12 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 	}
 	lp.recordLearned(ctx, p, t, checker, m, learned)
 	verdict.Ref = c.ref
+	if app.unavailable != "" {
+		verdict.Findings = append(verdict.Findings, core.Finding{Criterion: "Running the app", Note: app.unavailable})
+	}
+	if shots != nil {
+		lp.keepScreenshots(ctx, t, checker, &verdict, shots)
+	}
 	return verdict, nil
 }
 

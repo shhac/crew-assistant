@@ -36,6 +36,14 @@ func attachedWith(t core.Task, a core.Attachment) string {
 		}
 		return "with a note"
 	}
+	if a.Verdict != "" {
+		for _, v := range t.Verdicts {
+			if v.ID == a.Verdict {
+				return fmt.Sprintf("a screenshot %s took checking draft %d", v.Role, v.Revision)
+			}
+		}
+		return "a screenshot QA took checking a draft"
+	}
 	for _, r := range t.Design {
 		if r.ID != a.Design {
 			continue

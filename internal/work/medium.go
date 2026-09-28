@@ -36,8 +36,9 @@ type medium interface {
 	// published.
 	published(ctx context.Context, t core.Task, h core.Handoff) (at string, kept bool, err error)
 	// check is a checking role's own copy of revision r, never the
-	// implementer's workspace.
-	check(ctx context.Context, t core.Task, r core.Revision, qa bool) (checkout, error)
+	// implementer's workspace. app asks, for QA that runs the app, for a
+	// writable copy of the revision too, where its commands can build.
+	check(ctx context.Context, t core.Task, r core.Revision, qa, app bool) (checkout, error)
 	preview(ctx context.Context, t core.Task, r core.Revision) ([]media.File, error)
 	// deliver makes the approved revision real and says where it went.
 	deliver(ctx context.Context, t core.Task, r core.Revision) (string, error)
@@ -67,6 +68,9 @@ type checkout struct {
 	// role where it is.
 	read []string
 	note string
+	// tree is a writable copy of the revision in the scratch folder, when
+	// QA was given one: to run the check in, or the app's commands.
+	tree string
 	// verify says the copy is still exactly the revision; remove deletes it.
 	verify func(context.Context) error
 	remove func()

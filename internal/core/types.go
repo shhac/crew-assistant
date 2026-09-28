@@ -119,16 +119,18 @@ type Decision struct {
 	ID               string `json:"id"`
 	ProjectID        string `json:"project_id,omitempty"`
 	// TaskID and Kind tie a decision to the task it holds.
-	TaskID         string     `json:"task_id,omitempty"`
-	Kind           string     `json:"kind,omitempty"`
-	Title          string     `json:"title"`
-	Context        string     `json:"context"`
-	Recommendation string     `json:"recommendation"`
-	Choices        []string   `json:"choices"`
-	Status         string     `json:"status"`
-	Answer         string     `json:"answer,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
+	TaskID         string   `json:"task_id,omitempty"`
+	Kind           string   `json:"kind,omitempty"`
+	Title          string   `json:"title"`
+	Context        string   `json:"context"`
+	Recommendation string   `json:"recommendation"`
+	Choices        []string `json:"choices"`
+	Status         string   `json:"status"`
+	Answer         string   `json:"answer,omitempty"`
+	// Run is the recipe a DecisionRunRecipe proposes.
+	Run        *RunRecipe `json:"run,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 }
 
 // Approves reports a decision whose approval lets the task's change go out.

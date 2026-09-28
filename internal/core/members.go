@@ -21,14 +21,17 @@ type Member struct {
 	Kinds []string `json:"kinds"`
 	// LegacyKind is the one kind a member held before members could hold
 	// several; it is read into Kinds and never written again.
-	LegacyKind   string        `json:"kind,omitempty"`
-	Engine       string        `json:"engine"`
-	Model        string        `json:"model,omitempty"`
-	Effort       string        `json:"effort,omitempty"`
-	Instructions string        `json:"instructions,omitempty"`
-	Description  string        `json:"description,omitempty"`
-	Personality  string        `json:"personality,omitempty"`
-	Avatar       config.Avatar `json:"avatar"`
+	LegacyKind   string `json:"kind,omitempty"`
+	Engine       string `json:"engine"`
+	Model        string `json:"model,omitempty"`
+	Effort       string `json:"effort,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
+	Description  string `json:"description,omitempty"`
+	Personality  string `json:"personality,omitempty"`
+	// Browser is whether the member, as QA, uses its engine's own browser;
+	// a seat copies it.
+	Browser Browser       `json:"browser,omitzero"`
+	Avatar  config.Avatar `json:"avatar"`
 	// AvatarSVG is filled in when the state is read, and the drawing status
 	// by the app, which does the drawing; neither is stored.
 	AvatarSVG string     `json:"avatar_svg,omitempty"`
@@ -49,6 +52,7 @@ type MemberInput struct {
 	Instructions string         `json:"instructions"`
 	Description  string         `json:"description"`
 	Personality  string         `json:"personality"`
+	Browser      Browser        `json:"browser"`
 	Avatar       *config.Avatar `json:"avatar,omitempty"`
 }
 
@@ -147,6 +151,9 @@ func (in MemberInput) validate(v *Snapshot, id string) error {
 	if len(in.Personality) > MaxPersonality {
 		return fmt.Errorf("a personality must be at most %d characters", MaxPersonality)
 	}
+	if err := in.Browser.validate(in.Engine, slices.Contains(kinds, RoleQA)); err != nil {
+		return err
+	}
 	if in.Avatar != nil {
 		if err := in.Avatar.Normalized().Validate(); err != nil {
 			return fmt.Errorf("avatar: %w", err)
@@ -175,6 +182,7 @@ func (s *Service) SaveMember(ctx context.Context, id string, in MemberInput) (Me
 		m.Name, m.Kinds, m.Engine = strings.TrimSpace(in.Name), in.kinds(), in.Engine
 		m.Model, m.Effort, m.Instructions = strings.TrimSpace(in.Model), strings.TrimSpace(in.Effort), strings.TrimSpace(in.Instructions)
 		m.Description, m.Personality = strings.TrimSpace(in.Description), strings.TrimSpace(in.Personality)
+		m.Browser = Browser{On: in.Browser.On, Name: strings.TrimSpace(in.Browser.Name)}
 		// A drawn picture is changed only by drawing again; a new member
 		// keeps the look it is to be drawn with.
 		if in.Avatar != nil {

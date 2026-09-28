@@ -20,6 +20,12 @@ const (
 	UseModels Use = "models"
 	// UseEfforts lists each model's reasoning efforts.
 	UseEfforts Use = "efforts"
+	// UseBrowser lets QA drive the browser integration the engine itself
+	// ships, from its sandboxed session.
+	UseBrowser Use = "browser"
+	// UseLoopback lets a role's sandboxed shell start the project and reach
+	// it on this machine, while every other host stays closed.
+	UseLoopback Use = "loopback"
 )
 
 // Supports says whether engine can be chosen for use. lib-agent-harness
@@ -43,6 +49,10 @@ func Supports(engine string, use Use) bool {
 		return harness.Support(e, harness.Models, harness.Available).Usable()
 	case UseEfforts:
 		return harness.Support(e, harness.Models, harness.Effort).Usable()
+	case UseBrowser:
+		return Supports(engine, UseRoles) && harness.Support(e, harness.Session, harness.Browser).Usable()
+	case UseLoopback:
+		return Supports(engine, UseRoles) && harness.Support(e, harness.Session, harness.Loopback).Usable()
 	}
 	return false
 }

@@ -53,6 +53,11 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 		if disposition == DispositionChoice && !slices.Contains(d.Choices, answer) {
 			return fmt.Errorf("%q is not one of this decision's choices: %w", answer, ErrConflict)
 		}
+		if d.Kind == DecisionRunRecipe && disposition == DispositionChoice && answer == ChoiceUseRecipe {
+			if err := acceptRunRecipe(v, d); err != nil {
+				return err
+			}
+		}
 		now := s.now().UTC()
 		d.ResolvedAt = &now
 		d.Disposition = disposition

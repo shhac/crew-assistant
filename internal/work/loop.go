@@ -67,6 +67,8 @@ type Loop struct {
 	// reclaim ends a turn a stopped daemon left running; empty is the
 	// harness's own. Replaced in tests.
 	reclaim func(ctx context.Context, dir string) (session.Reclamation, error)
+	// ports are held by QA checks that run the app, one each.
+	ports ports
 }
 
 func New(s *core.Service, cfg func() config.Config, demo bool) *Loop {
@@ -231,6 +233,11 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 	kind := turnKind(t, r)
 	tools := lp.toolsFor(t, kind, r)
 	tools.workDir = workDir
+	// The researcher, having read the repository, may propose how QA runs
+	// the app.
+	if g, ok := m.(gitMedium); ok && kind == core.RoleResearcher {
+		tools = tools.proposing(&g.playbook)
+	}
 	lp.withTools(&spec, tools)
 	spec.Observer = lp.watchTurn(t, kind, r, workDir, write)
 	// Research is the one step that looks outward; nothing its shell runs

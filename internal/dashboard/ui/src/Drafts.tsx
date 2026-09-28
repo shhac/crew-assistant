@@ -9,6 +9,7 @@ import {
 } from "./stages";
 import { roleMember, taskRoles } from "./members";
 import { Avatar } from "./Avatar";
+import { VerdictEvidence } from "./VerdictEvidence";
 import { ErrorNotice, Pill, dateLabel } from "./ui";
 import {
   errorText,
@@ -137,7 +138,7 @@ function DraftDetail({
         </p>
       )}
       {verdicts.map((v, i) => (
-        <VerdictView key={i} verdict={v} asked={!!v.asked} />
+        <VerdictView key={i} task={task} verdict={v} asked={!!v.asked} />
       ))}
       {code
         ? !!revision.files?.length && (
@@ -171,7 +172,15 @@ function DraftDetail({
   );
 }
 
-function VerdictView({ verdict, asked }: { verdict: Verdict; asked: boolean }) {
+function VerdictView({
+  task,
+  verdict,
+  asked,
+}: {
+  task: Task;
+  verdict: Verdict;
+  asked: boolean;
+}) {
   const recommends = verdict.next ? nextStep[verdict.next] : undefined;
   return (
     <div className="check-note">
@@ -205,6 +214,7 @@ function VerdictView({ verdict, asked }: { verdict: Verdict; asked: boolean }) {
           ))}
         </ul>
       )}
+      <VerdictEvidence task={task} verdict={verdict} />
     </div>
   );
 }

@@ -88,6 +88,10 @@ export function RequestAttachments({ task }: { task: Task }) {
       const label = design.n ? `Design ${design.n}` : "Design input";
       return `${label}${state ? ` · ${designStateLabel[state]}` : ""}${when}`;
     }
+    const verdict =
+      a.verdict && (task.verdicts ?? []).find((v) => v.id === a.verdict);
+    if (verdict)
+      return `${verdict.role}'s screenshot, checking draft ${verdict.revision}${when}`;
     return `Added by ${a.by}${when}`;
   }
   return (

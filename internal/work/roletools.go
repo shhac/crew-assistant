@@ -49,6 +49,18 @@ type roleTools struct {
 	// only: attach_file keeps files with it, reading any it names from
 	// workDir.
 	design, workDir string
+	// proposes lets the researcher or the PM of a code project propose how
+	// QA runs the app, for the owner to accept; run is the recipe in use.
+	proposes bool
+	run      *core.RunRecipe
+}
+
+// proposing lets the role propose a run recipe, if playbook is a code team's.
+func (r roleTools) proposing(playbook *core.Playbook) roleTools {
+	if playbook != nil && playbook.Medium == core.MediumGit {
+		r.proposes, r.run = true, playbook.Run
+	}
+	return r
 }
 
 // maxPMQueued is how many tasks the PM may queue in one look at the list.
@@ -99,6 +111,20 @@ func (lp *Loop) answerTools(projectID string, seat core.Role) roleTools {
 
 // guide tells the role what its tools are for.
 func (r roleTools) guide() string {
+	guide := r.guideTools()
+	if r.proposes {
+		guide += " QA can also start this project's app and use it, on this machine only, when the project has a run recipe: "
+		if r.run != nil {
+			guide += "it has one now (start: " + r.run.Start + "; URL: " + r.run.URL + ")."
+		} else {
+			guide += "it has none yet."
+		}
+		guide += " If you have found out how the app starts and a better recipe would help QA, propose one with propose_run_recipe; the owner decides whether it is used. Propose only what the repository shows works, and don't propose one without cause."
+	}
+	return guide
+}
+
+func (r roleTools) guideTools() string {
 	guide := "While you work you can look up this project's other tasks: list_tasks lists them, filtered by which, related_to or text, and read_task reads one, with its plan, links, latest notes and latest reviews; read_notes reads all of a task's notes, a page at a time. Look up the ones that bear on yours rather than guessing what they change."
 	if r.notesOnly {
 		return guide + " add_note leaves a note on a task for the team and the owner. Answering changes nothing else, so say what you would change instead of changing it."
@@ -131,6 +157,14 @@ func (r roleTools) guide() string {
 }
 
 func (r roleTools) Definitions() []session.ToolDefinition {
+	defs := r.definitions()
+	if r.proposes && !r.notesOnly {
+		defs = append(defs, session.ToolDefinition{Name: "propose_run_recipe", Description: "Propose how QA starts this code project's app to use it, for the owner to accept; nothing changes until they do, and one proposal waits at a time. setup runs once first, offline, since dependencies come in through the project's prepare folders; or empty. start is the command that starts the app, which reads its port from the PORT environment variable. url is where it answers: http on 127.0.0.1, localhost or [::1], with {port} as its port and nowhere else, such as http://127.0.0.1:{port}/. ready is a command that succeeds once the app is ready, or empty to wait until url answers. why is one line on what you found that makes this the way to run it.", Schema: schema([]string{"setup", "start", "url", "ready", "why"})})
+	}
+	return defs
+}
+
+func (r roleTools) definitions() []session.ToolDefinition {
 	defs := []session.ToolDefinition{
 		{Name: "list_tasks", Description: "List this project's tasks, one line each with its readable id (such as CA-12) and canonical id, status and how it links to others. which is unfinished (the default when empty), finished or all. related_to is a task id, readable or canonical, to list only the tasks linked to it, or empty. text keeps only tasks whose objective contains it, or empty.", Schema: schema([]string{"which", "related_to", "text"})},
 		{Name: "read_task", Description: "Read one of this project's tasks: what it is for, its plan, where it is, its links, notes and its latest draft and reviews. task_id is its readable id (such as CA-12) or its canonical id. Use it for the tasks that bear on yours.", Schema: schema([]string{"task_id"})},
@@ -256,6 +290,15 @@ func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (
 	case "add_note":
 		_, err = r.lp.Core.AddNote(ctx, core.NoteInput{Project: r.projectID, Task: taskID, By: r.name, Kind: r.kind, While: while, Text: in["text"]})
 		done = "Noted."
+	case "propose_run_recipe":
+		if !r.proposes {
+			return "", fmt.Errorf("there is no tool %q", name)
+		}
+		recipe := core.RunRecipe{Setup: in["setup"], Start: in["start"], URL: in["url"], Ready: in["ready"]}
+		if _, err = r.lp.Core.ProposeRunRecipe(ctx, r.projectID, r.name, recipe, in["why"]); err != nil {
+			return "", hideProjects(err)
+		}
+		return "Proposed. The owner decides whether QA uses it; nothing changes until they do.", nil
 	case "attach_file":
 		if r.design == "" {
 			return "", fmt.Errorf("there is no tool %q", name)
@@ -518,6 +561,7 @@ func (r roleTools) read(ctx context.Context, id string) (string, error) {
 				continue
 			}
 			fmt.Fprintf(&b, "- %s: %s%s %s\n", v.Role, v.Outcome, checkedRef(v, last), text.Clip(v.Summary, 300))
+			b.WriteString(evidenceText(t, v, "  ", 300))
 			if v.Next != "" || v.Note != "" {
 				fmt.Fprintf(&b, "  recommends %s: %s\n", orDash(v.Next), orDash(v.Note))
 			}

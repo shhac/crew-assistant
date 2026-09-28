@@ -188,11 +188,12 @@ func (m gitMedium) published(ctx context.Context, t core.Task, h core.Handoff) (
 // clone and read-only. A reviewer reads it where it is. QA runs in a scratch
 // folder that holds its caches and temporary files, and reads the checkout,
 // or, where the team's check has to write into the tree it runs in, runs in
-// a writable copy of it there.
-func (m gitMedium) check(ctx context.Context, t core.Task, r core.Revision, qa bool) (checkout, error) {
+// a writable copy of it there. QA that runs the app gets that copy too, for
+// its setup and start commands to build in, whichever the check runs in.
+func (m gitMedium) check(ctx context.Context, t core.Task, r core.Revision, qa, app bool) (checkout, error) {
 	defer m.locked()()
 	inCopy := qa && m.playbook.CheckInCopy
-	c, err := m.repo.Checkout(ctx, r.Ref, inCopy)
+	c, err := m.repo.Checkout(ctx, r.Ref, inCopy || (qa && app))
 	if err != nil {
 		return checkout{}, err
 	}
@@ -200,7 +201,7 @@ func (m gitMedium) check(ctx context.Context, t core.Task, r core.Revision, qa b
 	if !qa {
 		return out, nil
 	}
-	out.workDir, out.write, out.read = c.Scratch, true, []string{c.Dir}
+	out.workDir, out.write, out.read, out.tree = c.Scratch, true, []string{c.Dir}, c.Tree
 	out.note = fmt.Sprintf("\n\nThe repository is checked out, read-only, at %s: that is the repository root to run the check from. Your working directory is a scratch folder for anything the check writes; build caches and temporary files already go there.\n", c.Dir)
 	if inCopy {
 		out.note = fmt.Sprintf("\n\nThe repository root to run the check from is %s: a writable copy of the revision, in your scratch folder, for a check that writes into the tree it runs in. The revision itself is at %s, read-only.\n", c.Tree, c.Dir)

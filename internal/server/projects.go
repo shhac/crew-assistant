@@ -64,6 +64,32 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		}
 		respond(w, 200, v)
 	})
+	mux.HandleFunc("PUT /api/projects/{id}/team/qa/browser", func(w http.ResponseWriter, r *http.Request) {
+		var in core.Browser
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.SetSeatBrowser(r.Context(), r.PathValue("id"), in)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
+	mux.HandleFunc("PUT /api/projects/{id}/run", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Run *core.RunRecipe `json:"run"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.SetRunRecipe(r.Context(), r.PathValue("id"), in.Run)
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		respond(w, 200, v)
+	})
 	mux.HandleFunc("POST /api/projects/{id}/team/seats", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Seat string `json:"seat"`

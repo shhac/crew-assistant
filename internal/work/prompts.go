@@ -129,6 +129,7 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string, fresh bool) stri
 					fmt.Fprintf(&b, "- %s\n", f.Note)
 				}
 			}
+			b.WriteString(evidenceText(t, v, "", core.MaxEvidenceText))
 		}
 		if len(p.Brief.Criteria) > 0 && t.Revisions[last-1].BriefVersion != p.Brief.Version {
 			b.WriteString("\nThe brief has changed since that draft. Make sure the revision meets the brief above.\n")
@@ -177,6 +178,7 @@ func historyText(t core.Task, latest bool) string {
 			for _, f := range v.Findings {
 				fmt.Fprintf(&b, "    - %s\n", f.Note)
 			}
+			b.WriteString(evidenceText(t, v, "    ", 1000))
 			if v.Next != "" || v.Note != "" {
 				fmt.Fprintf(&b, "    - recommends %s: %s\n", orDash(v.Next), orDash(v.Note))
 			}
@@ -192,6 +194,28 @@ func historyText(t core.Task, latest bool) string {
 		return ""
 	}
 	return "\nYou are starting afresh on this task. What has happened on it so far:\n" + b.String()
+}
+
+// evidenceText is what QA saw using the app, one line each, indented under
+// its verdict: its findings in words, clipped to limit, and the screenshots
+// kept with it, by name.
+func evidenceText(t core.Task, v core.Verdict, indent string, limit int) string {
+	var b strings.Builder
+	for _, e := range v.Evidence {
+		switch {
+		case e.Attachment != "":
+			name := "a screenshot"
+			for _, a := range t.Attachments {
+				if a.ID == e.Attachment {
+					name = a.Name
+				}
+			}
+			fmt.Fprintf(&b, "%s- screenshot kept with the task: %s\n", indent, name)
+		case e.Text != "":
+			fmt.Fprintf(&b, "%s- saw (%s): %s\n", indent, e.Kind, text.Clip(e.Text, limit))
+		}
+	}
+	return b.String()
 }
 
 // checkedRef names what a verdict checked when that is not the draft it is
@@ -283,6 +307,57 @@ Review it as a careful senior engineer, against the task and every criterion abo
 	return reviewerPrompt(p, t, r)
 }
 
+// appPrompt tells QA, after its check, to start the app from the project's
+// run recipe, use it against the task, and stop it; empty when QA doesn't
+// run the app.
+func appPrompt(app appRun) string {
+	if !app.running() {
+		return ""
+	}
+	r := app.recipe
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nAfter the check, whatever it showed, and still changing nothing in the repository, use the app itself to judge whether this change works, against the task and each of its criteria. Your shell reaches this machine's own addresses and nothing else, so everything runs offline: dependencies are already in place, copied in by the project's prepare setting, and nothing can be downloaded.")
+	if app.tree != "" {
+		fmt.Fprintf(&b, " Run each of these commands from %s, a writable copy of the revision in your scratch folder, so setup and the app can write what they build there; it is thrown away afterwards.\n", app.tree)
+	} else {
+		b.WriteString(" Run each command from the repository root.\n")
+	}
+	step := 1
+	if r.Setup != "" {
+		fmt.Fprintf(&b, "%d. Set it up, once:\n\n    %s\n\n", step, r.Setup)
+		step++
+	}
+	fmt.Fprintf(&b, "%d. Start it in the background, with PORT=%d set (it already is, in your environment), sending its output to a file in your working directory:\n\n    %s\n\n", step, app.port, r.Start)
+	step++
+	address := r.Address(app.port)
+	if r.Ready != "" {
+		fmt.Fprintf(&b, "%d. Wait, for at most two minutes, until this succeeds:\n\n    %s\n\n   It answers at %s.\n", step, strings.ReplaceAll(r.Ready, core.PortPlaceholder, fmt.Sprint(app.port)), address)
+	} else {
+		fmt.Fprintf(&b, "%d. Wait, for at most two minutes, until %s answers.\n", step, address)
+	}
+	step++
+	if app.browser.On {
+		if app.browser.Name != "" {
+			fmt.Fprintf(&b, "%d. Before anything else in the browser, call select_browser to choose the connected browser named %q. If it isn't connected, say so in a finding and don't use another.\n", step, app.browser.Name)
+		} else {
+			fmt.Fprintf(&b, "%d. Use the browser the Chrome extension connects by default; don't select or switch to another.\n", step)
+		}
+		step++
+		fmt.Fprintf(&b, "%d. Use the app in the browser at %s as the task's criteria need, and take a screenshot of each thing that shows whether it works. The browser is the owner's real Chrome, with their logins: open only the app's address, in tabs of your own; never sign in anywhere, visit other sites or change anything outside the app, and close the tabs you opened when you are done. Your last %d screenshots are kept with your verdict.\n", step, address, core.MaxScreenshots)
+		step++
+		fmt.Fprintf(&b, "%d. Read the page's console messages and network requests for errors and failed requests.\n", step)
+	} else {
+		fmt.Fprintf(&b, "%d. Use the app by requesting it at %s, such as with curl, as the task's criteria need, and read its output file for errors.\n", step, address)
+	}
+	step++
+	fmt.Fprintf(&b, "%d. Stop everything you started, the app and anything setup left running, before you reply.\n", step)
+	fmt.Fprintf(&b, `
+If the check passes but the app doesn't do what the task asks, use "revise", with a finding for each thing that doesn't work. If the app can't start or be reached for a reason the implementer can't fix, such as a missing tool or a need for the network, judge the check alone and say why in a finding.
+Add to your JSON object an "evidence" list of what you saw using the app, at most %d items, one finding each, in a sentence or two: {"kind": "page" | "console" | "network", "text": "..."}. Screenshots are kept for you; don't list them.
+`, core.MaxEvidence)
+	return b.String()
+}
+
 func reviewerPrompt(p core.Project, t core.Task, r core.Revision) string {
 	var b strings.Builder
 	b.WriteString(briefText(p, t))
@@ -350,6 +425,10 @@ func parseVerdict(reply string, researches bool) (core.Verdict, error) {
 		Question string         `json:"question"`
 		Next     string         `json:"next"`
 		Note     string         `json:"note"`
+		Evidence []struct {
+			Kind string `json:"kind"`
+			Text string `json:"text"`
+		} `json:"evidence"`
 	}
 	if err := decodeReply(reply, &v); err != nil {
 		return core.Verdict{}, errors.New("the review was not valid JSON")
@@ -382,6 +461,15 @@ func parseVerdict(reply string, researches bool) (core.Verdict, error) {
 		}
 	}
 	out.Note = text.Clip(strings.Join(strings.Fields(v.Note), " "), 300)
+	// Evidence in words is kept bounded; screenshots are the daemon's to
+	// add, from what the turn's tools returned, never a checker's to name.
+	for _, e := range v.Evidence {
+		kind, words := strings.ToLower(strings.TrimSpace(e.Kind)), strings.TrimSpace(e.Text)
+		if words == "" || len(out.Evidence) == core.MaxEvidence || (kind != core.EvidencePage && kind != core.EvidenceConsole && kind != core.EvidenceNetwork) {
+			continue
+		}
+		out.Evidence = append(out.Evidence, core.Evidence{Kind: kind, Text: text.Clip(words, core.MaxEvidenceText)})
+	}
 	return out, nil
 }
 

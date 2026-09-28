@@ -1149,6 +1149,7 @@ describe("the team", () => {
       instructions: "Check the tests first.",
       description: "A tall woman with silver hair.",
       personality: "",
+      browser: { on: false, name: "" },
     });
   });
   const milo = () => ({

@@ -37,10 +37,12 @@ type Attachment struct {
 	By   string    `json:"by"`
 	Kind string    `json:"kind"`
 	At   time.Time `json:"at"`
-	// Exactly one of Note and Design is set: the note it came with, or the
-	// design request whose input it belongs to.
-	Note   string `json:"note,omitempty"`
-	Design string `json:"design,omitempty"`
+	// Exactly one of Note, Design and Verdict is set: the note it came with,
+	// the design request whose input it belongs to, or the check whose
+	// evidence it is.
+	Note    string `json:"note,omitempty"`
+	Design  string `json:"design,omitempty"`
+	Verdict string `json:"verdict,omitempty"`
 }
 
 // NewFile is a file to attach, as it arrived.
@@ -324,6 +326,51 @@ func (s *Service) AttachToDesign(ctx context.Context, in DesignFiles) ([]Attachm
 	})
 	return out, err
 }
+
+// VerdictFiles are screenshots QA took while it used the app, kept as the
+// evidence of the verdict named Verdict, which is recorded after them.
+type VerdictFiles struct {
+	Project, Task string
+	By, Kind      string
+	Verdict       string
+	Files         []NewFile
+}
+
+// AttachToVerdict keeps QA's screenshots with the verdict they are evidence
+// for, checked and limited as every attachment is. At most MaxScreenshots
+// are kept for one verdict.
+func (s *Service) AttachToVerdict(ctx context.Context, in VerdictFiles) ([]Attachment, error) {
+	switch {
+	case len(in.Files) == 0:
+		return nil, errors.New("there is no file to attach")
+	case len(in.Files) > MaxScreenshots:
+		return nil, fmt.Errorf("a check can keep at most %d screenshots", MaxScreenshots)
+	case !attachmentID.MatchString(in.Verdict):
+		return nil, errors.New("the check the screenshots belong to has no id")
+	}
+	var out []Attachment
+	err := s.attach(ctx, in.Task, in.Files, func(v *Snapshot, t *Task, kept []Attachment, now time.Time) error {
+		if t.ProjectID != in.Project {
+			return ErrNotFound
+		}
+		names := make([]string, len(kept))
+		for i := range kept {
+			kept[i].By, kept[i].Kind, kept[i].Verdict = in.By, in.Kind, in.Verdict
+			names[i] = kept[i].Name
+		}
+		t.Attachments = append(t.Attachments, kept...)
+		t.UpdatedAt = now
+		recordTask(v, now, t, "task.attached", fmt.Sprintf("%s kept %s from checking %s", in.By, strings.Join(names, ", "), t.Objective))
+		derive(v, t)
+		out = kept
+		return nil
+	})
+	return out, err
+}
+
+// NewVerdictID names a verdict that keeps evidence, as the store names
+// everything else.
+func NewVerdictID() string { return uid() }
 
 // OpenAttachment finds one of a task's attachments, and where its file is
 // kept. An id from another task, or another project, is not found.

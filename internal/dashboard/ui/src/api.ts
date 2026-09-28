@@ -53,6 +53,25 @@ export interface Role {
   instructions?: string;
   /** The member this role was copied from, if any. */
   member?: string;
+  /** Whether QA in this seat uses its engine's browser. */
+  browser?: Browser;
+}
+/**
+ * QA using the browser its engine ships: the owner's real Chrome, with its
+ * logins. An empty name is the browser the extension connects by default.
+ */
+export interface Browser {
+  on?: boolean;
+  name?: string;
+}
+/** How QA starts a code project's app to use it, on this machine only. */
+export interface RunRecipe {
+  setup?: string;
+  start: string;
+  /** Where it answers, with {port} where each check's port goes. */
+  url: string;
+  /** A command that succeeds once it is ready; empty waits for the URL. */
+  ready?: string;
 }
 export type MemberKind =
   "researcher" | "designer" | "implementer" | "reviewer" | "qa" | "pm";
@@ -82,6 +101,7 @@ export interface Member extends Drawable {
   description?: string;
   /** How they write. */
   personality?: string;
+  browser?: Browser;
   learnings: Learning[];
   created_at?: string;
 }
@@ -94,6 +114,7 @@ export interface MemberInput {
   instructions: string;
   description: string;
   personality: string;
+  browser: Browser;
   /** A new member's stand-in face and the look to draw, from a suggestion. */
   avatar?: AvatarSpec;
 }
@@ -131,6 +152,8 @@ export interface Playbook {
   prepare?: string[];
   sign?: string;
   land?: LandPolicy;
+  /** How QA starts the app to use it; none keeps QA to the check. */
+  run?: RunRecipe;
   /**
    * How many tasks may be under way at once; absent is one per implementer
    * seat.
@@ -311,7 +334,20 @@ export interface Verdict {
   note?: string;
   /** Its question or research request came back; it judged the draft again. */
   answered?: boolean;
+  /** Names a verdict whose screenshots are kept with the task. */
+  id?: string;
+  /** What QA saw using the app. */
+  evidence?: Evidence[];
   at?: string;
+}
+/**
+ * One thing QA saw using the app: a screenshot, kept as one of the task's
+ * attachments, or a finding in words.
+ */
+export interface Evidence {
+  kind: "screenshot" | "console" | "network" | "page" | (string & {});
+  text?: string;
+  attachment?: string;
 }
 /** A checker sending the task back to the researcher, and back again. */
 export interface ResearchRequest {
@@ -352,8 +388,9 @@ export interface Note {
   at: string;
 }
 /**
- * A file kept with a task: the owner's, with a note, or the designer's,
- * with a design. Exactly one of note and design is set.
+ * A file kept with a task: the owner's, with a note, the designer's, with a
+ * design, or QA's screenshot, with its verdict. Exactly one of note, design
+ * and verdict is set.
  */
 export interface Attachment {
   id: string;
@@ -366,6 +403,7 @@ export interface Attachment {
   at: string;
   note?: string;
   design?: string;
+  verdict?: string;
 }
 export interface TeamMessage {
   id: string;
@@ -863,6 +901,8 @@ export interface EngineChoice {
   models: boolean;
   /** Its model list says which reasoning efforts each model takes. */
   efforts: boolean;
+  /** QA on it can use the browser the engine ships. */
+  browser: boolean;
 }
 /** What a blank engine setting falls back to, for showing in its place. */
 export interface ConfigDefaults {
@@ -964,6 +1004,20 @@ export function setWorkspace(projectID: string, input: WorkspaceInput) {
   return api<Project>(`${projectPath(projectID)}/workspace`, {
     method: "PUT",
     body: JSON.stringify(input),
+  });
+}
+/** Sets how QA starts the app to use it, or with null takes it away. */
+export function setRunRecipe(projectID: string, run: RunRecipe | null) {
+  return api<Project>(`${projectPath(projectID)}/run`, {
+    method: "PUT",
+    body: JSON.stringify({ run }),
+  });
+}
+/** Sets whether this project's QA uses its engine's browser. */
+export function setQABrowser(projectID: string, browser: Browser) {
+  return api<Project>(`${projectPath(projectID)}/team/qa/browser`, {
+    method: "PUT",
+    body: JSON.stringify(browser),
   });
 }
 export function askForTask(projectID: string, input: TaskInput) {
