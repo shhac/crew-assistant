@@ -267,8 +267,17 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 		spec.Read = append(append([]string(nil), spec.Read...), learned.dir)
 		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + learned.index)
 	}
+	// The task's attachments are read where they are kept, never copied
+	// into a workspace.
+	if len(t.Attachments) > 0 {
+		dir := lp.Core.AttachmentsDirectory(t.ID)
+		spec.Read = append(append([]string(nil), spec.Read...), dir)
+		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + attachmentsIndex(t, dir))
+	}
 	kind := turnKind(t, r)
-	lp.withTools(&spec, lp.toolsFor(t, kind, r))
+	tools := lp.toolsFor(t, kind, r)
+	tools.workDir = workDir
+	lp.withTools(&spec, tools)
 	spec.Observer = lp.watchTurn(t, kind, r, workDir, write)
 	// Research is the one step that looks outward; nothing its shell runs
 	// reaches the network either way.

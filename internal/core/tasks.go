@@ -73,6 +73,10 @@ type Task struct {
 	// Design is each time the researcher or the implementer handed the task
 	// to the designer, with the input it gave; see design.go.
 	Design []DesignRequest `json:"design,omitempty"`
+	// CurrentDesign is the request whose input is the task's current
+	// design: the target everyone works and judges to. Earlier designs stay
+	// on the record as superseded; see design.go.
+	CurrentDesign string `json:"current_design,omitempty"`
 	// Research is each time a checker sent the task back to the researcher
 	// for more research; see routing.go.
 	Research []ResearchRequest `json:"research,omitempty"`
@@ -90,6 +94,9 @@ type Task struct {
 	// for each other: a shared channel beside the record, which never takes
 	// its place; see notes.go.
 	Notes []Note `json:"notes,omitempty"`
+	// Attachments are the files kept with the task: the owner's, with a
+	// note, and the designer's, with a design; see attachments.go.
+	Attachments []Attachment `json:"attachments,omitempty"`
 	// DependsOn names tasks in the same project that must have landed before
 	// this one starts. Without stacking, a task never builds on work that has
 	// not landed.

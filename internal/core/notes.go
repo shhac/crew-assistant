@@ -33,6 +33,9 @@ type NoteInput struct {
 	// role's other changes.
 	While string
 	Text  string
+	// Files are attached with the note, in the same change: all of them or
+	// none. Only the owner attaches files to a note.
+	Files []NewFile
 }
 
 // Limits on a task's notes.
@@ -41,18 +44,17 @@ const (
 	maxNotes = 200
 )
 
-// AddNote leaves a note on a task. The team leaves none on a finished task;
-// the owner and the assistant may.
+// AddNote leaves a note on a task, with any files attached to it. The team
+// leaves none on a finished task; the owner and the assistant may.
 func (s *Service) AddNote(ctx context.Context, in NoteInput) (Note, error) {
 	words := strings.TrimSpace(in.Text)
-	if words == "" {
+	if words == "" && len(in.Files) == 0 {
 		return Note{}, errors.New("a note needs some text")
 	}
 	var out Note
-	err := s.store.update(ctx, func(v *Snapshot) error {
-		t := task(v, strings.TrimSpace(in.Task))
+	err := s.attach(ctx, in.Task, in.Files, func(v *Snapshot, t *Task, kept []Attachment, now time.Time) error {
 		switch {
-		case t == nil || t.ProjectID != in.Project:
+		case t.ProjectID != in.Project:
 			return ErrNotFound
 		case in.While != "" && t.Status != in.While:
 			return fmt.Errorf("the task has moved on, so this changes nothing more: %w", ErrConflict)
@@ -61,11 +63,21 @@ func (s *Service) AddNote(ctx context.Context, in NoteInput) (Note, error) {
 		case len(t.Notes) >= maxNotes:
 			return fmt.Errorf("this task already has %d notes: %w", maxNotes, ErrConflict)
 		}
-		now := s.now().UTC()
 		out = Note{ID: uid(), By: in.By, Kind: in.Kind, Text: text.Clip(words, maxNote), At: now}
 		t.Notes = append(t.Notes, out)
+		summary := text.Clip(words, 200)
+		for i := range kept {
+			kept[i].By, kept[i].Kind, kept[i].Note = in.By, in.Kind, out.ID
+		}
+		t.Attachments = append(t.Attachments, kept...)
+		switch n := len(kept); {
+		case n == 1:
+			summary = strings.TrimSpace(summary + " (1 file attached)")
+		case n > 1:
+			summary = strings.TrimSpace(fmt.Sprintf("%s (%d files attached)", summary, n))
+		}
 		t.UpdatedAt = now
-		recordTask(v, now, t, "task.note", fmt.Sprintf("%s left a note on %s: %s", in.By, t.Objective, text.Clip(words, 200)))
+		recordTask(v, now, t, "task.note", fmt.Sprintf("%s left a note on %s: %s", in.By, t.Objective, summary))
 		derive(v, t)
 		return nil
 	})

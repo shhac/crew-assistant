@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,13 +45,21 @@ type roleTools struct {
 	// notesOnly limits the PM to leaving notes, for a turn that answers a
 	// question and so changes nothing else.
 	notesOnly bool
+	// design is the request the designer is answering, in a designing turn
+	// only: attach_file keeps files with it, reading any it names from
+	// workDir.
+	design, workDir string
 }
 
 // maxPMQueued is how many tasks the PM may queue in one look at the list.
 const maxPMQueued = 3
 
 func (lp *Loop) toolsFor(t core.Task, kind string, r core.Role) roleTools {
-	return roleTools{lp: lp, projectID: t.ProjectID, taskID: t.ID, status: t.Status, by: core.TeamLinker(r.Member, kind), name: seatName(r, kind), kind: kind, relations: relationsFor(kind)}
+	tools := roleTools{lp: lp, projectID: t.ProjectID, taskID: t.ID, status: t.Status, by: core.TeamLinker(r.Member, kind), name: seatName(r, kind), kind: kind, relations: relationsFor(kind)}
+	if open := t.OpenDesign(); kind == core.RoleDesigner && t.Status == core.TaskDesigning && open != nil {
+		tools.design = open.ID
+	}
+	return tools
 }
 
 // seatName is how a seat signs what it changes.
@@ -114,7 +123,11 @@ func (r roleTools) guide() string {
 	default:
 		guide += " If your task is missing a requirement, add it with edit_task."
 	}
-	return guide + " add_note leaves a note on your task for the rest of the team and the owner, such as something whoever works on it next should know; it sits beside your reply and never replaces it."
+	guide += " add_note leaves a note on your task for the rest of the team and the owner, such as something whoever works on it next should know; it sits beside your reply and never replaces it."
+	if r.design != "" {
+		guide += fmt.Sprintf(" attach_file keeps a file with the design input you are giving, such as a mockup: at most %d files of up to %d MB each, and only %s.", core.MaxAttachmentsPerSet, core.MaxAttachmentBytes>>20, core.AttachmentKinds)
+	}
+	return guide
 }
 
 func (r roleTools) Definitions() []session.ToolDefinition {
@@ -149,9 +162,13 @@ func (r roleTools) Definitions() []session.ToolDefinition {
 	if core.Rewrites(r.kind) {
 		edit = session.ToolDefinition{Name: "edit_task", Description: "Change your own task's title and requirements. title replaces its title, or empty to keep it. requirements replaces all its requirements, one to a line; none removes them all; empty keeps them. add_requirement adds one, or empty. Every change is kept and the owner can undo it.", Schema: schema([]string{"title", "requirements", "add_requirement"})}
 	}
-	return append(defs, edit,
+	defs = append(defs, edit,
 		session.ToolDefinition{Name: "add_note", Description: "Leave a note on your own task for the rest of the team and the owner to read.", Schema: schema([]string{"text"})},
 	)
+	if r.design != "" {
+		defs = append(defs, session.ToolDefinition{Name: "attach_file", Description: "Attach a file, such as a mockup, to the design input you are giving; everyone who works on the task afterwards can open it. Give either content or path, not both. name is the file's name, with an extension saying its type (.svg, .html, .md, .txt, .json, .csv, .png, .jpg, .gif, .webp or .pdf), or empty to use the path's. content is the whole text of a text file you write out, such as an SVG or HTML mockup, or empty. path names a file already in the current directory, relative to it, or empty.", Schema: schema([]string{"name", "content", "path"})})
+	}
+	return defs
 }
 
 // relationGuide says what each relation a role may make means.
@@ -239,6 +256,11 @@ func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (
 	case "add_note":
 		_, err = r.lp.Core.AddNote(ctx, core.NoteInput{Project: r.projectID, Task: taskID, By: r.name, Kind: r.kind, While: while, Text: in["text"]})
 		done = "Noted."
+	case "attach_file":
+		if r.design == "" {
+			return "", fmt.Errorf("there is no tool %q", name)
+		}
+		return r.attach(ctx, in["name"], in["content"], in["path"])
 	case "queue_task":
 		if !r.manages {
 			return "", fmt.Errorf("there is no tool %q", name)
@@ -266,6 +288,49 @@ func (r roleTools) queue(ctx context.Context, title, requirements, dependsOn str
 	}
 	*r.queued++
 	return "Queued " + t.Label() + ".", nil
+}
+
+// attach keeps a file with the design input the designer is giving: text
+// it wrote out, or a file in its workspace, which is only ever read.
+func (r roleTools) attach(ctx context.Context, name, content, path string) (string, error) {
+	var data []byte
+	switch hasContent, hasPath := content != "", strings.TrimSpace(path) != ""; {
+	case hasContent == hasPath:
+		return "", errors.New("give either content or path, not both")
+	case hasContent:
+		data = []byte(content)
+	default:
+		var err error
+		if data, err = workspaceFile(r.workDir, path); err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(name) == "" {
+			name = filepath.Base(path)
+		}
+	}
+	kept, err := r.lp.Core.AttachToDesign(ctx, core.DesignFiles{Project: r.projectID, Task: r.taskID, By: r.name, Kind: r.kind, While: r.status, Design: r.design, Files: []core.NewFile{{Name: name, Data: data}}})
+	if err != nil {
+		return "", hideProjects(err)
+	}
+	return fmt.Sprintf("Attached %s (%d bytes) to your design input.", kept[0].Name, kept[0].Size), nil
+}
+
+// designFiles lists the files attached to a design, as read_task shows
+// them: on the role's own task, where each is kept, which its turn can
+// read; on another task, only their names, since its turn can't open them.
+func (r roleTools) designFiles(t core.Task, d core.DesignRequest) string {
+	var b strings.Builder
+	dir := r.lp.Core.AttachmentsDirectory(t.ID)
+	for _, a := range t.Attachments {
+		switch {
+		case a.Design != d.ID:
+		case t.ID == r.taskID:
+			fmt.Fprintf(&b, "- design %d file, which you can open: %s (%s)\n", d.N, filepath.Join(dir, a.ID), a.Name)
+		default:
+			fmt.Fprintf(&b, "- design %d file: %s (on another task, so not readable from your turn)\n", d.N, a.Name)
+		}
+	}
+	return b.String()
 }
 
 // lines is one item a line, or nil for none.
@@ -428,6 +493,22 @@ func (r roleTools) read(ctx context.Context, id string) (string, error) {
 	}
 	for _, q := range t.Research {
 		fmt.Fprintf(&b, "- %s asked for more research on draft %d: %s\n", q.From, q.Revision, text.Clip(q.Question, 300))
+	}
+	if current, ok := t.CurrentDesignInput(); ok {
+		fmt.Fprintf(&b, "Current design, the target: design %d by %s: %s\n", current.N, current.Designer, text.Clip(current.Input, 800))
+		b.WriteString(r.designFiles(t, current))
+	}
+	var superseded []string
+	for _, d := range t.Design {
+		if d.Marked && d.ID != t.CurrentDesign {
+			superseded = append(superseded, strconv.Itoa(d.N))
+		}
+	}
+	if len(superseded) > 0 {
+		fmt.Fprintf(&b, "- superseded designs, not the target: %s\n", strings.Join(superseded, ", "))
+	}
+	if n := len(t.Attachments); n > 0 {
+		fmt.Fprintf(&b, "Attachments: %d\n", n)
 	}
 	if n := len(t.Revisions); n > 0 {
 		last := t.Revisions[n-1]

@@ -258,7 +258,7 @@ func TestStoppingAndMessagingATaskWithTheDesigner(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A designer turn that finishes after the stop records nothing.
-	if _, err := a.Core.RecordDesign(ctx, task.ID, task.Design[0].ID, "Dee", "Too late", nil); !errors.Is(err, core.ErrConflict) {
+	if _, err := a.Core.RecordDesign(ctx, task.ID, task.Design[0].ID, core.DesignReply{Designer: "Dee", Input: "Too late"}); !errors.Is(err, core.ErrConflict) {
 		t.Fatalf("a stopped task took design input: %v", err)
 	}
 	task = settle(t, a)

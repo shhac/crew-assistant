@@ -1,5 +1,8 @@
 import { useState, type FormEvent } from "react";
-import { ErrorNotice, sinceLabel, useAction } from "./ui";
+import { ErrorNotice, Icon, sinceLabel, useAction } from "./ui";
+import { carriesFiles, sizeLabel } from "./composerAssets";
+import { addPending, ATTACHMENT_ACCEPT, type PendingFile } from "./attachments";
+import { AttachmentList } from "./RequestAttachments";
 import {
   addNote,
   undoTaskEdit,
@@ -17,7 +20,8 @@ function who(by: string, kind: string) {
 
 /**
  * The notes the team, the assistant and the owner left on a request for
- * each other, beside its record, with a box to add one.
+ * each other, beside its record, with a box to add one. The owner's note
+ * can carry files, dropped, pasted or picked as in the chat composer.
  */
 export function RequestNotes({
   task,
@@ -29,13 +33,30 @@ export function RequestNotes({
   refresh: () => Promise<void>;
 }) {
   const [text, setText] = useState("");
+  const [files, setFiles] = useState<PendingFile[]>([]);
+  const [refused, setRefused] = useState<string[]>([]);
+  const [dragging, setDragging] = useState(false);
   const { busy, error, run } = useAction();
   const notes: Note[] = task.notes ?? [];
+  const attachments = task.attachments ?? [];
+  function attach(picked: File[]) {
+    if (!picked.length) return;
+    const { pending, refused } = addPending(files, picked);
+    setFiles(pending);
+    setRefused(refused);
+  }
   async function send(e: FormEvent) {
     e.preventDefault();
     await run(async () => {
-      await addNote(task.project_id, task.id, text.trim());
+      await addNote(
+        task.project_id,
+        task.id,
+        text.trim(),
+        files.map((f) => f.file),
+      );
       setText("");
+      setFiles([]);
+      setRefused([]);
       await refresh();
     });
   }
@@ -52,12 +73,36 @@ export function RequestNotes({
                   <span className="muted small">{sinceLabel(n.at)}</span>
                 )}
               </p>
-              <p className="thread-text">{n.text}</p>
+              {n.text && <p className="thread-text">{n.text}</p>}
+              <AttachmentList
+                task={task}
+                attachments={attachments.filter((a) => a.note === n.id)}
+              />
             </li>
           ))}
         </ol>
       )}
-      <form className="thread-form" onSubmit={send}>
+      <form
+        className={`thread-form${dragging ? " dragging" : ""}`}
+        onSubmit={send}
+        onDragOver={(e) => {
+          if (!carriesFiles(e.dataTransfer)) return;
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+            setDragging(false);
+        }}
+        onDrop={(e) => {
+          setDragging(false);
+          const dropped = Array.from(e.dataTransfer?.files || []);
+          // Dropped text falls through to the textarea as usual.
+          if (!dropped.length) return;
+          e.preventDefault();
+          attach(dropped);
+        }}
+      >
         <label className="sr-only" htmlFor="note-text">
           Note
         </label>
@@ -69,15 +114,66 @@ export function RequestNotes({
           maxLength={2000}
           placeholder="Leave a note for the team"
           onChange={(e) => setText(e.target.value)}
+          onPaste={(e) => {
+            // Text always pastes as text; files on the clipboard are
+            // attached or refused with a reason, never dropped.
+            const pasted = Array.from(e.clipboardData.files || []);
+            if (!pasted.length) return;
+            if (!e.clipboardData.getData("text/plain")) e.preventDefault();
+            attach(pasted);
+          }}
         />
+        {files.length > 0 && (
+          <ul className="attachments" aria-label="Files to attach">
+            {files.map((f) => (
+              <li key={f.id}>
+                <span className="attachment-name">{f.file.name}</span>
+                <span className="muted small">{sizeLabel(f.file.size)}</span>
+                <button
+                  type="button"
+                  className="btn btn-quiet btn-icon btn-sm"
+                  aria-label={`Remove attachment ${f.file.name}`}
+                  onClick={() =>
+                    setFiles((current) => current.filter((c) => c.id !== f.id))
+                  }
+                >
+                  <Icon name="Close" size={12} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {refused.length > 0 && (
+          <div className="error" role="alert">
+            {refused.map((line, i) => (
+              <p key={`${i}:${line}`}>{line}</p>
+            ))}
+          </div>
+        )}
         <p className="hint">
           {closed
             ? "Your note stays with the finished request for anyone who looks later."
-            : "Everyone who works on it reads the notes. To change what it asks for, message the team instead."}
+            : "Everyone who works on it reads the notes, and can open the files. To change what it asks for, message the team instead."}
         </p>
         <ErrorNotice error={error} />
         <div className="actions">
-          <button className="btn" disabled={busy || !text.trim()}>
+          <label className="btn btn-quiet">
+            Attach files
+            <input
+              type="file"
+              className="sr-only"
+              multiple
+              accept={ATTACHMENT_ACCEPT}
+              onChange={(e) => {
+                attach(Array.from(e.target.files || []));
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <button
+            className="btn"
+            disabled={busy || (!text.trim() && !files.length)}
+          >
             Add note
           </button>
         </div>

@@ -15,6 +15,13 @@ import (
 // works on the task afterwards reads the same words.
 type DesignRequest struct {
 	ID string `json:"id"`
+	// N numbers the designer's input on the task, from 1, as everyone
+	// names it: design 2. A request with no input has none.
+	N int `json:"n,omitempty"`
+	// Marked is input the designer made the current design at some point:
+	// a design rather than advice. Once another is current it is
+	// superseded, and stays on the record.
+	Marked bool `json:"marked,omitempty"`
 	// From is the seat that asked; Step is where the task goes back to,
 	// TaskResearching or TaskWriting, in Round.
 	From     string `json:"from"`
@@ -40,6 +47,36 @@ const DesignLimit = 2
 
 // Open reports a request still waiting for its answer.
 func (r DesignRequest) Open() bool { return r.AnsweredAt.IsZero() }
+
+// CurrentDesignInput is the task's current design, the target everyone
+// works and judges to, if the designer has marked one.
+func (t Task) CurrentDesignInput() (DesignRequest, bool) {
+	for _, r := range t.Design {
+		if t.CurrentDesign != "" && r.ID == t.CurrentDesign {
+			return r, true
+		}
+	}
+	return DesignRequest{}, false
+}
+
+// DesignNumbered is the designer's input numbered n.
+func (t *Task) DesignNumbered(n int) *DesignRequest {
+	for i := range t.Design {
+		if r := &t.Design[i]; n > 0 && r.N == n {
+			return r
+		}
+	}
+	return nil
+}
+
+// nextDesignNumber numbers the next input the designer gives.
+func (t Task) nextDesignNumber() int {
+	n := 0
+	for _, r := range t.Design {
+		n = max(n, r.N)
+	}
+	return n + 1
+}
 
 // DesignAsk is a hand-off the loop asks for.
 type DesignAsk struct {
@@ -135,12 +172,30 @@ func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk) (
 	return out, err
 }
 
+// DesignReply is what the designer answered a request with.
+type DesignReply struct {
+	Designer, Input string
+	// Current is which design becomes the task's current one: CurrentThis
+	// for this input, an earlier design's number to keep or restore it, or
+	// 0 to leave it as it is, for input that is advice only. An escalation
+	// changes nothing current: the owner decides first.
+	Current int
+	// Escalate brings the owner a decision instead of handing the task back.
+	Escalate *DecisionInput
+}
+
+// CurrentThis marks the input being given as the current design.
+const CurrentThis = -1
+
 // RecordDesign keeps the designer's input on its request and hands the task
 // back to the step that asked, in one change, so a restart never runs the
-// designer twice or loses what it said. A designer that escalates brings the
-// owner a decision instead, and the task goes back once it is answered. A
-// task stopped while the designer worked stays stopped.
-func (s *Service) RecordDesign(ctx context.Context, taskID, requestID, designer, input string, escalate *DecisionInput) (Task, error) {
+// designer twice or loses what it said. Input is numbered, and in the same
+// change becomes the current design or restores an earlier one, as the
+// designer said. A designer that escalates brings the owner a decision
+// instead, and the task goes back once it is answered. A task stopped while
+// the designer worked stays stopped.
+func (s *Service) RecordDesign(ctx context.Context, taskID, requestID string, reply DesignReply) (Task, error) {
+	designer, escalate := reply.Designer, reply.Escalate
 	if escalate != nil {
 		if err := escalate.validTaskDecision(); err != nil {
 			return Task{}, err
@@ -157,11 +212,17 @@ func (s *Service) RecordDesign(ctx context.Context, taskID, requestID, designer,
 			return fmt.Errorf("the task is no longer with the designer: %w", ErrConflict)
 		}
 		now := s.now().UTC()
-		r.Designer, r.Input = designer, text.Clip(input, 6000)
+		r.Designer, r.Input = designer, text.Clip(reply.Input, 6000)
+		if r.Input != "" {
+			r.N = t.nextDesignNumber()
+		}
 		t.Failures, t.RetryAt = 0, time.Time{}
 		if escalate != nil {
 			r.Decision = openTaskDecision(v, t, DecisionQuestion, *escalate, now).ID
 		} else {
+			if err := markCurrent(v, t, r, designer, reply.Current, now); err != nil {
+				return err
+			}
 			r.AnsweredAt = now
 			t.Status, t.Detail = r.Step, "Back from "+designer+" with design input"
 			recordTask(v, now, t, "task.designed", fmt.Sprintf("%s gave design input on %s", designer, t.Objective))
@@ -172,4 +233,31 @@ func (s *Service) RecordDesign(ctx context.Context, taskID, requestID, designer,
 		return nil
 	})
 	return out, err
+}
+
+// markCurrent makes the design current names the task's current design:
+// this request's input, or an earlier design by its number. Naming the one
+// already current changes nothing.
+func markCurrent(v *Snapshot, t *Task, this *DesignRequest, designer string, current int, now time.Time) error {
+	if current == 0 {
+		return nil
+	}
+	n := current
+	if current == CurrentThis {
+		if this.N == 0 {
+			return errors.New("input with no words can't be the current design")
+		}
+		n = this.N
+	}
+	target := t.DesignNumbered(n)
+	if target == nil {
+		return fmt.Errorf("there is no design %d to make current", n)
+	}
+	target.Marked = true
+	if t.CurrentDesign == target.ID {
+		return nil
+	}
+	t.CurrentDesign = target.ID
+	recordTask(v, now, t, "task.design_current", fmt.Sprintf("%s marked design %d current on %s", designer, target.N, t.Objective))
+	return nil
 }

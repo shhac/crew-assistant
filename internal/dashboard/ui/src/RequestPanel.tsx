@@ -3,6 +3,7 @@ import { DecisionCard } from "./DecisionCard";
 import { Drafts } from "./Drafts";
 import { pmLandingLine } from "./landing";
 import { MemberPanel } from "./MemberPanel";
+import { RequestAttachments } from "./RequestAttachments";
 import { RequestEdits, RequestNotes } from "./RequestNotes";
 import { RequestDesign, RequestPlan, RequestResearch } from "./RequestPlan";
 import { RequestRelations } from "./RequestRelations";
@@ -182,10 +183,11 @@ export function RequestPanel({
           )}
           {!!task.design?.length && (
             <RequestDesign
-              design={task.design}
+              task={task}
               designer={task.with_designer ? task.checking : undefined}
             />
           )}
+          <RequestAttachments task={task} />
           <Drafts
             project={project}
             task={task}

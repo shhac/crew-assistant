@@ -346,6 +346,22 @@ export interface Note {
   text: string;
   at: string;
 }
+/**
+ * A file kept with a task: the owner's, with a note, or the designer's,
+ * with a design. Exactly one of note and design is set.
+ */
+export interface Attachment {
+  id: string;
+  name: string;
+  /** Judged from the file's bytes, never from what the sender said. */
+  type: string;
+  size: number;
+  by: string;
+  kind: string;
+  at: string;
+  note?: string;
+  design?: string;
+}
 export interface TeamMessage {
   id: string;
   to: string;
@@ -375,6 +391,10 @@ export interface Plan {
 /** One hand-off to the designer, and the input that came back. */
 export interface DesignRequest {
   id: string;
+  /** Numbers the designer's input: design 1, 2, … */
+  n?: number;
+  /** Made the current design at some point: a design, not advice. */
+  marked?: boolean;
   /** The seat that asked, and the step it asked from. */
   from: string;
   step: "researching" | "writing" | (string & {});
@@ -427,9 +447,12 @@ export interface Task {
   messages?: TeamMessage[];
   plan?: Plan;
   design?: DesignRequest[];
+  /** The design request whose input is the current design, the target. */
+  current_design?: string;
   research?: ResearchRequest[];
   edits?: TaskEdit[];
   notes?: Note[];
+  attachments?: Attachment[];
   /** Ids of the tasks that must land before this one starts. */
   depends_on?: string[];
   /** The objectives of its unfinished dependencies. */
@@ -699,11 +722,13 @@ export async function api<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  // A form sets its own type, with the boundary between its parts.
+  const form = options.body instanceof FormData;
   const response = await fetch(path, {
     ...options,
     credentials: "same-origin",
     headers: {
-      "Content-Type": "application/json",
+      ...(form ? {} : { "Content-Type": "application/json" }),
       "X-Requested-With": "crew-assistant",
       ...options.headers,
     },
@@ -966,11 +991,31 @@ export function unlinkTasks(projectID: string, taskID: string, other: string) {
     { method: "DELETE" },
   );
 }
-export function addNote(projectID: string, taskID: string, text: string) {
+export function addNote(
+  projectID: string,
+  taskID: string,
+  text: string,
+  files: File[] = [],
+) {
+  let body: string | FormData = JSON.stringify({ text });
+  if (files.length) {
+    // With files, the note and its files are kept together or not at all.
+    body = new FormData();
+    body.append("text", text);
+    for (const file of files) body.append("files", file, file.name);
+  }
   return api<Note>(
     `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/notes`,
-    { method: "POST", body: JSON.stringify({ text }) },
+    { method: "POST", body },
   );
+}
+/** Where one of a task's attachments is served. */
+export function attachmentURL(
+  projectID: string,
+  taskID: string,
+  attachmentID: string,
+) {
+  return `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/attachments/${encodeURIComponent(attachmentID)}`;
 }
 /** Puts the title and requirements back as they were before one edit. */
 export function undoTaskEdit(

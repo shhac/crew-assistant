@@ -155,19 +155,38 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		}
 		respond(w, 200, v)
 	})
+	// A note is JSON text, or a multipart form with its text and files, kept
+	// in one change.
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/notes", func(w http.ResponseWriter, r *http.Request) {
-		var in struct {
-			Text string `json:"text"`
+		in := core.NoteInput{Project: r.PathValue("id"), Task: r.PathValue("task"), By: core.FromOwner, Kind: core.FromOwner}
+		if isMultipart(r) {
+			var err error
+			if in.Text, in.Files, err = noteForm(w, r); err != nil {
+				return
+			}
+		} else {
+			var body struct {
+				Text string `json:"text"`
+			}
+			if decode(w, r, &body) != nil {
+				return
+			}
+			in.Text = body.Text
 		}
-		if decode(w, r, &in) != nil {
-			return
-		}
-		v, err := a.Core.AddNote(r.Context(), core.NoteInput{Project: r.PathValue("id"), Task: r.PathValue("task"), By: core.FromOwner, Kind: core.FromOwner, Text: in.Text})
+		v, err := a.Core.AddNote(r.Context(), in)
 		if err != nil {
 			problem(w, err)
 			return
 		}
 		respond(w, 201, v)
+	})
+	mux.HandleFunc("GET /api/projects/{id}/tasks/{task}/attachments/{att}", func(w http.ResponseWriter, r *http.Request) {
+		att, path, err := a.Core.OpenAttachment(r.Context(), r.PathValue("id"), r.PathValue("task"), r.PathValue("att"))
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		serveAttachment(w, r, att, path)
 	})
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/edits/{edit}/undo", func(w http.ResponseWriter, r *http.Request) {
 		v, err := a.Core.UndoTaskEdit(r.Context(), r.PathValue("id"), r.PathValue("task"), r.PathValue("edit"))

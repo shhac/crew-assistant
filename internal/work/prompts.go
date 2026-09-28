@@ -250,7 +250,11 @@ Reply with only this JSON object:
 func checkerPrompt(p core.Project, t core.Task, r core.Revision, checker core.Role, playbook *core.Playbook) string {
 	if checker.Holds(core.RoleQA) && playbook != nil {
 		var b strings.Builder
-		fmt.Fprintf(&b, "This repository holds a proposed change for: %s\n\nRun exactly this from the repository root, once:\n\n    %s\n\n", t.Objective, playbook.Check)
+		fmt.Fprintf(&b, "This repository holds a proposed change for: %s\n\n", t.Objective)
+		if current, ok := t.CurrentDesignInput(); ok {
+			fmt.Fprintf(&b, "Its current design is design %d by %s; any earlier design is superseded and not the target.\n\n", current.N, current.Designer)
+		}
+		fmt.Fprintf(&b, "Run exactly this from the repository root, once:\n\n    %s\n\n", playbook.Check)
 		b.WriteString(`Do not change, fix or commit anything; only run the check and read its output.
 Use "pass" if it exits successfully. Otherwise use "revise", with one finding per failing test, build error or check, quoting the key lines of output in the note.
 Use "question" only if the check cannot run at all for a reason the implementer cannot fix (for example a missing tool), and say what is missing.`)

@@ -38,11 +38,14 @@ const textExtensions = new Set(
 const bytes = (text: string) => new TextEncoder().encode(text).length;
 
 export function sizeLabel(size: number) {
-  return size < 1000 ? `${size} B` : `${(size / 1000).toFixed(1)} KB`;
+  if (size < 1000) return `${size} B`;
+  if (size < 1_000_000) return `${(size / 1000).toFixed(1)} KB`;
+  return `${(size / 1_000_000).toFixed(1)} MB`;
 }
 
-// Limits are reported exactly; a rounded size can read as within the limit.
-const exactSize = (size: number) => `${size.toLocaleString("en-US")} bytes`;
+/** Limits are reported exactly; a rounded size can read as within the limit. */
+export const exactSize = (size: number) =>
+  `${size.toLocaleString("en-US")} bytes`;
 
 function looksLikeText(file: File) {
   if (file.type.startsWith("text/") || textTypes.has(file.type)) return true;

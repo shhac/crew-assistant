@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -68,8 +70,12 @@ func (lp *Loop) design(ctx context.Context, p core.Project, t core.Task, m mediu
 	}
 	defer cleanup()
 	var answer designAnswer
+	current := 0
 	reply, learned, _, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
-		answer, err = parseDesign(reply)
+		if answer, err = parseDesign(reply); err != nil {
+			return err
+		}
+		current, err = designCurrent(answer.Current, answer.Input, t)
 		return err
 	})
 	if err != nil {
@@ -79,7 +85,7 @@ func (lp *Loop) design(ctx context.Context, p core.Project, t core.Task, m mediu
 	// Input that still cannot be read is passed on as written: the role that
 	// asked reads it either way.
 	if answer.Input == "" && answer.Escalate == nil {
-		answer.Input = text.Clip(strings.TrimSpace(reply), 6000)
+		answer.Input, current = text.Clip(strings.TrimSpace(reply), 6000), 0
 	}
 	var escalate *core.DecisionInput
 	if e := answer.Escalate; e != nil {
@@ -90,18 +96,47 @@ func (lp *Loop) design(ctx context.Context, p core.Project, t core.Task, m mediu
 			Choices:        []string{"Use your judgment", choiceStop},
 		}
 	}
-	_, err = lp.Core.RecordDesign(ctx, t.ID, request.ID, designer.Name, answer.Input, escalate)
+	_, err = lp.Core.RecordDesign(ctx, t.ID, request.ID, core.DesignReply{Designer: designer.Name, Input: answer.Input, Current: current, Escalate: escalate})
 	if errors.Is(err, core.ErrConflict) {
 		return nil
 	}
 	return err
 }
 
-// designAnswer is the designer's reply: its input, and an escalation when
-// the question needs more than design input.
+// designAnswer is the designer's reply: its input, which design is current
+// after it, and an escalation when the question needs more than design
+// input.
 type designAnswer struct {
 	Input    string      `json:"input"`
+	Current  string      `json:"current"`
 	Escalate *escalation `json:"escalate"`
+}
+
+var designNumber = regexp.MustCompile(`^(?:design\s*)?#?(\d+)$`)
+
+// designCurrent reads which design the designer says is current after its
+// answer: "this" for its own input, "design N" to keep or restore an
+// earlier one, or nothing, for input that is advice only.
+func designCurrent(said, input string, t core.Task) (int, error) {
+	said = strings.ToLower(strings.TrimSpace(said))
+	switch said {
+	case "", "none", "advice":
+		return 0, nil
+	case "this":
+		if input == "" {
+			return 0, errors.New(`"current": "this" needs design input to make current`)
+		}
+		return core.CurrentThis, nil
+	}
+	m := designNumber.FindStringSubmatch(said)
+	if m == nil {
+		return 0, fmt.Errorf(`"current" is "this", "design N" or empty, not %q`, said)
+	}
+	n, _ := strconv.Atoi(m[1])
+	if t.DesignNumbered(n) == nil {
+		return 0, fmt.Errorf(`there is no design %d; name one listed above, or use "this"`, n)
+	}
+	return n, nil
 }
 
 type escalation struct {
@@ -171,13 +206,25 @@ func designerPrompt(p core.Project, t core.Task, r core.DesignRequest) string {
 	fmt.Fprintf(&b, "\n%s, the task's %s, asks for your design input:\n%s\n", r.From, stepWord(r.Step), r.Question)
 	b.WriteString(`
 Give design input only: read what you need, change nothing, and do not commit, deliver, land or approve anything. Answer the question so the one who asked can go on, and say what you would choose and why.
+While you work, attach_file keeps a mockup with your input: an SVG, HTML or Markdown sketch you write out as its content, or an image or other file already in the current directory, named by its path. Everyone who works on the task afterwards can open it.
 If answering well needs more than design input, such as a choice only the owner can make or work beyond this task, escalate instead: give the evidence, the alternatives, the consequences of each and your recommendation. The owner decides, and the task goes back to whoever asked.
-
+`)
+	b.WriteString("\nSay which design is current after your answer: the one the implementer builds to and every checker judges against. \"this\" makes your input the current design; \"design N\" keeps or brings back an earlier design by its number; empty means your input is advice only, and the current design stays as it is. " + currentLine(t) + "\n")
+	b.WriteString(`
 Reply with only this JSON object:
-{"input": "your design input", "escalate": null}
+{"input": "your design input", "current": "this", "escalate": null}
 or, to escalate:
-{"input": "what you can say now, or empty", "escalate": {"evidence": "...", "alternatives": ["..."], "consequences": "...", "recommendation": "..."}}`)
+{"input": "what you can say now, or empty", "current": "", "escalate": {"evidence": "...", "alternatives": ["..."], "consequences": "...", "recommendation": "..."}}`)
 	return b.String()
+}
+
+// currentLine says which design is current, for the designer deciding
+// whether its answer changes that.
+func currentLine(t core.Task) string {
+	if current, ok := t.CurrentDesignInput(); ok {
+		return fmt.Sprintf("The current design is design %d.", current.N)
+	}
+	return "There is no current design yet."
 }
 
 // stepWord names the role that works at a step.
@@ -189,17 +236,50 @@ func stepWord(step string) string {
 }
 
 // designText is the design input already given on the task, as everyone
-// who works on it afterwards reads it.
+// who works on it afterwards reads it: the current design first, as the
+// target, then superseded designs, which are not, then advice.
 func designText(t core.Task) string {
-	var b strings.Builder
+	var b, superseded, advice strings.Builder
+	current, hasCurrent := t.CurrentDesignInput()
+	if hasCurrent {
+		fmt.Fprintf(&b, "\nThe current design, design %d, is the target: build to it and judge against it.\n", current.N)
+		b.WriteString(designEntry(t, current))
+	}
 	for _, r := range t.Design {
-		if r.Input == "" {
-			continue
+		switch {
+		case r.Input == "" || (hasCurrent && r.ID == current.ID):
+		case r.Marked:
+			superseded.WriteString(designEntry(t, r))
+		default:
+			advice.WriteString(designEntry(t, r))
 		}
-		if b.Len() == 0 {
-			b.WriteString("\nDesign input given on this task so far:\n")
+	}
+	if superseded.Len() > 0 {
+		b.WriteString("\nSuperseded designs: not current and not the target, kept only as history:\n" + superseded.String())
+	}
+	if advice.Len() > 0 {
+		b.WriteString("\nDesign advice given on this task, not a design to build to:\n" + advice.String())
+	}
+	return b.String()
+}
+
+// designEntry is one input from the designer: what was asked, what came
+// back, and the files attached to it.
+func designEntry(t core.Task, r core.DesignRequest) string {
+	var b strings.Builder
+	b.WriteString("- ")
+	if r.N > 0 {
+		fmt.Fprintf(&b, "Design %d. ", r.N)
+	}
+	fmt.Fprintf(&b, "%s asked: %s\n  %s answered: %s\n", r.From, text.Clip(r.Question, 500), r.Designer, r.Input)
+	var names []string
+	for _, a := range t.Attachments {
+		if a.Design == r.ID {
+			names = append(names, a.Name)
 		}
-		fmt.Fprintf(&b, "- %s asked: %s\n  %s answered: %s\n", r.From, text.Clip(r.Question, 500), r.Designer, r.Input)
+	}
+	if len(names) > 0 {
+		fmt.Fprintf(&b, "  Attached: %s (where to open them is under “Files attached to this task” in your instructions)\n", strings.Join(names, ", "))
 	}
 	return b.String()
 }

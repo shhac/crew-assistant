@@ -1,6 +1,11 @@
 import { useState } from "react";
-import { sinceLabel } from "./ui";
-import type { DesignRequest, Plan, ResearchRequest } from "./api";
+import { Pill, sinceLabel } from "./ui";
+import {
+  AttachmentList,
+  designState,
+  designStateLabel,
+} from "./RequestAttachments";
+import type { DesignRequest, Plan, ResearchRequest, Task } from "./api";
 
 /** Beyond this many points, the plan opens folded to its summary. */
 const foldAfter = 3;
@@ -47,35 +52,66 @@ export function RequestPlan({ plan }: { plan: Plan }) {
   );
 }
 
+const designTone = { current: "done", superseded: "", advice: "wait" };
+
 /**
  * Each time the researcher or the implementer asked the designer, and what
- * came back: the designer's input, the owner's answer, or nothing yet.
+ * came back: the designer's input, the owner's answer, or nothing yet. Each
+ * input is numbered, with its files, and says whether it is the current
+ * design everyone works to, superseded by it, or advice.
  */
 export function RequestDesign({
-  design,
+  task,
   designer,
 }: {
-  design: DesignRequest[];
+  task: Task;
   /** Who has the request open now, if anyone. */
   designer?: string;
 }) {
+  const attachments = task.attachments ?? [];
   return (
     <section className="section plan" aria-label="Design input">
       <h3>Design input</h3>
-      {design.map((r) => (
-        <div key={r.id} className="plan-part">
-          <p className="label">{r.from} asked</p>
-          <p>{r.question}</p>
-          {r.input ? (
-            <>
-              <p className="label">{r.designer} answered</p>
-              <p>{r.input}</p>
-            </>
-          ) : (
-            <p className="muted small">{unanswered(r, designer)}</p>
-          )}
-        </div>
-      ))}
+      {(task.design ?? []).map((r) => {
+        const state = designState(task, r);
+        return (
+          <div
+            key={r.id}
+            className={`plan-part${state === "superseded" ? " superseded" : ""}`}
+            aria-label={r.n ? `Design ${r.n}` : undefined}
+          >
+            {r.n ? (
+              <p className="design-title">
+                <span className="label">Design {r.n}</span>
+                {state && (
+                  <Pill tone={designTone[state]}>
+                    {designStateLabel[state]}
+                  </Pill>
+                )}
+              </p>
+            ) : null}
+            <p className="label">{r.from} asked</p>
+            <p>{r.question}</p>
+            {r.input ? (
+              <>
+                <p className="label">{r.designer} answered</p>
+                <p>{r.input}</p>
+              </>
+            ) : (
+              <p className="muted small">{unanswered(r, designer)}</p>
+            )}
+            <AttachmentList
+              task={task}
+              attachments={attachments.filter((a) => a.design === r.id)}
+            />
+            {state === "superseded" && (
+              <p className="muted small">
+                Not the current design: the team no longer works to it.
+              </p>
+            )}
+          </div>
+        );
+      })}
     </section>
   );
 }
