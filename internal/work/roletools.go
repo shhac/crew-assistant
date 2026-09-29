@@ -246,15 +246,7 @@ func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return "", errors.New("arguments must be an object of strings")
 	}
-	switch name {
-	case "list_tasks":
-		return r.list(ctx, in["which"], in["related_to"], in["text"])
-	case "read_task":
-		return r.read(ctx, in["task_id"])
-	case "read_notes":
-		return r.notes(ctx, in["task_id"], in["from"])
-	}
-	if (!r.manages && r.taskID == "") || (r.notesOnly && name != "add_note") {
+	if !r.offers(name) {
 		return "", fmt.Errorf("there is no tool %q", name)
 	}
 	// A role changes only its own task, and only while it is still there;
@@ -263,20 +255,21 @@ func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (
 	if r.manages {
 		taskID, while = in["task_id"], ""
 	}
-	var err error
-	done := "Done."
 	switch name {
+	case "list_tasks":
+		return r.list(ctx, in["which"], in["related_to"], in["text"])
+	case "read_task":
+		return r.read(ctx, in["task_id"])
+	case "read_notes":
+		return r.notes(ctx, in["task_id"], in["from"])
 	case "link_tasks", "unlink_tasks":
-		if !r.manages && len(r.relations) == 0 {
-			return "", errors.New("you cannot change links")
-		}
 		l := core.Link{Project: r.projectID, Task: taskID, Relation: in["relation"], Other: in["other_task_id"], By: r.by, Relations: r.relations, While: while}
-		change := r.lp.LinkTasks
-		done = "Linked."
 		if name == "unlink_tasks" {
-			change, done = r.lp.UnlinkTasks, "Unlinked."
+			_, err := r.lp.UnlinkTasks(ctx, l)
+			return changed("Unlinked.", err)
 		}
-		_, err = change(ctx, l)
+		_, err := r.lp.LinkTasks(ctx, l)
+		return changed("Linked.", err)
 	case "edit_task":
 		e := core.EditInput{Project: r.projectID, Task: taskID, By: r.name, Kind: r.kind, While: while, Objective: in["title"], Criteria: replacement(in["requirements"])}
 		if add := strings.TrimSpace(in["add_requirement"]); add != "" {
@@ -285,33 +278,33 @@ func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (
 		if strings.TrimSpace(e.Objective) == "" && e.Criteria == nil && e.Add == nil {
 			return "", errors.New("say what to change")
 		}
-		_, err = r.lp.Core.EditTask(ctx, e)
-		done = "Edited."
+		_, err := r.lp.Core.EditTask(ctx, e)
+		return changed("Edited.", err)
 	case "add_note":
-		_, err = r.lp.Core.AddNote(ctx, core.NoteInput{Project: r.projectID, Task: taskID, By: r.name, Kind: r.kind, While: while, Text: in["text"]})
-		done = "Noted."
+		_, err := r.lp.Core.AddNote(ctx, core.NoteInput{Project: r.projectID, Task: taskID, By: r.name, Kind: r.kind, While: while, Text: in["text"]})
+		return changed("Noted.", err)
 	case "propose_run_recipe":
-		if !r.proposes {
-			return "", fmt.Errorf("there is no tool %q", name)
-		}
 		recipe := core.RunRecipe{Setup: in["setup"], Start: in["start"], URL: in["url"], Ready: in["ready"]}
-		if _, err = r.lp.Core.ProposeRunRecipe(ctx, r.projectID, r.name, recipe, in["why"]); err != nil {
-			return "", hideProjects(err)
-		}
-		return "Proposed. The owner decides whether QA uses it; nothing changes until they do.", nil
+		_, err := r.lp.Core.ProposeRunRecipe(ctx, r.projectID, r.name, recipe, in["why"])
+		return changed("Proposed. The owner decides whether QA uses it; nothing changes until they do.", err)
 	case "attach_file":
-		if r.design == "" {
-			return "", fmt.Errorf("there is no tool %q", name)
-		}
 		return r.attach(ctx, in["name"], in["content"], in["path"])
 	case "queue_task":
-		if !r.manages {
-			return "", fmt.Errorf("there is no tool %q", name)
-		}
 		return r.queue(ctx, in["title"], in["requirements"], in["depends_on"])
 	default:
 		return "", fmt.Errorf("there is no tool %q", name)
 	}
+}
+
+// offers is whether the role's turn was given the tool, which is all that
+// decides whether it may call it.
+func (r roleTools) offers(name string) bool {
+	return slices.ContainsFunc(r.Definitions(), func(d session.ToolDefinition) bool { return d.Name == name })
+}
+
+// changed is the reply to a change: done, or why not, told without
+// anything about other projects.
+func changed(done string, err error) (string, error) {
 	if err != nil {
 		return "", hideProjects(err)
 	}
