@@ -1,6 +1,12 @@
 package core
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/shhac/crew-assistant/internal/config"
+)
 
 // Thread is one team member's conversation on one task, in one kind of role.
 // It belongs to the task, so nothing said in it reaches another task, and to
@@ -85,4 +91,50 @@ func (t *Task) KeepThread(kind string, r Role, session json.RawMessage) {
 		}
 	}
 	t.Threads = append(t.Threads, th)
+}
+
+// What to do with a task implementer's conversation at its next round.
+const (
+	// WriterCompact has the session compact its own context first. Only Codex
+	// can: Claude Code offers no compaction to a session driven from outside.
+	WriterCompact = "compact"
+	// WriterFresh starts a new session. Nothing is lost that the round needs:
+	// its prompt carries the brief, the latest draft and every review.
+	WriterFresh = "new"
+)
+
+// SetWriterNext asks for a task implementer's conversation to be compacted or
+// started afresh. The implementer's session is only ever used at the start of
+// a round, so the request waits for the next one; a round already under way
+// finishes as it is. Reviewers and QA start fresh every time and a project's
+// manager is asked one question at a time, so the implementer is the only
+// team member with a conversation to act on.
+func (s *Service) SetWriterNext(ctx context.Context, projectID, taskID, next string) (Task, error) {
+	if next != WriterCompact && next != WriterFresh {
+		return Task{}, fmt.Errorf("the implementer's conversation can be compacted or started afresh: %w", ErrChatValidation)
+	}
+	return s.UpdateTask(ctx, taskID, func(t *Task, _ *Project) (string, error) {
+		if t.ProjectID != projectID {
+			return "", ErrNotFound
+		}
+		if t.Finished() {
+			return "", fmt.Errorf("the task is finished; its implementer won't run again: %w", ErrConflict)
+		}
+		// The request is for the thread an implementer seat now on the task
+		// would carry on; one another member left on the task isn't its to
+		// act on.
+		writer, started := t.Writer()
+		if !started {
+			return "", fmt.Errorf("the implementer has no conversation yet; its first round starts one: %w", ErrConflict)
+		}
+		if next == WriterCompact && !config.Supports(writer.Engine, config.UseCompact) {
+			return "", fmt.Errorf("%s runs on %s, which can't be compacted from outside; start its conversation afresh instead, which loses nothing its next round needs: %w", writer.Name, writer.Engine, ErrConflict)
+		}
+		t.WriterNext = next
+		t.WriterRequest++
+		if next == WriterCompact {
+			return fmt.Sprintf("%s will compact its conversation at its next round of %s", writer.Name, t.Objective), nil
+		}
+		return fmt.Sprintf("%s will start afresh at its next round of %s", writer.Name, t.Objective), nil
+	})
 }
