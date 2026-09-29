@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/integrations/connections"
 )
@@ -62,40 +63,61 @@ func (a *App) syncCLIConnections(ctx context.Context) error {
 		if binding.Tool != "lin" || !binding.ImportAssignments {
 			continue
 		}
-		count := 0
-		var connectionErr error
-		for _, profile := range binding.Profiles {
-			result, err := a.connectionClient.Query(ctx, cfg.Connections, connections.Query{ConnectionID: binding.ID, Profile: profile, Operation: "assignments"})
-			if err != nil {
-				connectionErr = err
-				failures = append(failures, err)
-				continue
-			}
-			for _, raw := range result.Data {
-				var issue struct {
-					ID         string `json:"id"`
-					Identifier string `json:"identifier"`
-					Title      string `json:"title"`
-					Status     string `json:"status"`
-					StatusType string `json:"statusType"`
-				}
-				if err = json.Unmarshal(raw, &issue); err != nil || issue.ID == "" || issue.Title == "" || issue.StatusType == "completed" || issue.StatusType == "canceled" {
-					continue
-				}
-				_, err = a.Core.CreateProject(ctx, core.ProjectInput{Title: issue.Identifier + " · " + issue.Title, SourceDescription: fmt.Sprintf("Linear assignment from %s / %s. Status: %s. Read the full issue using this connection before writing its brief.", binding.Name, profile, issue.Status), SourceID: "lin:" + binding.ID + ":" + profile + ":" + issue.ID})
-				if err != nil {
-					connectionErr = err
-					failures = append(failures, err)
-					break
-				}
-				count++
-			}
+		count, errs := a.importAssignments(ctx, cfg.Connections, binding)
+		failures = append(failures, errs...)
+		if len(errs) > 0 {
+			a.Status("connection:"+binding.ID, binding.Name, "error", errs[len(errs)-1].Error())
+			continue
 		}
-		if connectionErr != nil {
-			a.Status("connection:"+binding.ID, binding.Name, "error", connectionErr.Error())
-		} else {
-			a.Status("connection:"+binding.ID, binding.Name, "connected", fmt.Sprintf("%d assigned issues", count))
-		}
+		a.Status("connection:"+binding.ID, binding.Name, "connected", fmt.Sprintf("%d assigned issues", count))
 	}
 	return errors.Join(failures...)
+}
+
+// importAssignments keeps going past a failing profile so one broken account
+// doesn't hide the others' assignments.
+func (a *App) importAssignments(ctx context.Context, bindings []config.Connection, binding config.Connection) (int, []error) {
+	count := 0
+	var failures []error
+	for _, profile := range binding.Profiles {
+		imported, err := a.importProfileAssignments(ctx, bindings, binding, profile)
+		count += imported
+		if err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return count, failures
+}
+
+func (a *App) importProfileAssignments(ctx context.Context, bindings []config.Connection, binding config.Connection, profile string) (int, error) {
+	result, err := a.connectionClient.Query(ctx, bindings, connections.Query{ConnectionID: binding.ID, Profile: profile, Operation: "assignments"})
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, raw := range result.Data {
+		var issue assignedIssue
+		if json.Unmarshal(raw, &issue) != nil || !issue.importable() {
+			continue
+		}
+		_, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: issue.Identifier + " · " + issue.Title, SourceDescription: fmt.Sprintf("Linear assignment from %s / %s. Status: %s. Read the full issue using this connection before writing its brief.", binding.Name, profile, issue.Status), SourceID: "lin:" + binding.ID + ":" + profile + ":" + issue.ID})
+		if err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, nil
+}
+
+type assignedIssue struct {
+	ID         string `json:"id"`
+	Identifier string `json:"identifier"`
+	Title      string `json:"title"`
+	Status     string `json:"status"`
+	StatusType string `json:"statusType"`
+}
+
+// importable leaves out finished work and records too thin to name a project.
+func (i assignedIssue) importable() bool {
+	return i.ID != "" && i.Title != "" && i.StatusType != "completed" && i.StatusType != "canceled"
 }
