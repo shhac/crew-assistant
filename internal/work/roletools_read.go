@@ -132,6 +132,16 @@ func (r roleTools) read(ctx context.Context, id string) (string, error) {
 	if !ok {
 		return "", errNoTask
 	}
+	files := ""
+	if current, ok := t.CurrentDesignInput(); ok {
+		files = r.designFiles(t, current)
+	}
+	return taskBrief(snap, r.projectID, t, files), nil
+}
+
+// taskBrief is task t as read_task shows it, with the files of its current
+// design, and the tasks it links to in projectID alone.
+func taskBrief(snap core.Snapshot, projectID string, t core.Task, designFiles string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s (%s, %s): %s\n", t.Label(), t.Status, t.Stage, text.Clip(t.Objective, 600))
 	for _, c := range t.Criteria {
@@ -142,7 +152,7 @@ func (r roleTools) read(ctx context.Context, id string) (string, error) {
 	}
 	for _, l := range linkGroups(t) {
 		for _, other := range l.ids {
-			if o, ok := findTask(snap, r.projectID, other); ok {
+			if o, ok := findTask(snap, projectID, other); ok {
 				fmt.Fprintf(&b, "- %s %s (%s): %s\n", l.name, o.Label(), o.Status, text.Clip(o.Objective, 200))
 			}
 		}
@@ -161,7 +171,7 @@ func (r roleTools) read(ctx context.Context, id string) (string, error) {
 	}
 	if current, ok := t.CurrentDesignInput(); ok {
 		fmt.Fprintf(&b, "Current design, the target: design %d by %s: %s\n", current.N, current.Designer, text.Clip(current.Input, 800))
-		b.WriteString(r.designFiles(t, current))
+		b.WriteString(designFiles)
 	}
 	var superseded []string
 	for _, d := range t.Design {
@@ -195,5 +205,5 @@ func (r roleTools) read(ctx context.Context, id string) (string, error) {
 	if t.Branch != "" {
 		fmt.Fprintf(&b, "Branch: %s\n", t.Branch)
 	}
-	return b.String(), nil
+	return b.String()
 }
