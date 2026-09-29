@@ -17,6 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/shhac/crew-assistant/internal/statepath"
 	_ "golang.org/x/image/webp"
 )
 
@@ -243,27 +244,10 @@ func (s *Service) keepFile(taskID, id string, data []byte) (string, error) {
 	if !ok {
 		return "", errors.New("the attachment could not be named")
 	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
 	}
-	f, err := os.CreateTemp(dir, ".put-")
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(f.Name())
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return "", err
-	}
-	if err := f.Chmod(0o600); err != nil {
-		f.Close()
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		return "", err
-	}
-	if err := os.Rename(f.Name(), path); err != nil {
+	if err := statepath.WriteFileAtomic(path, data); err != nil {
 		return "", err
 	}
 	return path, nil

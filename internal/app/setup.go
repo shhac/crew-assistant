@@ -15,6 +15,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
+	"github.com/shhac/crew-assistant/internal/statepath"
 )
 
 // Who a suggestion is for: a new assistant profile or a new team member.
@@ -105,23 +106,7 @@ func (a *App) saveIdentitySetup(subject string, state IdentitySetup) error {
 	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".identity-setup-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if _, err = f.Write(data); err != nil {
-		f.Close()
-		return err
-	}
-	if err = f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), path)
+	return statepath.WriteFileAtomic(path, data)
 }
 
 func identityTools() []engine.Tool {

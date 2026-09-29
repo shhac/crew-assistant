@@ -67,20 +67,7 @@ func Pair(dir string) (string, error) {
 		return "", err
 	}
 	code := secret()
-	p := filepath.Join(dir, "pairing-code")
-	f, err := os.CreateTemp(dir, ".pairing-*")
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(f.Name())
-	if _, err = f.WriteString(code); err != nil {
-		_ = f.Close()
-		return "", err
-	}
-	if err = f.Close(); err != nil {
-		return "", err
-	}
-	if err = os.Rename(f.Name(), p); err != nil {
+	if err := statepath.WriteFileAtomic(filepath.Join(dir, "pairing-code"), []byte(code)); err != nil {
 		return "", err
 	}
 	return code, nil
