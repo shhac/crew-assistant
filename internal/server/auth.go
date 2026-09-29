@@ -28,6 +28,7 @@ type Auth struct {
 	sessions     map[string]time.Time
 	allowedHosts map[string]bool
 	tailscale    bool
+	publicHost   string
 	users        []string
 }
 
@@ -52,6 +53,9 @@ func NewAuth(dir, localURL, publicURL string, users []string) (*Auth, error) {
 		if err == nil && u.Host != "" {
 			a.allowedHosts[u.Host] = true
 		}
+	}
+	if u, err := url.Parse(publicURL); err == nil {
+		a.publicHost = u.Host
 	}
 	if err := statepath.WriteFileAtomic(filepath.Join(dir, "admin-token"), []byte(a.admin)); err != nil {
 		return nil, err
@@ -174,7 +178,7 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 	}
 	token := secret()
 	a.sessions[token] = time.Now().Add(12 * time.Hour)
-	http.SetCookie(w, &http.Cookie{Name: config.Namespace + ".session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil || (a.tailscale && isLoopback(r) && strings.HasPrefix(r.Host, "127.") == false && r.Host != "localhost"), MaxAge: 43200})
+	http.SetCookie(w, &http.Cookie{Name: config.Namespace + ".session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil || (a.publicHost != "" && r.Host == a.publicHost), MaxAge: 43200})
 	respond(w, 200, map[string]bool{"ok": true})
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) error {

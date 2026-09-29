@@ -175,3 +175,41 @@ func TestNewAuthTightensRuntimeFilesLeftOpen(t *testing.T) {
 		t.Error("the admin token was not replaced")
 	}
 }
+
+// Tailscale Serve ends HTTPS and proxies plain HTTP from this machine, so
+// only the public host can tell the session cookie must be Secure.
+func TestTheSessionCookieIsSecureOnlyThroughThePublicHost(t *testing.T) {
+	for _, tc := range []struct {
+		name, local, public, host string
+		secure                    bool
+	}{
+		{"loopback without Tailscale", "http://127.0.0.1:8340", "", "127.0.0.1:8340", false},
+		{"loopback with Tailscale", "http://127.0.0.1:8340", "https://host.example:8443", "127.0.0.1:8340", false},
+		{"IPv6 loopback with Tailscale", "http://[::1]:8340", "https://host.example:8443", "[::1]:8340", false},
+		{"public host", "http://127.0.0.1:8340", "https://host.example:8443", "host.example:8443", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			a, err := NewAuth(dir, tc.local, tc.public, []string{"owner@example.test"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			code, err := Pair(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest("POST", "http://"+tc.host+"/api/session", strings.NewReader(`{"token":"`+code+`"}`))
+			r.RemoteAddr = "127.0.0.1:1234"
+			r.Header.Set("X-Requested-With", "crew-assistant")
+			w := httptest.NewRecorder()
+			a.Middleware(http.NotFoundHandler()).ServeHTTP(w, r)
+			cookies := w.Result().Cookies()
+			if w.Code != 200 || len(cookies) != 1 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			if cookies[0].Secure != tc.secure {
+				t.Errorf("Secure = %v, want %v", cookies[0].Secure, tc.secure)
+			}
+		})
+	}
+}
