@@ -11,7 +11,7 @@
 import { useState, type ClipboardEvent, type DragEvent } from "react";
 
 /** Mirrors the byte limit core.EnqueueChat applies to a whole message. */
-export const MESSAGE_LIMIT_BYTES = 24_000;
+const MESSAGE_LIMIT_BYTES = 24_000;
 
 export type ComposerAsset = {
   id: string;
@@ -127,7 +127,7 @@ export function messageLimitError(message: string) {
 }
 
 /** A drag or clipboard carries files, not just text. */
-export function carriesFiles(data: DataTransfer | null) {
+function carriesFiles(data: DataTransfer | null) {
   return !!data && Array.from(data.types || []).includes("Files");
 }
 
