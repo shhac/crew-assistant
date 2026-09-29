@@ -143,3 +143,35 @@ func TestAuthRefusesWhatIsNotTheOwnersOwnDashboard(t *testing.T) {
 		t.Error("an expired session was accepted")
 	}
 }
+
+func TestNewAuthTightensRuntimeFilesLeftOpen(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "runtime")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	token := filepath.Join(dir, "admin-token")
+	if err := os.WriteFile(token, []byte("stale"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for p, mode := range map[string]os.FileMode{dir: 0755, token: 0644} {
+		if err := os.Chmod(p, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, err := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for p, want := range map[string]os.FileMode{dir: 0700, token: 0600} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s has mode %o, want %o", p, got, want)
+		}
+	}
+	if b, _ := os.ReadFile(token); string(b) != a.admin {
+		t.Error("the admin token was not replaced")
+	}
+}

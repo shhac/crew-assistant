@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/statepath"
 )
 
 type Auth struct {
@@ -41,6 +42,10 @@ func NewAuth(dir, localURL, publicURL string, users []string) (*Auth, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
+	// MkdirAll keeps the mode of a directory that already exists.
+	if err := os.Chmod(dir, 0700); err != nil {
+		return nil, err
+	}
 	a := &Auth{admin: secret(), pairingPath: filepath.Join(dir, "pairing-code"), sessions: map[string]time.Time{}, allowedHosts: map[string]bool{}, tailscale: publicURL != "", users: users}
 	for _, raw := range []string{localURL, publicURL} {
 		u, err := url.Parse(raw)
@@ -48,7 +53,7 @@ func NewAuth(dir, localURL, publicURL string, users []string) (*Auth, error) {
 			a.allowedHosts[u.Host] = true
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "admin-token"), []byte(a.admin), 0600); err != nil {
+	if err := statepath.WriteFileAtomic(filepath.Join(dir, "admin-token"), []byte(a.admin)); err != nil {
 		return nil, err
 	}
 	return a, nil
