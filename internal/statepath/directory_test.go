@@ -81,3 +81,56 @@ func TestEnsureDirectoryCreatesAndTightensPrivateDirectories(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteFileAtomicReplacesAFileWithAPrivateOne(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "token")
+	if err := os.WriteFile(path, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFileAtomic(path, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "new" {
+		t.Fatalf("contents %q, %v", got, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0600 {
+		t.Errorf("mode %o, want 600", mode)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("a temporary file was left behind: %v", entries)
+	}
+}
+
+func TestWriteFileAtomicLeavesNothingWhenItCannotReplace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "occupied")
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "child"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFileAtomic(path, []byte("new")); err == nil {
+		t.Fatal("a non-empty directory was replaced")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("a temporary file was left behind: %v", entries)
+	}
+}
