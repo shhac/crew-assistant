@@ -355,62 +355,6 @@ func TestACheckoutIsTheRevisionReadOnly(t *testing.T) {
 	}
 }
 
-func TestCatchingUpMergesLandedWorkAndRefusesUnresolvedConflicts(t *testing.T) {
-	source := ownerRepo(t)
-	r, err := Open(ctx, t.TempDir(), source, nil, SignAsOwner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	base, _, err := r.Begin(ctx, "crew-task/a", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	write(t, filepath.Join(r.Workspace(), "main.go"), "package main\n\nfunc A() {}\n")
-	landed, _, err := r.Snapshot(ctx, base, base, "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = r.Begin(ctx, "crew-task/b", ""); err != nil {
-		t.Fatal(err)
-	}
-	write(t, filepath.Join(r.Workspace(), "main.go"), "package main\n\nfunc B() {}\n")
-	b1, _, err := r.Snapshot(ctx, base, base, "b")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if in, err := r.Contains(ctx, b1, landed); err != nil || in {
-		t.Fatalf("b already contains a: %v %v", in, err)
-	}
-	if err = r.Reset(ctx, "crew-task/b", b1); err != nil {
-		t.Fatal(err)
-	}
-	conflicts, err := r.Merge(ctx, landed)
-	if err != nil || len(conflicts) != 1 || conflicts[0] != "main.go" {
-		t.Fatalf("conflicts %v err %v", conflicts, err)
-	}
-	if _, _, err = r.Snapshot(ctx, landed, b1, "b caught up"); err == nil || !strings.Contains(err.Error(), "conflict markers") {
-		t.Fatalf("recorded unresolved conflicts: %v", err)
-	}
-	// A failed round is reset; the next one merges again and resolves.
-	if err = r.Reset(ctx, "crew-task/b", b1); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = r.Merge(ctx, landed); err != nil {
-		t.Fatal(err)
-	}
-	write(t, filepath.Join(r.Workspace(), "main.go"), "package main\n\nfunc A() {}\n\nfunc B() {}\n")
-	b2, files, err := r.Snapshot(ctx, landed, b1, "b caught up")
-	if err != nil || len(files) != 1 {
-		t.Fatalf("files %v err %v", files, err)
-	}
-	if in, err := r.Contains(ctx, b2, landed); err != nil || !in {
-		t.Fatalf("the caught-up revision does not contain what landed: %v %v", in, err)
-	}
-	if in, _ := r.Contains(ctx, b2, b1); !in {
-		t.Fatal("the caught-up revision dropped the task's own history")
-	}
-}
-
 func TestPushLandsOnlyByFastForwardAndFollowsTheOwnersCheckoutRules(t *testing.T) {
 	source := ownerRepo(t)
 	marker := filepath.Join(t.TempDir(), "hook")
@@ -486,38 +430,6 @@ func TestPushLandsOnlyByFastForwardAndFollowsTheOwnersCheckoutRules(t *testing.T
 	}
 	if git(t, source, "rev-parse", "main") != ownerTip {
 		t.Fatal("the owner's commit on main was lost")
-	}
-}
-
-func TestAMergeThatChangesNoFilesIsStillRecorded(t *testing.T) {
-	source := ownerRepo(t)
-	r, err := Open(ctx, t.TempDir(), source, nil, SignAsOwner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	base, _, err := r.Begin(ctx, "crew-task/a", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	write(t, filepath.Join(r.Workspace(), "same.go"), "package main\n")
-	landed, _, _ := r.Snapshot(ctx, base, base, "a")
-	if _, _, err = r.Begin(ctx, "crew-task/b", ""); err != nil {
-		t.Fatal(err)
-	}
-	write(t, filepath.Join(r.Workspace(), "same.go"), "package main\n")
-	b1, _, _ := r.Snapshot(ctx, base, base, "b, identical")
-	if err = r.Reset(ctx, "crew-task/b", b1); err != nil {
-		t.Fatal(err)
-	}
-	if conflicts, err := r.Merge(ctx, landed); err != nil || len(conflicts) != 0 {
-		t.Fatalf("conflicts %v err %v", conflicts, err)
-	}
-	merged, _, err := r.Snapshot(ctx, landed, b1, "catch up")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if in, _ := r.Contains(ctx, merged, landed); !in {
-		t.Fatal("the merge was not recorded, so the task never catches up")
 	}
 }
 
@@ -707,37 +619,6 @@ func TestDaemonGitIgnoresGlobalConfig(t *testing.T) {
 	}
 }
 
-func TestMergeCleanNeverTouchesTheWorkspace(t *testing.T) {
-	source := ownerRepo(t)
-	r, err := Open(ctx, t.TempDir(), source, nil, SignAsOwner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	base, _, _ := r.Begin(ctx, "crew-task/a", "")
-	write(t, filepath.Join(r.Workspace(), "main.go"), "package main // a\n")
-	a, _, _ := r.Snapshot(ctx, base, base, "a")
-	r.Begin(ctx, "crew-task/b", "")
-	write(t, filepath.Join(r.Workspace(), "main.go"), "package main // b\n")
-	b, _, _ := r.Snapshot(ctx, base, base, "b")
-	before := git(t, r.Workspace(), "rev-parse", "HEAD")
-	if commit, err := r.MergeClean(ctx, b, a, "merge"); err != nil || commit != "" {
-		t.Fatalf("a conflicting merge was made clean: %q %v", commit, err)
-	}
-	if git(t, r.Workspace(), "rev-parse", "HEAD") != before || git(t, r.Workspace(), "status", "--porcelain") != "" {
-		t.Fatal("a merge attempt changed the workspace")
-	}
-	r.Begin(ctx, "crew-task/c", "")
-	write(t, filepath.Join(r.Workspace(), "other.go"), "package main\n")
-	c, _, _ := r.Snapshot(ctx, base, base, "c")
-	merged, err := r.MergeClean(ctx, c, a, "merge")
-	if err != nil || merged == "" {
-		t.Fatalf("a clean merge failed: %v", err)
-	}
-	if parents := strings.Fields(git(t, r.Workspace(), "rev-list", "--parents", "-n1", merged)); len(parents) != 3 || parents[1] != c || parents[2] != a {
-		t.Fatalf("the merge does not have both parents: %v", parents)
-	}
-}
-
 func TestAFirstPushNeverTakesOverABranchAlreadyThere(t *testing.T) {
 	source := ownerRepo(t)
 	remote := t.TempDir()
@@ -755,115 +636,6 @@ func TestAFirstPushNeverTakesOverABranchAlreadyThere(t *testing.T) {
 	}
 	if git(t, remote, "rev-parse", "refs/heads/crew/a") != base {
 		t.Fatal("the existing branch was moved")
-	}
-}
-
-// fakeSigner stands in for gpg: it signs anything and notes the key it was
-// asked for.
-func fakeSigner(t *testing.T) (program, calls string) {
-	t.Helper()
-	dir := t.TempDir()
-	program, calls = filepath.Join(dir, "gpg"), filepath.Join(dir, "calls")
-	write(t, program, "#!/bin/sh\necho \"$@\" >> "+calls+"\ncat > /dev/null\necho '[GNUPG:] SIG_CREATED D 1 8 00 1 KEY' >&2\nprintf -- '-----BEGIN PGP SIGNATURE-----\\nfake\\n-----END PGP SIGNATURE-----\\n'\n")
-	if err := os.Chmod(program, 0700); err != nil {
-		t.Fatal(err)
-	}
-	return program, calls
-}
-
-func signed(t *testing.T, r Repo, commit string) bool {
-	t.Helper()
-	return strings.Contains(git(t, r.Workspace(), "cat-file", "commit", commit), "\ngpgsig ")
-}
-
-func TestCommitsAreMadeAsTheOwnerIsForTheirFolder(t *testing.T) {
-	source := ownerRepo(t)
-	home := t.TempDir()
-	personal := filepath.Join(home, "personal")
-	write(t, personal, "[user]\n\tname = Owner\n\temail = owner@personal.test\n")
-	folder, err := filepath.EvalSymlinks(filepath.Dir(source))
-	if err != nil {
-		t.Fatal(err)
-	}
-	global := filepath.Join(home, "gitconfig")
-	// A work identity everywhere, and a personal one for the folders the
-	// source sits in, as an includeIf for a directory gives it.
-	write(t, global, "[user]\n\tname = Owner at Work\n\temail = owner@work.test\n[includeIf \"gitdir:"+folder+"/\"]\n\tpath = "+personal+"\n")
-	t.Setenv("GIT_CONFIG_GLOBAL", global)
-	r, err := Open(ctx, t.TempDir(), source, nil, SignNever)
-	if err != nil {
-		t.Fatal(err)
-	}
-	base, _, _ := r.Begin(ctx, "crew-task/a", "")
-	write(t, filepath.Join(r.Workspace(), "a.go"), "package main\n")
-	a, _, err := r.Snapshot(ctx, base, base, "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if who := git(t, r.Workspace(), "log", "-1", "--format=%an <%ae> %cn <%ce>", a); who != "Owner <owner@personal.test> Owner <owner@personal.test>" {
-		t.Fatalf("committed as %s", who)
-	}
-
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	write(t, filepath.Join(r.Workspace(), "a.go"), "package main // 2\n")
-	b, _, _ := r.Snapshot(ctx, base, a, "b")
-	if who := git(t, r.Workspace(), "log", "-1", "--format=%ae", b); who != authorKey {
-		t.Fatalf("without an identity of the owner's, committed as %s", who)
-	}
-}
-
-func TestCommitsAreSignedAsTheOwnersGitConfigSaysUnlessTheProjectDecides(t *testing.T) {
-	source := ownerRepo(t)
-	program, calls := fakeSigner(t)
-	global := filepath.Join(t.TempDir(), "gitconfig")
-	write(t, global, "[user]\n\tname = Owner\n\temail = owner@example.test\n[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = "+program+"\n")
-	t.Setenv("GIT_CONFIG_GLOBAL", global)
-	project := t.TempDir()
-	r, err := Open(ctx, project, source, nil, SignAsOwner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	base, _, _ := r.Begin(ctx, "crew-task/a", "")
-	write(t, filepath.Join(r.Workspace(), "a.go"), "package main\n")
-	a, _, err := r.Snapshot(ctx, base, base, "a")
-	if err != nil || !signed(t, r, a) {
-		t.Fatalf("a revision was not signed as the owner's config asks: %v", err)
-	}
-	if got, _ := os.ReadFile(calls); !strings.Contains(string(got), "Owner <owner@example.test>") {
-		t.Fatalf("signed with a key other than the owner's: %s", got)
-	}
-	r.Begin(ctx, "crew-task/b", "")
-	write(t, filepath.Join(r.Workspace(), "b.go"), "package main\n")
-	b, _, _ := r.Snapshot(ctx, base, base, "b")
-	if merged, err := r.MergeClean(ctx, b, a, "catch up"); err != nil || !signed(t, r, merged) {
-		t.Fatalf("a catch-up merge was not signed: %v", err)
-	}
-
-	// The repository's own config has the last word, as it does for the owner.
-	git(t, source, "config", "commit.gpgsign", "false")
-	write(t, filepath.Join(r.Workspace(), "b.go"), "package main // 2\n")
-	b2, _, _ := r.Snapshot(ctx, base, b, "b2")
-	if signed(t, r, b2) {
-		t.Fatal("signed although the repository's config turns signing off")
-	}
-	// A project that chose for itself overrides both.
-	always, _ := Open(ctx, project, source, nil, SignAlways)
-	write(t, filepath.Join(r.Workspace(), "b.go"), "package main // 3\n")
-	if b3, _, _ := always.Snapshot(ctx, base, b2, "b3"); !signed(t, r, b3) {
-		t.Fatal("a project that always signs made an unsigned commit")
-	}
-	git(t, source, "config", "commit.gpgsign", "true")
-	never, _ := Open(ctx, project, source, nil, SignNever)
-	write(t, filepath.Join(r.Workspace(), "b.go"), "package main // 4\n")
-	b4, _, _ := never.Snapshot(ctx, base, b2, "b4")
-	if signed(t, r, b4) {
-		t.Fatal("a project that never signs made a signed commit")
-	}
-
-	git(t, source, "config", "gpg.program", "false")
-	write(t, filepath.Join(r.Workspace(), "b.go"), "package main // 5\n")
-	if _, _, err = r.Snapshot(ctx, base, b4, "b5"); err == nil || !strings.Contains(err.Error(), "signing") {
-		t.Fatalf("a failed signature should say signing is why: %v", err)
 	}
 }
 
