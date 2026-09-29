@@ -222,7 +222,7 @@ func TestAPullRequestIsBabysatThroughReviewAndCIUntilItMerges(t *testing.T) {
 	task = current()
 	var round string
 	for _, spec := range runner.seen {
-		if strings.Contains(spec.Prompt, "Handle the nil case") {
+		if spec.Write && strings.Contains(spec.Prompt, "Handle the nil case") {
 			round = spec.Prompt
 		}
 	}
