@@ -42,9 +42,7 @@ func (a *App) runChatCommand(ctx context.Context, turn core.ChatTurn) error {
 	} else {
 		err = a.Core.FinishChatCommand(saveCtx, turn.ID, summary, outcome)
 	}
-	if w, ok := a.chatWaiters.Load(turn.ID); ok {
-		w.(chan chatOutcome) <- chatOutcome{engine.Result{Message: outcome}, errors.Join(runErr, err)}
-	}
+	a.answerWaiter(turn.ID, chatOutcome{engine.Result{Message: outcome}, errors.Join(runErr, err)})
 	return err
 }
 

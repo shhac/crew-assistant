@@ -191,25 +191,31 @@ func (a *App) processNextChat(stop lifecycle.Stop) (bool, error) {
 	cancel()
 	saveCtx, saveCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer saveCancel()
-	status, reason := "completed", ""
-	if runErr != nil {
-		status = "failed"
-		reason = chatFailureReason(runErr)
-		if ctx.Err() != nil {
-			status = "interrupted"
-			reason = "The assistant stopped before this message finished. Recorded actions were preserved; no automatic replay was attempted."
-		}
-	}
+	status, reason := chatOutcomeStatus(runErr, ctx.Err() != nil)
 	if err = a.Core.FinishChat(saveCtx, turn.ID, status, result.Message, reason); err != nil {
-		if w, ok := a.chatWaiters.Load(turn.ID); ok {
-			w.(chan chatOutcome) <- chatOutcome{result, err}
-		}
+		a.answerWaiter(turn.ID, chatOutcome{result, err})
 		return true, err // Never advance past an uncertain durable completion.
 	}
-	if w, ok := a.chatWaiters.Load(turn.ID); ok {
-		w.(chan chatOutcome) <- chatOutcome{result, runErr}
-	}
+	a.answerWaiter(turn.ID, chatOutcome{result, runErr})
 	return true, nil
+}
+
+func chatOutcomeStatus(runErr error, stopped bool) (status, reason string) {
+	if runErr == nil {
+		return "completed", ""
+	}
+	if stopped {
+		return "interrupted", "The assistant stopped before this message finished. Recorded actions were preserved; no automatic replay was attempted."
+	}
+	return "failed", chatFailureReason(runErr)
+}
+
+// answerWaiter hands a finished turn's outcome to the caller waiting on it,
+// if one still is.
+func (a *App) answerWaiter(id string, outcome chatOutcome) {
+	if w, ok := a.chatWaiters.Load(id); ok {
+		w.(chan chatOutcome) <- outcome
+	}
 }
 
 func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Result, error) {
