@@ -128,6 +128,11 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string, fresh bool) stri
 		if len(p.Brief.Criteria) > 0 && t.Revisions[last-1].BriefVersion != p.Brief.Version {
 			b.WriteString("\nThe brief has changed since that draft. Make sure the revision meets the brief above.\n")
 		}
+		b.WriteString("\nFix every finding above and any earlier one still open. For each, find every other path that applies the same rule and fix it too.\n")
+	}
+	merging := caughtUp != "" && !revising
+	if !merging {
+		b.WriteString(checkBeforeFinishing(p, t))
 	}
 	// Implementer seats are told alike, whichever of them takes the round.
 	if writers := t.RolesOf(core.RoleImplementer); len(writers) > 0 {
@@ -136,12 +141,49 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string, fresh bool) stri
 		}
 	}
 	b.WriteString("\nIf a requirement needs something outside your sandbox, such as the owner's machine, their browser or the network, do everything else it asks, then end your reply with a ```owner-step block holding a JSON list: [{\"requirement\": \"the requirement, quoted\", \"why\": \"why you can't meet it from here\"}]. It goes to the owner to check after the change lands, instead of another round.\n")
+	account := "."
+	if !merging {
+		account = accountFor(t, revising)
+	}
 	if code {
-		b.WriteString("\nOnly change files in this repository. Do not commit, push, create branches or touch .git; your changes are recorded for you. Nothing you run can reach the network.\nEnd your reply with two sentences on what you changed.")
+		b.WriteString("\nOnly change files in this repository. Do not commit, push, create branches or touch .git; your changes are recorded for you. Nothing you run can reach the network.\nEnd your reply with two sentences on what you changed" + account)
 	} else {
-		b.WriteString("\nOnly change files in the working directory. Do not send, publish or deliver anything anywhere; the owner approves delivery.\nEnd your reply with two sentences on what you wrote or changed.")
+		b.WriteString("\nOnly change files in the working directory. Do not send, publish or deliver anything anywhere; the owner approves delivery.\nEnd your reply with two sentences on what you wrote or changed" + account)
 	}
 	return b.String()
+}
+
+// checkBeforeFinishing asks the implementer to hold its work up to the plan
+// and the criteria itself, rather than leave the gaps for a review to find.
+func checkBeforeFinishing(p core.Project, t core.Task) string {
+	var against []string
+	if t.Plan != nil && len(t.Plan.Changes) > 0 {
+		against = append(against, "plan change")
+	}
+	if len(p.Brief.Criteria) > 0 || len(t.Criteria) > 0 {
+		against = append(against, "criterion")
+	}
+	if len(against) == 0 {
+		return ""
+	}
+	return "\nBefore you finish, check each " + strings.Join(against, " and ") + ".\n"
+}
+
+// accountFor ends the reply's instruction with the list the implementer
+// owes: a line for each finding it was given and each plan item, so a gap
+// shows before a review has to find it.
+func accountFor(t core.Task, revising bool) string {
+	var per []string
+	if revising {
+		per = append(per, "per finding")
+	}
+	if t.Plan != nil && len(t.Plan.Changes) > 0 {
+		per = append(per, "per plan item")
+	}
+	if len(per) == 0 {
+		return "."
+	}
+	return ", then one line " + strings.Join(per, " and ") + ": done, or why not."
 }
 
 // latestChecksText is what the checks said of draft last, for the

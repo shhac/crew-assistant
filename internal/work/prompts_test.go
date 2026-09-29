@@ -68,3 +68,41 @@ func TestAReviewerIsShownTheEarlierFindingsAndAskedForEverything(t *testing.T) {
 		t.Fatalf("QA's check should be as it was: %s", qa)
 	}
 }
+
+// The implementer accounts for everything it was asked for before it hands
+// a draft on, so a gap shows in its own reply rather than a review.
+func TestTheImplementerAccountsForEveryFindingAndPlanItem(t *testing.T) {
+	code := core.Project{Brief: core.Brief{Goal: "Add features", Criteria: []string{"Handles errors"}}, Playbook: &core.Playbook{Medium: core.MediumGit}}
+	docs := core.Project{Brief: core.Brief{Goal: "Write notes"}}
+	task := reviewedTask()
+	task.Plan = &core.Plan{Role: "Researcher", Summary: "Add it.", Changes: []string{"add feature.go"}}
+	fix := "Fix every finding above and any earlier one still open. For each, find every other path that applies the same rule and fix it too."
+	check := "Before you finish, check each plan change and criterion."
+	revise := writerPrompt(code, task, "", false)
+	for _, want := range []string{fix, check, "End your reply with two sentences on what you changed, then one line per finding and per plan item: done, or why not."} {
+		if !strings.Contains(revise, want) {
+			t.Fatalf("a revise round lacks %q: %s", want, revise)
+		}
+	}
+	if !strings.Contains(writerPrompt(docs, task, "", false), "End your reply with two sentences on what you wrote or changed, then one line per finding and per plan item: done, or why not.") {
+		t.Fatal("a document's revise round should ask for the same account")
+	}
+	first := task
+	first.Revisions, first.Verdicts = nil, nil
+	draft := writerPrompt(code, first, "", false)
+	if strings.Contains(draft, fix) || !strings.Contains(draft, check) || !strings.Contains(draft, "on what you changed, then one line per plan item: done, or why not.") {
+		t.Fatalf("a first draft should account for the plan only: %s", draft)
+	}
+	unplanned := first
+	unplanned.Plan = nil
+	if plain := writerPrompt(docs, unplanned, "", false); strings.Contains(plain, "Before you finish") || !strings.HasSuffix(plain, "on what you wrote or changed.") {
+		t.Fatalf("with no plan or criteria there is nothing to account for: %s", plain)
+	}
+	// Catching up a passed draft to land it owes only the merge.
+	passed := first
+	passed.Revisions = []core.Revision{{N: 1}}
+	passed.Verdicts = []core.Verdict{{Revision: 1, Role: "Reviewer", Outcome: core.VerdictPass, Summary: "Good."}}
+	if landing := writerPrompt(code, passed, catchUpText("main moved on", []string{"main.go"}), false); strings.Contains(landing, "Before you finish") || strings.Contains(landing, "done, or why not") {
+		t.Fatalf("a catch-up before landing should ask for no account: %s", landing)
+	}
+}
