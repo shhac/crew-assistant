@@ -47,7 +47,7 @@ func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
 			profile = "assistant"
 		}
 		if profile != "assistant" {
-			http.Error(w, "unknown model profile", http.StatusBadRequest)
+			fail(w, http.StatusBadRequest, "unknown model profile")
 			return
 		}
 		cfg := a.Config()
@@ -62,7 +62,7 @@ func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
 		}
 		if preview := r.URL.Query().Get("engine"); preview != "" {
 			if !config.Supports(preview, config.UseModels) {
-				http.Error(w, "unknown model engine", http.StatusBadRequest)
+				fail(w, http.StatusBadRequest, "unknown model engine")
 				return
 			}
 			selected = cfg.Harness(preview, selected.Model, selected.Effort)
