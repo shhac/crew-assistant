@@ -148,7 +148,7 @@ function SubscriptionUse({
             max={8}
             step={1}
             value={numberOrEmpty(settings.role_runs)}
-            placeholder={defaults?.role_runs?.toString()}
+            placeholder="Off"
             onChange={(e) =>
               onChange(
                 withEngine(config, engine, {
@@ -162,8 +162,9 @@ function SubscriptionUse({
       </div>
       <p className="hint">
         {label} teams wait while less than this is left, and carry on when the
-        window resets. Blank uses the default; 0 never waits. Team turns at once
-        counts every project's; none starts while you chat.
+        window resets. Blank uses the default; 0 never waits. Each team member
+        works one step at a time; team turns at once is an optional safety cap
+        across every project, off when blank. None starts while you chat.
       </p>
     </Panel>
   );

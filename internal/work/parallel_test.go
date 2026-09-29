@@ -217,10 +217,120 @@ func TestReviewerAndQACheckOneDraftAtOnce(t *testing.T) {
 	}
 }
 
-// Role turns on one engine run no more at once than the owner allows,
-// across every task: by default one each.
+// twoProjects are two writing projects, each with its implementer seat
+// given to a member of its own on Claude, named as given: the same name
+// twice seats one member in both.
+func twoProjects(t *testing.T, runner roles.Runner, first, second string) (*Loop, core.Project, core.Project) {
+	t.Helper()
+	a, p := parallelApp(t, runner, 0)
+	ctx := context.Background()
+	other, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Other notes", Template: "draft", Brief: core.BriefInput{Goal: "Write other notes"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := map[string]string{}
+	for _, seat := range []struct {
+		p    *core.Project
+		name string
+	}{{&p, first}, {&other, second}} {
+		if members[seat.name] == "" {
+			m, err := a.Core.SaveMember(ctx, "", core.MemberInput{Name: seat.name, Kinds: []string{core.RoleImplementer}, Engine: "claude"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			members[seat.name] = m.ID
+		}
+		if *seat.p, err = a.SetSeat(ctx, seat.p.ID, core.RoleImplementer, members[seat.name]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return a, p, other
+}
+
+// Two members work at once, though both run on Claude: with no safety cap
+// set, DevB starts writing in one project while DevA writes in another. With
+// the owner's cap of one turn on Claude, DevB waits for DevA, and its task
+// says it waits for that cap.
+func TestTwoMembersOnOneEngineWorkAtOnce(t *testing.T) {
+	for _, capped := range []bool{false, true} {
+		t.Run(fmt.Sprintf("capped %v", capped), func(t *testing.T) {
+			runner := &parallelRunner{}
+			a, first, second := twoProjects(t, runner, "DevA", "DevB")
+			if capped {
+				one := 1
+				cfg := config.Default()
+				cfg.Engines.Claude.RoleRuns = &one
+				a.Config = func() config.Config { return cfg }
+			}
+			queue(t, a, first, "A")
+			b := queue(t, a, second, "B")
+			devB := make(chan struct{})
+			var once sync.Once
+			overlapped := false
+			var waited *core.Wait
+			runner.onTurn = func(_ context.Context, seat, _ string, write bool) error {
+				switch {
+				case write && seat == "DevB":
+					once.Do(func() { close(devB) })
+				case write && seat == "DevA" && capped:
+					waited = taskByID(t, a, b.ID).Waiting
+				case write && seat == "DevA":
+					overlapped = within(devB)
+				}
+				return nil
+			}
+			settle(t, a)
+			if overlapped == capped {
+				t.Fatalf("DevB wrote beside DevA: %v", overlapped)
+			}
+			if capped && (waited == nil || *waited != (core.Wait{Kind: core.WaitEngineCap, Engine: "claude"})) {
+				t.Fatalf("B should wait for the Claude safety cap: %+v", waited)
+			}
+			if got := taskByID(t, a, b.ID); got.Status != core.TaskWaiting || len(got.Revisions) != 1 || got.Waiting != nil {
+				t.Fatalf("B %+v", got)
+			}
+		})
+	}
+}
+
+// A member seated in two projects is one person: with no safety cap to hold
+// them back, they still write one project's task and then the other's, and
+// the other says it waits for them, busy on the first.
+func TestAMemberSharedByTwoProjectsWorksOneStepAtATime(t *testing.T) {
+	runner := &parallelRunner{}
+	a, one, other := twoProjects(t, runner, "Lucius", "Lucius")
+	first := queue(t, a, one, "A")
+	b := queue(t, a, other, "B")
+	var waited *core.Wait
+	runner.onTurn = func(_ context.Context, _, objective string, write bool) error {
+		if write && objective == "A" {
+			// Give B's step every chance to start beside A's.
+			time.Sleep(100 * time.Millisecond)
+			waited = taskByID(t, a, b.ID).Waiting
+		}
+		return nil
+	}
+	settle(t, a)
+	if len(runner.twice) != 0 {
+		t.Fatalf("Lucius worked on two steps at once: %v", runner.twice)
+	}
+	if ref := taskByID(t, a, first.ID).Ref; waited == nil || *waited != (core.Wait{Kind: core.WaitMember, Seat: "Lucius", Member: waited.Member, On: ref}) || waited.Member == "" || ref == "" {
+		t.Fatalf("B should wait for Lucius, busy on %s: %+v", ref, waited)
+	}
+	if got := taskByID(t, a, b.ID); got.Status != core.TaskWaiting || len(got.Revisions) != 1 {
+		t.Fatalf("B %+v", got)
+	}
+}
+
+// Role turns on one engine run no more at once than the safety cap the
+// owner set, across every task; with none set, nothing but the people
+// bounds them.
 func TestTurnsOnOneEngineWaitForAFreeSlot(t *testing.T) {
 	a, runner, _, task := codeTask(t, pass, pass)
+	one := 1
+	cfg := config.Default()
+	cfg.Engines.Codex.RoleRuns = &one
+	a.Config = func() config.Config { return cfg }
 	var mu sync.Mutex
 	now, most := 0, 0
 	a.runner = checkRunner{codeRunner: runner, onCheck: func(roles.Spec) {
@@ -241,11 +351,19 @@ func TestTurnsOnOneEngineWaitForAFreeSlot(t *testing.T) {
 		t.Fatalf("task %+v", done)
 	}
 	if !a.admit("codex") || a.admit("codex") {
-		t.Fatal("the default bound is one turn at once")
+		t.Fatal("a cap of one is one turn at once")
 	}
 	a.free("codex")
 	if !a.admit("codex") {
 		t.Fatal("a freed slot is not taken again")
+	}
+	a.free("codex")
+	// With no cap set, the default, the engine never holds a turn back.
+	a.Config = config.Default
+	for range config.MaxRoleRuns + 1 {
+		if !a.admit("codex") {
+			t.Fatal("an engine with no safety cap refused a turn")
+		}
 	}
 }
 
@@ -553,7 +671,7 @@ func TestARestartResumesEachClaimOnceAndHoldsAnUnconfirmedOne(t *testing.T) {
 	}
 	first, second := queue(t, a, p, "A"), queue(t, a, p, "B")
 	// The old daemon claimed both writers' turns, then stopped.
-	claimed, err := a.Core.Schedule(ctx, func(core.Role) bool { return true })
+	claimed, err := a.Core.Schedule(ctx, func(core.Role) string { return "" })
 	if err != nil || len(claimed) != 2 {
 		t.Fatalf("claimed %+v %v", claimed, err)
 	}
@@ -695,7 +813,7 @@ func TestARestartRunsThePMsLookOnceOrHoldsIt(t *testing.T) {
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, _, second := pmTeam(t, runner)
 	ctx := context.Background()
-	c, _, ok, err := a.Core.ClaimPM(ctx, p.ID, func(core.Role) bool { return true })
+	c, _, ok, err := a.Core.ClaimPM(ctx, p.ID, func(core.Role) string { return "" })
 	if err != nil || !ok {
 		t.Fatalf("claim %v %v", ok, err)
 	}
@@ -779,7 +897,7 @@ func TestTheAssistantsQuestionTakesThePMsSeatAndATurn(t *testing.T) {
 		return n
 	}
 	// The PM is looking at the list: its seat is busy.
-	look, _, ok, err := a.Core.ClaimPM(ctx, p.ID, func(core.Role) bool { return true })
+	look, _, ok, err := a.Core.ClaimPM(ctx, p.ID, func(core.Role) string { return "" })
 	if err != nil || !ok {
 		t.Fatalf("look %v %v", ok, err)
 	}
@@ -787,7 +905,11 @@ func TestTheAssistantsQuestionTakesThePMsSeatAndATurn(t *testing.T) {
 		t.Fatalf("asked a PM busy looking at the list: %v, %d", err, asks())
 	}
 	a.Core.ReleaseProjectClaim(ctx, p.ID, look.Token)
-	// Its engine has no turn free.
+	// Its engine, under the owner's safety cap of one, has no turn free.
+	one := 1
+	cfg := config.Default()
+	cfg.Engines.Claude.RoleRuns = &one
+	a.Config = func() config.Config { return cfg }
 	if !a.admit("claude") {
 		t.Fatal("no slot to fill")
 	}
@@ -801,7 +923,7 @@ func TestTheAssistantsQuestionTakesThePMsSeatAndATurn(t *testing.T) {
 	defer chatting()
 	var seatFree, slotFree bool
 	runner.onAsked = func() {
-		_, _, seatFree, _ = a.Core.ClaimPM(ctx, p.ID, func(core.Role) bool { return true })
+		_, _, seatFree, _ = a.Core.ClaimPM(ctx, p.ID, func(core.Role) string { return "" })
 		if slotFree = a.take("claude", true); slotFree {
 			a.free("claude")
 		}
@@ -836,8 +958,9 @@ func TestTheAssistantsQuestionWaitsForTheTaskThePMIsDeciding(t *testing.T) {
 	for _, c := range []struct {
 		name     string
 		roleRuns int
-		// elsewhere asks the same member as PM of another project, whose
-		// seat is free, so only the engine's bound holds the question back.
+		// elsewhere asks another member on the same engine, as PM of another
+		// project, who is free, so only the engine's safety cap holds the
+		// question back.
 		elsewhere bool
 	}{
 		{"the seat is taken", 2, false},
@@ -853,6 +976,13 @@ func TestTheAssistantsQuestionWaitsForTheTaskThePMIsDeciding(t *testing.T) {
 			a.Config = func() config.Config { return cfg }
 			ctx := context.Background()
 			pm, _ := p.PMSeat()
+			if c.elsewhere {
+				other, err := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Quill", Kinds: []string{core.RolePM}, Engine: pm.Engine})
+				if err != nil {
+					t.Fatal(err)
+				}
+				pm.Member = other.ID
+			}
 			routed := false
 			var asked, otherFree error
 			runner.onRoute = func() {
@@ -869,7 +999,7 @@ func TestTheAssistantsQuestionWaitsForTheTaskThePMIsDeciding(t *testing.T) {
 					}
 					target = other.ID
 					// Its seat is free: only the turn is taken.
-					look, _, ok, err := a.Core.ClaimPMQuestion(ctx, other.ID, func(core.Role) bool { return true })
+					look, _, ok, err := a.Core.ClaimPMQuestion(ctx, other.ID, func(core.Role) string { return "" })
 					if err != nil || !ok {
 						otherFree = fmt.Errorf("the other project's PM seat was not free: %v %v", ok, err)
 						return

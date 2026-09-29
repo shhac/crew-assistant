@@ -398,6 +398,35 @@ describe("the board", () => {
       ),
     ).toBe("Waiting to start");
   });
+  it("says who or what a ready step waits for", () => {
+    const queued = (waiting: Task["waiting"]) =>
+      requestStep(task({ status: "queued", waiting }));
+    expect(
+      queued({ kind: "member", seat: "Lucius", member: "m1", on: "CA-27" }),
+    ).toBe("Waiting for Lucius (busy on CA-27)");
+    expect(queued({ kind: "member", seat: "Implementer", on: "CA-3" })).toBe(
+      "Waiting for the implementer (busy on CA-3)",
+    );
+    expect(
+      queued({ kind: "member", seat: "Pim", member: "m2", list: "Notes" }),
+    ).toBe("Waiting for Pim (busy with the Notes to-do list)");
+    expect(queued({ kind: "project_cap", active: 2, cap: 2 })).toBe(
+      "Waiting for this project's cap (2 of 2 active)",
+    );
+    expect(queued({ kind: "engine_cap", engine: "claude" })).toBe(
+      "Waiting for the Claude safety cap",
+    );
+    expect(queued({ kind: "owner" })).toBe("Waiting while you chat");
+    // A started task's next round says it too, and a task back with the
+    // owner never does.
+    const waiting = { kind: "member" as const, seat: "Ada", member: "m1" };
+    expect(requestStep(task({ status: "writing", round: 2, waiting }))).toBe(
+      "Round 2 · Waiting for Ada",
+    );
+    expect(
+      requestStep(task({ status: "waiting", waiting }), decision("delivery")),
+    ).toBe("Waiting for your approval");
+  });
 });
 
 describe("projects", () => {

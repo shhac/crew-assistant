@@ -110,7 +110,7 @@ func configKeys(o *options) []libcli.ConfigKey {
 			libcli.PathKey(b, prefix+"home", "The "+name+" login home; empty is the default", func(c *config.Config) *string { return &engine(c).Home }),
 		)
 		if config.Supports(name, config.UseRoles) {
-			keys = append(keys, libcli.OptionalIntKey(b, prefix+"role_runs", "How many team role turns run on "+name+" at once, across every project", func(c *config.Config) **int { return &engine(c).RoleRuns }, 1, config.MaxRoleRuns))
+			keys = append(keys, libcli.OptionalIntKey(b, prefix+"role_runs", "An optional safety cap on team role turns running on "+name+" at once, across every project; off by default", func(c *config.Config) **int { return &engine(c).RoleRuns }, 1, config.MaxRoleRuns))
 		}
 		if !config.Supports(name, config.UseUsage) {
 			continue

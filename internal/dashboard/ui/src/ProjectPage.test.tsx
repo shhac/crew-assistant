@@ -1645,6 +1645,33 @@ describe("a request's relations", () => {
     ).toBeTruthy();
     expect(within(todo).queryByText(/^Blocks/)).toBeNull();
   });
+  it("shows on a to-do card who or what its start waits for", () => {
+    const lucius = { kind: "member" as const, seat: "Lucius", member: "m7" };
+    show(project(), {
+      tasks: [
+        task({ waiting: { ...lucius, on: "CA-27" } }),
+        task({
+          id: "t2",
+          objective: "Tidy the logs",
+          waiting: { kind: "project_cap", active: 2, cap: 2 },
+        }),
+        task({ id: "t3", objective: "Trim the cache" }),
+      ],
+    });
+    const todo = screen.getByRole("listitem", { name: "To do" });
+    const step = (objective: string) =>
+      within(todo)
+        .getByRole("link", { name: objective })
+        .closest("article")!
+        .querySelector(".board-card-step")?.textContent;
+    expect(step("Cache the lookups")).toBe(
+      "Waiting for Lucius (busy on CA-27)",
+    );
+    expect(step("Tidy the logs")).toBe(
+      "Waiting for this project's cap (2 of 2 active)",
+    );
+    expect(step("Trim the cache")).toBeUndefined();
+  });
 });
 
 describe("whether a role is at work", () => {

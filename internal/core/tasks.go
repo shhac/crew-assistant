@@ -47,7 +47,10 @@ type Task struct {
 	// to land, which the owner may take ahead of it. Derived with Stage.
 	PMDeciding bool   `json:"pm_deciding,omitempty"`
 	Detail     string `json:"detail,omitempty"`
-	Roles      []Role `json:"roles,omitempty"`
+	// Waiting is who or what the task's next step waits for, while it is
+	// ready and can't start; see Schedule.
+	Waiting *Wait  `json:"waiting,omitempty"`
+	Roles   []Role `json:"roles,omitempty"`
 	// Playbook is the team's setup as it was when the task started: its
 	// medium and, for code, the repository, check and branch prefix.
 	Playbook  *Playbook `json:"playbook,omitempty"`

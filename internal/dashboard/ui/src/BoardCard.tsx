@@ -57,7 +57,8 @@ export function BoardCard({
       >
         {task.objective}
       </a>
-      {task.stage !== "todo" && (
+      {/* A to-do card says only who or what its start waits for. */}
+      {(task.stage !== "todo" || task.waiting) && (
         <p className="board-card-step">
           {worker && <Avatar of={worker} size={20} />}
           {needsYou(task) ? (

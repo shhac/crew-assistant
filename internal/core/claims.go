@@ -1,6 +1,7 @@
 package core
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -134,20 +135,54 @@ type Scheduled struct {
 }
 
 // Admit lets a seat's turn start now, taking what it needs to run, such as
-// a slot on its engine; false leaves the step for a later look.
-type Admit func(Role) bool
+// a slot on its engine. It returns "" when it does; otherwise the step is
+// left for a later look, and it returns what holds the turn back:
+// WaitEngineCap or WaitOwner.
+type Admit func(Role) string
+
+// Kinds of Wait: a person busy with other work, the project's cap on tasks
+// under way, an engine's safety cap on role turns at once, and the owner's
+// own use, which no new role turn starts during.
+const (
+	WaitMember     = "member"
+	WaitProjectCap = "project_cap"
+	WaitEngineCap  = "engine_cap"
+	WaitOwner      = "owner"
+)
+
+// Wait is who or what a task's next step waits for while it is ready to
+// start and can't: recorded by each look at the work, and cleared once the
+// step is claimed.
+type Wait struct {
+	Kind string `json:"kind"`
+	// Seat is the busy person's seat, and Member the team member it is
+	// filled from, if any.
+	Seat   string `json:"seat,omitempty"`
+	Member string `json:"member,omitempty"`
+	// On is the readable ID of the task the person is busy on; List is the
+	// title of the project whose to-do list they are busy with instead.
+	On   string `json:"on,omitempty"`
+	List string `json:"list,omitempty"`
+	// Active and Cap are the project's tasks under way and its cap on them.
+	Active int `json:"active,omitempty"`
+	Cap    int `json:"cap,omitempty"`
+	// Engine is the engine whose safety cap is reached.
+	Engine string `json:"engine,omitempty"`
+}
 
 // Schedule claims every step that can start now, in one change: the next
 // steps of started tasks first, furthest along first, then queued tasks in
-// queue order while their project is below its cap on active tasks. A seat
-// takes one step at a time. A task's checks each take a seat of their own,
-// side by side; any other step holds the task alone, and a project lands one
-// task at a time.
+// queue order while their project is below its cap on active tasks. A person
+// takes one step at a time, across every project and seat they hold. A
+// task's checks each take a seat of their own, side by side; any other step
+// holds the task alone, and a project lands one task at a time. A task whose
+// next step is ready and can't start records what it waits for.
 func (s *Service) Schedule(ctx context.Context, admit Admit) ([]Scheduled, error) {
 	var out []Scheduled
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		now := s.now().UTC()
-		busy := busySeats(v)
+		busy := busyPeople(v)
+		waits := map[string]*Wait{}
 		var active []*Task
 		for i := range v.Tasks {
 			if v.Tasks[i].Active() {
@@ -167,15 +202,54 @@ func (s *Service) Schedule(ctx context.Context, admit Admit) ([]Scheduled, error
 			if t.RetryAt.After(now) || t.Handoff != nil {
 				continue
 			}
-			out = append(out, offer(v, t, busy, admit, now)...)
+			claimed, wait := offer(v, t, busy, admit, now)
+			out = append(out, claimed...)
+			waits[t.ID] = wait
 		}
-		for i := range v.Projects {
-			out = append(out, startQueued(v, &v.Projects[i], busy, admit, now)...)
+		for _, p := range queueOrder(v) {
+			out = append(out, startQueued(v, p, busy, admit, waits, now)...)
+		}
+		for i := range v.Tasks {
+			v.Tasks[i].Waiting = waits[v.Tasks[i].ID]
 		}
 		markBeside(v)
 		return nil
 	})
 	return out, err
+}
+
+// queueOrder is the projects in the order their queued work was asked for:
+// the project whose next task to start was asked for first goes first, so a
+// person seated in several projects starts their tasks in the order they
+// were asked for, not one project's ahead of another's.
+func queueOrder(v *Snapshot) []*Project {
+	next := func(p *Project) (time.Time, bool) {
+		for _, t := range v.Tasks {
+			if t.ProjectID == p.ID && t.Status == TaskQueued && len(waitsFor(v, t)) == 0 {
+				return t.CreatedAt, true
+			}
+		}
+		return time.Time{}, false
+	}
+	var out []*Project
+	for i := range v.Projects {
+		out = append(out, &v.Projects[i])
+	}
+	slices.SortStableFunc(out, func(a, b *Project) int {
+		at, aok := next(a)
+		bt, bok := next(b)
+		switch {
+		case aok != bok:
+			if aok {
+				return -1
+			}
+			return 1
+		case !aok:
+			return 0
+		}
+		return at.Compare(bt)
+	})
+	return out
 }
 
 // markBeside records, on each task under way, the other tasks of its
@@ -204,70 +278,138 @@ func (t Task) BuiltBeside(o Task) bool {
 	return slices.Contains(t.Beside, o.ID) || slices.Contains(o.Beside, t.ID)
 }
 
-// busySeats are the seats with a claim, a task's or the project's own, by
-// project and seat name.
-func busySeats(v *Snapshot) map[string]bool {
-	busy := map[string]bool{}
-	mark := func(projectID string, claims []Claim) {
-		for _, c := range claims {
-			if c.Seat != "" {
-				busy[seatKey(projectID, c.Seat)] = true
-			}
+// personKey is who sits in seat r of team. A seat filled from a team member
+// is that member, as the first, second, ... copy of the member's seats that
+// hold the same roles: Claudius and Claudius #2, added as a copy of it, are
+// two people, while a member's seats holding different roles, such as one
+// that implements and one that reviews, are one person, and so is the
+// member's first seat in every project. A template's seat, such as a new
+// project's Implementer, is a person of its own in its project.
+func personKey(projectID string, team []Role, r Role) string {
+	if r.Member == "" {
+		return "seat/" + projectID + "/" + strings.ToLower(strings.TrimSpace(r.Name))
+	}
+	copies := 0
+	for _, o := range team {
+		if strings.EqualFold(o.Name, r.Name) {
+			break
+		}
+		if o.Member == r.Member && len(o.Kinds) == len(r.Kinds) && !slices.ContainsFunc(o.Kinds, func(k string) bool { return !r.Holds(k) }) {
+			copies++
 		}
 	}
+	return fmt.Sprintf("member/%s/%d", r.Member, copies)
+}
+
+// seatRole is the seat a claim on a task names, and the team it sits in: as
+// the task pinned it, or else as the project's team has it now, as for the
+// PM's seat held while a task is decided.
+func seatRole(v *Snapshot, projectID string, pinned []Role, name string) (Role, []Role) {
+	for _, roles := range [][]Role{pinned, playbookRoles(project(v, projectID))} {
+		if i := slices.IndexFunc(roles, func(r Role) bool { return strings.EqualFold(r.Name, name) }); i >= 0 {
+			return roles[i], roles
+		}
+	}
+	return Role{Name: name}, nil
+}
+
+func playbookRoles(p *Project) []Role {
+	if p == nil || p.Playbook == nil {
+		return nil
+	}
+	return p.Playbook.Roles
+}
+
+// busyPeople are the people with a claim, a task's or a project's own, in
+// any project, each with what they are busy on, as a Wait for them.
+func busyPeople(v *Snapshot) map[string]Wait {
+	busy := map[string]Wait{}
 	for _, t := range v.Tasks {
-		mark(t.ProjectID, t.Claims)
+		for _, c := range t.Claims {
+			if c.Seat == "" {
+				continue
+			}
+			r, team := seatRole(v, t.ProjectID, t.Roles, c.Seat)
+			doing := onTask(v, t)
+			doing.Kind, doing.Seat, doing.Member = WaitMember, r.Name, r.Member
+			busy[personKey(t.ProjectID, team, r)] = doing
+		}
 	}
 	for _, p := range v.Projects {
-		mark(p.ID, p.Claims)
+		for _, c := range p.Claims {
+			if c.Seat != "" {
+				r, team := seatRole(v, p.ID, nil, c.Seat)
+				busy[personKey(p.ID, team, r)] = Wait{Kind: WaitMember, Seat: r.Name, Member: r.Member, List: p.Title}
+			}
+		}
 	}
 	return busy
 }
 
-func seatKey(projectID, seat string) string {
-	return projectID + "/" + strings.ToLower(strings.TrimSpace(seat))
+// onTask is a person busy on t, as a Wait for them names it.
+func onTask(v *Snapshot, t Task) Wait {
+	if p := project(v, t.ProjectID); p != nil {
+		return Wait{On: p.TaskRef(t.Number)}
+	}
+	return Wait{}
 }
 
-// freeSeat is the first of seats with no claim that admit lets run, which it
-// marks busy.
-func freeSeat(projectID string, seats []Role, busy map[string]bool, admit Admit) (Role, bool) {
+// freeSeat is the first of seats, on team, whose person is free and that
+// admit lets run, which it marks busy on what doing names. With none, it
+// says what the seats wait for: what admit refused, or else the first
+// seat's person, busy elsewhere.
+func freeSeat(projectID string, team, seats []Role, busy map[string]Wait, admit Admit, doing Wait) (Role, *Wait) {
+	var wait *Wait
 	for _, r := range seats {
-		key := seatKey(projectID, r.Name)
-		if busy[key] || !admit(r) {
+		key := personKey(projectID, team, r)
+		if on, ok := busy[key]; ok {
+			if wait == nil {
+				wait = &on
+			}
 			continue
 		}
-		busy[key] = true
-		return r, true
+		if why := admit(r); why != "" {
+			wait = &Wait{Kind: why}
+			if why == WaitEngineCap {
+				wait.Engine = r.Engine
+			}
+			continue
+		}
+		doing.Kind, doing.Seat, doing.Member = WaitMember, r.Name, r.Member
+		busy[key] = doing
+		return r, nil
 	}
-	return Role{}, false
+	return Role{}, wait
 }
 
 // stepKinds is the kind of role that takes each step a seat takes.
 var stepKinds = map[string]string{TaskResearching: RoleResearcher, TaskDesigning: RoleDesigner, TaskWriting: RoleImplementer}
 
 // offer claims what t can do next: its step, or each check its latest draft
-// still needs.
-func offer(v *Snapshot, t *Task, busy map[string]bool, admit Admit, now time.Time) []Scheduled {
+// still needs. With nothing of the task under way or claimed, it says what
+// a step that is ready waits for.
+func offer(v *Snapshot, t *Task, busy map[string]Wait, admit Admit, now time.Time) ([]Scheduled, *Wait) {
 	if t.alone() {
-		return nil
+		return nil, nil
 	}
-	whole := func(step string, seat Role) []Scheduled {
+	whole := func(step string, seat Role) ([]Scheduled, *Wait) {
 		c := newClaim(t, Claim{Step: step, Seat: seat.Name}, now)
-		return []Scheduled{{Task: *t, Claim: c, Seat: seat}}
+		return []Scheduled{{Task: *t, Claim: c, Seat: seat}}, nil
 	}
 	if kind, ok := stepKinds[t.Status]; ok {
 		if len(t.Claims) > 0 {
-			return nil
+			return nil, nil
 		}
 		seats := t.RolesOf(kind)
 		// With no seat for it, the step itself says what happens instead.
 		if len(seats) == 0 {
 			return whole(t.Status, Role{})
 		}
-		if seat, ok := freeSeat(t.ProjectID, seats, busy, admit); ok {
+		seat, wait := freeSeat(t.ProjectID, t.Roles, seats, busy, admit, onTask(v, *t))
+		if wait == nil {
 			return whole(t.Status, seat)
 		}
-		return nil
+		return nil, wait
 	}
 	switch t.Status {
 	case TaskReviewing:
@@ -277,6 +419,7 @@ func offer(v *Snapshot, t *Task, busy map[string]bool, admit Admit, now time.Tim
 		latest := t.Revisions[len(t.Revisions)-1].N
 		brief := briefVersion(v, *t)
 		var out []Scheduled
+		var waiting *Wait
 		pending := false
 		for _, g := range t.CheckerGroups() {
 			if t.Judged(g.Seats[0].Name, latest, brief) {
@@ -288,15 +431,19 @@ func offer(v *Snapshot, t *Task, busy map[string]bool, admit Admit, now time.Tim
 			if slices.ContainsFunc(t.Claims, func(c Claim) bool { return c.Group == g.Key }) {
 				continue
 			}
-			seat, ok := freeSeat(t.ProjectID, g.Seats, busy, admit)
-			if !ok {
+			seat, wait := freeSeat(t.ProjectID, t.Roles, g.Seats, busy, admit, onTask(v, *t))
+			if wait != nil {
+				waiting = cmp.Or(waiting, wait)
 				continue
 			}
 			c := newClaim(t, Claim{Step: TaskReviewing, Seat: seat.Name, Group: g.Key, Revision: latest, Shared: true}, now)
 			out = append(out, Scheduled{Task: *t, Claim: c, Seat: seat})
 		}
 		if pending {
-			return out
+			if len(t.Claims) > 0 {
+				return out, nil
+			}
+			return out, waiting
 		}
 	case TaskLanding:
 		// One landing at a time, counting one a stop cut off whose delivery
@@ -307,11 +454,11 @@ func offer(v *Snapshot, t *Task, busy map[string]bool, admit Admit, now time.Tim
 			}
 			return (o.Finished() && o.Delivering != nil) || slices.ContainsFunc(o.Claims, func(c Claim) bool { return c.Step == TaskLanding })
 		}) {
-			return nil
+			return nil, nil
 		}
 	}
 	if len(t.Claims) > 0 {
-		return nil
+		return nil, nil
 	}
 	return whole(t.Status, Role{})
 }
@@ -319,8 +466,9 @@ func offer(v *Snapshot, t *Task, busy map[string]bool, admit Admit, now time.Tim
 // startQueued starts a project's queued tasks in queue order, skipping
 // those that wait for unfinished work, while the project is below its cap
 // and a seat is free for the first step. A queued task never starts ahead
-// of one before it that could.
-func startQueued(v *Snapshot, p *Project, busy map[string]bool, admit Admit, now time.Time) []Scheduled {
+// of one before it that could; the first that can't records in waits what
+// it waits for.
+func startQueued(v *Snapshot, p *Project, busy map[string]Wait, admit Admit, waits map[string]*Wait, now time.Time) []Scheduled {
 	// Nothing starts while the PM is ordering the list: the order it sets
 	// is the one tasks start in.
 	if p.Playbook == nil || slices.ContainsFunc(p.Claims, func(c Claim) bool { return c.Step == StepPM }) {
@@ -338,7 +486,8 @@ func startQueued(v *Snapshot, p *Project, busy map[string]bool, admit Admit, now
 		if t.ProjectID != p.ID || t.Status != TaskQueued || len(waitsFor(v, *t)) > 0 {
 			continue
 		}
-		if active >= p.Playbook.ActiveCap() {
+		if limit := p.Playbook.ActiveCap(); active >= limit {
+			waits[t.ID] = &Wait{Kind: WaitProjectCap, Active: active, Cap: limit}
 			break
 		}
 		status := TaskWriting
@@ -347,8 +496,9 @@ func startQueued(v *Snapshot, p *Project, busy map[string]bool, admit Admit, now
 		}
 		var seat Role
 		if seats := rolesOf(p.Playbook.Roles, stepKinds[status]); len(seats) > 0 {
-			var ok bool
-			if seat, ok = freeSeat(p.ID, seats, busy, admit); !ok {
+			var wait *Wait
+			if seat, wait = freeSeat(p.ID, p.Playbook.Roles, seats, busy, admit, onTask(v, *t)); wait != nil {
+				waits[t.ID] = wait
 				break
 			}
 		}
@@ -394,8 +544,9 @@ func (s *Service) ClaimTask(ctx context.Context, taskID, step string) (Claim, er
 
 // ClaimMessage takes the seat a message to a reviewer or QA is for, to
 // answer it with a check of the latest draft, beside the task's other
-// checks. It says whether it could: not while the seat is busy, the task is
-// held for another step, or the message is no longer waiting.
+// checks. It says whether it could: not while the seat's person is busy in
+// any project, the task is held for another step, or the message is no
+// longer waiting.
 func (s *Service) ClaimMessage(ctx context.Context, taskID, messageID string, admit Admit) (Scheduled, bool, error) {
 	var out Scheduled
 	found := false
@@ -419,9 +570,8 @@ func (s *Service) ClaimMessage(ctx context.Context, taskID, messageID string, ad
 		if ok && slices.ContainsFunc(t.Claims, func(c Claim) bool { return c.Group == group }) {
 			return nil
 		}
-		busy := busySeats(v)
 		if ok {
-			if seat, ok = freeSeat(t.ProjectID, []Role{seat}, busy, admit); !ok {
+			if _, wait := freeSeat(t.ProjectID, t.Roles, []Role{seat}, busyPeople(v), admit, Wait{}); wait != nil {
 				return nil
 			}
 		}
@@ -463,7 +613,8 @@ func (s *Service) claimPM(ctx context.Context, projectID, step string, admit Adm
 		if !ok || (step == StepPM && !p.PMDue) || len(p.Claims) > 0 {
 			return nil
 		}
-		if seat, ok = freeSeat(p.ID, []Role{pm}, busySeats(v), admit); !ok {
+		var wait *Wait
+		if seat, wait = freeSeat(p.ID, p.Playbook.Roles, []Role{pm}, busyPeople(v), admit, Wait{}); wait != nil {
 			return nil
 		}
 		p.Attempt++
@@ -487,7 +638,8 @@ func (s *Service) ReleaseProjectClaim(ctx context.Context, projectID, token stri
 
 // HoldSeat gives a step no seat took the seat it now needs, such as the
 // PM's while a task is decided, for the rest of the step. It says whether
-// it could: not while the seat is at work on anything else.
+// it could: not while the seat's person is at work on anything else, in any
+// project.
 func (s *Service) HoldSeat(ctx context.Context, taskID, token, seat string) (bool, error) {
 	held := false
 	err := s.store.update(ctx, func(v *Snapshot) error {
@@ -503,7 +655,8 @@ func (s *Service) HoldSeat(ctx context.Context, taskID, token, seat string) (boo
 			held = true
 			return nil
 		}
-		if c.Seat != "" || busySeats(v)[seatKey(t.ProjectID, seat)] {
+		r, team := seatRole(v, t.ProjectID, t.Roles, seat)
+		if _, busy := busyPeople(v)[personKey(t.ProjectID, team, r)]; c.Seat != "" || busy {
 			return nil
 		}
 		c.Seat, held = seat, true
@@ -534,6 +687,9 @@ func (s *Service) RecoverClaims(ctx context.Context, held map[string]string) err
 	return s.store.update(ctx, func(v *Snapshot) error {
 		for i := range v.Tasks {
 			t := &v.Tasks[i]
+			// Who a step waited for may have been busy only on a turn that
+			// has gone; the next look says again.
+			t.Waiting = nil
 			if len(t.Claims) == 0 {
 				continue
 			}

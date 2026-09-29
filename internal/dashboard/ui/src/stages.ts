@@ -1,5 +1,6 @@
 import { recordedTime } from "./ui";
 import { approveLabel, isCode } from "./landing";
+import { engineLabel } from "./engines";
 import { holds, pmSeat, taskPlaybook } from "./members";
 import {
   pendingDecisions,
@@ -9,6 +10,7 @@ import {
   type Task,
   type TeamMessage,
   type Turn,
+  type Wait,
 } from "./api";
 
 /** Colour roles: amber needs the owner, blue is under way, grey waits. */
@@ -211,6 +213,31 @@ export function seatWords(task: Task, name: string) {
   return name === name.toUpperCase() ? name : `the ${name.toLowerCase()}`;
 }
 
+/** How a seat reads, as seatWords does, when the task may not list it. */
+const personWords = (task: Task, wait: Wait) =>
+  wait.member ? wait.seat! : seatWords(task, wait.seat ?? "");
+
+/** Who or what a ready step waits for, as "Waiting for Lucius (busy on CA-27)". */
+export function waitingWords(task: Task, wait: Wait) {
+  switch (wait.kind) {
+    case "member": {
+      const busy = wait.on
+        ? ` (busy on ${wait.on})`
+        : wait.list
+          ? ` (busy with the ${wait.list} to-do list)`
+          : "";
+      return `Waiting for ${personWords(task, wait)}${busy}`;
+    }
+    case "project_cap":
+      return `Waiting for this project's cap (${wait.active} of ${wait.cap} active)`;
+    case "engine_cap":
+      return `Waiting for the ${engineLabel(wait.engine ?? "")} safety cap`;
+    case "owner":
+      return "Waiting while you chat";
+  }
+  return "Waiting to start";
+}
+
 /**
  * What a request is doing now, in a few words. Given the turns running, a
  * request with a role says it is at work only while that role's turn runs,
@@ -226,6 +253,8 @@ export function requestStep(
   const code = isCode(task.playbook);
   const idle = !!turns && !turns.some((t) => t.task_id === task.id);
   const withSeat = (name: string) => `${round}With ${seatWords(task, name)}`;
+  if (task.waiting && task.status !== "waiting" && !finished(task))
+    return `${round}${waitingWords(task, task.waiting)}`;
   switch (task.status) {
     case "queued":
       return "Waiting to start";

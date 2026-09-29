@@ -4,10 +4,11 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 )
 
 // anyone admits every seat's turn.
-func anyone(Role) bool { return true }
+func anyone(Role) string { return "" }
 
 // claimed is what one look at the work claims, as "task objective: step
 // by seat".
@@ -465,7 +466,7 @@ func TestAStepWithNoSlotStaysUnclaimed(t *testing.T) {
 	s, _ := fixture(t)
 	p := newProject(t, s)
 	queueAll(t, s, p, "A")
-	out, err := s.Schedule(testContext, func(Role) bool { return false })
+	out, err := s.Schedule(testContext, func(Role) string { return WaitEngineCap })
 	if err != nil || len(out) != 0 {
 		t.Fatalf("claimed without a slot: %+v %v", out, err)
 	}
@@ -511,4 +512,182 @@ func seatNames(p Playbook) []string {
 		out = append(out, r.Name)
 	}
 	return out
+}
+
+// seated gives p's team the seats roles, with the draft template's reviewer
+// unless one of them reviews, and cap tasks under way at once, or the
+// default for 0.
+func seated(t *testing.T, s *Service, p Project, cap int, roles ...Role) Project {
+	t.Helper()
+	playbook := *p.Playbook
+	playbook.Roles, playbook.MaxActive = roles, cap
+	if !slices.ContainsFunc(roles, func(r Role) bool { return r.Holds(RoleReviewer) }) {
+		playbook.Roles = append(playbook.Roles, p.Playbook.Roles[1])
+	}
+	p, err := s.SetPlaybook(testContext, p.ID, playbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// waiting is what a task's next step waits for, as the record has it.
+func waiting(t *testing.T, s *Service, id string) *Wait {
+	t.Helper()
+	snap, _ := s.Snapshot(testContext)
+	task, _ := snap.FindTask(id)
+	return task.Waiting
+}
+
+func lucius(kinds ...string) Role {
+	return Role{Name: "Lucius", Kinds: kinds, Engine: "claude", Member: "lucius"}
+}
+
+// A member seated in two projects is one person: they take the projects'
+// steps one after another, the one asked for first first, whichever project
+// comes first, and the other says it waits for them and what they are on.
+func TestAMemberSeatedInTwoProjectsWorksOneStepAtATime(t *testing.T) {
+	s, _ := fixture(t)
+	first := seated(t, s, newProject(t, s), 0, lucius(RoleImplementer))
+	second := seated(t, s, newProject(t, s), 0, lucius(RoleImplementer))
+	at := s.now()
+	s.now = func() time.Time { return at.Add(time.Minute) }
+	b := queueAll(t, s, second, "B")[0]
+	s.now = func() time.Time { return at.Add(2 * time.Minute) }
+	a := queueAll(t, s, first, "A")[0]
+	if got := claimed(t, s); !slices.Equal(got, []string{"B: writing by Lucius"}) {
+		t.Fatalf("Lucius should take the task asked for first, and only it: %v", got)
+	}
+	snap, _ := s.Snapshot(testContext)
+	onB, _ := snap.FindTask(b.ID)
+	if w := waiting(t, s, a.ID); w == nil || *w != (Wait{Kind: WaitMember, Seat: "Lucius", Member: "lucius", On: onB.Ref}) || onB.Ref == "" {
+		t.Fatalf("A should wait for Lucius, busy on %s: %+v", onB.Ref, w)
+	}
+	if got := claimed(t, s); len(got) != 0 {
+		t.Fatalf("Lucius was given a second step: %v", got)
+	}
+	finish(t, s, b.ID, TaskWaiting)
+	if got := claimed(t, s); !slices.Equal(got, []string{"A: writing by Lucius"}) {
+		t.Fatalf("once B waits on the owner: %v", got)
+	}
+	if w := waiting(t, s, a.ID); w != nil {
+		t.Fatalf("a claimed step still says it waits: %+v", w)
+	}
+	// A started task's next step waits for them too, and a restart forgets
+	// what it waited for.
+	finish(t, s, b.ID, TaskWriting)
+	if got := claimed(t, s); len(got) != 0 {
+		t.Fatalf("B's next round beside A's: %v", got)
+	}
+	if w := waiting(t, s, b.ID); w == nil || w.Seat != "Lucius" || w.On == "" {
+		t.Fatalf("B's round should wait for Lucius: %+v", w)
+	}
+	if err := s.RecoverClaims(testContext, nil); err != nil {
+		t.Fatal(err)
+	}
+	if w := waiting(t, s, b.ID); w != nil {
+		t.Fatalf("a restart kept what B waited for: %+v", w)
+	}
+}
+
+// A member holding two roles in a project, in a seat for each, is one
+// person: a task's check and the next task's writing wait for each other,
+// within the project's cap.
+func TestAMemberHoldingTwoRolesDoesOneAtATime(t *testing.T) {
+	s, _ := fixture(t)
+	reviewer := lucius(RoleReviewer)
+	reviewer.Name = "Lucius #2"
+	p := seated(t, s, newProject(t, s), 2, lucius(RoleImplementer), reviewer)
+	tasks := queueAll(t, s, p, "A", "B")
+	if got := claimed(t, s); !slices.Equal(got, []string{"A: writing by Lucius"}) {
+		t.Fatalf("first look: %v", got)
+	}
+	finish(t, s, tasks[0].ID, TaskReviewing)
+	if got := claimed(t, s); !slices.Equal(got, []string{"A: reviewing by Lucius #2"}) {
+		t.Fatalf("Lucius should check A, and not write B beside it: %v", got)
+	}
+	if w := waiting(t, s, tasks[1].ID); w == nil || w.Kind != WaitMember || w.Seat != "Lucius #2" || w.On == "" {
+		t.Fatalf("B should wait for Lucius, reviewing: %+v", w)
+	}
+}
+
+// Several people in one role work several tasks at once, up to the
+// project's cap: seats filled from one member are two people, and a
+// template's own seat is a person of its own. Past the cap, the next task
+// says it waits for the cap.
+func TestSeveralPeopleInOneRoleWorkWithinTheCap(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	claudius := Role{Name: "Claudius", Kinds: []string{RoleImplementer}, Engine: "claude", Member: "claudius"}
+	claudius2 := claudius
+	claudius2.Name = "Claudius #2"
+	p = seated(t, s, p, 3, p.Playbook.Roles[0], claudius, claudius2)
+	tasks := queueAll(t, s, p, "A", "B", "C", "D")
+	if got := claimed(t, s); !slices.Equal(got, []string{"A: writing by Writer", "B: writing by Claudius", "C: writing by Claudius #2"}) {
+		t.Fatalf("three people should write three tasks: %v", got)
+	}
+	if w := waiting(t, s, tasks[3].ID); w == nil || *w != (Wait{Kind: WaitProjectCap, Active: 3, Cap: 3}) {
+		t.Fatalf("D should wait for the cap: %+v", w)
+	}
+}
+
+// A step whose person is free but whose turn admit refuses says what holds
+// it back: an engine's safety cap, or the owner's own use.
+func TestAStepSaysWhatHoldsItsTurnBack(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	a := queueAll(t, s, p, "A")[0]
+	for why, want := range map[string]Wait{
+		WaitEngineCap: {Kind: WaitEngineCap, Engine: p.Playbook.Roles[0].Engine},
+		WaitOwner:     {Kind: WaitOwner},
+	} {
+		if out, _ := s.Schedule(testContext, func(Role) string { return why }); len(out) != 0 {
+			t.Fatalf("claimed past admit: %+v", out)
+		}
+		if w := waiting(t, s, a.ID); w == nil || *w != want {
+			t.Fatalf("A should wait for %s: %+v", why, w)
+		}
+	}
+}
+
+// A person keeping a project's list is busy with it, as the step waiting
+// for them says.
+func TestAStepWaitsForAPersonKeepingTheList(t *testing.T) {
+	s, p, a := pmWriter(t)
+	if _, _, ok, _ := s.ClaimPM(testContext, p.ID, anyone); !ok {
+		t.Fatal("the PM could not look")
+	}
+	claimed(t, s)
+	if w := waiting(t, s, a.ID); w == nil || *w != (Wait{Kind: WaitMember, Seat: "Pim", List: p.Title}) {
+		t.Fatalf("A should wait for Pim, busy with the list: %+v", w)
+	}
+}
+
+// A member's seats in two projects are one person to every claim: the PM
+// deciding a task in one project holds them, so the assistant's question
+// to them in the other project waits until the decision ends.
+func TestAMemberHeldInOneProjectIsBusyInAnother(t *testing.T) {
+	s, _ := fixture(t)
+	pim := Role{Name: "Pim", Kinds: []string{RolePM}, Engine: "claude", Member: "pim"}
+	first := newProject(t, s)
+	first = seated(t, s, first, 0, first.Playbook.Roles[0], pim)
+	second := newProject(t, s)
+	second = seated(t, s, second, 0, second.Playbook.Roles[0], pim)
+	a := queueAll(t, s, first, "A")[0]
+	claimed(t, s)
+	finish(t, s, a.ID, TaskDeciding)
+	out, _ := s.Schedule(testContext, anyone)
+	if len(out) != 1 {
+		t.Fatalf("deciding %+v", out)
+	}
+	if held, err := s.HoldSeat(testContext, a.ID, out[0].Claim.Token, "Pim"); err != nil || !held {
+		t.Fatalf("could not hold Pim's seat: %v %v", held, err)
+	}
+	if _, _, ok, _ := s.ClaimPMQuestion(testContext, second.ID, anyone); ok {
+		t.Fatal("Pim answered in one project while deciding in another")
+	}
+	s.ReleaseClaim(testContext, a.ID, out[0].Claim.Token)
+	if _, _, ok, _ := s.ClaimPMQuestion(testContext, second.ID, anyone); !ok {
+		t.Fatal("Pim stayed busy once the decision ended")
+	}
 }

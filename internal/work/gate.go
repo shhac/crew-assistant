@@ -16,10 +16,11 @@ import (
 // starts, so a quick follow-up doesn't queue behind one.
 const interactiveGrace = 5 * time.Second
 
-// gate bounds the role turns running at once on each engine, across every
-// project, and starts none while the owner's own use is in flight: a chat
-// message queued or being answered, a composer request. That use never
-// takes a slot or waits on one; turns already running go on.
+// gate counts the role turns running on each engine, across every project,
+// and holds them within the engine's safety cap when the owner has set one;
+// it starts none while the owner's own use is in flight: a chat message
+// queued or being answered, a composer request. That use never takes a slot
+// or waits on one; turns already running go on.
 type gate struct {
 	mu          sync.Mutex
 	running     map[string]int
@@ -43,25 +44,29 @@ func (g *gate) busy() bool {
 // owner isn't busy.
 func (lp *Loop) admit(engine string) bool { return lp.take(engine, false) }
 
-// take takes a slot on engine for a role turn, if one is free: for the
+// take takes a slot on engine for a role turn, if one is free.
+func (lp *Loop) take(engine string, forOwner bool) bool { return lp.try(engine, forOwner) == "" }
+
+// try takes a slot on engine for a role turn, if one is free: for the
 // owner's own ask, such as the assistant's question to the PM in their
 // chat, whatever else the owner is doing, and otherwise only while they
-// aren't busy.
-func (lp *Loop) take(engine string, forOwner bool) bool {
+// aren't busy. An engine with no safety cap always has one free. It returns
+// "" when it took one, or else what the turn waits for.
+func (lp *Loop) try(engine string, forOwner bool) string {
 	g := &lp.gate
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if !forOwner && g.busy() {
-		return false
+		return core.WaitOwner
 	}
 	if g.running == nil {
 		g.running = map[string]int{}
 	}
-	if g.running[engine] >= lp.Config().Engines.RoleRuns(engine) {
-		return false
+	if limit := lp.Config().Engines.RoleRuns(engine); limit > 0 && g.running[engine] >= limit {
+		return core.WaitEngineCap
 	}
 	g.running[engine]++
-	return true
+	return ""
 }
 
 // free gives back a slot admit took.
@@ -205,12 +210,12 @@ type slots struct {
 	forOwner bool
 }
 
-func (s *slots) admit(r core.Role) bool {
-	if !s.lp.take(r.Engine, s.forOwner) {
-		return false
+func (s *slots) admit(r core.Role) string {
+	if why := s.lp.try(r.Engine, s.forOwner); why != "" {
+		return why
 	}
 	s.taken = append(s.taken, r.Engine)
-	return true
+	return ""
 }
 
 // giveBack frees the slots of a change that was not recorded.
@@ -236,9 +241,9 @@ func (f fencedTools) CallTool(ctx context.Context, call session.ToolCall) (sessi
 	return f.ToolHandler.CallTool(core.FencedLike(ctx, f.turn), call)
 }
 
-// runRole runs a role's turn within the bound on its engine: in the slot its
-// step claimed, or else once one is free. A turn for a claim records its
-// launch where a restart looks for it.
+// runRole runs a role's turn within its engine's safety cap, if one is set:
+// in the slot its step claimed, or else once one is free. A turn for a
+// claim records its launch where a restart looks for it.
 func (lp *Loop) runRole(ctx context.Context, spec roles.Spec) (roles.Result, error) {
 	if held, _ := ctx.Value(slotKey{}).(string); held != spec.Engine {
 		if err := lp.waitAdmit(ctx, spec.Engine); err != nil {

@@ -461,6 +461,21 @@ export interface Proposal {
   number?: number;
   url?: string;
 }
+/** Who or what a task's ready step waits for. */
+export interface Wait {
+  kind: "member" | "project_cap" | "engine_cap" | "owner";
+  /** The busy person's seat, and the member it is filled from, if any. */
+  seat?: string;
+  member?: string;
+  /** The readable ID of the task they are busy on. */
+  on?: string;
+  /** The project whose to-do list they are busy with instead. */
+  list?: string;
+  active?: number;
+  cap?: number;
+  engine?: string;
+}
+
 export interface Task {
   id: string;
   project_id: string;
@@ -481,6 +496,8 @@ export interface Task {
   /** Waiting on a decision the owner has already made; it resumes next. */
   answered?: boolean;
   detail?: string;
+  /** Who or what the next step waits for, while it is ready and can't start. */
+  waiting?: Wait;
   roles?: Role[];
   playbook?: Playbook;
   max_rounds?: number;
@@ -911,8 +928,6 @@ export interface ConfigDefaults {
   choices?: EngineChoice[];
   usage_floor?: number;
   on_unknown_usage?: "allow" | "pause";
-  /** How many role turns run on an engine at once when unset. */
-  role_runs?: number;
   openai_base_url?: string;
 }
 export function getConfigDefaults() {

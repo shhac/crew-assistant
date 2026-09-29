@@ -132,20 +132,16 @@ it("keeps the model call limits where they are", () => {
   });
 });
 
-it("sets how many team turns run on one engine at once, blank for the default", () => {
+it("sets an optional safety cap on team turns at once, blank for none", () => {
   const changed = vi.fn();
   render(
-    <LimitsSettings
-      config={config}
-      defaults={{ ...defaults, role_runs: 1 }}
-      onChange={changed}
-    />,
+    <LimitsSettings config={config} defaults={defaults} onChange={changed} />,
   );
   const runs = panel("Claude subscription").getByLabelText<HTMLInputElement>(
     "Team turns at once",
   );
   expect(runs.value).toBe("");
-  expect(runs.placeholder).toBe("1");
+  expect(runs.placeholder).toBe("Off");
   fireEvent.change(runs, { target: { value: "2" } });
   expect(changed).toHaveBeenLastCalledWith({
     ...config,

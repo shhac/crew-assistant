@@ -155,6 +155,12 @@ const (
 func testLoop(t *testing.T) *Loop {
 	t.Helper()
 	cfg := config.Default()
+	// A code team's reviewer and QA are both on Codex, and the scripted
+	// runners answer checks from one list in team order: a safety cap of
+	// one has them take turns, so each gets its own answer. A test that
+	// runs them side by side sets a cap of its own.
+	one := 1
+	cfg.Engines.Codex.RoleRuns = &one
 	s, err := core.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)

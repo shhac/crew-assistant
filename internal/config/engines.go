@@ -37,23 +37,21 @@ type CLIEngine struct {
 	// OnUnknownUsage is what roles do while usage can't be read: allow, the
 	// default, or pause.
 	OnUnknownUsage string `json:"on_unknown_usage,omitempty"`
-	// RoleRuns is how many team role turns may run on the engine at once,
-	// across every project; nil is DefaultRoleRuns.
+	// RoleRuns is an optional safety cap on how many team role turns may run
+	// on the engine at once, across every project; nil is no cap, and each
+	// team member working one step at a time is the only bound.
 	RoleRuns *int `json:"role_runs,omitempty"`
 }
 
-// DefaultRoleRuns is how many role turns run on an engine at once when the
-// owner hasn't said, and MaxRoleRuns the most they may say.
-const (
-	DefaultRoleRuns = 1
-	MaxRoleRuns     = 8
-)
+// MaxRoleRuns is the highest safety cap on role turns the owner may set.
+const MaxRoleRuns = 8
 
-// RoleRuns is how many team role turns may run on engine at once.
+// RoleRuns is the safety cap on team role turns running on engine at once,
+// or 0 when the owner has set none.
 func (e Engines) RoleRuns(engine string) int {
 	cli, _ := e.CLI(engine)
 	if cli.RoleRuns == nil {
-		return DefaultRoleRuns
+		return 0
 	}
 	return *cli.RoleRuns
 }
