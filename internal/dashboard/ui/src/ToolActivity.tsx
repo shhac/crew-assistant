@@ -1,4 +1,5 @@
 import type { ChatToolEvent } from "./api";
+import { counted } from "./ui";
 
 function seconds(from?: string, to?: string) {
   const start = Date.parse(from || "");
@@ -44,7 +45,7 @@ export function ToolActivity({
       events.at(-1)?.finished_at ?? events.at(-1)?.started_at,
     ),
   );
-  const count = `${events.length} ${events.length === 1 ? "step" : "steps"}`;
+  const count = counted(events.length, "step");
   const summary = running
     ? `${running.label || "Working"}…`
     : live

@@ -9,7 +9,7 @@ import {
   type Project,
 } from "./api";
 import { ConversationMarkdown } from "./ConversationMarkdown";
-import { dateLabel, useAction } from "./ui";
+import { counted, dateLabel, useAction } from "./ui";
 
 /** Who a message in a past conversation is from, in a word or two. */
 function byline(role: string, origin: string | undefined, name: string) {
@@ -123,8 +123,7 @@ export function ChatHistory({
               >
                 <span className="chat-history-title">{c.title}</span>
                 <span className="muted small">
-                  {dateLabel(c.started_at)} · {c.messages}{" "}
-                  {c.messages === 1 ? "message" : "messages"}
+                  {dateLabel(c.started_at)} · {counted(c.messages, "message")}
                 </span>
               </button>
             </li>

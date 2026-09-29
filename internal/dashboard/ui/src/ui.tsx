@@ -203,6 +203,65 @@ export function typingIn(event: KeyboardEvent) {
 }
 
 /**
+ * A destructive action that asks once more before it happens. Until then the
+ * row shows the trigger, after anything placed alongside it.
+ */
+export function ConfirmAction({
+  confirming,
+  onConfirming,
+  trigger,
+  confirm,
+  busy = false,
+  onConfirm,
+  note,
+  children,
+}: {
+  confirming: boolean;
+  onConfirming: (confirming: boolean) => void;
+  trigger: string;
+  confirm: string;
+  busy?: boolean;
+  onConfirm: () => void;
+  note?: ReactNode;
+  children?: ReactNode;
+}) {
+  if (confirming)
+    return (
+      <div className="actions">
+        <button
+          type="button"
+          className="btn btn-danger btn-sm"
+          disabled={busy}
+          onClick={onConfirm}
+        >
+          {confirm}
+        </button>
+        <button
+          type="button"
+          className="btn btn-quiet btn-sm"
+          disabled={busy}
+          onClick={() => onConfirming(false)}
+        >
+          Keep
+        </button>
+        {note && <span className="muted small">{note}</span>}
+      </div>
+    );
+  return (
+    <div className="actions">
+      {children}
+      <button
+        type="button"
+        className="btn btn-quiet btn-sm"
+        onClick={() => onConfirming(true)}
+      >
+        {trigger}
+      </button>
+    </div>
+  );
+}
+
+/**
  * useAction runs one owner action at a time: it marks the component busy,
  * clears the last error, and shows a failure as the error.
  */

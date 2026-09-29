@@ -5,7 +5,7 @@ import { DrawingStatus, LookForm } from "./Redraw";
 import { href, projectHref } from "./router";
 import { Learnings } from "./MemberLearnings";
 import { memberProjects, memberSummary } from "./members";
-import { ErrorNotice, useAction } from "./ui";
+import { ConfirmAction, ErrorNotice, useAction } from "./ui";
 import {
   deleteMember,
   redrawMember,
@@ -152,41 +152,21 @@ function DeleteMember({
   }
   return (
     <section className="section member-delete" aria-label="Delete member">
-      {confirming ? (
-        <div className="actions">
-          <button
-            type="button"
-            className="btn btn-danger btn-sm"
-            disabled={busy}
-            onClick={() => void remove()}
-          >
-            Delete {member.name}
-          </button>
-          <button
-            type="button"
-            className="btn btn-quiet btn-sm"
-            disabled={busy}
-            onClick={() => setConfirming(false)}
-          >
-            Keep
-          </button>
-          <span className="muted small">
+      <ConfirmAction
+        confirming={confirming}
+        onConfirming={setConfirming}
+        trigger="Delete member"
+        confirm={`Delete ${member.name}`}
+        busy={busy}
+        onConfirm={() => void remove()}
+        note={
+          <>
             {projects.length > 0 &&
               `${member.name} leaves the team for ${projects.map((p) => p.title).join(", ")}; the template's role takes their place. `}
             Requests already under way keep them.
-          </span>
-        </div>
-      ) : (
-        <div className="actions">
-          <button
-            type="button"
-            className="btn btn-quiet btn-sm"
-            onClick={() => setConfirming(true)}
-          >
-            Delete member
-          </button>
-        </div>
-      )}
+          </>
+        }
+      />
       <ErrorNotice error={error} />
     </section>
   );

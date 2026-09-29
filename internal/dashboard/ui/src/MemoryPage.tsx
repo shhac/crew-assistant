@@ -1,5 +1,11 @@
 import { useState, type FormEvent } from "react";
-import { dateLabel, ErrorNotice, recordedTime, useAction } from "./ui";
+import {
+  ConfirmAction,
+  dateLabel,
+  ErrorNotice,
+  recordedTime,
+  useAction,
+} from "./ui";
 import { api, errorText, type Memory, type State } from "./api";
 
 const groups = [
@@ -198,45 +204,25 @@ export function MemoryView({
                           {m.supersedes && " · corrected"}
                         </p>
                       </div>
-                      {confirm === m.id ? (
-                        <div className="actions">
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-danger"
-                            disabled={pending === m.id}
-                            onClick={() => void remove(m.id)}
-                          >
-                            Forget it
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-quiet btn-sm"
-                            onClick={() => setConfirm(null)}
-                          >
-                            Keep
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="actions">
-                          <button
-                            type="button"
-                            className="btn btn-quiet btn-sm"
-                            onClick={() => {
-                              setCorrecting(m.id);
-                              setCorrection(m.content);
-                            }}
-                          >
-                            Correct
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-quiet btn-sm"
-                            onClick={() => setConfirm(m.id)}
-                          >
-                            Forget
-                          </button>
-                        </div>
-                      )}
+                      <ConfirmAction
+                        confirming={confirm === m.id}
+                        onConfirming={(on) => setConfirm(on ? m.id : null)}
+                        trigger="Forget"
+                        confirm="Forget it"
+                        busy={pending === m.id}
+                        onConfirm={() => void remove(m.id)}
+                      >
+                        <button
+                          type="button"
+                          className="btn btn-quiet btn-sm"
+                          onClick={() => {
+                            setCorrecting(m.id);
+                            setCorrection(m.content);
+                          }}
+                        >
+                          Correct
+                        </button>
+                      </ConfirmAction>
                     </>
                   )}
                 </li>
