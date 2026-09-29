@@ -167,6 +167,12 @@ type Task struct {
 	// change last landed or the owner stepped in: past a few, the owner
 	// decides instead.
 	LandingFailures []string `json:"landing_failures,omitempty"`
+	// Unreachable are the requirements the implementer said it can't meet
+	// from its sandbox, with the draft it said so of, for the PM or the
+	// owner to judge; OwnerSteps are those the owner took on, to check once
+	// the change lands. See owner_steps.go.
+	Unreachable []Unreachable `json:"unreachable,omitempty"`
+	OwnerSteps  []string      `json:"owner_steps,omitempty"`
 	// Proposal is the pull request a task lands through, and the branch the
 	// project owns for it.
 	Proposal  *Proposal `json:"proposal,omitempty"`
@@ -555,7 +561,7 @@ func (in DecisionInput) validTaskDecision() error {
 
 // openTaskDecision holds a task for a decision, within a change.
 func openTaskDecision(v *Snapshot, t *Task, kind string, in DecisionInput, now time.Time) Decision {
-	d := Decision{ID: uid(), Kind: kind, TaskID: t.ID, ProjectID: t.ProjectID, Title: in.Title, Context: in.Context, Recommendation: in.Recommendation, Choices: in.Choices, Status: DecisionOpen, CreatedAt: now}
+	d := Decision{ID: uid(), Kind: kind, TaskID: t.ID, ProjectID: t.ProjectID, Title: in.Title, Context: in.Context, Recommendation: in.Recommendation, Choices: in.Choices, FollowUp: in.FollowUp, OwnerStep: in.OwnerStep, Status: DecisionOpen, CreatedAt: now}
 	t.Status = TaskWaiting
 	t.DecisionID = d.ID
 	t.UpdatedAt = now

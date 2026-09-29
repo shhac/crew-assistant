@@ -123,7 +123,7 @@ func (lp *Loop) askOwnerToLand(ctx context.Context, p core.Project, t core.Task,
 	if in.Recommendation == "" {
 		in.Recommendation = choiceApprove
 	}
-	in.Context = strings.TrimSpace(in.Context + "\n\n" + text.Clip(r.Summary, 600) + "\n\n" + m.deliveryNote(t))
+	in.Context = strings.TrimSpace(in.Context + "\n\n" + text.Clip(r.Summary, 600) + "\n\n" + m.deliveryNote(t) + "\n\n" + t.OwnerChecklist())
 	in.Choices = []string{choiceApprove, choiceChanges}
 	_, err := lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionDelivery, in)
 	return err

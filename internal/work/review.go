@@ -223,6 +223,11 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 		return v.Outcome != core.VerdictRevise && v.Next != core.NextRevise
 	})
 	switch {
+	// A requirement the implementer can't meet from its sandbox is judged
+	// first, wherever the checks send the draft: never landed without the
+	// owner taking it on, nor sent back for a round it can't win.
+	case len(now.Pending(r.N)) > 0:
+		return lp.proposeOwnerStep(ctx, p, now, now.Pending(r.N)[0])
 	// A draft written for an older brief that passes against the current one
 	// is still a pass.
 	case next == core.NextLand:
@@ -230,13 +235,7 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 	case next == core.NextResearch:
 		return lp.askResearch(ctx, t, r, current)
 	case t.Round >= t.MaxRounds:
-		_, err := lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionEscalation, core.DecisionInput{
-			Title:          fmt.Sprintf("“%s” still has review points after %d rounds", t.Objective, t.Round),
-			Context:        reviewDigest(changes),
-			Recommendation: "Another round if these points matter; otherwise accept it as it is",
-			Choices:        []string{choiceAnotherRound, choiceAcceptDraft, choiceStop},
-		})
-		return err
+		return lp.escalate(ctx, p, t, current, changes)
 	default:
 		_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			// Checks failing on a change the PM approved, merged with what

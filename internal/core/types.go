@@ -131,7 +131,13 @@ type Decision struct {
 	Status         string   `json:"status"`
 	Answer         string   `json:"answer,omitempty"`
 	// Run is the recipe a DecisionRunRecipe proposes.
-	Run        *RunRecipe `json:"run,omitempty"`
+	Run *RunRecipe `json:"run,omitempty"`
+	// FollowUp is the task an escalation queues if the owner accepts the
+	// draft and follows up, exactly as the owner was shown it; OwnerStep is
+	// the requirement a decision proposes leaving to the owner after the
+	// change lands. See owner_steps.go.
+	FollowUp   *TaskInput `json:"follow_up,omitempty"`
+	OwnerStep  *OwnerStep `json:"owner_step,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 }
@@ -248,4 +254,8 @@ type DecisionInput struct {
 	Context        string   `json:"context"`
 	Recommendation string   `json:"recommendation"`
 	Choices        []string `json:"choices"`
+	// FollowUp and OwnerStep are what a task decision's choices act on; only
+	// the loop sets them. See Decision.
+	FollowUp  *TaskInput `json:"-"`
+	OwnerStep *OwnerStep `json:"-"`
 }

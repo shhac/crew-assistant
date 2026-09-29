@@ -96,6 +96,7 @@ func (lp *Loop) prepareWorkspace(ctx context.Context, t core.Task, m medium) (co
 func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m medium, writer string, result roles.Result, seen int) error {
 	reply, learned := splitBlock(result.Text, "learned")
 	reply, block := splitBlock(reply, "wake")
+	reply, unmet := splitBlock(reply, "owner-step")
 	wakeErrors := lp.applyWakeBlock(ctx, p, t, block)
 	r, ok := t.Role(writer)
 	if ok {
@@ -149,7 +150,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	// The draft counts only once the project's records hold it; the handoff
 	// carries the round's whole outcome until then.
 	revision.Summary = text.Clip(reply, 2000)
-	h := core.Handoff{Revision: revision, Writer: writer, Session: result.Session, Seen: seen, Reply: reply, Request: applied, WakeErrors: wakeErrors}
+	h := core.Handoff{Revision: revision, Writer: writer, Session: result.Session, Seen: seen, Reply: reply, Request: applied, WakeErrors: wakeErrors, Unreachable: parseOwnerSteps(unmet, n, t.Criteria)}
 	if ok {
 		r.Learnings = nil
 		h.Seat = &r

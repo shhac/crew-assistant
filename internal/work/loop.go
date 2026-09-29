@@ -29,9 +29,17 @@ const (
 	choiceChanges      = "Request changes"
 	choiceAnotherRound = "Another round"
 	choiceAcceptDraft  = "Accept this draft"
-	choiceStop         = "Stop"
-	choiceTryAgain     = "Try again"
-	choiceResolve      = "Let the implementer resolve it"
+	// choiceAcceptFollowUp accepts the draft and queues what the checks
+	// still raise as a follow-up task.
+	choiceAcceptFollowUp = "Accept and follow up"
+	// choiceOwnerStep leaves a requirement the team can't meet from its
+	// sandbox to the owner after the change lands; choiceKeepForTeam keeps
+	// it the team's.
+	choiceOwnerStep   = "Make it an owner step"
+	choiceKeepForTeam = "Keep it for the team"
+	choiceStop        = "Stop"
+	choiceTryAgain    = "Try again"
+	choiceResolve     = "Let the implementer resolve it"
 	// A role that fails is retried this many times, with growing waits,
 	// before the owner hears about it.
 	roleRetries = 2

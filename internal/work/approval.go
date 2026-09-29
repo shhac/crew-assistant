@@ -12,15 +12,21 @@ import (
 // task on to landing.
 func (lp *Loop) approve(ctx context.Context, t core.Task) error {
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if len(t.Revisions) > 0 {
-			t.Approved = t.Revisions[len(t.Revisions)-1].N
-		}
-		// The owner's approval replaces whatever the PM decided.
-		t.LandDecision, t.LandingFailures = nil, nil
-		t.Status, t.DecisionID, t.ResumeStatus, t.Detail = core.TaskLanding, "", "", "Landing"
-		return "Landing " + t.Objective, nil
+		return approveLatest(t), nil
 	})
 	return err
+}
+
+// approveLatest approves a task's latest revision, within a change, and
+// says so.
+func approveLatest(t *core.Task) string {
+	if len(t.Revisions) > 0 {
+		t.Approved = t.Revisions[len(t.Revisions)-1].N
+	}
+	// The owner's approval replaces whatever the PM decided.
+	t.LandDecision, t.LandingFailures = nil, nil
+	t.Status, t.DecisionID, t.ResumeStatus, t.Detail = core.TaskLanding, "", "", "Landing"
+	return "Landing " + t.Objective
 }
 
 // resumeLanding moves a task whose approval still stands, or that needs none,

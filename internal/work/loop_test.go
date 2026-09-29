@@ -48,6 +48,11 @@ type scriptedRunner struct {
 	// route answers the PM's choices of where a task goes after its checks,
 	// in order; after them, a reply that can't be read.
 	route []string
+	// escalate answers the PM's judgements of what remains at a round limit,
+	// and ownerStep its judgements of a requirement the implementer can't
+	// meet, each in order; after them, a reply that can't be read.
+	escalate  []string
+	ownerStep []string
 }
 
 // sendOn is the PM's plain answer to what waits in triage: every task sent
@@ -109,6 +114,20 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 		reply := "no choice"
 		if len(r.route) > 0 {
 			reply, r.route = r.route[0], r.route[1:]
+		}
+		return roles.Result{Text: reply}, nil
+	}
+	if !spec.Write && strings.Contains(spec.Prompt, "Judge what remains at the round limit") {
+		reply := "no judgement"
+		if len(r.escalate) > 0 {
+			reply, r.escalate = r.escalate[0], r.escalate[1:]
+		}
+		return roles.Result{Text: reply}, nil
+	}
+	if !spec.Write && strings.Contains(spec.Prompt, "Judge whether a requirement the implementer can't meet") {
+		reply := "no judgement"
+		if len(r.ownerStep) > 0 {
+			reply, r.ownerStep = r.ownerStep[0], r.ownerStep[1:]
 		}
 		return roles.Result{Text: reply}, nil
 	}

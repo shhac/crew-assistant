@@ -114,6 +114,15 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 	case d.Approves() && chose(choiceApprove),
 		d.Kind == core.DecisionEscalation && chose(choiceAcceptDraft):
 		return lp.approve(ctx, t)
+	// The follow-up queued is the one the owner was shown.
+	case d.Kind == core.DecisionEscalation && d.FollowUp != nil && chose(choiceAcceptFollowUp):
+		_, _, err := lp.Core.AcceptWithFollowUp(ctx, t.ID, d.ID, approveLatest)
+		return err
+	case d.OwnerStep != nil && chose(choiceOwnerStep):
+		_, err := lp.Core.MakeOwnerStep(ctx, t.ID, d.ID)
+		return err
+	case d.OwnerStep != nil && chose(choiceKeepForTeam):
+		return lp.keepForTeam(ctx, t, d.OwnerStep.Criterion, fmt.Sprintf("You kept “%s” for the team", text.Clip(d.OwnerStep.Criterion, 200)))
 	case d.Kind == core.DecisionFailure && (chose(choiceTryAgain) || chose(choiceResolve)):
 		_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.Status, t.ResumeStatus = t.ResumeStatus, ""

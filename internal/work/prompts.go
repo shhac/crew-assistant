@@ -25,6 +25,12 @@ func briefText(p core.Project, t core.Task) string {
 		b.WriteString("\nThe result must meet every one of these criteria:\n")
 		b.WriteString(numbered(criteria))
 	}
+	if len(t.OwnerSteps) > 0 {
+		b.WriteString("\nThe owner checks these after it lands; they are not the team's to meet:\n")
+		for _, s := range t.OwnerSteps {
+			fmt.Fprintf(&b, "- %s\n", s)
+		}
+	}
 	if len(t.Direction) > 0 {
 		b.WriteString("\nThe owner has also said:\n")
 		for _, d := range t.Direction {
@@ -141,6 +147,7 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string, fresh bool) stri
 			b.WriteString("\n" + strings.TrimSpace(guide) + "\n")
 		}
 	}
+	b.WriteString("\nIf a requirement needs something outside your sandbox, such as the owner's machine, their browser or the network, do everything else it asks, then end your reply with a ```owner-step block holding a JSON list: [{\"requirement\": \"the requirement, quoted\", \"why\": \"why you can't meet it from here\"}]. It goes to the owner to check after the change lands, instead of another round.\n")
 	if code {
 		b.WriteString("\nOnly change files in this repository. Do not commit, push, create branches or touch .git; your changes are recorded for you. Nothing you run can reach the network.\nEnd your reply with two sentences on what you changed.")
 	} else {

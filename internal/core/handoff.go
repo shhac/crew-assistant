@@ -25,6 +25,9 @@ type Handoff struct {
 	Reply      string          `json:"reply,omitempty"`
 	Request    int             `json:"request,omitempty"`
 	WakeErrors []string        `json:"wake_errors,omitempty"`
+	// Unreachable are the requirements the implementer said it can't meet
+	// from its sandbox in this turn.
+	Unreachable []Unreachable `json:"unreachable,omitempty"`
 	// CatchUp is set for a clean merge with landed work the daemon made
 	// itself, with no implementer.
 	CatchUp *CatchUp `json:"catch_up,omitempty"`
