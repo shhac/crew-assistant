@@ -2,12 +2,12 @@ package gitrepo
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/shhac/crew-assistant/internal/media"
 )
 
 // Checkout is one check's own copy of a recorded revision: never the
@@ -78,11 +78,8 @@ func (r Repo) checkOut(ctx context.Context, c Checkout, tree bool) error {
 			return fmt.Errorf("copying the revision for the check: %w", err)
 		}
 	}
-	return setWritable(c.Dir, false)
+	return media.SetWritable(c.Dir, false)
 }
-
-// ErrCheckoutChanged is a check that changed the revision it was given.
-var ErrCheckoutChanged = errors.New("the check changed the revision it was checking")
 
 // Verify says the checkout is still exactly the revision: at its commit,
 // with nothing changed, added or left behind, ignored files included. Only
@@ -90,14 +87,14 @@ var ErrCheckoutChanged = errors.New("the check changed the revision it was check
 func (c Checkout) Verify(ctx context.Context) error {
 	head, err := run(ctx, c.Dir, "rev-parse", "HEAD")
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrCheckoutChanged, err)
+		return fmt.Errorf("%w: %w", media.ErrCheckChanged, err)
 	}
 	if strings.TrimSpace(head) != c.commit {
-		return fmt.Errorf("%w: it is at %s", ErrCheckoutChanged, strings.TrimSpace(head))
+		return fmt.Errorf("%w: it is at %s", media.ErrCheckChanged, strings.TrimSpace(head))
 	}
 	out, err := run(ctx, c.Dir, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching")
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrCheckoutChanged, err)
+		return fmt.Errorf("%w: %w", media.ErrCheckChanged, err)
 	}
 	var changed []string
 	for _, entry := range strings.Split(out, "\x00") {
@@ -110,7 +107,7 @@ func (c Checkout) Verify(ctx context.Context) error {
 		}
 	}
 	if len(changed) > 0 {
-		return fmt.Errorf("%w: %s", ErrCheckoutChanged, strings.Join(changed, ", "))
+		return fmt.Errorf("%w: %s", media.ErrCheckChanged, strings.Join(changed, ", "))
 	}
 	return nil
 }
@@ -127,44 +124,12 @@ func (c Checkout) prepared(path string) bool {
 // Remove deletes the checkout and its scratch folder.
 func (c Checkout) Remove() {
 	if c.root != "" {
-		removeAll(c.root)
+		_ = media.RemoveReadOnly(c.root)
 	}
 }
 
 // RemoveChecks deletes every checkout a check left behind, such as one a
 // daemon stopped mid-check never removed.
 func (r Repo) RemoveChecks() error {
-	return removeAll(r.checksDir())
-}
-
-func removeAll(dir string) error {
-	_ = setWritable(dir, true)
-	return os.RemoveAll(dir)
-}
-
-// setWritable takes write permission from, or gives it back to, every file
-// and folder under dir. Links are left alone: changing one would change
-// what it points at.
-func setWritable(dir string, writable bool) error {
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.Type()&fs.ModeSymlink != 0 {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		mode := info.Mode().Perm() &^ 0o222
-		if writable {
-			mode |= 0o200
-		}
-		return os.Chmod(path, mode)
-	})
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	return err
+	return media.RemoveReadOnly(r.checksDir())
 }

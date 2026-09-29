@@ -117,7 +117,7 @@ func (d Docs) Workspaces() ([]string, error) {
 
 // RemoveChecks deletes every copy a check left behind.
 func (d Docs) RemoveChecks() error {
-	return removeAll(filepath.Join(d.root, "reviews"))
+	return media.RemoveReadOnly(filepath.Join(d.root, "reviews"))
 }
 
 // Check is one check's own copy of a revision: never the writer's
@@ -131,9 +131,6 @@ type Check struct {
 	digest  string
 	root    string
 }
-
-// ErrCopyChanged is a check that changed the revision it was checking.
-var ErrCopyChanged = errors.New("the check changed the revision it was checking")
 
 // Checkout copies revision n for one check, read-only, in a folder of its
 // own beside a scratch folder. want is the digest the revision was recorded
@@ -165,7 +162,7 @@ func (c Check) fill(revision string) error {
 	if err := c.Verify(); err != nil {
 		return fmt.Errorf("the revision is not as recorded: %w", err)
 	}
-	return setWritable(c.Dir, false)
+	return media.SetWritable(c.Dir, false)
 }
 
 // Verify says the copy is still exactly the revision: the same files with
@@ -179,13 +176,13 @@ func (c Check) Verify() error {
 		return err
 	})
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrCopyChanged, err)
+		return fmt.Errorf("%w: %w", media.ErrCheckChanged, err)
 	}
 	if len(extra) > 0 {
-		return fmt.Errorf("%w: %s", ErrCopyChanged, strings.Join(extra, ", "))
+		return fmt.Errorf("%w: %s", media.ErrCheckChanged, strings.Join(extra, ", "))
 	}
 	if got, err := digest(c.Dir); err != nil || got != c.digest {
-		return fmt.Errorf("%w: its files differ", errors.Join(ErrCopyChanged, err))
+		return fmt.Errorf("%w: its files differ", errors.Join(media.ErrCheckChanged, err))
 	}
 	return nil
 }
@@ -193,40 +190,8 @@ func (c Check) Verify() error {
 // Remove deletes the copy and its scratch folder.
 func (c Check) Remove() {
 	if c.root != "" {
-		_ = removeAll(c.root)
+		_ = media.RemoveReadOnly(c.root)
 	}
-}
-
-func removeAll(dir string) error {
-	_ = setWritable(dir, true)
-	return os.RemoveAll(dir)
-}
-
-// setWritable takes write permission from, or gives it back to, every file
-// and folder under dir. Links are left alone: changing one would change
-// what it points at.
-func setWritable(dir string, writable bool) error {
-	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.Type()&fs.ModeSymlink != 0 {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		mode := info.Mode().Perm() &^ 0o222
-		if writable {
-			mode |= 0o200
-		}
-		return os.Chmod(path, mode)
-	})
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	return err
 }
 
 // File is one file of a revision as shown to the owner.

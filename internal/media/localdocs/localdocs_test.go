@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/shhac/crew-assistant/internal/media"
 )
 
 func write(t *testing.T, path, content string) {
@@ -67,13 +69,13 @@ func TestRevisionsResetAndReviewCopies(t *testing.T) {
 	}
 	os.Chmod(c.Dir, 0o700)
 	os.Symlink(filepath.Join(c.Dir, "draft.md"), filepath.Join(c.Dir, "link.md"))
-	if err = c.Verify(); !errors.Is(err, ErrCopyChanged) {
+	if err = c.Verify(); !errors.Is(err, media.ErrCheckChanged) {
 		t.Fatalf("a link added to the copy went unseen: %v", err)
 	}
 	os.Remove(filepath.Join(c.Dir, "link.md"))
 	os.Chmod(filepath.Join(c.Dir, "draft.md"), 0o600)
 	write(t, filepath.Join(c.Dir, "draft.md"), "checker edit")
-	if err = c.Verify(); !errors.Is(err, ErrCopyChanged) {
+	if err = c.Verify(); !errors.Is(err, media.ErrCheckChanged) {
 		t.Fatalf("an edited copy went unseen: %v", err)
 	}
 	c.Remove()

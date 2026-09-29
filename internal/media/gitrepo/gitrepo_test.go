@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shhac/crew-assistant/internal/media"
 )
 
 var ctx = context.Background()
@@ -326,7 +328,7 @@ func TestACheckoutIsTheRevisionReadOnly(t *testing.T) {
 	// A check that gets round the permissions is caught.
 	os.Chmod(c.Dir, 0o700)
 	write(t, filepath.Join(c.Dir, "left.go"), "package main\n")
-	if err = c.Verify(ctx); !errors.Is(err, ErrCheckoutChanged) || !strings.Contains(err.Error(), "left.go") {
+	if err = c.Verify(ctx); !errors.Is(err, media.ErrCheckChanged) || !strings.Contains(err.Error(), "left.go") {
 		t.Fatalf("a changed checkout passed: %v", err)
 	}
 	c.Remove()
