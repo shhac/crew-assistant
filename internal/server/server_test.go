@@ -1,10 +1,13 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -276,6 +279,68 @@ func TestAConfigInTheEarlierLayoutStillSaves(t *testing.T) {
 	}
 	if !reflect.DeepEqual(a.Config(), before) {
 		t.Fatal("a refused config changed the saved one")
+	}
+}
+
+// Who may reach the dashboard over the tailnet is set where the daemon runs,
+// never by a browser that has been paired with it.
+func TestAPairedBrowserCannotChangeWhoIsAllowedIn(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+	cfg.Dashboard.AllowedUsers = []string{"owner@example.test"}
+	configPath := filepath.Join(dir, "config.json")
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := core.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	a := app.New(core.NewService(store, cfg), cfg, configPath, app.Options{})
+	auth, err := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(a, auth)
+	send := func(method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "http://127.0.0.1:8340"+path, strings.NewReader(body))
+		r.RemoteAddr = "127.0.0.1:4321"
+		r.Header.Set("X-Requested-With", "crew-assistant")
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	code, err := Pair(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	login := send("POST", "/api/session", `{"token":"`+code+`"}`, nil)
+	cookies := login.Result().Cookies()
+	if login.Code != 200 || len(cookies) != 1 {
+		t.Fatal(login.Code, login.Body.String())
+	}
+	if w := send("GET", "/api/config", "", cookies[0]); w.Code != 200 {
+		t.Fatal("the paired browser was not let in", w.Code)
+	}
+	changed := a.Config()
+	changed.Dashboard.AllowedUsers = append(changed.Dashboard.AllowedUsers, "intruder@example.test")
+	body, _ := json.Marshal(changed)
+	if w := send("PUT", "/api/config", string(body), cookies[0]); w.Code != 400 || !strings.Contains(w.Body.String(), "stopping the daemon") {
+		t.Fatal("a paired browser changed who is allowed in", w.Code, w.Body.String())
+	}
+	if got := a.Config().Dashboard.AllowedUsers; !reflect.DeepEqual(got, cfg.Dashboard.AllowedUsers) {
+		t.Fatalf("allowed users became %v", got)
+	}
+	if now, err := os.ReadFile(configPath); err != nil || !bytes.Equal(now, saved) {
+		t.Fatalf("the config file changed: %v", err)
 	}
 }
 

@@ -213,3 +213,20 @@ func TestTheSessionCookieIsSecureOnlyThroughThePublicHost(t *testing.T) {
 		})
 	}
 }
+
+// Without Tailscale nothing proxies the dashboard, so the identity header is
+// whatever a local process chose to send.
+func TestATailscaleIdentityIsIgnoredWhenTailscaleIsOff(t *testing.T) {
+	a, err := NewAuth(t.TempDir(), "http://127.0.0.1:8340", "", []string{"owner@example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "http://127.0.0.1:8340/api/state", nil)
+	r.RemoteAddr = "127.0.0.1:1234"
+	r.Header.Set("Tailscale-User-Login", "owner@example.test")
+	w := httptest.NewRecorder()
+	a.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })).ServeHTTP(w, r)
+	if w.Code != 401 {
+		t.Fatalf("a spoofed Tailscale login was let in: %d", w.Code)
+	}
+}
