@@ -3,6 +3,8 @@ package work
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -152,6 +154,46 @@ func TestEachRoleGetsItsTools(t *testing.T) {
 		link := spec.Tools[3].Description
 		if (status == core.TaskResearching) != strings.Contains(link, "depends_on") {
 			t.Errorf("%s may link as: %s", status, link)
+		}
+	}
+}
+
+// Every turn can call exactly the tools it is offered: whatever
+// Definitions lists is taken, and any other name is refused as unknown.
+func TestARoleCallsExactlyTheToolsItIsOffered(t *testing.T) {
+	a, p, task := loopApp(t, &scriptedRunner{}, "")
+	code := &core.Playbook{Medium: core.MediumGit}
+	designing := task
+	designing.Status = core.TaskDesigning
+	designing.Design = []core.DesignRequest{{ID: "design-1", N: 1}}
+	variants := map[string]roleTools{
+		"researcher":           a.toolsFor(task, core.RoleResearcher, core.Role{}),
+		"proposing researcher": a.toolsFor(task, core.RoleResearcher, core.Role{}).proposing(code),
+		"implementer":          a.toolsFor(task, core.RoleImplementer, core.Role{}),
+		"reviewer":             a.toolsFor(task, core.RoleReviewer, core.Role{}),
+		"QA":                   a.toolsFor(task, core.RoleQA, core.Role{}),
+		"designer":             a.toolsFor(designing, core.RoleDesigner, core.Role{}),
+		"PM":                   a.managerTools(p.ID, core.Role{}),
+		"proposing PM":         a.managerTools(p.ID, core.Role{}).proposing(code),
+		"answering PM":         a.answerTools(p.ID, core.Role{}),
+		"proposing answering":  a.answerTools(p.ID, core.Role{}).proposing(code),
+	}
+	all := []string{"no_such_tool"}
+	for _, tools := range variants {
+		for _, name := range toolNames(tools) {
+			if !slices.Contains(all, name) {
+				all = append(all, name)
+			}
+		}
+	}
+	for variant, tools := range variants {
+		offered := toolNames(tools)
+		for _, name := range all {
+			got := callTool(t, tools, name, map[string]string{})
+			refused := got.IsError && got.Content == fmt.Sprintf("there is no tool %q", name)
+			if refused == slices.Contains(offered, name) {
+				t.Errorf("%s: %s offered %v, refused %v: %s", variant, name, slices.Contains(offered, name), refused, got.Content)
+			}
 		}
 	}
 }
