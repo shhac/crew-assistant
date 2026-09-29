@@ -19,6 +19,16 @@ var ErrConflict = errors.New("state conflict")
 // ErrModelCallAllowance means the day's model calls are all spent.
 var ErrModelCallAllowance = errors.New("daily model call allowance exhausted")
 
+// Reason is what an error says without the sentinel it wraps, for showing
+// to the owner or the assistant.
+func Reason(err error) string {
+	text := err.Error()
+	for _, sentinel := range []error{ErrConflict, ErrNotFound, ErrChatValidation, ErrChatQueueFull} {
+		text = strings.TrimSuffix(text, ": "+sentinel.Error())
+	}
+	return text
+}
+
 // Service deliberately exposes no execution, shell, production or purchase capability.
 type Service struct {
 	store *Store

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -99,7 +98,7 @@ func (a *App) manageConversation(ctx context.Context, in engine.ManageConversati
 	case "implementer":
 		_, err := a.Core.SetWriterNext(ctx, in.ProjectID, in.TaskID, in.Action)
 		if errors.Is(err, core.ErrConflict) {
-			return map[string]string{"declined": strings.TrimSuffix(err.Error(), ": "+core.ErrConflict.Error())}, nil
+			return map[string]string{"declined": core.Reason(err)}, nil
 		}
 		if err != nil {
 			return nil, err

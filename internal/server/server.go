@@ -268,10 +268,7 @@ func problem(w http.ResponseWriter, err error) {
 // ownerText is an error as the owner reads it: without the sentinel that
 // classified it, and starting with a capital letter.
 func ownerText(err error) string {
-	text := err.Error()
-	for _, sentinel := range []error{core.ErrConflict, core.ErrNotFound, core.ErrChatValidation, core.ErrChatQueueFull} {
-		text = strings.TrimSuffix(text, ": "+sentinel.Error())
-	}
+	text := core.Reason(err)
 	if text == "" {
 		return text
 	}
