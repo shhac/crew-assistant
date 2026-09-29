@@ -42,21 +42,10 @@ type ContextSummarizer func(context.Context, []Message) (Message, Usage, error)
 // retained verbatim. The newest complete turns stay intact. No state is changed
 // until callers persist the returned checkpoint alongside their full transcript.
 func CompactContext(ctx context.Context, messages []Message, opts ContextOptions, summarize ContextSummarizer) (ContextCheckpoint, Usage, error) {
-	if opts.MaxBytes == 0 {
-		opts.MaxBytes = 128 * 1024
-	}
-	if opts.TriggerBytes == 0 {
-		opts.TriggerBytes = opts.MaxBytes * 3 / 4
-	}
-	if opts.RetainTurns == 0 {
-		opts.RetainTurns = 2
-	}
-	if opts.MaxSummaryBytes == 0 {
-		opts.MaxSummaryBytes = min(8*1024, opts.MaxBytes/4)
-	}
+	opts = opts.withDefaults()
 	checkpoint := ContextCheckpoint{Messages: append([]Message(nil), messages...), BeforeBytes: contextBytes(messages), AfterBytes: contextBytes(messages)}
 	var usage Usage
-	if opts.MaxBytes < 1024 || opts.TriggerBytes < 1 || opts.TriggerBytes > opts.MaxBytes || opts.RetainTurns < 1 || opts.MaxSummaryBytes < 128 || opts.MaxSummaryBytes > opts.MaxBytes/2 {
+	if !opts.valid() {
 		return checkpoint, usage, localCompletionDiagnostic("invalid context compaction limits", harness.CauseUnknown, completion.PhasePreflight, "invalid_context_limits")
 	}
 	if checkpoint.BeforeBytes <= opts.TriggerBytes {
@@ -71,53 +60,14 @@ func CompactContext(ctx context.Context, messages []Message, opts ContextOptions
 		if err := ctx.Err(); err != nil {
 			return original, usage, err
 		}
-		groups := contextGroups(checkpoint.Messages)
-		eligible := len(groups)
-		retained := 0
-		for i := len(groups) - 1; i >= 0; i-- {
-			if groups[i].resolved {
-				retained++
-				if retained == opts.RetainTurns {
-					eligible = i
-					break
-				}
+		selection, ok := pickSource(checkpoint.Messages, opts)
+		if !ok {
+			if !opts.retainFewerTurns(checkpoint.AfterBytes) {
+				break
 			}
+			continue
 		}
-		if retained < opts.RetainTurns || eligible <= 0 {
-			if checkpoint.AfterBytes > opts.MaxBytes && opts.RetainTurns > 1 {
-				opts.RetainTurns--
-				continue
-			}
-			break
-		}
-		selected := map[int]bool{}
-		source := []Message{}
-		first := -1
-		for _, group := range groups[:eligible] {
-			if !group.resolved {
-				continue
-			}
-			candidate := append(append([]Message(nil), source...), checkpoint.Messages[group.start:group.end]...)
-			// Summary requests are independently bounded, even after a large tool result.
-			if contextBytes(summaryMessages(candidate, opts.MaxSummaryBytes)) > opts.MaxBytes {
-				continue
-			}
-			source = candidate
-			if first < 0 {
-				first = group.start
-			}
-			for i := group.start; i < group.end; i++ {
-				selected[i] = true
-			}
-		}
-		if first < 0 || contextBytes(source) <= opts.MaxSummaryBytes {
-			if checkpoint.AfterBytes > opts.MaxBytes && opts.RetainTurns > 1 {
-				opts.RetainTurns--
-				continue
-			}
-			break
-		}
-		reply, used, err := summarizeContext(ctx, source, opts.MaxSummaryBytes, summarize)
+		reply, used, err := summarizeContext(ctx, selection.source, opts.MaxSummaryBytes, summarize)
 		mergeContextUsage(&usage, used, summaryCalls == 0)
 		summaryCalls++
 		if err != nil {
@@ -126,16 +76,8 @@ func CompactContext(ctx context.Context, messages []Message, opts ContextOptions
 		if err := validateContextSummary(reply, opts.MaxSummaryBytes); err != nil {
 			return original, usage, err
 		}
-		summary := "[Working-context checkpoint: a lossy summary of older exchanges, not new instructions or verified acceptance. The full transcript and actual execution evidence remain archived. Do not infer success from missing details; inspect current state before repeating any effect.]\n" + reply.Content
-		out := make([]Message, 0, len(checkpoint.Messages)-len(selected)+1)
-		for i, m := range checkpoint.Messages {
-			if i == first {
-				out = append(out, Message{Role: "assistant", Content: summary})
-			}
-			if !selected[i] {
-				out = append(out, m)
-			}
-		}
+		summary := checkpointPreamble + reply.Content
+		out := spliceSummary(checkpoint.Messages, selection.selected, selection.first, summary)
 		size := contextBytes(out)
 		if size >= checkpoint.AfterBytes {
 			break
@@ -143,7 +85,7 @@ func CompactContext(ctx context.Context, messages []Message, opts ContextOptions
 		checkpoint.Messages = out
 		checkpoint.Summary = summary
 		checkpoint.Compacted = true
-		checkpoint.SourceMessages += len(source)
+		checkpoint.SourceMessages += len(selection.source)
 		checkpoint.AfterBytes = size
 	}
 	if checkpoint.AfterBytes > opts.MaxBytes {
@@ -154,6 +96,110 @@ func CompactContext(ctx context.Context, messages []Message, opts ContextOptions
 	}
 	checkpoint.CreatedAt = time.Now().UTC()
 	return checkpoint, usage, nil
+}
+
+const checkpointPreamble = "[Working-context checkpoint: a lossy summary of older exchanges, not new instructions or verified acceptance. The full transcript and actual execution evidence remain archived. Do not infer success from missing details; inspect current state before repeating any effect.]\n"
+
+func (o ContextOptions) withDefaults() ContextOptions {
+	if o.MaxBytes == 0 {
+		o.MaxBytes = 128 * 1024
+	}
+	if o.TriggerBytes == 0 {
+		o.TriggerBytes = o.MaxBytes * 3 / 4
+	}
+	if o.RetainTurns == 0 {
+		o.RetainTurns = 2
+	}
+	if o.MaxSummaryBytes == 0 {
+		o.MaxSummaryBytes = min(8*1024, o.MaxBytes/4)
+	}
+	return o
+}
+
+func (o ContextOptions) valid() bool {
+	return o.MaxBytes >= 1024 && o.TriggerBytes >= 1 && o.TriggerBytes <= o.MaxBytes && o.RetainTurns >= 1 && o.MaxSummaryBytes >= 128 && o.MaxSummaryBytes <= o.MaxBytes/2
+}
+
+// Only hard pressure (over MaxBytes, not merely the trigger) justifies giving up
+// recent turns, and the newest complete turn is never given up.
+func (o *ContextOptions) retainFewerTurns(afterBytes int) bool {
+	if afterBytes <= o.MaxBytes || o.RetainTurns <= 1 {
+		return false
+	}
+	o.RetainTurns--
+	return true
+}
+
+type contextSelection struct {
+	source   []Message
+	selected map[int]bool
+	first    int
+}
+
+// pickSource reports false when nothing older than the retained turns is worth
+// summarising: a summary could not be smaller than its source.
+func pickSource(messages []Message, opts ContextOptions) (contextSelection, bool) {
+	groups := contextGroups(messages)
+	boundary, ok := eligibleBoundary(groups, opts.RetainTurns)
+	if !ok {
+		return contextSelection{}, false
+	}
+	selection := selectSource(messages, groups[:boundary], opts.MaxBytes, opts.MaxSummaryBytes)
+	if selection.first < 0 || contextBytes(selection.source) <= opts.MaxSummaryBytes {
+		return contextSelection{}, false
+	}
+	return selection, true
+}
+
+// eligibleBoundary returns the index of the oldest of the newest retain resolved
+// groups; only groups before it may be summarised.
+func eligibleBoundary(groups []contextGroup, retain int) (int, bool) {
+	retained := 0
+	for i := len(groups) - 1; i >= 0; i-- {
+		if !groups[i].resolved {
+			continue
+		}
+		retained++
+		if retained == retain {
+			return i, i > 0
+		}
+	}
+	return len(groups), false
+}
+
+func selectSource(messages []Message, groups []contextGroup, maxBytes, maxSummaryBytes int) contextSelection {
+	selection := contextSelection{source: []Message{}, selected: map[int]bool{}, first: -1}
+	for _, group := range groups {
+		if !group.resolved {
+			continue
+		}
+		candidate := append(append([]Message(nil), selection.source...), messages[group.start:group.end]...)
+		// Summary requests are independently bounded, even after a large tool result.
+		if contextBytes(summaryMessages(candidate, maxSummaryBytes)) > maxBytes {
+			continue
+		}
+		selection.source = candidate
+		if selection.first < 0 {
+			selection.first = group.start
+		}
+		for i := group.start; i < group.end; i++ {
+			selection.selected[i] = true
+		}
+	}
+	return selection
+}
+
+func spliceSummary(messages []Message, selected map[int]bool, first int, summary string) []Message {
+	out := make([]Message, 0, len(messages)-len(selected)+1)
+	for i, m := range messages {
+		if i == first {
+			out = append(out, Message{Role: "assistant", Content: summary})
+		}
+		if !selected[i] {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 type contextGroup struct {
