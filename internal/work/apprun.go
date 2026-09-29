@@ -1,7 +1,6 @@
 package work
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -15,7 +14,6 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/roles"
-	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // appRun is how QA runs the project's app in one check, from the project's
@@ -186,32 +184,19 @@ func (s *screenshots) taken() ([]session.Image, int) {
 
 var imageExtensions = map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
 
-// keepScreenshots attaches the screenshots QA's turn took to its task, as
-// the evidence of its verdict, which is given an id for them. What can't be
-// kept is said in its evidence instead.
-func (lp *Loop) keepScreenshots(ctx context.Context, t core.Task, checker core.Role, verdict *core.Verdict, shots *screenshots) {
-	images, omitted := shots.taken()
-	var files []core.NewFile
+// files are the screenshots QA's turn took, as files to keep with its
+// verdict when it is recorded, and how many more it took that are not kept,
+// counting images of a type that can't be.
+func (s *screenshots) files(by string) core.Screenshots {
+	images, omitted := s.taken()
+	out := core.Screenshots{By: by, Omitted: omitted}
 	for _, img := range images {
 		ext, ok := imageExtensions[img.MediaType]
 		if !ok {
-			omitted++
+			out.Omitted++
 			continue
 		}
-		files = append(files, core.NewFile{Name: fmt.Sprintf("screenshot-%d%s", len(files)+1, ext), Data: img.Data})
+		out.Files = append(out.Files, core.NewFile{Name: fmt.Sprintf("screenshot-%d%s", len(out.Files)+1, ext), Data: img.Data})
 	}
-	if len(files) > 0 {
-		verdict.ID = core.NewVerdictID()
-		kept, err := lp.Core.AttachToVerdict(ctx, core.VerdictFiles{Project: t.ProjectID, Task: t.ID, By: checker.Name, Kind: core.RoleQA, Verdict: verdict.ID, Files: files})
-		if err != nil {
-			verdict.ID = ""
-			verdict.Evidence = append(verdict.Evidence, core.Evidence{Kind: core.EvidenceScreenshot, Text: text.Clip(fmt.Sprintf("%d screenshots could not be kept: %v", len(files), err), core.MaxEvidenceText)})
-		}
-		for _, a := range kept {
-			verdict.Evidence = append(verdict.Evidence, core.Evidence{Kind: core.EvidenceScreenshot, Attachment: a.ID})
-		}
-	}
-	if omitted > 0 {
-		verdict.Evidence = append(verdict.Evidence, core.Evidence{Kind: core.EvidenceScreenshot, Text: fmt.Sprintf("%d more screenshots were taken and not kept: a check keeps its last %d, each an image within the attachment limits.", omitted, core.MaxScreenshots)})
-	}
+	return out
 }

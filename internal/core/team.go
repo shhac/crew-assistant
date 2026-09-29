@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -236,8 +237,11 @@ func (t *Task) ReviseWithDirection() {
 // same change as its verdict, so a restart never records a check twice. The
 // verdict counts toward the task only while the task is being checked; later,
 // a check that did not pass is added to the approval the owner is looking at.
-func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID string, verdict *Verdict, failure string) error {
-	return s.store.update(ctx, func(v *Snapshot) error {
+// The check's screenshots are kept, in the same change, only with a verdict
+// that counts; otherwise the files written for them are removed.
+func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID string, verdict *Verdict, shots Screenshots, failure string) error {
+	pending := s.writeScreenshots(ctx, taskID, shots)
+	err := s.store.update(ctx, func(v *Snapshot) error {
 		t := task(v, taskID)
 		if t == nil {
 			return ErrNotFound
@@ -270,7 +274,10 @@ func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID strin
 		case (t.Status == TaskReviewing || t.Status == TaskDeciding) && verdict.Revision == latest:
 			counted := *verdict
 			counted.Asked = m.ID
+			counted.Evidence = slices.Clone(verdict.Evidence)
+			pending.evidence(t, &counted, now)
 			t.Verdicts = append(t.Verdicts, counted)
+			pending.keep(v, t, counted.ID, now)
 		case verdict.Outcome != VerdictPass && t.Status == TaskWaiting:
 			if d := decision(v, t.DecisionID); d != nil && d.Status == DecisionOpen && d.Approves() {
 				d.Context += fmt.Sprintf("\n\nAsked directly, %s did not pass it: %s", m.To, verdict.Summary)
@@ -280,4 +287,6 @@ func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID strin
 		recordTask(v, now, t, "task.message_answered", fmt.Sprintf("%s answered about %s: %s", m.To, t.Objective, text.Clip(verdict.Summary, 200)))
 		return nil
 	})
+	pending.done(err)
+	return err
 }

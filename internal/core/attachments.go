@@ -12,12 +12,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/shhac/crew-assistant/internal/statepath"
+	"github.com/shhac/crew-assistant/internal/text"
 	_ "golang.org/x/image/webp"
 )
 
@@ -176,54 +178,17 @@ func (s *Service) attachmentPath(taskID, id string) (string, bool) {
 // partly accepted, and if the update fails the files written are removed.
 // change gets the records, with their ids, to complete and keep.
 func (s *Service) attach(ctx context.Context, taskRef string, files []NewFile, change func(v *Snapshot, t *Task, kept []Attachment, now time.Time) error) error {
-	if len(files) > MaxAttachmentsPerSet {
-		return fmt.Errorf("%d files can't be attached at once; the most is %d", len(files), MaxAttachmentsPerSet)
+	kept, written, err := s.writeFiles(ctx, taskRef, files)
+	if err != nil {
+		return err
 	}
-	kept := make([]Attachment, len(files))
-	for i, f := range files {
-		a, err := checkFile(f)
-		if err != nil {
-			return err
-		}
-		a.ID = uid()
-		kept[i] = a
-	}
-	var written []string
-	if len(files) > 0 {
-		snap, err := s.Snapshot(ctx)
-		if err != nil {
-			return err
-		}
-		t, ok := snap.FindTask(strings.TrimSpace(taskRef))
-		if !ok {
-			return ErrNotFound
-		}
-		for i, f := range files {
-			path, err := s.keepFile(t.ID, kept[i].ID, f.Data)
-			if err != nil {
-				removeAll(written)
-				return err
-			}
-			written = append(written, path)
-		}
-	}
-	err := s.store.update(ctx, func(v *Snapshot) error {
+	err = s.store.update(ctx, func(v *Snapshot) error {
 		t := task(v, strings.TrimSpace(taskRef))
 		if t == nil {
 			return ErrNotFound
 		}
-		count, total := len(t.Attachments), int64(0)
-		for _, a := range t.Attachments {
-			total += a.Size
-		}
-		for _, a := range kept {
-			count, total = count+1, total+a.Size
-		}
-		switch {
-		case count > MaxTaskAttachments:
-			return fmt.Errorf("a task can keep at most %d attachments, and this one has %d", MaxTaskAttachments, len(t.Attachments))
-		case total > MaxTaskAttachmentBytes:
-			return fmt.Errorf("a task can keep at most %s of attachments, and these would bring it to %s", ExactBytes(MaxTaskAttachmentBytes), ExactBytes(total))
+		if err := withinLimits(t, kept); err != nil {
+			return err
 		}
 		now := s.now().UTC()
 		for i := range kept {
@@ -235,6 +200,64 @@ func (s *Service) attach(ctx context.Context, taskRef string, files []NewFile, c
 		removeAll(written)
 	}
 	return err
+}
+
+// writeFiles checks files and writes them where the task's attachments are
+// kept, before anything records them. Every file is checked before any is
+// written, and if one can't be written those already written are removed.
+// It gives the files' records, with their ids, and where they were written.
+func (s *Service) writeFiles(ctx context.Context, taskRef string, files []NewFile) ([]Attachment, []string, error) {
+	if len(files) > MaxAttachmentsPerSet {
+		return nil, nil, fmt.Errorf("%d files can't be attached at once; the most is %d", len(files), MaxAttachmentsPerSet)
+	}
+	kept := make([]Attachment, len(files))
+	for i, f := range files {
+		a, err := checkFile(f)
+		if err != nil {
+			return nil, nil, err
+		}
+		a.ID = uid()
+		kept[i] = a
+	}
+	var written []string
+	if len(files) > 0 {
+		snap, err := s.Snapshot(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		t, ok := snap.FindTask(strings.TrimSpace(taskRef))
+		if !ok {
+			return nil, nil, ErrNotFound
+		}
+		for i, f := range files {
+			path, err := s.keepFile(t.ID, kept[i].ID, f.Data)
+			if err != nil {
+				removeAll(written)
+				return nil, nil, err
+			}
+			written = append(written, path)
+		}
+	}
+	return kept, written, nil
+}
+
+// withinLimits refuses records that would take a task past what it can
+// keep in all.
+func withinLimits(t *Task, kept []Attachment) error {
+	count, total := len(t.Attachments), int64(0)
+	for _, a := range t.Attachments {
+		total += a.Size
+	}
+	for _, a := range kept {
+		count, total = count+1, total+a.Size
+	}
+	switch {
+	case count > MaxTaskAttachments:
+		return fmt.Errorf("a task can keep at most %d attachments, and this one has %d", MaxTaskAttachments, len(t.Attachments))
+	case total > MaxTaskAttachmentBytes:
+		return fmt.Errorf("a task can keep at most %s of attachments, and these would bring it to %s", ExactBytes(MaxTaskAttachmentBytes), ExactBytes(total))
+	}
+	return nil
 }
 
 // keepFile writes one attachment's bytes where it is kept: to a temporary
@@ -311,50 +334,91 @@ func (s *Service) AttachToDesign(ctx context.Context, in DesignFiles) ([]Attachm
 	return out, err
 }
 
-// VerdictFiles are screenshots QA took while it used the app, kept as the
-// evidence of the verdict named Verdict, which is recorded after them.
-type VerdictFiles struct {
-	Project, Task string
-	By, Kind      string
-	Verdict       string
-	Files         []NewFile
+// Screenshots are what QA's turn took while it used the app, to keep as the
+// evidence of its verdict: the images as files, who took them, and how many
+// more were taken and not kept. They are recorded in the same update as the
+// verdict, and only if the verdict is, so none ever names a verdict that
+// does not exist.
+type Screenshots struct {
+	By      string
+	Files   []NewFile
+	Omitted int
 }
 
-// AttachToVerdict keeps QA's screenshots with the verdict they are evidence
-// for, checked and limited as every attachment is. At most MaxScreenshots
-// are kept for one verdict.
-func (s *Service) AttachToVerdict(ctx context.Context, in VerdictFiles) ([]Attachment, error) {
+// pendingShots are screenshots written where they are kept, for the update
+// that records their verdict to keep or let go.
+type pendingShots struct {
+	shots   Screenshots
+	kept    []Attachment
+	written []string
+	// failed is why the files can't be kept, which the verdict says instead.
+	failed   error
+	recorded bool
+}
+
+// writeScreenshots checks and writes a check's screenshots before the update
+// that records its verdict. Files that can't be kept are not refused: the
+// verdict says why instead.
+func (s *Service) writeScreenshots(ctx context.Context, taskRef string, shots Screenshots) *pendingShots {
+	p := &pendingShots{shots: shots}
 	switch {
-	case len(in.Files) == 0:
-		return nil, errors.New("there is no file to attach")
-	case len(in.Files) > MaxScreenshots:
-		return nil, fmt.Errorf("a check can keep at most %d screenshots", MaxScreenshots)
-	case !attachmentID.MatchString(in.Verdict):
-		return nil, errors.New("the check the screenshots belong to has no id")
+	case len(shots.Files) == 0:
+	case len(shots.Files) > MaxScreenshots:
+		p.failed = fmt.Errorf("a check can keep at most %d screenshots", MaxScreenshots)
+	default:
+		p.kept, p.written, p.failed = s.writeFiles(ctx, taskRef, shots.Files)
 	}
-	var out []Attachment
-	err := s.attach(ctx, in.Task, in.Files, func(v *Snapshot, t *Task, kept []Attachment, now time.Time) error {
-		if t.ProjectID != in.Project {
-			return ErrNotFound
-		}
-		names := make([]string, len(kept))
-		for i := range kept {
-			kept[i].By, kept[i].Kind, kept[i].Verdict = in.By, in.Kind, in.Verdict
-			names[i] = kept[i].Name
-		}
-		t.Attachments = append(t.Attachments, kept...)
-		t.UpdatedAt = now
-		recordTask(v, now, t, "task.attached", fmt.Sprintf("%s kept %s from checking %s", in.By, strings.Join(names, ", "), t.Objective))
-		derive(v, t)
-		out = kept
-		return nil
-	})
-	return out, err
+	return p
 }
 
-// NewVerdictID names a verdict that keeps evidence, as the store names
-// everything else.
-func NewVerdictID() string { return uid() }
+// evidence gives verdict its screenshots, inside the update that records
+// it: an id, and an item for each screenshot, or why they couldn't be kept,
+// then how many more were taken.
+func (p *pendingShots) evidence(t *Task, verdict *Verdict, now time.Time) {
+	verdict.ID = ""
+	if n := len(p.shots.Files); n > 0 {
+		failed := p.failed
+		if failed == nil {
+			failed = withinLimits(t, p.kept)
+		}
+		if failed != nil {
+			verdict.Evidence = append(verdict.Evidence, Evidence{Kind: EvidenceScreenshot, Text: text.Clip(fmt.Sprintf("%d screenshots could not be kept: %v", n, failed), MaxEvidenceText)})
+		} else {
+			verdict.ID = uid()
+			for i := range p.kept {
+				p.kept[i].By, p.kept[i].Kind, p.kept[i].Verdict, p.kept[i].At = p.shots.By, RoleQA, verdict.ID, now
+				verdict.Evidence = append(verdict.Evidence, Evidence{Kind: EvidenceScreenshot, Attachment: p.kept[i].ID})
+			}
+		}
+	}
+	if p.shots.Omitted > 0 {
+		verdict.Evidence = append(verdict.Evidence, Evidence{Kind: EvidenceScreenshot, Text: fmt.Sprintf("%d more screenshots were taken and not kept: a check keeps its last %d, each an image within the attachment limits.", p.shots.Omitted, MaxScreenshots)})
+	}
+}
+
+// keep records the screenshots with the task, in the same update, if the
+// verdict they were given is among its verdicts now.
+func (p *pendingShots) keep(v *Snapshot, t *Task, verdictID string, now time.Time) {
+	p.recorded = false
+	if verdictID == "" || !slices.ContainsFunc(t.Verdicts, func(v Verdict) bool { return v.ID == verdictID }) {
+		return
+	}
+	names := make([]string, len(p.kept))
+	for i, a := range p.kept {
+		names[i] = a.Name
+	}
+	t.Attachments = append(t.Attachments, p.kept...)
+	recordTask(v, now, t, "task.attached", fmt.Sprintf("%s kept %s from checking %s", p.shots.By, strings.Join(names, ", "), t.Objective))
+	p.recorded = true
+}
+
+// done removes the files written, unless the update that ended with err
+// recorded them.
+func (p *pendingShots) done(err error) {
+	if err != nil || !p.recorded {
+		removeAll(p.written)
+	}
+}
 
 // OpenAttachment finds one of a task's attachments, and where its file is
 // kept. An id from another task, or another project, is not found.

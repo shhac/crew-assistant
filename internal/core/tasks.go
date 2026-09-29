@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -449,6 +450,36 @@ func reorder(v *Snapshot, projectID string, ids []string) ([]Task, error) {
 // UpdateTask applies one loop transition atomically. The loop decides what
 // happens next; the store makes sure it happens to the current record.
 func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Project) (activity string, err error)) (Task, error) {
+	return s.updateTask(ctx, id, func(_ *Snapshot, t *Task, p *Project) (string, error) {
+		return fn(t, p)
+	})
+}
+
+// UpdateTaskWithVerdict is UpdateTask for a transition that may record a
+// check's verdict, with the screenshots the check took. fn gets the verdict
+// with its screenshots as evidence, to record or not. The screenshots are
+// kept in the same update, and only if the verdict fn was given is among
+// the task's verdicts afterwards; otherwise, or if the update fails, the
+// files written for them are removed.
+func (s *Service) UpdateTaskWithVerdict(ctx context.Context, id string, verdict Verdict, shots Screenshots, fn func(t *Task, p *Project, verdict Verdict) (activity string, err error)) (Task, error) {
+	pending := s.writeScreenshots(ctx, id, shots)
+	out, err := s.updateTask(ctx, id, func(v *Snapshot, t *Task, p *Project) (string, error) {
+		now := s.now().UTC()
+		recorded := verdict
+		recorded.Evidence = slices.Clone(verdict.Evidence)
+		pending.evidence(t, &recorded, now)
+		activity, err := fn(t, p, recorded)
+		if err != nil {
+			return "", err
+		}
+		pending.keep(v, t, recorded.ID, now)
+		return activity, nil
+	})
+	pending.done(err)
+	return out, err
+}
+
+func (s *Service) updateTask(ctx context.Context, id string, fn func(*Snapshot, *Task, *Project) (activity string, err error)) (Task, error) {
 	var out Task
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		t := task(v, id)
@@ -460,7 +491,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Pro
 			return ErrNotFound
 		}
 		wasFinished := t.Finished()
-		activity, err := fn(t, p)
+		activity, err := fn(v, t, p)
 		if err != nil {
 			return err
 		}

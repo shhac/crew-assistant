@@ -200,32 +200,84 @@ func TestQAScreenshotsAreKeptWithTheirVerdict(t *testing.T) {
 	s, _ := fixture(t)
 	p := codeProject(t, s, "claude")
 	task, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "A page"})
-	verdict := NewVerdictID()
 	shot := pngBytes(t)
-	kept, err := s.AttachToVerdict(testContext, VerdictFiles{Project: p.ID, Task: task.ID, By: "QA", Kind: RoleQA, Verdict: verdict, Files: []NewFile{{Name: "screenshot-1.png", Data: shot}}})
-	if err != nil || len(kept) != 1 {
-		t.Fatalf("kept %+v %v", kept, err)
+	check := func(shots Screenshots) (Task, Verdict) {
+		t.Helper()
+		var recorded Verdict
+		got, err := s.UpdateTaskWithVerdict(testContext, task.ID, Verdict{Role: "QA", Outcome: VerdictPass}, shots, func(t *Task, _ *Project, v Verdict) (string, error) {
+			t.Verdicts = append(t.Verdicts, v)
+			recorded = v
+			return "", nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got, recorded
 	}
-	if a := kept[0]; a.Verdict != verdict || a.Note != "" || a.Design != "" || a.Type != "image/png" || a.By != "QA" {
-		t.Fatalf("attachment %+v", a)
+	got, v := check(Screenshots{By: "QA", Files: []NewFile{{Name: "screenshot-1.png", Data: shot}}, Omitted: 2})
+	if v.ID == "" || len(v.Evidence) != 2 || len(got.Attachments) != 1 || v.Evidence[0].Attachment != got.Attachments[0].ID || !strings.HasPrefix(v.Evidence[1].Text, "2 more screenshots were taken and not kept") {
+		t.Fatalf("verdict %+v, attachments %+v", v, got.Attachments)
 	}
-	if _, path, err := s.OpenAttachment(testContext, p.ID, task.ID, kept[0].ID); err != nil || path == "" {
+	kept := got.Attachments[0]
+	if kept.Verdict != v.ID || kept.Note != "" || kept.Design != "" || kept.Type != "image/png" || kept.By != "QA" || kept.Kind != RoleQA {
+		t.Fatalf("attachment %+v", kept)
+	}
+	if _, path, err := s.OpenAttachment(testContext, p.ID, task.ID, kept.ID); err != nil || path == "" {
 		t.Fatalf("opening it: %v", err)
 	}
+	// What can't be kept is said in the verdict, which is still recorded,
+	// with no id for screenshots it doesn't have.
 	five := make([]NewFile, MaxScreenshots+1)
 	for i := range five {
 		five[i] = NewFile{Name: "s.png", Data: shot}
 	}
-	if _, err := s.AttachToVerdict(testContext, VerdictFiles{Project: p.ID, Task: task.ID, By: "QA", Kind: RoleQA, Verdict: verdict, Files: five}); err == nil {
-		t.Fatal("more screenshots than a check keeps were kept")
+	if got, v = check(Screenshots{By: "QA", Files: five}); v.ID != "" || len(got.Verdicts) != 2 || len(v.Evidence) != 1 || !strings.HasPrefix(v.Evidence[0].Text, "5 screenshots could not be kept: a check can keep at most") {
+		t.Fatalf("more screenshots than a check keeps: %+v", v)
 	}
-	if _, err := s.AttachToVerdict(testContext, VerdictFiles{Project: p.ID, Task: task.ID, By: "QA", Kind: RoleQA, Verdict: verdict, Files: []NewFile{{Name: "s.png", Data: []byte("not a picture")}}}); err == nil {
-		t.Fatal("something that isn't an image was kept as a screenshot")
+	if _, v = check(Screenshots{By: "QA", Files: []NewFile{{Name: "s.png", Data: []byte("not a picture")}}}); v.ID != "" || len(v.Evidence) != 1 || !strings.Contains(v.Evidence[0].Text, "it is not a PNG image") {
+		t.Fatalf("something that isn't an image: %+v", v)
 	}
-	if _, err := s.AttachToVerdict(testContext, VerdictFiles{Project: p.ID, Task: task.ID, By: "QA", Kind: RoleQA, Files: []NewFile{{Name: "s.png", Data: shot}}}); err == nil {
-		t.Fatal("a screenshot was kept for no check")
+	if got, _ = check(Screenshots{}); len(got.Attachments) != 1 {
+		t.Fatalf("attachments %+v", got.Attachments)
 	}
 	if names := keptFiles(t, s, task.ID); len(names) != 1 {
 		t.Fatalf("files kept %v", names)
+	}
+}
+
+// Screenshots are kept only with a verdict the same update records: when
+// it leaves the verdict out, or fails, no attachment is recorded and the
+// files written for them are removed.
+func TestQAScreenshotsAreNotKeptWithoutTheirVerdict(t *testing.T) {
+	s, _ := fixture(t)
+	p := codeProject(t, s, "claude")
+	task, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "A page"})
+	shots := Screenshots{By: "QA", Files: []NewFile{{Name: "screenshot-1.png", Data: pngBytes(t)}, {Name: "screenshot-2.png", Data: pngBytes(t)}}}
+	var given Verdict
+	left := func(t *Task, _ *Project, v Verdict) (string, error) {
+		given = v
+		return "", nil
+	}
+	failing := func(t *Task, _ *Project, v Verdict) (string, error) {
+		t.Verdicts = append(t.Verdicts, v)
+		return "", errors.New("the check can't be recorded")
+	}
+	if _, err := s.UpdateTaskWithVerdict(testContext, task.ID, Verdict{Role: "QA"}, shots, left); err != nil || given.ID == "" {
+		t.Fatalf("the verdict was not offered its screenshots: %+v %v", given, err)
+	}
+	if _, err := s.UpdateTaskWithVerdict(testContext, task.ID, Verdict{Role: "QA"}, shots, failing); err == nil {
+		t.Fatal("a failed update was not reported")
+	}
+	// A turn whose claim has gone records nothing, its screenshots included.
+	if _, err := s.UpdateTaskWithVerdict(Fenced(testContext, task.ID, "gone"), task.ID, Verdict{Role: "QA"}, shots, failing); !errors.Is(err, ErrStale) {
+		t.Fatalf("a stale turn: %v", err)
+	}
+	snap, _ := s.Snapshot(testContext)
+	got, _ := snap.FindTask(task.ID)
+	if len(got.Attachments) != 0 || len(got.Verdicts) != 0 {
+		t.Fatalf("kept without their verdict: %+v, verdicts %+v", got.Attachments, got.Verdicts)
+	}
+	if names := keptFiles(t, s, task.ID); len(names) != 0 {
+		t.Fatalf("files left %v", names)
 	}
 }

@@ -57,17 +57,17 @@ func (lp *Loop) answerMessage(ctx context.Context, p core.Project, t core.Task, 
 	}
 	m := t.Messages[i]
 	if s.Seat.Name == "" {
-		return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, nil, m.To+" is not on this task's team")
+		return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, nil, core.Screenshots{}, m.To+" is not on this task's team")
 	}
 	failed := func(err error) error {
-		return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, nil, err.Error())
+		return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, nil, core.Screenshots{}, err.Error())
 	}
 	medium, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
 	if err != nil {
 		return failed(err)
 	}
 	r := t.Revisions[len(t.Revisions)-1]
-	verdict, err := lp.runChecker(ctx, p, t, r, s.Seat, medium, messageNote(m))
+	verdict, shots, err := lp.runChecker(ctx, p, t, r, s.Seat, medium, messageNote(m))
 	if err != nil {
 		return failed(err)
 	}
@@ -76,7 +76,7 @@ func (lp *Loop) answerMessage(ctx context.Context, p core.Project, t core.Task, 
 	// The verdict judged the text the checker was shown, not whatever it
 	// became while the checker worked.
 	verdict.TextVersion = t.TextVersion
-	return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, &verdict, "")
+	return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, &verdict, shots, "")
 }
 
 type openMessage struct {

@@ -69,6 +69,9 @@ type Loop struct {
 	reclaim func(ctx context.Context, dir string) (session.Reclamation, error)
 	// ports are held by QA checks that run the app, one each.
 	ports ports
+	// checked, when set, is told a checker's turn is over, before its
+	// verdict is recorded. Set in tests.
+	checked func(taskID, checker string)
 }
 
 func New(s *core.Service, cfg func() config.Config, demo bool) *Loop {

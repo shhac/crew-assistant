@@ -40,14 +40,22 @@ func (lp *Loop) check(ctx context.Context, p core.Project, t core.Task, m medium
 	if held, err := lp.holdForUsage(ctx, t, checker); held || err != nil {
 		return err
 	}
-	verdict, err := lp.runChecker(ctx, p, t, r, checker, m, "")
+	verdict, shots, err := lp.runChecker(ctx, p, t, r, checker, m, "")
 	if err != nil {
 		return lp.roleFailed(ctx, t, checker.Name, err)
+	}
+	if lp.checked != nil {
+		lp.checked(t.ID, checker.Name)
 	}
 	// The verdict judged the text the checker was shown: if it or anyone
 	// changed the objective or criteria meanwhile, it judges again.
 	verdict.TextVersion = t.TextVersion
-	_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
+	// The screenshots are kept only with the verdict, in the same update:
+	// as updateOpen, a finished task records neither.
+	_, err = lp.Core.UpdateTaskWithVerdict(ctx, t.ID, verdict, shots, func(t *core.Task, p *core.Project, verdict core.Verdict) (string, error) {
+		if t.Finished() {
+			return "", nil
+		}
 		// Ref is what the checker's own copy held, set with the verdict.
 		verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, checker.Name, p.Brief.Version, time.Now().UTC()
 		t.Verdicts = append(t.Verdicts, verdict)
@@ -63,17 +71,18 @@ func (lp *Loop) check(ctx context.Context, p core.Project, t core.Task, m medium
 // revision afterwards, or the verdict is discarded and the check fails, to
 // run again. A reply that is not a usable verdict gets one plain retry.
 // Where the project has a run recipe, QA also starts the app and uses it, on
-// a port of its own, and the screenshots it takes are kept with its verdict.
-func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium, note string) (core.Verdict, error) {
+// a port of its own, and gives the screenshots it took, to keep with its
+// verdict when that is recorded.
+func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium, note string) (core.Verdict, core.Screenshots, error) {
 	playbook := taskPlaybook(p, t)
 	app, err := lp.planApp(checker, playbook)
 	if err != nil {
-		return core.Verdict{}, err
+		return core.Verdict{}, core.Screenshots{}, err
 	}
 	c, err := m.check(ctx, t, r, checker.Holds(core.RoleQA), app.running())
 	if err != nil {
 		app.release()
-		return core.Verdict{}, err
+		return core.Verdict{}, core.Screenshots{}, err
 	}
 	app.tree = c.tree
 	// The port is held until the copy the app ran from is gone.
@@ -84,7 +93,7 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 	base := checkerPrompt(p, t, r, checker, playbook) + c.note + appPrompt(app) + note + learnedGuide(checker, true)
 	spec, cleanupLearnings, err := lp.roleSpec(t, checker, c.workDir, c.write, m, base)
 	if err != nil {
-		return core.Verdict{}, err
+		return core.Verdict{}, core.Screenshots{}, err
 	}
 	defer cleanupLearnings()
 	if c.env != nil {
@@ -104,23 +113,24 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 		return err
 	})
 	if err != nil {
-		return core.Verdict{}, err
+		return core.Verdict{}, core.Screenshots{}, err
 	}
 	if parseErr != nil {
-		return core.Verdict{}, parseErr
+		return core.Verdict{}, core.Screenshots{}, parseErr
 	}
 	if err = c.verify(ctx); err != nil {
-		return core.Verdict{}, fmt.Errorf("its verdict was discarded: %w", err)
+		return core.Verdict{}, core.Screenshots{}, fmt.Errorf("its verdict was discarded: %w", err)
 	}
 	lp.recordLearned(ctx, p, t, checker, m, learned)
 	verdict.Ref = c.ref
 	if app.unavailable != "" {
 		verdict.Findings = append(verdict.Findings, core.Finding{Criterion: "Running the app", Note: app.unavailable})
 	}
+	var taken core.Screenshots
 	if shots != nil {
-		lp.keepScreenshots(ctx, t, checker, &verdict, shots)
+		taken = shots.files(checker.Name)
 	}
-	return verdict, nil
+	return verdict, taken, nil
 }
 
 // askForJSON runs a role and reads its reply with parse, asking once more,

@@ -5,6 +5,7 @@ package work
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image"
 	"image/png"
 	"os"
@@ -236,6 +237,73 @@ func TestClaudeQARunsTheAppAndKeepsWhatItSaw(t *testing.T) {
 	// Whoever works on the task next reads what QA saw.
 	if h := historyText(task, true); !strings.Contains(h, "saw (console): No errors in the console.") || !strings.Contains(h, "screenshot kept with the task: screenshot-1.png") {
 		t.Fatalf("history %s", h)
+	}
+}
+
+// keptOnDisk lists the files kept for a task's attachments, if any.
+func keptOnDisk(t *testing.T, a *Loop, taskID string) []os.DirEntry {
+	t.Helper()
+	entries, err := os.ReadDir(a.Core.AttachmentsDirectory(taskID))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	return entries
+}
+
+// The owner stops the task once QA has used the app and taken screenshots,
+// before its verdict is recorded: nothing of the check is kept, so no
+// screenshot names a verdict that never was.
+func TestStoppingATaskBeforeQAsVerdictKeepsNoScreenshots(t *testing.T) {
+	runner := &appRunner{codeRunner: codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass}}}, qaReply: qaSawTheApp}
+	runner.events = []session.Event{{Kind: "tool_completed", Tool: "mcp__claude-in-chrome__computer", Images: []session.Image{screenshot(t, 1), screenshot(t, 2)}}}
+	a, p := qaTeam(t, runner, "claude", core.Browser{On: true}, &testRecipe)
+	a.checked = func(taskID, checker string) {
+		if checker != "Quinn" {
+			return
+		}
+		if _, err := a.StopTask(context.Background(), p.ID, taskID); err != nil {
+			t.Error(err)
+		}
+	}
+	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add Feature"})
+	task = settleCode(t, a, task.ID)
+	if task.Status != core.TaskStopped || len(runner.qa) != 1 {
+		t.Fatalf("task %s after %d QA turns", task.Status, len(runner.qa))
+	}
+	if len(task.Attachments) != 0 || verdictBy(task, "Quinn").Role != "" {
+		t.Fatalf("kept after the stop: attachments %+v, verdicts %+v", task.Attachments, task.Verdicts)
+	}
+	if files := keptOnDisk(t, a, task.ID); len(files) != 0 {
+		t.Fatalf("files left: %d", len(files))
+	}
+}
+
+// Asked directly once approval is waiting, QA's passing check is not
+// counted, so the screenshots it took are not kept either.
+func TestQAsAnswerThatDoesNotCountKeepsNoScreenshots(t *testing.T) {
+	runner := &appRunner{codeRunner: codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass}}}, qaReply: qaSawTheApp}
+	runner.events = []session.Event{{Kind: "tool_completed", Tool: "mcp__claude-in-chrome__computer", Images: []session.Image{screenshot(t, 1), screenshot(t, 2)}}}
+	a, p := qaTeam(t, runner, "claude", core.Browser{On: true}, &testRecipe)
+	ctx := context.Background()
+	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add Feature"})
+	task = settleCode(t, a, task.ID)
+	if task.Status != core.TaskWaiting || len(task.Attachments) != 2 || len(keptOnDisk(t, a, task.ID)) != 2 {
+		t.Fatalf("task %s with attachments %+v", task.Status, task.Attachments)
+	}
+	if _, err := a.MessageTeam(ctx, p.ID, task.ID, "Quinn", core.FromOwner, "Look again"); err != nil {
+		t.Fatal(err)
+	}
+	task = settleCode(t, a, task.ID)
+	if len(runner.qa) != 2 || task.Messages[0].Status != core.MessageAnswered || len(task.Verdicts) != 2 {
+		t.Fatalf("%d QA turns, message %+v, verdicts %d", len(runner.qa), task.Messages[0], len(task.Verdicts))
+	}
+	for _, a := range task.Attachments {
+		if !slices.ContainsFunc(task.Verdicts, func(v core.Verdict) bool { return v.ID == a.Verdict }) {
+			t.Fatalf("attachment %+v names no verdict", a)
+		}
+	}
+	if len(task.Attachments) != 2 || len(keptOnDisk(t, a, task.ID)) != 2 {
+		t.Fatalf("attachments %+v", task.Attachments)
 	}
 }
 
