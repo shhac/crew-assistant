@@ -49,8 +49,11 @@
   grid-template-columns: 224px minmax(0, 1fr) 400px;
 }
 
+/* The workspace is hidden, not given a zero-width track: a display: none
+   child takes no grid cell, so a third column would leave the pane in the
+   empty middle one. */
 .shell.pane-open.chat-expanded {
-  grid-template-columns: 224px 0 minmax(0, 1fr);
+  grid-template-columns: 224px minmax(0, 1fr);
 }
 
 .shell.chat-expanded .workspace {
@@ -252,7 +255,8 @@ main:focus {
   .shell.pane-open {
     grid-template-columns: 200px minmax(0, 1fr) 360px;
   }
-  .shell:not(.pane-open) {
+  .shell:not(.pane-open),
+  .shell.pane-open.chat-expanded {
     grid-template-columns: 200px minmax(0, 1fr);
   }
 }
