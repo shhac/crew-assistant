@@ -104,6 +104,29 @@ func runTurn(t *testing.T, a *App, message string) engine.Result {
 	return result
 }
 
+// A project the owner renames in its settings is named by its new title in
+// the ongoing conversation, and the rename is among what changed.
+func TestTheChatIsToldOfARename(t *testing.T) {
+	a, o := sessionApp(t)
+	ctx := context.Background()
+	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Shop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runTurn(t, a, "Hello")
+	if _, err := a.Core.SetProjectTitle(ctx, p.ID, "Corner shop"); err != nil {
+		t.Fatal(err)
+	}
+	runTurn(t, a, "And now?")
+	if len(o.chats) != 1 || !strings.HasPrefix(o.chats[0].sent[1], "Since your last message:\n- Corner shop: Renamed from “Shop” to “Corner shop”\n") {
+		t.Fatalf("the second turn should hear of the rename: %q", o.chats[0].sent)
+	}
+	state, _, err := a.chatContext(ctx, "")
+	if err != nil || !strings.Contains(string(state), `"title":"Corner shop"`) || strings.Contains(string(state), `"title":"Shop"`) {
+		t.Fatalf("the chat context should name the project by its new title: %s %v", state, err)
+	}
+}
+
 func TestTheChatRunsOnOneSessionAndIsToldOnlyWhatChanged(t *testing.T) {
 	a, o := sessionApp(t)
 	ctx := context.Background()

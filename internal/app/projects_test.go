@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -68,5 +69,34 @@ func TestTheAssistantSetsHowQARunsTheApp(t *testing.T) {
 	payload, _ = json.Marshal(map[string]any{"project_id": p.ID, "setup": "", "start": "", "url": "", "ready": ""})
 	if result, err = a.Execute(ctx, "set_run_recipe", payload); err != nil || result.(core.Project).Playbook.Run != nil {
 		t.Fatalf("taking it away: %v", err)
+	}
+}
+
+// The assistant renames a project when the owner asks, and the rename is
+// recorded like its other project changes.
+func TestTheAssistantRenamesAProject(t *testing.T) {
+	a := testApp(t)
+	ctx := context.Background()
+	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Shop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(map[string]any{"project_id": p.ID, "title": "Corner shop"})
+	result, err := a.Execute(ctx, "rename_project", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.(core.Project); got.Title != "Corner shop" || got.Prefix != p.Prefix {
+		t.Fatalf("renamed %+v", got)
+	}
+	s, _ := a.Snapshot(ctx)
+	if !slices.ContainsFunc(s.Activity, func(e core.Activity) bool {
+		return e.Kind == "project.renamed" && e.ProjectID == p.ID && e.Summary == "Renamed from “Shop” to “Corner shop”"
+	}) {
+		t.Fatalf("activity %+v", s.Activity)
+	}
+	payload, _ = json.Marshal(map[string]any{"project_id": p.ID, "title": " "})
+	if _, err := a.Execute(ctx, "rename_project", payload); err == nil {
+		t.Fatal("renamed a project to nothing")
 	}
 }

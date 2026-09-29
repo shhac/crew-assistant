@@ -76,6 +76,23 @@ func TestSourceRefreshPreservesTheBrief(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+func TestSourceRefreshKeepsTheOwnersName(t *testing.T) {
+	s, _ := fixture(t)
+	p, err := s.CreateProject(testContext, ProjectInput{Title: "Issue", SourceID: "linear:fixture", SourceDescription: "Initial source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetProjectTitle(testContext, p.ID, "Owner's name"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.CreateProject(testContext, ProjectInput{Title: "Updated title", SourceID: p.SourceID, SourceDescription: "Updated source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != p.ID || got.Title != "Owner's name" || got.SourceDescription != "Updated source" || got.Prefix != p.Prefix {
+		t.Fatal(got)
+	}
+}
 func TestPendingOperationInspectionIsVisibleAndDoesNotReplay(t *testing.T) {
 	s, _ := fixture(t)
 	p := newProject(t, s)

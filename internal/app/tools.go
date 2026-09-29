@@ -84,6 +84,9 @@ var toolActions = map[string]toolAction{
 	"update_brief": with(func(a *App, ctx context.Context, in engine.UpdateBriefArgs) (any, error) {
 		return a.Work.UpdateBrief(ctx, in.ProjectID, core.BriefInput{Goal: in.Goal, Audience: in.Audience, Constraints: in.Constraints, Criteria: in.Criteria})
 	}),
+	"rename_project": with(func(a *App, ctx context.Context, in engine.RenameProjectArgs) (any, error) {
+		return a.Core.SetProjectTitle(ctx, in.ProjectID, in.Title)
+	}),
 	"set_team": with(func(a *App, ctx context.Context, in engine.SetTeamArgs) (any, error) {
 		return a.Work.SetTeam(ctx, in.ProjectID, work.TeamChoice{Template: in.Template, WriterEngine: in.WriterEngine, ReviewerEngine: in.ReviewerEngine, MaxRounds: in.MaxRounds, DeliverTo: in.DeliverTo, Repo: in.Repo, BranchPrefix: in.BranchPrefix, Check: in.Check, Prepare: in.Prepare, Sign: in.Sign, CheckInCopy: in.CheckInCopy, Implementer: in.ImplementerMember, Reviewer: in.ReviewerMember, QA: in.QAMember, Researcher: in.ResearcherMember, Designer: in.DesignerMember, PM: in.PMMember})
 	}),

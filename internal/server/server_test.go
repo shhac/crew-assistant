@@ -523,6 +523,54 @@ func TestTheOwnerRenamesAPrefixAndNamesTasksByReadableID(t *testing.T) {
 	}
 }
 
+// The owner renames a project, and only its title changes: its prefix,
+// task IDs and links stay as they were.
+func TestTheOwnerRenamesAProject(t *testing.T) {
+	_, call := ownerServer(t)
+	var project core.Project
+	_ = json.Unmarshal(call("POST", "/api/projects", `{"title":"Export","brief":{"goal":"CSV","criteria":["Valid CSV"]},"template":"draft"}`).Body.Bytes(), &project)
+	var schema, api core.Task
+	for _, task := range []*core.Task{&schema, &api} {
+		w := call("POST", "/api/projects/"+project.ID+"/tasks", `{"objective":"Work","criteria":[]}`)
+		_ = json.Unmarshal(w.Body.Bytes(), task)
+	}
+	if w := call("POST", "/api/projects/"+project.ID+"/tasks/EXP-2/links", `{"relation":"depends_on","task":"EXP-1"}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w := call("PUT", "/api/projects/"+project.ID+"/title", `{"title":" Spreadsheet export "}`)
+	var renamed core.Project
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &renamed) != nil || renamed.Title != "Spreadsheet export" || renamed.ID != project.ID || renamed.Prefix != "EXP" || renamed.NextTask != 3 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var state struct {
+		Tasks []core.Task `json:"tasks"`
+	}
+	_ = json.Unmarshal(call("GET", "/api/state", "").Body.Bytes(), &state)
+	for _, task := range state.Tasks {
+		switch task.ID {
+		case schema.ID:
+			if task.Ref != "EXP-1" {
+				t.Fatalf("schema %+v", task)
+			}
+		case api.ID:
+			if task.Ref != "EXP-2" || len(task.DependsOn) != 1 || task.DependsOn[0] != schema.ID {
+				t.Fatalf("api %+v", task)
+			}
+		}
+	}
+	for body, message := range map[string]string{
+		`{"title":"  "}`: "A project needs a name",
+		`{"title":"` + strings.Repeat("x", 201) + `"}`: "A project name can be at most 200 characters",
+	} {
+		if w := call("PUT", "/api/projects/"+project.ID+"/title", body); w.Code != 400 || !strings.Contains(w.Body.String(), message) {
+			t.Fatal("a bad name was accepted", w.Code, w.Body.String())
+		}
+	}
+	if w := call("PUT", "/api/projects/nope/title", `{"title":"Name"}`); w.Code != 404 {
+		t.Fatal("renamed a project that doesn't exist", w.Code)
+	}
+}
+
 // A task's place is readable from the dashboard's API, and only a code
 // task's draft can be changed by hand.
 func TestATasksPlaceAndDraftsByHand(t *testing.T) {

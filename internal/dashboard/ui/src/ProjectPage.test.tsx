@@ -2761,6 +2761,49 @@ describe("readable request IDs", () => {
       },
     ]);
   });
+
+  it("renames the project from Config, keeping its request IDs", async () => {
+    show(project({ prefix: "SE" }), {}, { tab: "config" });
+    const name = screen.getByRole("region", { name: "Name" });
+    expect(within(name).getByText("Service")).toBeTruthy();
+    fireEvent.click(within(name).getByRole("button", { name: "Edit" }));
+    const field = within(name).getByRole("textbox", { name: /^Name/ });
+    expect(field).toHaveProperty("value", "Service");
+    expect(field).toHaveProperty("maxLength", 200);
+    fireEvent.change(field, { target: { value: "Search service" } });
+    fireEvent.click(within(name).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/title",
+        method: "PUT",
+        body: { title: "Search service" },
+      },
+    ]);
+    expect(within(name).queryByRole("form")).toBeNull();
+  });
+
+  it("says why a new name was refused, keeping it to fix", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: "A project needs a name" }),
+      })),
+    );
+    show(project(), {}, { tab: "config" });
+    const name = screen.getByRole("region", { name: "Name" });
+    fireEvent.click(within(name).getByRole("button", { name: "Edit" }));
+    const field = within(name).getByRole("textbox", { name: /^Name/ });
+    fireEvent.change(field, { target: { value: "   " } });
+    fireEvent.submit(within(name).getByRole("form", { name: "Name" }));
+    expect((await within(name).findByRole("alert")).textContent).toBe(
+      "A project needs a name",
+    );
+    expect(field).toHaveProperty("value", "   ");
+    expect(refresh).not.toHaveBeenCalled();
+  });
 });
 
 describe("faces of the team at work", () => {

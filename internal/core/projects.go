@@ -122,9 +122,14 @@ func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (Project, 
 					continue
 				}
 				// A source refresh updates what the source says, never the brief
-				// the owner and assistant have since agreed.
-				if p.Title != in.Title || p.SourceDescription != in.SourceDescription {
-					p.Title = in.Title
+				// the owner and assistant have since agreed, nor a title the
+				// owner has renamed.
+				title := in.Title
+				if p.TitleRenamed {
+					title = p.Title
+				}
+				if p.Title != title || p.SourceDescription != in.SourceDescription {
+					p.Title = title
 					p.SourceDescription = in.SourceDescription
 					p.UpdatedAt = now
 				}

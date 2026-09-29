@@ -8,6 +8,7 @@ import { ErrorNotice, useAction } from "./ui";
 import {
   setParallel,
   setPrefix,
+  setTitle,
   setWorkspace,
   type Member,
   type Playbook,
@@ -34,6 +35,7 @@ export function ConfigTab({
   const code = playbook && isCode(playbook);
   return (
     <div className="tab-stack">
+      <ProjectName project={project} refresh={refresh} />
       <TeamSettings project={project} members={members} refresh={refresh} />
       {playbook && (
         <TasksAtOnce project={project} playbook={playbook} refresh={refresh} />
@@ -153,6 +155,92 @@ function TasksAtOnce({
             Up to {cap} at once
             {!playbook.max_active && " (one per implementer seat)"}
           </dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+/** The longest name a project can have, as the server allows. */
+const longestName = 200;
+
+/** The project's name. Renaming it keeps its request IDs as they are. */
+function ProjectName({
+  project,
+  refresh,
+}: {
+  project: Project;
+  refresh: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitleText] = useState(project.title);
+  const { busy, error, run } = useAction();
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    await run(async () => {
+      await setTitle(project.id, title);
+      await refresh();
+      setEditing(false);
+    });
+  }
+  if (editing)
+    return (
+      <section className="tab-panel card" aria-label="Name">
+        <form className="form" aria-label="Name" onSubmit={save}>
+          <h2>Name</h2>
+          <label htmlFor="config-project-title">
+            Name
+            <input
+              id="config-project-title"
+              className="field"
+              value={title}
+              maxLength={longestName}
+              onChange={(e) => setTitleText(e.target.value)}
+              required
+            />
+            <span className="hint">
+              Request IDs keep their prefix whatever the project is called.
+            </span>
+          </label>
+          <ErrorNotice error={error} />
+          <div className="actions">
+            <button className="btn btn-primary" type="submit" disabled={busy}>
+              Save
+            </button>
+            <button
+              className="btn btn-quiet"
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setTitleText(project.title);
+                setEditing(false);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </section>
+    );
+  return (
+    <section className="tab-panel card" aria-label="Name">
+      <div className="panel-head">
+        <h2>Name</h2>
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={() => {
+            setTitleText(project.title);
+            setEditing(true);
+          }}
+        >
+          Edit
+        </button>
+      </div>
+      <dl className="facts">
+        <div className="fact-row">
+          <dt>Name</dt>
+          <dd>{project.title}</dd>
         </div>
       </dl>
     </section>

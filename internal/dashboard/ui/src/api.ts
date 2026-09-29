@@ -976,6 +976,14 @@ export function setDirectories(projectID: string, paths: string[]) {
   });
 }
 
+/** Renames a project; its readable task IDs keep their prefix. */
+export function setTitle(projectID: string, title: string) {
+  return api<Project>(`${projectPath(projectID)}/title`, {
+    method: "PUT",
+    body: JSON.stringify({ title }),
+  });
+}
+
 /** Renames the prefix of a project's readable task IDs. */
 export function setPrefix(projectID: string, prefix: string) {
   return api<Project>(`${projectPath(projectID)}/prefix`, {

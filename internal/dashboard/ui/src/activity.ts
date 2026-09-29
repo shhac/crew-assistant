@@ -24,6 +24,7 @@ const labels: Record<string, string> = {
   "project.created": "Project",
   "project.directories_updated": "Folders",
   "project.refined": "Brief",
+  "project.renamed": "Project",
   "recovery.pending": "Interrupted",
   "task.awaiting": "Waiting",
   "task.deciding": "Checks",

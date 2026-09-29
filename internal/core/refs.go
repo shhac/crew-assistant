@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Readable task IDs. Each project has a short prefix and numbers its tasks
@@ -241,6 +242,34 @@ func canonicalID(v *Snapshot, id string) string {
 		return t.ID
 	}
 	return id
+}
+
+// MaxProjectTitle is the longest name a project can be given, in characters,
+// as the dashboard's new-project form allows.
+const MaxProjectTitle = 200
+
+// SetProjectTitle renames a project. Only the title changes: its ID, task
+// IDs and their prefix stay as they are, and a source refresh no longer
+// overwrites the title.
+func (s *Service) SetProjectTitle(ctx context.Context, id, title string) (Project, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return Project{}, errors.New("a project needs a name")
+	}
+	if utf8.RuneCountInString(title) > MaxProjectTitle {
+		return Project{}, fmt.Errorf("a project name can be at most %d characters", MaxProjectTitle)
+	}
+	return s.editProject(ctx, id, func(p *Project, v *Snapshot) error {
+		if p.Title == title {
+			return nil
+		}
+		old := p.Title
+		p.Title = title
+		p.TitleRenamed = true
+		p.UpdatedAt = s.now().UTC()
+		record(v, p.UpdatedAt, p.ID, "project.renamed", fmt.Sprintf("Renamed from “%s” to “%s”", old, title))
+		return nil
+	})
 }
 
 // SetProjectPrefix renames a project's task ID prefix. Only the prefix is

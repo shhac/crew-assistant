@@ -19,6 +19,16 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		v, err := a.Work.UpdateBrief(r.Context(), r.PathValue("id"), in)
 		reply(w, 200, v, err)
 	})
+	mux.HandleFunc("PUT /api/projects/{id}/title", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Title string `json:"title"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Core.SetProjectTitle(r.Context(), r.PathValue("id"), in.Title)
+		reply(w, 200, v, err)
+	})
 	mux.HandleFunc("PUT /api/projects/{id}/prefix", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Prefix string `json:"prefix"`

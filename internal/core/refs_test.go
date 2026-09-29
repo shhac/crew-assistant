@@ -256,6 +256,68 @@ func TestAPrefixMustBeValidAndUnique(t *testing.T) {
 	}
 }
 
+func TestRenamingAProjectChangesOnlyItsTitle(t *testing.T) {
+	s, p, tasks := linkedProject(t)
+	schema, api := tasks[0], tasks[1]
+	if _, err := s.LinkTasks(testContext, Link{Project: p.ID, Task: api.ID, Relation: RelationDependsOn, Other: schema.ID, By: LinkedByOwner}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.Snapshot(testContext)
+	renamed, err := s.SetProjectTitle(testContext, p.ID, "  Crew rebuild  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed.Title != "Crew rebuild" || !renamed.TitleRenamed || renamed.ID != p.ID || renamed.Prefix != p.Prefix || renamed.NextTask != 4 || renamed.ScratchDirectory != p.ScratchDirectory || !slices.Equal(renamed.Directories, p.Directories) {
+		t.Fatalf("renamed %+v from %+v", renamed, p)
+	}
+	snap, _ := s.Snapshot(testContext)
+	if !reflect.DeepEqual(snap.Tasks, before.Tasks) {
+		t.Fatalf("tasks changed: %+v", snap.Tasks)
+	}
+	if got := taskByID(t, s, api.ID); got.Ref != "FP-2" || !slices.Equal(got.DependsOn, []string{schema.ID}) {
+		t.Fatalf("api after the rename %+v", got)
+	}
+	if !slices.ContainsFunc(snap.Activity, func(a Activity) bool {
+		return a.Kind == "project.renamed" && a.ProjectID == p.ID && a.Summary == "Renamed from “Fictional project” to “Crew rebuild”"
+	}) {
+		t.Fatalf("activity %+v", snap.Activity)
+	}
+	if !slices.ContainsFunc(snap.Activity, func(a Activity) bool { return a.Kind == "project.created" && a.Summary == "Fictional project" }) {
+		t.Fatal("the rename rewrote history")
+	}
+	if _, err := s.SetProjectTitle(testContext, p.ID, "Crew rebuild"); err != nil {
+		t.Fatal(err)
+	}
+	again, _ := s.Snapshot(testContext)
+	if len(again.Activity) != len(snap.Activity) {
+		t.Fatal("an unchanged title was recorded as a rename")
+	}
+}
+
+func TestAProjectNameMustBeGivenAndNotTooLong(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	for bad, message := range map[string]string{
+		"":                       "a project needs a name",
+		"   ":                    "a project needs a name",
+		strings.Repeat("é", 201): "a project name can be at most 200 characters",
+	} {
+		if _, err := s.SetProjectTitle(testContext, p.ID, bad); err == nil || err.Error() != message {
+			t.Errorf("title %q: %v", bad, err)
+		}
+	}
+	if got, _ := s.Snapshot(testContext); got.Projects[0].Title != p.Title || got.Projects[0].TitleRenamed {
+		t.Fatalf("a refused rename changed the project %+v", got.Projects[0])
+	}
+	longest := strings.Repeat("é", 200)
+	if renamed, err := s.SetProjectTitle(testContext, p.ID, longest); err != nil || renamed.Title != longest {
+		t.Fatalf("the longest name: %v", err)
+	}
+	if _, err := s.SetProjectTitle(testContext, "missing", "Name"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a missing project: %v", err)
+	}
+}
+
 func TestEitherIDNamesATaskAndOnlyTheCanonicalOneIsKept(t *testing.T) {
 	s, p, tasks := linkedProject(t)
 	schema, api, dashboard := tasks[0], tasks[1], tasks[2]
