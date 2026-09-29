@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/procgroup"
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // validBranch refuses anything git would not take as a branch name, before it
@@ -42,10 +43,7 @@ func runIn(ctx context.Context, dir string, env []string, args ...string) (strin
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if len(detail) > 300 {
-			detail = detail[:300]
-		}
+		detail := text.Clip(stderr.String(), 300)
 		code := -1
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {

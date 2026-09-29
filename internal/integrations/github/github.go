@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/procgroup"
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // Runner runs gh with args and returns what it printed.
@@ -33,10 +34,7 @@ func runGH(ctx context.Context, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if len(detail) > 300 {
-			detail = detail[:300]
-		}
+		detail := text.Clip(stderr.String(), 300)
 		return nil, fmt.Errorf("gh %s: %s", args[0], detail)
 	}
 	return stdout.Bytes(), nil
