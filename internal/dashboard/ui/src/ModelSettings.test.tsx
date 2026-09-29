@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { EngineSettings, SuggestionModel } from "./ModelSettings";
+import { EngineSettings } from "./EngineSettings";
+import { SuggestionModel } from "./SuggestionModel";
 import type { Config } from "./api";
 import { rememberChoices } from "./engines";
 import { testChoices } from "./testEngines";

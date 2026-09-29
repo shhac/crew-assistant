@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { ChatSettings } from "./ChatSettings";
-import { EngineSettings, SuggestionModel } from "./ModelSettings";
+import { EngineSettings } from "./EngineSettings";
+import { SuggestionModel } from "./SuggestionModel";
 import { LimitsSettings } from "./LimitsSettings";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { Panel } from "./SettingsPanel";
