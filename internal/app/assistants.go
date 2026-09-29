@@ -30,11 +30,10 @@ func (a *App) CreateAssistant(ctx context.Context, in AssistantInput) (config.As
 		p.Avatar.Image = ""
 	}
 	in.applyTo(&p)
-	a.mu.Lock()
-	next := a.cfg.CloneAssistants()
-	next.Assistants = append(next.Assistants, p)
-	err := a.updateConfigLocked(next)
-	a.mu.Unlock()
+	err := a.editAssistants(func(next *config.Config) error {
+		next.Assistants = append(next.Assistants, p)
+		return nil
+	})
 	if err != nil {
 		return config.AssistantProfile{}, err
 	}
@@ -45,21 +44,22 @@ func (a *App) CreateAssistant(ctx context.Context, in AssistantInput) (config.As
 // SaveAssistant changes an assistant profile. A different model, name or
 // personality in the seat starts a new session with the assistant.
 func (a *App) SaveAssistant(ctx context.Context, id string, in AssistantInput) (config.AssistantProfile, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	next := a.cfg.CloneAssistants()
-	p := next.ProfileRef(id)
-	if p == nil {
-		return config.AssistantProfile{}, core.ErrNotFound
-	}
-	in.applyTo(p)
-	if in.Avatar != nil {
-		avatar := in.Avatar.Normalized()
-		avatar.Image, avatar.Look = p.Avatar.Image, p.Avatar.Look
-		p.Avatar = avatar
-	}
-	saved := *p
-	if err := a.updateConfigLocked(next); err != nil {
+	var saved config.AssistantProfile
+	err := a.editAssistants(func(next *config.Config) error {
+		p := next.ProfileRef(id)
+		if p == nil {
+			return core.ErrNotFound
+		}
+		in.applyTo(p)
+		if in.Avatar != nil {
+			avatar := in.Avatar.Normalized()
+			avatar.Image, avatar.Look = p.Avatar.Image, p.Avatar.Look
+			p.Avatar = avatar
+		}
+		saved = *p
+		return nil
+	})
+	if err != nil {
 		return config.AssistantProfile{}, err
 	}
 	return saved, nil
@@ -69,23 +69,33 @@ func (a *App) SaveAssistant(ctx context.Context, id string, in AssistantInput) (
 // itself. Deleting the one in the seat leaves the seat empty until the owner
 // chooses another; the owner's own memories stay for whoever that is.
 func (a *App) DeleteAssistant(ctx context.Context, id string) error {
-	a.mu.Lock()
-	next := a.cfg.CloneAssistants()
-	i := slices.IndexFunc(next.Assistants, func(p config.AssistantProfile) bool { return p.ID == id })
-	if i < 0 {
-		a.mu.Unlock()
-		return core.ErrNotFound
-	}
-	next.Assistants = slices.Delete(next.Assistants, i, i+1)
-	if next.Assistant.Seat == id {
-		next.Assistant.Seat = ""
-	}
-	err := a.updateConfigLocked(next)
-	a.mu.Unlock()
+	err := a.editAssistants(func(next *config.Config) error {
+		i := slices.IndexFunc(next.Assistants, func(p config.AssistantProfile) bool { return p.ID == id })
+		if i < 0 {
+			return core.ErrNotFound
+		}
+		next.Assistants = slices.Delete(next.Assistants, i, i+1)
+		if next.Assistant.Seat == id {
+			next.Assistant.Seat = ""
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
 	return a.Core.ForgetAssistant(ctx, id)
+}
+
+// editAssistants changes the assistant profiles on a copy, so a refused edit
+// leaves the running config as it was.
+func (a *App) editAssistants(edit func(*config.Config) error) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	next := a.cfg.CloneAssistants()
+	if err := edit(&next); err != nil {
+		return err
+	}
+	return a.updateConfigLocked(next)
 }
 
 func (in AssistantInput) applyTo(p *config.AssistantProfile) {

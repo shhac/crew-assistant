@@ -195,15 +195,14 @@ func (a *App) DrawAssistant(ctx context.Context, id, look string) error {
 	}
 	character := p.Name + ", a calm personal assistant who runs projects for its owner. Personality: " + text.Clip(p.Personality, 200) + " " + lookOrChoose(look)
 	return a.startDrawing(ctx, drawingKey(id), character, func(_ context.Context, image string) error {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		next := a.cfg.CloneAssistants()
-		drawn := next.ProfileRef(id)
-		if drawn == nil {
-			return errors.New("the assistant was deleted while it was being drawn")
-		}
-		drawn.Avatar.Image, drawn.Avatar.Look = image, look
-		return a.updateConfigLocked(next)
+		return a.editAssistants(func(next *config.Config) error {
+			drawn := next.ProfileRef(id)
+			if drawn == nil {
+				return errors.New("the assistant was deleted while it was being drawn")
+			}
+			drawn.Avatar.Image, drawn.Avatar.Look = image, look
+			return nil
+		})
 	})
 }
 
