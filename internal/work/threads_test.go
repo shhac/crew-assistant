@@ -192,30 +192,57 @@ func TestTwoTasksOfOneMemberNeverShareAConversation(t *testing.T) {
 	}
 }
 
-// A catch-up round replaces the latest draft's checks with what landed, so an
-// implementer starting it afresh still gets those checks from the history,
-// and one carrying on its conversation isn't told them twice.
-func TestAFreshCatchUpRoundKeepsTheLatestDraftsChecks(t *testing.T) {
+// Work landing during a revise round is merged in, but the round still owes
+// every finding of the latest draft: a resumed conversation has never seen
+// them, so they follow the merge, once, however the round starts.
+func TestACatchUpDuringARevisionStillCarriesItsFindings(t *testing.T) {
 	p := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit}}
 	task := core.Task{Objective: "Add Feature", Base: "abc",
 		Revisions: []core.Revision{{N: 1, Summary: "First try"}, {N: 2, Summary: "Second try"}},
 		Verdicts: []core.Verdict{
 			{Revision: 1, Role: "Reviewer", Outcome: core.VerdictRevise, Summary: "Missing tests.", Findings: []core.Finding{{Note: "Add a test"}}},
 			{Revision: 2, Role: "QA", Outcome: core.VerdictRevise, Summary: "The build fails.", Findings: []core.Finding{{Note: "Fix the vet warning"}}},
+			{Revision: 2, Role: "Reviewer", Outcome: core.VerdictRevise, Summary: "Two gaps.", Findings: []core.Finding{{Criterion: "Handles errors", Note: "Check the write error"}, {Note: "Name the flag"}}},
 		}}
 	caughtUp := catchUpText("main moved on", nil)
 	fresh := writerPrompt(p, task, caughtUp, true)
-	for _, want := range []string{"- Draft 1: First try\n  - Reviewer, revise: Missing tests.\n    - Add a test", "- Draft 2: Second try\n  - QA, revise: The build fails.\n    - Fix the vet warning", caughtUp} {
-		if !strings.Contains(fresh, want) {
-			t.Fatalf("a fresh catch-up round lacks %q: %s", want, fresh)
+	if !strings.Contains(fresh, "- Draft 1: First try\n  - Reviewer, revise: Missing tests.\n    - Add a test") {
+		t.Fatalf("a fresh catch-up round lacks the earlier draft's history: %s", fresh)
+	}
+	for name, prompt := range map[string]string{"fresh": fresh, "resumed": writerPrompt(p, task, caughtUp, false)} {
+		merged := strings.Index(prompt, caughtUp)
+		owed := strings.Index(prompt, "Merging is not the whole round: also address every finding below.")
+		if merged < 0 || owed < merged {
+			t.Fatalf("a %s catch-up round should say what landed, then that the findings are still owed: %s", name, prompt)
+		}
+		for _, want := range []string{"- Fix the vet warning", "- [Handles errors] Check the write error", "- Name the flag"} {
+			if strings.Count(prompt, want) != 1 || strings.Index(prompt, want) < owed {
+				t.Fatalf("a %s catch-up round should carry %q once, after the merge: %s", name, want, prompt)
+			}
 		}
 	}
-	if resumed := writerPrompt(p, task, caughtUp, false); strings.Contains(resumed, "Fix the vet warning") {
-		t.Fatalf("a resumed catch-up round was told the checks again: %s", resumed)
-	}
 	// Outside a catch-up the checks follow the history, so they appear once.
-	if plain := writerPrompt(p, task, "", true); strings.Count(plain, "Fix the vet warning") != 1 {
+	if plain := writerPrompt(p, task, "", true); strings.Count(plain, "Fix the vet warning") != 1 || strings.Contains(plain, "Merging is not") {
 		t.Fatalf("a fresh round should see the latest checks once: %s", plain)
+	}
+}
+
+// Catching up a draft that passed, to land it, owes only the merge: the
+// history carries its checks, and nothing asks for more changes.
+func TestACatchUpBeforeLandingOwesOnlyTheMerge(t *testing.T) {
+	p := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit}}
+	task := core.Task{Objective: "Add Feature", Base: "abc",
+		Revisions: []core.Revision{{N: 1, Summary: "First try"}},
+		Verdicts:  []core.Verdict{{Revision: 1, Role: "Reviewer", Outcome: core.VerdictPass, Summary: "Good.", Findings: []core.Finding{{Note: "Rename later"}}}},
+	}
+	caughtUp := catchUpText("main moved on", []string{"main.go"})
+	for name, prompt := range map[string]string{"fresh": writerPrompt(p, task, caughtUp, true), "resumed": writerPrompt(p, task, caughtUp, false)} {
+		if !strings.Contains(prompt, caughtUp) || strings.Contains(prompt, "Merging is not") || strings.Contains(prompt, "Improve it in place") {
+			t.Fatalf("a %s catch-up before landing should ask only for the merge: %s", name, prompt)
+		}
+	}
+	if fresh := writerPrompt(p, task, caughtUp, true); !strings.Contains(fresh, "  - Reviewer, pass: Good.\n    - Rename later") {
+		t.Fatalf("a fresh catch-up before landing should carry the checks in its history: %s", fresh)
 	}
 }
 
