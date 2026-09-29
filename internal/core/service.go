@@ -16,6 +16,9 @@ import (
 var ErrNotFound = errors.New("not found")
 var ErrConflict = errors.New("state conflict")
 
+// ErrModelCallAllowance means the day's model calls are all spent.
+var ErrModelCallAllowance = errors.New("daily model call allowance exhausted")
+
 // Service deliberately exposes no execution, shell, production or purchase capability.
 type Service struct {
 	store *Store
@@ -234,7 +237,7 @@ func (s *Service) ReserveModelCall(ctx context.Context, limit int) error {
 	return s.store.update(ctx, func(v *Snapshot) error {
 		day := s.now().UTC().Format("2006-01-02")
 		if v.ModelCalls[day] >= limit {
-			return errors.New("daily model call allowance exhausted")
+			return ErrModelCallAllowance
 		}
 		v.ModelCalls[day]++
 		for d := range v.ModelCalls {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
 	harness "github.com/shhac/lib-agent-harness"
 )
@@ -35,7 +36,7 @@ func chatFailureReason(err error) string {
 		reason = "Choose your assistant in Settings before sending another message."
 	case errors.Is(err, engine.ErrNotConfigured):
 		reason = "Choose an assistant model in Settings before sending another message."
-	case strings.Contains(detail, "daily model call allowance"):
+	case errors.Is(err, core.ErrModelCallAllowance):
 		reason = "The daily model-call allowance is exhausted. Wait for it to reset or adjust the limit in Settings."
 	case errors.Is(err, context.DeadlineExceeded) || strings.Contains(detail, "timed out"):
 		reason = "The reply timed out. Check the recorded actions before asking the assistant to continue."
