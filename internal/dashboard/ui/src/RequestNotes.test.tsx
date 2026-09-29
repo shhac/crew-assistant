@@ -11,6 +11,7 @@ import { Drafts } from "./Drafts";
 import { RequestEdits, RequestNotes } from "./RequestNotes";
 import { RequestResearch } from "./RequestPlan";
 import type { Project, Task } from "./api";
+import { recordFetch, reply } from "./testFetch";
 
 const project: Project = {
   id: "p1",
@@ -67,16 +68,6 @@ const task: Task = {
   ],
 };
 
-function stubFetch(calls: { path: string; options?: RequestInit }[]) {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (path: string, options?: RequestInit) => {
-      calls.push({ path, options });
-      return { ok: true, status: 200, json: async () => [] };
-    }),
-  );
-}
-
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -84,8 +75,7 @@ afterEach(() => {
 
 describe("a request's notes and changes", () => {
   it("shows the notes and adds the owner's", async () => {
-    const calls: { path: string; options?: RequestInit }[] = [];
-    stubFetch(calls);
+    const { calls } = recordFetch(() => reply([]));
     const refresh = vi.fn(async () => {});
     render(<RequestNotes task={task} closed={false} refresh={refresh} />);
     expect(screen.getByText("Dates are UTC.")).toBeTruthy();
@@ -104,8 +94,7 @@ describe("a request's notes and changes", () => {
   });
 
   it("still takes the owner's note once the request has finished", async () => {
-    const calls: { path: string; options?: RequestInit }[] = [];
-    stubFetch(calls);
+    const { calls } = recordFetch(() => reply([]));
     render(
       <RequestNotes
         task={{ ...task, status: "landed", notes: [] }}
@@ -124,8 +113,7 @@ describe("a request's notes and changes", () => {
   });
 
   it("lists each change to what was asked, and undoes one", async () => {
-    const calls: { path: string; options?: RequestInit }[] = [];
-    stubFetch(calls);
+    const { calls } = recordFetch(() => reply([]));
     render(
       <RequestEdits task={task} closed={false} refresh={async () => {}} />,
     );
@@ -156,7 +144,7 @@ describe("a request's notes and changes", () => {
   });
 
   it("shows a checker's recommendation beside its verdict", () => {
-    stubFetch([]);
+    recordFetch(() => reply([]));
     render(
       <Drafts project={project} task={task} members={[]} collapsed={false} />,
     );

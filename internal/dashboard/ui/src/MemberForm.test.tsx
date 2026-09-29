@@ -11,6 +11,7 @@ import { MemberForm } from "./MemberForm";
 import type { Member } from "./api";
 import { rememberChoices } from "./engines";
 import { testChoices } from "./testEngines";
+import { recordFetch, reply, type FetchCall } from "./testFetch";
 
 rememberChoices(testChoices);
 
@@ -53,21 +54,17 @@ const listed = (): Record<string, unknown> => ({
   },
 });
 let catalogs: Record<string, unknown>;
-let calls: { path: string; options?: RequestInit }[];
+let calls: FetchCall[];
 beforeEach(() => {
   catalogs = listed();
-  calls = [];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (path: string, options?: RequestInit) => {
-      calls.push({ path, options });
-      const engine = new URL(path, "http://test").searchParams.get("engine");
-      const body = path.startsWith("/api/models")
+  calls = recordFetch((path, options) => {
+    const engine = new URL(path, "http://test").searchParams.get("engine");
+    return reply(
+      path.startsWith("/api/models")
         ? catalogs[engine ?? ""]
-        : { id: "m1", ...JSON.parse(String(options?.body)) };
-      return { ok: true, status: 200, json: async () => body };
-    }),
-  );
+        : { id: "m1", ...JSON.parse(String(options?.body)) },
+    );
+  }).calls;
 });
 afterEach(() => {
   cleanup();

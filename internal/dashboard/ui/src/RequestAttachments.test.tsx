@@ -13,6 +13,7 @@ import { RequestAttachments } from "./RequestAttachments";
 import { RequestNotes } from "./RequestNotes";
 import { RequestDesign } from "./RequestPlan";
 import type { Task } from "./api";
+import { recordFetch, reply } from "./testFetch";
 
 const task: Task = {
   id: "t1",
@@ -108,16 +109,6 @@ const task: Task = {
 const file = (name: string, size = 10, type = "") =>
   new File([new Uint8Array(size)], name, { type });
 
-function stubFetch(calls: { path: string; options?: RequestInit }[]) {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (path: string, options?: RequestInit) => {
-      calls.push({ path, options });
-      return { ok: true, status: 201, json: async () => ({}) };
-    }),
-  );
-}
-
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -141,8 +132,7 @@ describe("a request's attachments", () => {
   });
 
   it("attaches picked, dropped and pasted files to the owner's note, refusing the rest", async () => {
-    const calls: { path: string; options?: RequestInit }[] = [];
-    stubFetch(calls);
+    const { calls } = recordFetch(() => reply({}, 201));
     const refresh = vi.fn(async () => {});
     render(
       <RequestNotes
@@ -194,7 +184,7 @@ describe("a request's attachments", () => {
   });
 
   it("shows a note's files: pictures as thumbnails, the rest as links", () => {
-    stubFetch([]);
+    recordFetch(() => reply({}, 201));
     render(
       <RequestNotes task={task} closed={false} refresh={async () => {}} />,
     );

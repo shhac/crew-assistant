@@ -14,24 +14,21 @@ import { VerdictEvidence } from "./VerdictEvidence";
 import { rememberChoices } from "./engines";
 import { testChoices } from "./testEngines";
 import type { Playbook, Project, Task } from "./api";
+import { recordFetch, type FetchCall } from "./testFetch";
 
 rememberChoices(testChoices);
 
-let calls: { path: string; method?: string; body: unknown }[];
+let fetched: FetchCall[];
 beforeEach(() => {
-  calls = [];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (path: string, options?: RequestInit) => {
-      calls.push({
-        path,
-        method: options?.method,
-        body: JSON.parse(String(options?.body ?? "null")),
-      });
-      return { ok: true, status: 200, json: async () => ({}) };
-    }),
-  );
+  fetched = recordFetch().calls;
 });
+/** What was sent, with each body read back from its JSON. */
+const sent = () =>
+  fetched.map(({ path, options }) => ({
+    path,
+    method: options?.method,
+    body: JSON.parse(String(options?.body ?? "null")),
+  }));
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -68,7 +65,7 @@ it("adds a run recipe, explaining that setup runs offline", async () => {
   });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(refresh).toHaveBeenCalled());
-  expect(calls).toEqual([
+  expect(sent()).toEqual([
     {
       path: "/api/projects/p1/run",
       method: "PUT",
@@ -97,7 +94,7 @@ it("shows a recipe and takes it away", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.click(screen.getByRole("button", { name: "Remove recipe" }));
   await waitFor(() => expect(refresh).toHaveBeenCalled());
-  expect(calls[0]).toEqual({
+  expect(sent()[0]).toEqual({
     path: "/api/projects/p1/run",
     method: "PUT",
     body: { run: null },
@@ -122,7 +119,7 @@ it("lets the owner turn QA's browser on only where its engine has one", async ()
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(refresh).toHaveBeenCalled());
-  expect(calls[0]).toEqual({
+  expect(sent()[0]).toEqual({
     path: "/api/projects/p1/team/qa/browser",
     method: "PUT",
     body: { on: true, name: "" },

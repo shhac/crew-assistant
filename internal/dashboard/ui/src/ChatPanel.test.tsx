@@ -18,6 +18,7 @@ import {
   type State,
 } from "./api";
 import { fullDateLabel } from "./ui";
+import { reply, type Reply } from "./testFetch";
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
   cleanup();
@@ -48,26 +49,20 @@ function typeAndSend(text: string) {
   fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
   return input as HTMLTextAreaElement;
 }
-const result = (body: unknown) => ({
-  ok: true,
-  status: 200,
-  json: async () => body,
-});
 const tick = async (ms = 3000) => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
   });
 };
-type Reply = { ok: boolean; status: number; json: () => Promise<unknown> };
 function backend(
   seed: ChatTurn[] = [],
   suggest: (after: string) => Reply | Promise<Reply> = (after) =>
-    result({ after, suggestion: "" }),
+    reply({ after, suggestion: "" }),
 ) {
   const turns = [...seed];
   const fetch = vi.fn(async (path: string, options?: RequestInit) => {
     if (path === "/api/chat/turns")
-      return result({ turns: turns.map((t) => ({ ...t })) });
+      return reply({ turns: turns.map((t) => ({ ...t })) });
     if (path === "/api/chat/suggestion")
       return suggest(JSON.parse(options!.body as string).after);
     if (options?.method === "POST") {
@@ -85,12 +80,12 @@ function backend(
         };
         turns.push(turn!);
       }
-      return result({ ...turn });
+      return reply({ ...turn });
     }
     if (options?.method === "DELETE") {
       const turn = turns.find((t) => path.endsWith(t.id))!;
       turn.status = "cancelled";
-      return result({ ...turn });
+      return reply({ ...turn });
     }
     throw new Error("Unexpected request");
   });
@@ -424,7 +419,7 @@ describe("conversation", () => {
     await tick(0);
     const stale = { ...turn };
     const original = server.fetch.getMockImplementation()!;
-    let release!: (value: ReturnType<typeof result>) => void;
+    let release!: (value: Reply) => void;
     server.fetch.mockImplementation((path, options) =>
       path === "/api/chat/turns"
         ? new Promise((resolve) => {
@@ -441,7 +436,7 @@ describe("conversation", () => {
     await tick(0);
     expect(screen.getByText("Cancelled")).toBeTruthy();
     await act(async () => {
-      release(result({ turns: [stale] }));
+      release(reply({ turns: [stale] }));
     });
     expect(screen.getByText("Cancelled")).toBeTruthy();
     expect(
@@ -864,7 +859,7 @@ describe("next-message suggestions", () => {
     return state;
   }
   const offering = (text: string) => (after: string) =>
-    result({ after, suggestion: text });
+    reply({ after, suggestion: text });
   function deferred() {
     let resolve!: (reply: Reply) => void;
     const promise = new Promise<Reply>((r) => (resolve = r));
@@ -978,12 +973,12 @@ describe("next-message suggestions", () => {
   });
 
   it("never overwrites a draft typed while the suggestion was being written", async () => {
-    const reply = deferred();
-    backend([], () => reply.promise);
+    const answer = deferred();
+    backend([], () => answer.promise);
     render(panel(settled()));
     await tick(SUGGESTION_DELAY);
     fireEvent.change(input(), { target: { value: "My own idea" } });
-    reply.resolve(result({ after: "reply-1", suggestion: "Something else" }));
+    answer.resolve(reply({ after: "reply-1", suggestion: "Something else" }));
     await tick(0);
     expect(input().value).toBe("My own idea");
     fireEvent.change(input(), { target: { value: "" } });
@@ -992,8 +987,8 @@ describe("next-message suggestions", () => {
   });
 
   it("drops a suggestion that arrives after the conversation changed", async () => {
-    const reply = deferred();
-    const server = backend([], () => reply.promise);
+    const answer = deferred();
+    const server = backend([], () => answer.promise);
     const view = render(panel(settled()));
     await tick(SUGGESTION_DELAY);
     expect(server.suggestions()).toHaveLength(1);
@@ -1010,7 +1005,7 @@ describe("next-message suggestions", () => {
         ]),
       ),
     );
-    reply.resolve(result({ after: "reply-1", suggestion: "Stale idea" }));
+    answer.resolve(reply({ after: "reply-1", suggestion: "Stale idea" }));
     await tick(0);
     expect(input().placeholder).toBe(defaultPlaceholder);
   });
@@ -1402,9 +1397,9 @@ describe("slash commands and past conversations", () => {
     const fetch = vi.fn(async (path: string, options?: RequestInit) => {
       const body = options?.body ? JSON.parse(options.body as string) : {};
       if (path === "/api/chat/turns")
-        return result({ turns: turns.map((t) => ({ ...t })), conversation });
+        return reply({ turns: turns.map((t) => ({ ...t })), conversation });
       if (path === "/api/chat/suggestion")
-        return result({ after: body.after, suggestion });
+        return reply({ after: body.after, suggestion });
       if (path === "/api/chat/messages") {
         const command = /^\/(compact|new|clear)$/.exec(body.message)?.[1];
         if (body.message.startsWith("/") && !command)
@@ -1424,12 +1419,12 @@ describe("slash commands and past conversations", () => {
           ...(command ? { command } : { user_message_id: `user-${body.id}` }),
         };
         turns.push(turn);
-        return result(turn);
+        return reply(turn);
       }
       if (path === "/api/chat/conversations")
-        return result({ conversations: [{ ...past, messages: 2 }] });
+        return reply({ conversations: [{ ...past, messages: 2 }] });
       if (path === "/api/chat/conversations/conv-1")
-        return result({
+        return reply({
           ...past,
           messages: [
             { id: "p1", role: "user", content: "Plan the garden" },
@@ -1442,7 +1437,7 @@ describe("slash commands and past conversations", () => {
         });
       if (path === "/api/chat/conversations/conv-1/resume") {
         conversation = "conv-1";
-        return result({ resumed: true });
+        return reply({ resumed: true });
       }
       throw new Error(`Unexpected request ${path}`);
     });
@@ -1589,8 +1584,8 @@ describe("slash commands and past conversations", () => {
     ];
     const fetch = vi.fn(async (path: string) => {
       if (path === "/api/chat/turns")
-        return result(answers.length > 1 ? answers.shift() : answers[0]);
-      if (path === "/api/chat/suggestion") return result({ suggestion: "" });
+        return reply(answers.length > 1 ? answers.shift() : answers[0]);
+      if (path === "/api/chat/suggestion") return reply({ suggestion: "" });
       throw new Error(`Unexpected request ${path}`);
     });
     vi.stubGlobal("fetch", fetch);
@@ -1622,11 +1617,11 @@ describe("slash commands and past conversations", () => {
         polls++;
         if (polls === 1)
           return new Promise<Reply>((resolve) => (answer = resolve));
-        return result({ turns: [], conversation: "c" });
+        return reply({ turns: [], conversation: "c" });
       }
       if (path === "/api/chat/messages") {
         const body = JSON.parse(options!.body as string);
-        return result({
+        return reply({
           ...body,
           status: "queued",
           created_at: new Date().toISOString(),
@@ -1642,7 +1637,7 @@ describe("slash commands and past conversations", () => {
     typeAndSend("Just sent");
     await tick(0);
     // The first poll was asked before the message arrived; it cannot list it.
-    answer(result({ turns: [], conversation: "c" }));
+    answer(reply({ turns: [], conversation: "c" }));
     await tick(0);
     const queue = screen.getByRole("region", { name: "Queued messages" });
     expect(within(queue).getByText("Just sent")).toBeTruthy();
@@ -1832,14 +1827,14 @@ describe("model session", () => {
     const shown = { session: current };
     const fetch = vi.fn(async (path: string, options?: RequestInit) => {
       if (path === "/api/chat/turns")
-        return result({
+        return reply({
           turns: turns.map((t) => ({ ...t })),
           session: shown.session,
         });
       if (path === "/api/chat/suggestion")
-        return result({ after: "", suggestion: "" });
+        return reply({ after: "", suggestion: "" });
       if (path === "/api/chat/conversations")
-        return result({ conversations: [] });
+        return reply({ conversations: [] });
       if (path === "/api/chat/messages") {
         const body = JSON.parse(String(options?.body));
         const turn: ChatTurn = {
@@ -1851,7 +1846,7 @@ describe("model session", () => {
           command: commandIn(body.message),
         };
         turns.push(turn);
-        return result(turn);
+        return reply(turn);
       }
       throw new Error(`Unexpected request ${path}`);
     });
