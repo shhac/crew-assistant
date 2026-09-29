@@ -30,6 +30,35 @@ func delivery(t *testing.T) (r Repo, source, base, commit string) {
 	return r, source, base, commit
 }
 
+func TestDeliveredFindsTheBranchDeliverChose(t *testing.T) {
+	r, source, _, commit := delivery(t)
+	if name, ok, err := r.Delivered(ctx, commit, "paul/x"); err != nil || ok {
+		t.Fatalf("found a delivery before any was made: %q %v %v", name, ok, err)
+	}
+	// The owner already has a branch by that name, at another commit.
+	git(t, source, "branch", "paul/x", "main")
+	delivered, err := r.Deliver(ctx, commit, "paul/x")
+	if err != nil || delivered != "paul/x-2" {
+		t.Fatalf("delivered %q: %v", delivered, err)
+	}
+	if name, ok, err := r.Delivered(ctx, commit, "paul/x"); err != nil || !ok || name != delivered {
+		t.Fatalf("Delivered says %q %v %v, Deliver chose %q", name, ok, err, delivered)
+	}
+	// The owner checks the delivered branch out: a retried delivery settles on
+	// it rather than making another, and both still agree on its name.
+	git(t, source, "checkout", "-q", delivered)
+	again, err := r.Deliver(ctx, commit, "paul/x")
+	if err != nil || again != delivered {
+		t.Fatalf("a retried delivery chose %q rather than %q: %v", again, delivered, err)
+	}
+	if out := git(t, source, "branch", "--list", "paul/x-3"); out != "" {
+		t.Fatalf("a retried delivery made another branch: %s", out)
+	}
+	if name, ok, err := r.Delivered(ctx, commit, "paul/x"); err != nil || !ok || name != delivered {
+		t.Fatalf("Delivered says %q %v %v, Deliver chose %q", name, ok, err, delivered)
+	}
+}
+
 func TestAPushIntoALinkedWorktreeLandsOnlyWhenItIsClean(t *testing.T) {
 	r, source, base, commit := delivery(t)
 	git(t, source, "branch", "target", "main")

@@ -25,9 +25,6 @@ func (r Repo) Deliver(ctx context.Context, commit, name string) (string, error) 
 		if attempt > 1 {
 			candidate = fmt.Sprintf("%s-%d", name, attempt)
 		}
-		if candidate == strings.TrimSpace(current) {
-			continue
-		}
 		if err := validBranch(ctx, r.source, candidate); err != nil {
 			return "", err
 		}
@@ -36,6 +33,11 @@ func (r Repo) Deliver(ctx context.Context, commit, name string) (string, error) 
 			if strings.TrimSpace(existing) == commit {
 				return candidate, nil
 			}
+			continue
+		}
+		// A checked-out branch with no commits yet is the owner's to start;
+		// one already at commit, checked out after delivery, settled above.
+		if candidate == strings.TrimSpace(current) {
 			continue
 		}
 		// Bring the objects over without naming any branch, then create the
