@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { ErrorNotice, Icon, sinceLabel, useAction } from "./ui";
-import { carriesFiles, sizeLabel } from "./composerAssets";
+import { sizeLabel, useFileDrop } from "./composerAssets";
 import { addPending, ATTACHMENT_ACCEPT, type PendingFile } from "./attachments";
 import { AttachmentList } from "./RequestAttachments";
 import {
@@ -35,7 +35,6 @@ export function RequestNotes({
   const [text, setText] = useState("");
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [refused, setRefused] = useState<string[]>([]);
-  const [dragging, setDragging] = useState(false);
   const { busy, error, run } = useAction();
   const notes: Note[] = task.notes ?? [];
   const attachments = task.attachments ?? [];
@@ -45,6 +44,7 @@ export function RequestNotes({
     setFiles(pending);
     setRefused(refused);
   }
+  const { dragging, dropHandlers, onPaste } = useFileDrop(attach);
   async function send(e: FormEvent) {
     e.preventDefault();
     await run(async () => {
@@ -85,23 +85,7 @@ export function RequestNotes({
       <form
         className={`thread-form${dragging ? " dragging" : ""}`}
         onSubmit={send}
-        onDragOver={(e) => {
-          if (!carriesFiles(e.dataTransfer)) return;
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node | null))
-            setDragging(false);
-        }}
-        onDrop={(e) => {
-          setDragging(false);
-          const dropped = Array.from(e.dataTransfer?.files || []);
-          // Dropped text falls through to the textarea as usual.
-          if (!dropped.length) return;
-          e.preventDefault();
-          attach(dropped);
-        }}
+        {...dropHandlers}
       >
         <label className="sr-only" htmlFor="note-text">
           Note
@@ -114,14 +98,7 @@ export function RequestNotes({
           maxLength={2000}
           placeholder="Leave a note for the team"
           onChange={(e) => setText(e.target.value)}
-          onPaste={(e) => {
-            // Text always pastes as text; files on the clipboard are
-            // attached or refused with a reason, never dropped.
-            const pasted = Array.from(e.clipboardData.files || []);
-            if (!pasted.length) return;
-            if (!e.clipboardData.getData("text/plain")) e.preventDefault();
-            attach(pasted);
-          }}
+          onPaste={onPaste}
         />
         {files.length > 0 && (
           <ul className="attachments" aria-label="Files to attach">

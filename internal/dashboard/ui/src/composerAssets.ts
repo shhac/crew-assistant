@@ -8,6 +8,8 @@
  * reason rather than dropped, until the daemon has a transport for them.
  */
 
+import { useState, type ClipboardEvent, type DragEvent } from "react";
+
 /** Mirrors the byte limit core.EnqueueChat applies to a whole message. */
 export const MESSAGE_LIMIT_BYTES = 24_000;
 
@@ -124,4 +126,40 @@ export function messageLimitError(message: string) {
 /** A drag or clipboard carries files, not just text. */
 export function carriesFiles(data: DataTransfer | null) {
   return !!data && Array.from(data.types || []).includes("Files");
+}
+
+/**
+ * Files dropped onto a form or pasted into its text field, handed to onFiles.
+ * Dropped or pasted text still lands in the field as usual. Files on the same
+ * clipboard as text (a copied file comes with its name as text) are still
+ * handed over, so they are attached or refused with a reason, never dropped.
+ */
+export function useFileDrop(onFiles: (files: File[]) => void) {
+  const [dragging, setDragging] = useState(false);
+  const dropHandlers = {
+    onDragOver(e: DragEvent<HTMLElement>) {
+      if (!carriesFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      setDragging(true);
+    },
+    onDragLeave(e: DragEvent<HTMLElement>) {
+      const to = e.relatedTarget;
+      if (!(to instanceof Node && e.currentTarget.contains(to)))
+        setDragging(false);
+    },
+    onDrop(e: DragEvent<HTMLElement>) {
+      setDragging(false);
+      const files = Array.from(e.dataTransfer?.files || []);
+      if (!files.length) return;
+      e.preventDefault();
+      onFiles(files);
+    },
+  };
+  function onPaste(e: ClipboardEvent<HTMLElement>) {
+    const files = Array.from(e.clipboardData.files || []);
+    if (!files.length) return;
+    if (!e.clipboardData.getData("text/plain")) e.preventDefault();
+    onFiles(files);
+  }
+  return { dragging, dropHandlers, onPaste };
 }

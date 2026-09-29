@@ -13,11 +13,11 @@ import { dateLabel, Icon } from "./ui";
 import { ChatQueue, type QueueHold } from "./ChatQueue";
 import { ChatHistory } from "./ChatHistory";
 import {
-  carriesFiles,
   composeMessage,
   messageLimitError,
   readAsset,
   sizeLabel,
+  useFileDrop,
   type ComposerAsset,
 } from "./composerAssets";
 import {
@@ -77,7 +77,6 @@ export function ChatPanel({
   const [assetErrors, setAssetErrors] = useState<string[]>([]);
   const [reading, setReading] = useState(0);
   const readingRef = useRef(0);
-  const [dragging, setDragging] = useState(false);
   async function addFiles(files: File[]) {
     if (!files.length) return;
     // Attaching is composing, so it dismisses a suggestion as typing does.
@@ -95,6 +94,9 @@ export function ChatPanel({
     setAssets((current) => [...current, ...added]);
     setAssetErrors((current) => [...current, ...refused]);
   }
+  const { dragging, dropHandlers, onPaste } = useFileDrop(
+    (files) => void addFiles(files),
+  );
   const [turns, setTurns] = useState<VisibleTurn[]>([]);
   const [error, setError] = useState("");
   const [pollError, setPollError] = useState("");
@@ -687,23 +689,7 @@ export function ChatPanel({
           <form
             className={`composer${dragging ? " dragging" : ""}`}
             onSubmit={send}
-            onDragOver={(e) => {
-              if (!carriesFiles(e.dataTransfer)) return;
-              e.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node | null))
-                setDragging(false);
-            }}
-            onDrop={(e) => {
-              setDragging(false);
-              const files = Array.from(e.dataTransfer?.files || []);
-              // Dropped text falls through to the textarea as usual.
-              if (!files.length) return;
-              e.preventDefault();
-              void addFiles(files);
-            }}
+            {...dropHandlers}
           >
             <label className="sr-only" htmlFor="chat-message">
               Message {name}
@@ -736,16 +722,7 @@ export function ChatPanel({
                 id="chat-message"
                 value={message}
                 onChange={(e) => setDraft(e.target.value)}
-                onPaste={(e) => {
-                  // Text always pastes as text. Files on the same clipboard (a
-                  // copied file comes with its name as text) are still attached
-                  // or refused with a reason, never dropped.
-                  const files = Array.from(e.clipboardData.files || []);
-                  if (!files.length) return;
-                  if (!e.clipboardData.getData("text/plain"))
-                    e.preventDefault();
-                  void addFiles(files);
-                }}
+                onPaste={onPaste}
                 // A suggestion is shown, never committed: the draft stays empty
                 // and Send stays disabled until the owner takes it.
                 placeholder={shownSuggestion || `Message ${name}`}
