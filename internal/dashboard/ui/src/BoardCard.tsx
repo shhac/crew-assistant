@@ -6,7 +6,7 @@ import { decisionFor, isOpenMessage, needsYou, requestStep } from "./stages";
 import { TaskActivity } from "./TaskActivity";
 import { Avatar } from "./Avatar";
 import { Icon, Pill, TaskRef } from "./ui";
-import type { Decision, Member, State, Task, Turn } from "./api";
+import type { Decision, Member, Project, State, Task, Turn } from "./api";
 
 /**
  * The members at work on a request now, one for each seat at work, or the
@@ -24,7 +24,15 @@ function workers(task: Task, state: State) {
   });
 }
 
-export function CardList({ tasks, state }: { tasks: Task[]; state: State }) {
+export function CardList({
+  tasks,
+  state,
+  project,
+}: {
+  tasks: Task[];
+  state: State;
+  project?: Project;
+}) {
   return (
     <ul className="board-cards">
       {tasks.map((t) => (
@@ -34,6 +42,7 @@ export function CardList({ tasks, state }: { tasks: Task[]; state: State }) {
             decision={decisionFor(t, state.decisions)}
             workers={workers(t, state)}
             turns={state.turns}
+            project={project}
             activity={<TaskActivity task={t} state={state} />}
           />
         </li>
@@ -47,6 +56,7 @@ export function BoardCard({
   decision,
   workers = [],
   turns,
+  project,
   activity,
   children,
 }: {
@@ -56,6 +66,8 @@ export function BoardCard({
   workers?: Member[];
   /** The turns running now, when known, so the step says who is at work. */
   turns?: Turn[];
+  /** The request's project, which names the stages of one not yet started. */
+  project?: Project;
   activity?: ReactNode;
   children?: ReactNode;
 }) {
@@ -81,10 +93,10 @@ export function BoardCard({
           ))}
           {needsYou(task) ? (
             <Pill tone="needs" dot>
-              {requestStep(task, decision, turns)}
+              {requestStep(task, decision, turns, project)}
             </Pill>
           ) : (
-            requestStep(task, decision, turns)
+            requestStep(task, decision, turns, project)
           )}
         </p>
       )}

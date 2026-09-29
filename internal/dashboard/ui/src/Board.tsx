@@ -1,6 +1,13 @@
 import { projectHref, requestHref } from "./router";
 import { pmLandingLine } from "./landing";
-import { capLine, latestFirst, projectTasks, requestStep } from "./stages";
+import {
+  capLine,
+  finished,
+  latestFirst,
+  projectTasks,
+  requestStep,
+  stageLimit,
+} from "./stages";
 import { boardColumns, doneLabel, readyLabel } from "./boardLanes";
 import { AskForm } from "./AskForm";
 import { CardList } from "./BoardCard";
@@ -23,14 +30,31 @@ export function Board({
   const ready = at("ready");
   const done = latestFirst(at("done"));
   const stopped = at("stopped");
-  const cards = (list: Task[]) => <CardList tasks={list} state={state} />;
+  const cards = (list: Task[]) => (
+    <CardList tasks={list} state={state} project={project} />
+  );
+  // A stage with a limit counts the requests it holds, including those done
+  // with it and waiting for room in the next.
+  const holds = (stage: Stage) =>
+    tasks.filter((t) => !finished(t) && (t.place || t.stage) === stage).length;
+  const title = (stage: Stage, label: string, count: number) => {
+    const limit = stageLimit(project.playbook, stage);
+    return (
+      <LaneTitle
+        label={label}
+        count={limit ? `${holds(stage)} of ${limit}` : String(count)}
+      />
+    );
+  };
+  // With a limit, Ready always shows its count against it, even empty.
+  const readyLimited = stageLimit(project.playbook, "ready") > 0;
   const cap = capLine(project, state.tasks);
   return (
     <div className="board-page">
       <AskForm project={project} refresh={refresh} />
-      {ready.length > 0 && (
+      {(ready.length > 0 || readyLimited) && (
         <section className="board-ready" aria-label={readyLabel(project)}>
-          <LaneTitle label={readyLabel(project)} count={ready.length} />
+          {title("ready", readyLabel(project), ready.length)}
           {cards(ready)}
         </section>
       )}
@@ -54,7 +78,7 @@ export function Board({
                     role="listitem"
                     aria-label={lane.label}
                   >
-                    <LaneTitle label={lane.label} count={list.length} />
+                    {title(lane.stage, lane.label, list.length)}
                     {lane.stage === "todo" ? (
                       <TodoQueue
                         tasks={list}
@@ -77,7 +101,7 @@ export function Board({
   );
 }
 
-function LaneTitle({ label, count }: { label: string; count: number }) {
+function LaneTitle({ label, count }: { label: string; count: string }) {
   return (
     <h2 className="board-lane-title">
       {label}

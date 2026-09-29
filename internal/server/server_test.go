@@ -249,6 +249,15 @@ func TestTheOwnerAddsSeatsAndSetsHowMuchRunsAtOnce(t *testing.T) {
 	if bad := call("PUT", "/api/projects/"+p.ID+"/parallel", `{"max_active":-1}`); bad.Code == 200 {
 		t.Fatal("a negative cap was taken")
 	}
+	limits := call("PUT", "/api/projects/"+p.ID+"/stage-limits", `{"stage_limits":{"implementing":2,"reviewing":0}}`)
+	if limits.Code != 200 || !strings.Contains(limits.Body.String(), `"stage_limits":{"implementing":2}`) {
+		t.Fatal(limits.Code, limits.Body.String())
+	}
+	for _, body := range []string{`{"stage_limits":{"todo":1}}`, `{"stage_limits":{"qa":-1}}`, `{"stage_limits":{"testing":1}}`} {
+		if bad := call("PUT", "/api/projects/"+p.ID+"/stage-limits", body); bad.Code != 400 {
+			t.Fatal(body, bad.Code, bad.Body.String())
+		}
+	}
 	removed := call("DELETE", "/api/projects/"+p.ID+"/team/seats/Writer%20%232", "")
 	if removed.Code != 200 || strings.Contains(removed.Body.String(), "Writer #2") {
 		t.Fatal(removed.Code, removed.Body.String())

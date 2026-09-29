@@ -159,6 +159,8 @@ export interface Playbook {
    * seat.
    */
   max_active?: number;
+  /** The most requests each working stage may hold; a stage absent has no limit. */
+  stage_limits?: Partial<Record<Stage, number>>;
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -463,7 +465,7 @@ export interface Proposal {
 }
 /** Who or what a task's ready step waits for. */
 export interface Wait {
-  kind: "member" | "project_cap" | "engine_cap" | "owner";
+  kind: "member" | "project_cap" | "engine_cap" | "owner" | "stage";
   /** The busy person's seat, and the member it is filled from, if any. */
   seat?: string;
   member?: string;
@@ -474,6 +476,14 @@ export interface Wait {
   active?: number;
   cap?: number;
   engine?: string;
+  /**
+   * The stage it waits for room in, the stage it holds meanwhile (none from
+   * To do), and how many the full stage holds against its limit.
+   */
+  stage?: Stage;
+  from?: Stage;
+  count?: number;
+  limit?: number;
 }
 /**
  * A step of a task a seat has taken and not yet finished. Checks of one
@@ -499,6 +509,11 @@ export interface Task {
   criteria: string[] | null;
   status: TaskStatus;
   stage: Stage;
+  /**
+   * The working stage it holds towards the project's stage limits: the one
+   * it last entered, kept while it waits for room in the next.
+   */
+  place?: Stage;
   /**
    * The checker at work while it is checked, the researcher while it
    * researches, or the designer while it gives design input.
@@ -1036,6 +1051,16 @@ export function setParallel(projectID: string, maxActive: number) {
   return api<Project>(`${projectPath(projectID)}/parallel`, {
     method: "PUT",
     body: JSON.stringify({ max_active: maxActive }),
+  });
+}
+/** Sets the most requests each working stage may hold; 0 or absent is no limit. */
+export function setStageLimits(
+  projectID: string,
+  limits: Partial<Record<Stage, number>>,
+) {
+  return api<Project>(`${projectPath(projectID)}/stage-limits`, {
+    method: "PUT",
+    body: JSON.stringify({ stage_limits: limits }),
   });
 }
 export function setWorkspace(projectID: string, input: WorkspaceInput) {

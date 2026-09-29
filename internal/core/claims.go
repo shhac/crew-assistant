@@ -141,13 +141,15 @@ type Scheduled struct {
 type Admit func(Role) string
 
 // Kinds of Wait: a person busy with other work, the project's cap on tasks
-// under way, an engine's safety cap on role turns at once, and the owner's
-// own use, which no new role turn starts during.
+// under way, an engine's safety cap on role turns at once, the owner's own
+// use, which no new role turn starts during, and a stage of the board full
+// to its limit.
 const (
 	WaitMember     = "member"
 	WaitProjectCap = "project_cap"
 	WaitEngineCap  = "engine_cap"
 	WaitOwner      = "owner"
+	WaitStage      = "stage"
 )
 
 // Wait is who or what a task's next step waits for while it is ready to
@@ -168,6 +170,13 @@ type Wait struct {
 	Cap    int `json:"cap,omitempty"`
 	// Engine is the engine whose safety cap is reached.
 	Engine string `json:"engine,omitempty"`
+	// Stage is the stage the task waits for room in, From the stage it
+	// holds meanwhile, done with it, or none from To do, and Count and
+	// Limit the tasks Stage holds and its limit.
+	Stage string `json:"stage,omitempty"`
+	From  string `json:"from,omitempty"`
+	Count int    `json:"count,omitempty"`
+	Limit int    `json:"limit,omitempty"`
 }
 
 // Schedule claims every step that can start now, in one change: the next
@@ -175,14 +184,17 @@ type Wait struct {
 // queue order while their project is below its cap on active tasks. A person
 // takes one step at a time, across every project and seat they hold. A
 // task's checks each take a seat of their own, side by side; any other step
-// holds the task alone, and a project lands one task at a time. A task whose
-// next step is ready and can't start records what it waits for.
+// holds the task alone, and a project lands one task at a time. A task
+// enters a stage of the board only while the stage is below its limit; see
+// stage_limits.go. A task whose next step is ready and can't start records
+// what it waits for.
 func (s *Service) Schedule(ctx context.Context, admit Admit) ([]Scheduled, error) {
 	var out []Scheduled
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		now := s.now().UTC()
 		busy := busyPeople(v)
 		waits := map[string]*Wait{}
+		stages := holdings(v)
 		var active []*Task
 		for i := range v.Tasks {
 			if v.Tasks[i].Active() {
@@ -199,15 +211,26 @@ func (s *Service) Schedule(ctx context.Context, admit Admit) ([]Scheduled, error
 			return 0
 		})
 		for _, t := range active {
-			if t.RetryAt.After(now) || t.Handoff != nil {
+			if t.RetryAt.After(now) || t.Handoff != nil || t.alone() {
+				continue
+			}
+			// Done with its stage, it waits there for room in the next.
+			next, full := stages.entry(v, t)
+			if full != nil {
+				waits[t.ID] = full
 				continue
 			}
 			claimed, wait := offer(v, t, busy, admit, now)
 			out = append(out, claimed...)
 			waits[t.ID] = wait
+			// It enters only once someone takes it up there, so a stage
+			// is never held for a person who is busy elsewhere.
+			if next != "" && len(t.Claims) > 0 {
+				stages.move(t, next)
+			}
 		}
 		for _, p := range queueOrder(v) {
-			out = append(out, startQueued(v, p, busy, admit, waits, now)...)
+			out = append(out, startQueued(v, p, busy, admit, stages, waits, now)...)
 		}
 		for i := range v.Tasks {
 			v.Tasks[i].Waiting = waits[v.Tasks[i].ID]
@@ -464,11 +487,11 @@ func offer(v *Snapshot, t *Task, busy map[string]Wait, admit Admit, now time.Tim
 }
 
 // startQueued starts a project's queued tasks in queue order, skipping
-// those that wait for unfinished work, while the project is below its cap
-// and a seat is free for the first step. A queued task never starts ahead
-// of one before it that could; the first that can't records in waits what
-// it waits for.
-func startQueued(v *Snapshot, p *Project, busy map[string]Wait, admit Admit, waits map[string]*Wait, now time.Time) []Scheduled {
+// those that wait for unfinished work, while the project is below its cap,
+// its first stage has room and a seat is free for the first step. A queued
+// task never starts ahead of one before it that could; the first that
+// can't records in waits what it waits for.
+func startQueued(v *Snapshot, p *Project, busy map[string]Wait, admit Admit, stages held, waits map[string]*Wait, now time.Time) []Scheduled {
 	// Nothing starts while the PM is ordering the list: the order it sets
 	// is the one tasks start in.
 	if p.Playbook == nil || slices.ContainsFunc(p.Claims, func(c Claim) bool { return c.Step == StepPM }) {
@@ -490,9 +513,13 @@ func startQueued(v *Snapshot, p *Project, busy map[string]Wait, admit Admit, wai
 			waits[t.ID] = &Wait{Kind: WaitProjectCap, Active: active, Cap: limit}
 			break
 		}
-		status := TaskWriting
+		status, stage := TaskWriting, StageImplementing
 		if slices.ContainsFunc(p.Playbook.Roles, func(r Role) bool { return r.Holds(RoleResearcher) }) && t.Plan == nil {
-			status = TaskResearching
+			status, stage = TaskResearching, StageResearching
+		}
+		if wait := stages.room(v, p.ID, "", stage); wait != nil {
+			waits[t.ID] = wait
+			break
 		}
 		var seat Role
 		if seats := rolesOf(p.Playbook.Roles, stepKinds[status]); len(seats) > 0 {
@@ -503,6 +530,7 @@ func startQueued(v *Snapshot, p *Project, busy map[string]Wait, admit Admit, wai
 			}
 		}
 		startTask(v, p, t, now)
+		stages.move(t, stage)
 		active++
 		// The seat as the task pinned it, with its member's learnings.
 		if pinned, ok := t.Role(seat.Name); ok {

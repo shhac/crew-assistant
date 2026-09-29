@@ -67,7 +67,7 @@ export function TodoQueue({
             onDragOver={(e) => dragging && e.preventDefault()}
             onDrop={(e) => drop(e, i)}
           >
-            <BoardCard task={t}>
+            <BoardCard task={t} project={project}>
               <Place
                 task={t}
                 index={i}

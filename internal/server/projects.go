@@ -99,6 +99,16 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		v, err := a.Work.SetParallel(r.Context(), r.PathValue("id"), in.MaxActive)
 		reply(w, 200, v, err)
 	})
+	mux.HandleFunc("PUT /api/projects/{id}/stage-limits", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			StageLimits map[string]int `json:"stage_limits"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.SetStageLimits(r.Context(), r.PathValue("id"), in.StageLimits)
+		reply(w, 200, v, err)
+	})
 	mux.HandleFunc("PUT /api/projects/{id}/workspace", func(w http.ResponseWriter, r *http.Request) {
 		var in work.Workspace
 		if decode(w, r, &in) != nil {

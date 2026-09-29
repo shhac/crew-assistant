@@ -1,6 +1,6 @@
 import { isCode } from "./landing";
 import { holds } from "./members";
-import { finished } from "./stages";
+import { finished, stageLabel } from "./stages";
 import type { Project, Stage, Task } from "./api";
 
 export interface Lane {
@@ -32,31 +32,30 @@ const hasLane = (project: Project, tasks: Task[], kind: string, stage: Stage) =>
  * land sits above the board, not in a column.
  */
 export function boardColumns(project: Project, tasks: Task[]): Column[] {
-  const lane = (kind: string, stage: Stage, label: string): Lane[] =>
-    hasLane(project, tasks, kind, stage) ? [{ stage, label }] : [];
+  const label = (stage: Stage) => stageLabel(stage, project.playbook);
+  const lane = (kind: string, stage: Stage): Lane[] =>
+    hasLane(project, tasks, kind, stage)
+      ? [{ stage, label: label(stage) }]
+      : [];
   const research = [
-    ...lane("researcher", "researching", "Researching"),
-    ...lane("designer", "designing", "Designing"),
+    ...lane("researcher", "researching"),
+    ...lane("designer", "designing"),
   ];
-  const implementing = isCode(project.playbook) ? "Implementing" : "Writing";
   return [
     {
       key: "todo",
-      lanes: [
-        { stage: "todo", label: "To do" },
-        ...lane("pm", "triage", "Triage"),
-      ],
+      lanes: [{ stage: "todo", label: label("todo") }, ...lane("pm", "triage")],
     },
     ...(research.length ? [{ key: "research", lanes: research }] : []),
     {
       key: "implementing",
-      lanes: [{ stage: "implementing", label: implementing }],
+      lanes: [{ stage: "implementing", label: label("implementing") }],
     },
     {
       key: "checks",
       lanes: [
-        ...lane("qa", "qa", "QA"),
-        { stage: "reviewing", label: "Reviewing" },
+        ...lane("qa", "qa"),
+        { stage: "reviewing", label: label("reviewing") },
       ],
     },
   ];
@@ -64,7 +63,7 @@ export function boardColumns(project: Project, tasks: Task[]): Column[] {
 
 /** What the board calls work that is ready to go out, kept above the columns. */
 export const readyLabel = (project: Project) =>
-  isCode(project.playbook) ? "Ready to land" : "Ready";
+  stageLabel("ready", project.playbook);
 
 /** What the board calls finished work, kept apart from the columns. */
 export const doneLabel = (project: Project) =>

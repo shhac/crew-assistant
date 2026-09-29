@@ -8,6 +8,7 @@ import {
   type Playbook,
   type Project,
   type Role,
+  type Stage,
   type Task,
   type TeamMessage,
   type Turn,
@@ -238,9 +239,47 @@ export function seatWords(task: Task, name: string) {
 const personWords = (task: Task, wait: Wait) =>
   wait.member ? wait.seat! : seatWords(task, wait.seat ?? "");
 
-/** Who or what a ready step waits for, as "Waiting for Lucius (busy on CA-27)". */
-export function waitingWords(task: Task, wait: Wait) {
+/** What the board calls a stage, as its lane does. */
+export function stageLabel(stage: Stage, playbook?: Playbook) {
+  switch (stage) {
+    case "todo":
+      return "To do";
+    case "triage":
+      return "Triage";
+    case "researching":
+      return "Researching";
+    case "designing":
+      return "Designing";
+    case "implementing":
+      return isCode(playbook) ? "Implementing" : "Writing";
+    case "reviewing":
+      return "Reviewing";
+    case "qa":
+      return "QA";
+    case "ready":
+      return isCode(playbook) ? "Ready to land" : "Ready";
+  }
+  return stage;
+}
+
+/**
+ * The stage's limit, if it has one: the most requests it may hold at once.
+ */
+export const stageLimit = (playbook: Playbook | undefined, stage: Stage) =>
+  playbook?.stage_limits?.[stage] || 0;
+
+/**
+ * Who or what a ready step waits for, as "Waiting for Lucius (busy on
+ * CA-27)". The project names the stages of a request not yet started.
+ */
+export function waitingWords(task: Task, wait: Wait, project?: Project) {
   switch (wait.kind) {
+    case "stage": {
+      const stage = stageLabel(wait.stage!, taskPlaybook(task, project));
+      return wait.from
+        ? `Done, waiting for room in ${stage}`
+        : `Waiting for room in ${stage} (${wait.count} of ${wait.limit})`;
+    }
     case "member": {
       const busy = wait.on
         ? ` (busy on ${wait.on})`
@@ -262,12 +301,14 @@ export function waitingWords(task: Task, wait: Wait) {
 /**
  * What a request is doing now, in a few words. Given the turns running, a
  * request with a role says it is at work only while that role's turn runs,
- * and "With …" otherwise.
+ * and "With …" otherwise. The project, when known, names the stages of a
+ * request not yet started.
  */
 export function requestStep(
   task: Task,
   decision?: Decision,
   turns?: Turn[],
+  project?: Project,
 ): string {
   if (held(task) && task.detail) return task.detail;
   const round = task.round > 1 ? `Round ${task.round} · ` : "";
@@ -277,7 +318,7 @@ export function requestStep(
   const seats = workingSeats(task, turns ?? []);
   const withSeat = (name: string) => `${round}With ${seatWords(task, name)}`;
   if (task.waiting && task.status !== "waiting" && !finished(task))
-    return `${round}${waitingWords(task, task.waiting)}`;
+    return `${round}${waitingWords(task, task.waiting, project)}`;
   switch (task.status) {
     case "queued":
       return "Waiting to start";

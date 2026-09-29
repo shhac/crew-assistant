@@ -28,6 +28,10 @@ type Task struct {
 	// Stage is where the task sits on its project's board, derived from the
 	// rest of the record; see stage.go.
 	Stage string `json:"stage,omitempty"`
+	// Place is the working stage the task holds towards its project's stage
+	// limits: the stage it last entered, which it keeps while it waits for
+	// room in the next. Kept by Schedule; see stage_limits.go.
+	Place string `json:"place,omitempty"`
 	// Checking names who is at work in a stage someone else leads: the
 	// checker while the task is checked, the researcher while it is
 	// researched, the designer while it is with the designer, the PM while

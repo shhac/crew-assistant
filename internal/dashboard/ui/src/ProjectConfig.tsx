@@ -3,16 +3,19 @@ import { Folders } from "./ProjectFolders";
 import { RunRecipeSettings } from "./RunRecipe";
 import { LandingSettings } from "./ProjectLanding";
 import { TeamSettings } from "./TeamSettings";
-import { activeCap, isCode } from "./stages";
+import { boardColumns, readyLabel } from "./boardLanes";
+import { activeCap, isCode, stageLimit } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
 import {
   setParallel,
   setPrefix,
+  setStageLimits,
   setTitle,
   setWorkspace,
   type Member,
   type Playbook,
   type Project,
+  type Stage,
 } from "./api";
 
 const signing: Record<string, string> = {
@@ -38,7 +41,18 @@ export function ConfigTab({
       <ProjectName project={project} refresh={refresh} />
       <TeamSettings project={project} members={members} refresh={refresh} />
       {playbook && (
-        <TasksAtOnce project={project} playbook={playbook} refresh={refresh} />
+        <>
+          <TasksAtOnce
+            project={project}
+            playbook={playbook}
+            refresh={refresh}
+          />
+          <StageLimits
+            project={project}
+            playbook={playbook}
+            refresh={refresh}
+          />
+        </>
       )}
       {code && (
         <>
@@ -157,6 +171,131 @@ function TasksAtOnce({
           </dd>
         </div>
       </dl>
+    </section>
+  );
+}
+
+/** The stages of the project's board that can have a limit, with their labels. */
+const limitStages = (project: Project) => [
+  ...boardColumns(project, [])
+    .flatMap((c) => c.lanes)
+    .filter((l) => l.stage !== "todo" && l.stage !== "triage"),
+  { stage: "ready" as Stage, label: readyLabel(project) },
+];
+
+/**
+ * The most requests each stage of the board may hold at once. A request
+ * done with a stage waits in it until the next has room, so a full stage
+ * holds back the ones before it, back to To do. Unset, a stage has none.
+ */
+function StageLimits({
+  project,
+  playbook,
+  refresh,
+}: {
+  project: Project;
+  playbook: Playbook;
+  refresh: () => Promise<void>;
+}) {
+  const stages = limitStages(project);
+  const current = () =>
+    Object.fromEntries(
+      stages.map((s) => [s.stage, String(stageLimit(playbook, s.stage))]),
+    );
+  const [editing, setEditing] = useState(false);
+  const [values, setValues] = useState<Record<string, string>>(current);
+  const { busy, error, run } = useAction();
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    await run(async () => {
+      const limits: Partial<Record<Stage, number>> = {};
+      for (const s of stages) {
+        const n = Number(values[s.stage] ?? 0);
+        if (n > 0) limits[s.stage] = n;
+      }
+      await setStageLimits(project.id, limits);
+      await refresh();
+      setEditing(false);
+    });
+  }
+  if (editing)
+    return (
+      <section className="tab-panel card" aria-label="Stage limits">
+        <form className="form" aria-label="Stage limits" onSubmit={save}>
+          <h2>Stage limits</h2>
+          <div className="form-row">
+            {stages.map((s) => (
+              <label key={s.stage} htmlFor={`config-stage-${s.stage}`}>
+                {s.label}
+                <select
+                  id={`config-stage-${s.stage}`}
+                  className="field"
+                  value={values[s.stage] ?? "0"}
+                  onChange={(e) =>
+                    setValues({ ...values, [s.stage]: e.target.value })
+                  }
+                >
+                  <option value="0">No limit</option>
+                  {Array.from({ length: mostAtOnce }, (_, i) => (
+                    <option key={i + 1} value={String(i + 1)}>
+                      {i + 1}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+          <p className="hint">
+            A request done with a stage waits in it until the next has room. To
+            do has no limit.
+          </p>
+          <ErrorNotice error={error} />
+          <div className="actions">
+            <button className="btn btn-primary" type="submit" disabled={busy}>
+              Save
+            </button>
+            <button
+              className="btn btn-quiet"
+              type="button"
+              disabled={busy}
+              onClick={() => setEditing(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </section>
+    );
+  const limited = stages.filter((s) => stageLimit(playbook, s.stage));
+  return (
+    <section className="tab-panel card" aria-label="Stage limits">
+      <div className="panel-head">
+        <h2>Stage limits</h2>
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={() => {
+            setValues(current());
+            setEditing(true);
+          }}
+        >
+          Edit
+        </button>
+      </div>
+      {limited.length ? (
+        <dl className="facts">
+          {limited.map((s) => (
+            <div key={s.stage} className="fact-row">
+              <dt>{s.label}</dt>
+              <dd>Up to {stageLimit(playbook, s.stage)} at once</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="muted">
+          No limits: a request moves on as soon as someone is free for it.
+        </p>
+      )}
     </section>
   );
 }

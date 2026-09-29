@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -122,6 +123,19 @@ type Playbook struct {
 	// MaxActive is how many of the project's tasks may be under way at once;
 	// 0 is one for each implementer seat. See ActiveCap.
 	MaxActive int `json:"max_active,omitempty"`
+	// StageLimits is the most tasks each working stage of the board may
+	// hold at once, keyed by stage; a stage missing, or 0, has no limit, and
+	// To do and triage never have one. See StageLimit.
+	StageLimits map[string]int `json:"stage_limits,omitempty"`
+}
+
+// limitStages are the stages of the board a project can limit, in board
+// order: each working stage, up to landing.
+var limitStages = []string{StageResearching, StageDesigning, StageImplementing, StageReviewing, StageQA, StageReady}
+
+// StageLimit is the most tasks the stage may hold at once, or 0 for no limit.
+func (p Playbook) StageLimit(stage string) int {
+	return p.StageLimits[stage]
 }
 
 const (
@@ -236,6 +250,14 @@ func (p Playbook) Validate() error {
 	if p.MaxActive < 0 || p.MaxActive > maxActiveLimit {
 		return fmt.Errorf("max_active must be between 1 and %d, or 0 for one per implementer seat", maxActiveLimit)
 	}
+	for stage, limit := range p.StageLimits {
+		if !slices.Contains(limitStages, stage) {
+			return fmt.Errorf("stage_limits: %q is not a stage that can have a limit; use one of %s", stage, strings.Join(limitStages, ", "))
+		}
+		if limit < 0 || limit > maxActiveLimit {
+			return fmt.Errorf("stage_limits: %s must be between 1 and %d, or 0 for no limit", stage, maxActiveLimit)
+		}
+	}
 	return nil
 }
 
@@ -294,6 +316,7 @@ func (s *Service) EditPlaybook(ctx context.Context, projectID string, change fun
 		if p.Playbook != nil {
 			playbook = *p.Playbook
 			playbook.Roles = slices.Clone(playbook.Roles)
+			playbook.StageLimits = maps.Clone(playbook.StageLimits)
 		}
 		if err := change(v, p, &playbook); err != nil {
 			return err

@@ -148,10 +148,11 @@ export function RequestPanel({
             <h2 id="request-title">{task.objective}</h2>
             <p className="request-status">
               <Pill tone={requestTone(task)} dot>
-                {requestStep(task, decision, state.turns)}
+                {requestStep(task, decision, state.turns, project)}
               </Pill>
               {task.detail &&
-                task.detail !== requestStep(task, decision, state.turns) && (
+                task.detail !==
+                  requestStep(task, decision, state.turns, project) && (
                   <span className="muted small">{task.detail}</span>
                 )}
             </p>

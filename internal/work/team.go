@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -217,9 +218,11 @@ func chosenTeam(in TeamChoice, snap core.Snapshot, p core.Project) (core.Playboo
 	// The template's seats are made afresh, so one named like a member gives
 	// way again, as it did when the member was given its seat.
 	playbook.NameSeats()
-	// How much of the project's work runs at once is its own setting.
+	// How much of the project's work runs at once is its own setting, and
+	// so is how much each stage holds.
 	if p.Playbook != nil {
 		playbook.MaxActive = p.Playbook.MaxActive
+		playbook.StageLimits = maps.Clone(p.Playbook.StageLimits)
 	}
 	if playbook.Medium == core.MediumGit {
 		if playbook.Repo, err = teamRepo(p, playbook.Repo); err != nil {
@@ -379,6 +382,24 @@ func (lp *Loop) changeSeats(ctx context.Context, projectID string, change func(*
 func (lp *Loop) SetParallel(ctx context.Context, projectID string, maxActive int) (core.Project, error) {
 	return lp.changeSeats(ctx, projectID, func(playbook *core.Playbook) error {
 		playbook.MaxActive = maxActive
+		return nil
+	})
+}
+
+// SetStageLimits sets the most tasks each working stage of a project's
+// board may hold at once, keyed by stage; a stage left out, or 0, has no
+// limit. A task that finishes a stage waits in it for room in the next.
+func (lp *Loop) SetStageLimits(ctx context.Context, projectID string, limits map[string]int) (core.Project, error) {
+	return lp.changeSeats(ctx, projectID, func(playbook *core.Playbook) error {
+		playbook.StageLimits = nil
+		for stage, limit := range limits {
+			if limit != 0 {
+				if playbook.StageLimits == nil {
+					playbook.StageLimits = map[string]int{}
+				}
+				playbook.StageLimits[stage] = limit
+			}
+		}
 		return nil
 	})
 }

@@ -351,6 +351,170 @@ describe("the project's cap on requests under way", () => {
   });
 });
 
+describe("limits on how much each stage holds", () => {
+  const draft = { revisions: [{ n: 1, brief_version: 1, files: [] }] };
+  const limits = { implementing: 1, reviewing: 1, qa: 1, ready: 2 };
+  /** QA is full, so a passed review waits in review, and so on back to To do. */
+  const bottleneck = () => ({
+    tasks: [
+      task(1, {
+        ...draft,
+        status: "reviewing",
+        stage: "qa",
+        place: "qa",
+        claims: [{ step: "reviewing", seat: "Quinn", shared: true }],
+      }),
+      task(2, {
+        ...draft,
+        status: "reviewing",
+        stage: "reviewing",
+        place: "reviewing",
+        waiting: {
+          kind: "stage",
+          stage: "qa",
+          from: "reviewing",
+          count: 1,
+          limit: 1,
+        },
+      }),
+      writing(3, "Claudius", { place: "implementing" }),
+      // Not yet started, so with no team of its own.
+      task(4, {
+        playbook: undefined,
+        roles: undefined,
+        waiting: { kind: "stage", stage: "implementing", count: 1, limit: 1 },
+      }),
+      task(5, { ...draft, status: "landing", stage: "ready", place: "ready" }),
+    ],
+  });
+  const count = (name: string) =>
+    screen.getByRole("listitem", { name }).querySelector(".count")?.textContent;
+
+  it("counts each stage against its limit, and a plain count without one", () => {
+    show(project(team({ stage_limits: limits })), bottleneck());
+    expect(count("QA")).toBe("1 of 1");
+    expect(count("Reviewing")).toBe("1 of 1");
+    expect(count("Implementing")).toBe("1 of 1");
+    expect(count("To do")).toBe("1");
+    expect(
+      screen
+        .getByRole("region", { name: "Ready to land" })
+        .querySelector(".count")?.textContent,
+    ).toBe("1 of 2");
+    cleanup();
+    show(project(team()), bottleneck());
+    expect(count("QA")).toBe("1");
+    expect(count("Reviewing")).toBe("1");
+  });
+
+  it("counts Ready whenever a request holds it, wherever its card shows", () => {
+    show(project(team({ stage_limits: limits })), {
+      tasks: [
+        task(6, {
+          ...draft,
+          status: "deciding",
+          stage: "qa",
+          place: "ready",
+        }),
+      ],
+    });
+    expect(
+      screen
+        .getByRole("region", { name: "Ready to land" })
+        .querySelector(".count")?.textContent,
+    ).toBe("1 of 2");
+    // Empty, it still shows its limit; with none, it shows only when used.
+    cleanup();
+    const writingOnly = { tasks: [writing(1, "Claudius")] };
+    show(project(team({ stage_limits: limits })), writingOnly);
+    expect(
+      screen
+        .getByRole("region", { name: "Ready to land" })
+        .querySelector(".count")?.textContent,
+    ).toBe("0 of 2");
+    cleanup();
+    show(project(team()), writingOnly);
+    expect(screen.queryByRole("region", { name: "Ready to land" })).toBeNull();
+  });
+
+  it("keeps a held request in the stage it finished, saying where it waits", () => {
+    show(project(team({ stage_limits: limits })), bottleneck());
+    expect(lane("Reviewing").map((a) => a.textContent)).toEqual(["Request 2"]);
+    expect(step("Request 2")).toBe("Done, waiting for room in QA");
+    // A request not yet started names the stage as its project's board does.
+    expect(step("Request 4")).toBe("Waiting for room in Implementing (1 of 1)");
+    cleanup();
+    show(project(team({ stage_limits: limits })), bottleneck(), {
+      request: "t2",
+    });
+    const view = screen.getByRole("complementary", { name: "Request 2" });
+    expect(view.querySelector(".request-status")?.textContent).toBe(
+      "Done, waiting for room in QA",
+    );
+  });
+
+  const card = () => screen.getByRole("region", { name: "Stage limits" });
+  it("shows the limits set in Config, and none until set", () => {
+    show(project(team()), {}, { tab: "config" });
+    expect(card().textContent).toContain("No limits");
+    cleanup();
+    show(
+      project(team({ stage_limits: { qa: 1, ready: 2 } })),
+      {},
+      {
+        tab: "config",
+      },
+    );
+    const rows = [...card().querySelectorAll(".fact-row")].map(
+      (r) => r.textContent,
+    );
+    expect(rows).toEqual(["QAUp to 1 at once", "Ready to landUp to 2 at once"]);
+  });
+
+  it("sets a stage's limit, or takes it away", async () => {
+    show(project(team({ stage_limits: { qa: 1 } })), {}, { tab: "config" });
+    fireEvent.click(within(card()).getByRole("button", { name: "Edit" }));
+    const field = (name: string) =>
+      within(card()).getByLabelText(name) as HTMLSelectElement;
+    expect(field("QA").value).toBe("1");
+    expect(field("Reviewing").value).toBe("0");
+    fireEvent.change(field("Reviewing"), { target: { value: "2" } });
+    fireEvent.change(field("QA"), { target: { value: "0" } });
+    fireEvent.click(within(card()).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/stage-limits",
+        method: "PUT",
+        body: { stage_limits: { reviewing: 2 } },
+      },
+    ]);
+  });
+
+  it("keeps an open editor through a refresh", () => {
+    const view = show(
+      project(team({ stage_limits: { qa: 1 } })),
+      {},
+      {
+        tab: "config",
+      },
+    );
+    fireEvent.click(within(card()).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(card()).getByLabelText("Implementing"), {
+      target: { value: "3" },
+    });
+    view.rerender(
+      page(project(team({ stage_limits: { qa: 1 } })), bottleneck(), {
+        tab: "config",
+      }),
+    );
+    expect(
+      (within(card()).getByLabelText("Implementing") as HTMLSelectElement)
+        .value,
+    ).toBe("3");
+  });
+});
+
 describe("a refresh while several requests move", () => {
   it("keeps the open request, its member's panel, the draft and focus", async () => {
     const at = { request: "t2", seat: "Claudius #2" };

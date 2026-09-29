@@ -17,7 +17,7 @@ import {
   taskPlaybook,
   underWay,
 } from "./stages";
-import type { Decision, Playbook, Project, Task } from "./api";
+import type { Decision, Playbook, Project, Stage, Task } from "./api";
 
 const writing: Playbook = {
   template: "draft",
@@ -428,6 +428,52 @@ describe("the board", () => {
     expect(
       requestStep(task({ status: "waiting", waiting }), decision("delivery")),
     ).toBe("Waiting for your approval");
+  });
+  it("says which stage a request waits for room in, as its board names it", () => {
+    const full = (stage: Stage, from?: Stage) => ({
+      kind: "stage" as const,
+      stage,
+      from,
+      count: 2,
+      limit: 2,
+    });
+    expect(
+      requestStep(
+        task({
+          status: "reviewing",
+          playbook: code(),
+          waiting: full("qa", "reviewing"),
+        }),
+      ),
+    ).toBe("Done, waiting for room in QA");
+    expect(
+      requestStep(
+        task({
+          status: "writing",
+          round: 2,
+          playbook: writing,
+          waiting: full("reviewing", "implementing"),
+        }),
+      ),
+    ).toBe("Round 2 · Done, waiting for room in Reviewing");
+    expect(
+      requestStep(
+        task({
+          status: "deciding",
+          playbook: code(),
+          waiting: full("ready", "qa"),
+        }),
+      ),
+    ).toBe("Done, waiting for room in Ready to land");
+    // A request not yet started takes its project's names for the stages.
+    expect(
+      requestStep(
+        task({ status: "queued", waiting: full("implementing") }),
+        undefined,
+        undefined,
+        project(writing),
+      ),
+    ).toBe("Waiting for room in Writing (2 of 2)");
   });
 });
 
