@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // memoryKinds are the categories an owner can choose between. An empty kind is
 // preserved as uncategorized; nothing infers one from the text.
 var memoryKinds = []string{"preference", "observation"}
 
-func validMemoryKind(kind string) bool { return kind == "" || contains(memoryKinds, kind) }
+func validMemoryKind(kind string) bool { return kind == "" || slices.Contains(memoryKinds, kind) }
 
 // liveMemory finds the memory currently answering for a key. A corrected
 // memory keeps its key so the chain stays readable, so the superseded records

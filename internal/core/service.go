@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/shhac/crew-assistant/internal/config"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -163,14 +164,6 @@ func required(fields ...string) bool {
 	}
 	return true
 }
-func contains(xs []string, x string) bool {
-	for _, v := range xs {
-		if v == x {
-			return true
-		}
-	}
-	return false
-}
 func (s *Service) CreateDecision(ctx context.Context, in DecisionInput) (Decision, error) {
 	return s.openDecision(ctx, DecisionChoice, in)
 }
@@ -196,7 +189,7 @@ func (s *Service) openDecision(ctx context.Context, kind string, in DecisionInpu
 	return out, err
 }
 func (s *Service) AddMessage(ctx context.Context, role, text string) (Message, error) {
-	if !contains([]string{"user", "assistant", "system"}, role) || !required(text) {
+	if !slices.Contains([]string{"user", "assistant", "system"}, role) || !required(text) {
 		return Message{}, errors.New("message requires a supported role and content")
 	}
 	out := Message{ID: uid(), Role: role, Content: text, CreatedAt: s.now().UTC()}
@@ -273,14 +266,14 @@ func pendingOperation(v Snapshot, id string) PendingOperation {
 		out.Summary = "A notification to you may not have been sent"
 	}
 	for _, d := range v.Decisions {
-		if contains(parts, d.ID) {
+		if slices.Contains(parts, d.ID) {
 			out.ProjectID = d.ProjectID
 			out.Summary += " Decision: " + d.Title
 			return out
 		}
 	}
 	for _, p := range v.Projects {
-		if contains(parts, p.ID) {
+		if slices.Contains(parts, p.ID) {
 			out.ProjectID = p.ID
 			out.Summary += " Project: " + p.Title
 			return out
