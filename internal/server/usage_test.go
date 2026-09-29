@@ -6,34 +6,18 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/shhac/crew-assistant/internal/app"
 	"github.com/shhac/crew-assistant/internal/config"
-	"github.com/shhac/crew-assistant/internal/core"
 )
 
 // The owner sees each engine's usage, or why there is none, and nobody
 // else sees it at all. The CLIs here are missing, so no login is reached.
 func TestUsageEndpoint(t *testing.T) {
-	dir := t.TempDir()
+	missing := t.TempDir()
 	cfg := config.Default()
-	cfg.Engines.Codex.Bin, cfg.Engines.Claude.Bin = filepath.Join(dir, "codex"), filepath.Join(dir, "claude")
-	store, err := core.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	auth, _ := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
-	h := New(app.New(core.NewService(store, cfg), cfg, filepath.Join(dir, "config.json"), app.Options{}), auth)
+	cfg.Engines.Codex.Bin, cfg.Engines.Claude.Bin = filepath.Join(missing, "codex"), filepath.Join(missing, "claude")
+	_, auth, h := newDashboard(t, cfg)
 	get := func(owner bool) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("GET", "http://127.0.0.1:8340/api/usage", nil)
-		r.RemoteAddr = "127.0.0.1:4321"
-		if owner {
-			r.Header.Set("Authorization", "Bearer "+auth.admin)
-			r.Header.Set("X-Requested-With", "crew-assistant")
-		}
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w
+		return send(h, auth, "GET", "/api/usage", nil, caller{owner: owner, csrf: owner})
 	}
 	if w := get(false); w.Code != 401 {
 		t.Fatal(w.Code, w.Body.String())

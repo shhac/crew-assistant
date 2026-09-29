@@ -3,40 +3,14 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/shhac/crew-assistant/internal/app"
-	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 )
 
 func TestPastConversationsCanBeListedReadAndPickedUpAgain(t *testing.T) {
-	dir := t.TempDir()
-	cfg := config.Default()
-	store, err := core.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	s := core.NewService(store, cfg)
-	a := app.New(s, cfg, filepath.Join(dir, "config.json"), app.Options{})
-	auth, err := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := New(a, auth)
-	call := func(method, path, body string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, "http://127.0.0.1:8340"+path, strings.NewReader(body))
-		r.RemoteAddr = "127.0.0.1:1234"
-		r.Header.Set("Authorization", "Bearer "+auth.admin)
-		r.Header.Set("X-Requested-With", "crew-assistant")
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w
-	}
+	s, call := ownerServer(t)
 	// An unknown command is refused with what to type instead.
 	if w := call("POST", "/api/chat/messages", `{"id":"typo","message":"/nwe"}`); w.Code != 400 || !strings.Contains(w.Body.String(), "/nwe isn't a command. Try /compact") {
 		t.Fatal(w.Code, w.Body.String())

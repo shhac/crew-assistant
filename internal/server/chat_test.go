@@ -31,17 +31,7 @@ func TestChatQueueRoutesAuthenticateValidateAndRetryIdempotently(t *testing.T) {
 	}
 	h := New(a, auth)
 	call := func(method, path, body string, authorized, csrf bool) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, "http://127.0.0.1:8340"+path, strings.NewReader(body))
-		r.RemoteAddr = "127.0.0.1:1234"
-		if authorized {
-			r.Header.Set("Authorization", "Bearer "+auth.admin)
-		}
-		if csrf {
-			r.Header.Set("X-Requested-With", "crew-assistant")
-		}
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w
+		return send(h, auth, method, path, strings.NewReader(body), caller{owner: authorized, csrf: csrf})
 	}
 	drawing := []struct{ method, path, body string }{{"POST", "/api/members/m/avatar", `{"look":"Violet bob"}`}, {"POST", "/api/assistants/milo/avatar", `{"look":"Silver hair"}`}}
 	for _, route := range append([]struct{ method, path, body string }{{"POST", "/api/chat/messages", `{"id":"one","message":"Hello"}`}, {"GET", "/api/chat/turns", ""}, {"DELETE", "/api/chat/messages/one", ""}}, drawing...) {
@@ -99,29 +89,7 @@ func TestChatQueueRoutesAuthenticateValidateAndRetryIdempotently(t *testing.T) {
 // The queue routes exist so the owner can change what runs before it runs.
 // They must refuse a stale intent rather than merging it.
 func TestChatQueueHoldEditAndReorder(t *testing.T) {
-	dir := t.TempDir()
-	cfg := config.Default()
-	store, err := core.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	s := core.NewService(store, cfg)
-	a := app.New(s, cfg, filepath.Join(dir, "config.json"), app.Options{})
-	auth, err := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := New(a, auth)
-	call := func(method, path, body string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, "http://127.0.0.1:8340"+path, strings.NewReader(body))
-		r.RemoteAddr = "127.0.0.1:4321"
-		r.Header.Set("Authorization", "Bearer "+auth.admin)
-		r.Header.Set("X-Requested-With", "crew-assistant")
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w
-	}
+	_, call := ownerApp(t)
 	for _, id := range []string{"one", "two", "three"} {
 		if got := call("POST", "/api/chat/messages", `{"id":"`+id+`","message":"text `+id+`"}`); got.Code != 202 {
 			t.Fatal(got.Body.String())
@@ -188,29 +156,10 @@ func TestChatQueueHoldEditAndReorder(t *testing.T) {
 }
 
 func TestChatSuggestionRouteRefusesStaleRequestsAndReportsUnavailableModels(t *testing.T) {
-	dir := t.TempDir()
 	cfg := config.Default()
-	store, err := core.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	a := app.New(core.NewService(store, cfg), cfg, filepath.Join(dir, "config.json"), app.Options{})
-	auth, err := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := New(a, auth)
+	a, auth, h := newDashboard(t, cfg)
 	call := func(body string, authorized bool) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("POST", "http://127.0.0.1:8340/api/chat/suggestion", strings.NewReader(body))
-		r.RemoteAddr = "127.0.0.1:1234"
-		if authorized {
-			r.Header.Set("Authorization", "Bearer "+auth.admin)
-		}
-		r.Header.Set("X-Requested-With", "crew-assistant")
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w
+		return send(h, auth, "POST", "/api/chat/suggestion", strings.NewReader(body), caller{owner: authorized, csrf: true})
 	}
 	if w := call(`{"after":"reply"}`, false); w.Code != 401 {
 		t.Fatal(w.Code)

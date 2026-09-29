@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -28,26 +29,52 @@ func ownerServer(t *testing.T) (*core.Service, func(method, path, body string) *
 
 func ownerApp(t *testing.T) (*app.App, func(method, path, body string) *httptest.ResponseRecorder) {
 	t.Helper()
+	a, auth, h := newDashboard(t, config.Default())
+	return a, func(method, path, body string) *httptest.ResponseRecorder {
+		return send(h, auth, method, path, strings.NewReader(body), asOwner)
+	}
+}
+
+func newDashboard(t *testing.T, cfg config.Config) (*app.App, *Auth, http.Handler) {
+	t.Helper()
 	dir := t.TempDir()
-	cfg := config.Default()
 	store, err := core.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	s := core.NewService(store, cfg)
-	a := app.New(s, cfg, filepath.Join(dir, "config.json"), app.Options{})
-	auth, _ := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
-	h := New(a, auth)
-	return a, func(method, path, body string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, "http://127.0.0.1:8340"+path, strings.NewReader(body))
-		r.RemoteAddr = "127.0.0.1:4321"
-		r.Header.Set("Authorization", "Bearer "+auth.admin)
-		r.Header.Set("X-Requested-With", "crew-assistant")
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w
+	a := app.New(core.NewService(store, cfg), cfg, filepath.Join(dir, "config.json"), app.Options{})
+	auth, err := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
+	if err != nil {
+		t.Fatal(err)
 	}
+	return a, auth, New(a, auth)
+}
+
+// caller is who a request comes from: owner carries the admin token, and csrf
+// the header only the dashboard's own pages send.
+type caller struct {
+	owner, csrf bool
+	contentType string
+}
+
+var asOwner = caller{owner: true, csrf: true}
+
+func send(h http.Handler, auth *Auth, method, path string, body io.Reader, as caller) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(method, "http://127.0.0.1:8340"+path, body)
+	r.RemoteAddr = "127.0.0.1:4321"
+	if as.owner {
+		r.Header.Set("Authorization", "Bearer "+auth.admin)
+	}
+	if as.csrf {
+		r.Header.Set("X-Requested-With", "crew-assistant")
+	}
+	if as.contentType != "" {
+		r.Header.Set("Content-Type", as.contentType)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w
 }
 
 func TestDashboardProjectDecisionMemoryFlow(t *testing.T) {

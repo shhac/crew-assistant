@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shhac/crew-assistant/internal/app"
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/filesystem"
@@ -17,30 +16,12 @@ import (
 
 func TestFilesystemRequiresOwnerAndReturnsMetadataOnly(t *testing.T) {
 	root := t.TempDir()
-	cfg := config.Default()
-	store, err := core.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	a := app.New(core.NewService(store, cfg), cfg, filepath.Join(t.TempDir(), "config.json"), app.Options{})
-	auth, err := NewAuth(t.TempDir(), "http://127.0.0.1:8340", "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := New(a, auth)
-	if err = os.WriteFile(filepath.Join(root, "note.txt"), []byte("private-file-content"), 0600); err != nil {
+	a, auth, h := newDashboard(t, config.Default())
+	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("private-file-content"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	call := func(path string, owner bool) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("GET", "http://127.0.0.1:8340"+path, nil)
-		r.RemoteAddr = "127.0.0.1:4321"
-		if owner {
-			r.Header.Set("Authorization", "Bearer "+auth.admin)
-		}
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w
+		return send(h, auth, "GET", path, nil, caller{owner: owner})
 	}
 	endpoint := "/api/filesystem?path=" + url.QueryEscape(root)
 	if w := call(endpoint, false); w.Code != 401 {
@@ -51,7 +32,7 @@ func TestFilesystemRequiresOwnerAndReturnsMetadataOnly(t *testing.T) {
 		t.Fatalf("metadata response: %d %s", w.Code, w.Body.String())
 	}
 	var result filesystem.Listing
-	if err = json.Unmarshal(w.Body.Bytes(), &result); err != nil || len(result.Entries) != 1 || result.Entries[0].Name != "note.txt" {
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || len(result.Entries) != 1 || result.Entries[0].Name != "note.txt" {
 		t.Fatal(w.Body.String())
 	}
 	if w = call("/api/filesystem?path="+url.QueryEscape(filepath.Join(root, "note.txt")), true); w.Code != 400 {
@@ -67,39 +48,19 @@ func TestFilesystemRequiresOwnerAndReturnsMetadataOnly(t *testing.T) {
 }
 
 func TestExistingProjectDirectoriesHTTP(t *testing.T) {
-	state := t.TempDir()
 	source := t.TempDir()
 	second := t.TempDir()
-	cfg := config.Default()
-	store, err := core.Open(filepath.Join(state, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	a := app.New(core.NewService(store, cfg), cfg, filepath.Join(state, "config.json"), app.Options{})
-	auth, err := NewAuth(t.TempDir(), "http://127.0.0.1:8340", "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := New(a, auth)
+	_, auth, h := newDashboard(t, config.Default())
 	call := func(method, path string, body any, owner bool) *httptest.ResponseRecorder {
 		data, _ := json.Marshal(body)
-		r := httptest.NewRequest(method, "http://127.0.0.1:8340"+path, strings.NewReader(string(data)))
-		r.RemoteAddr = "127.0.0.1:4321"
-		r.Header.Set("X-Requested-With", "crew-assistant")
-		if owner {
-			r.Header.Set("Authorization", "Bearer "+auth.admin)
-		}
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w
+		return send(h, auth, method, path, strings.NewReader(string(data)), caller{owner: owner, csrf: true})
 	}
 	w := call("POST", "/api/projects", map[string]any{"title": "Existing workspace", "directories": []string{source}}, true)
 	if w.Code != 201 {
 		t.Fatalf("intake: %d %s", w.Code, w.Body.String())
 	}
 	var p core.Project
-	if err = json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+	if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
 		t.Fatal(err)
 	}
 	canonical, _ := filepath.EvalSymlinks(source)
@@ -118,7 +79,7 @@ func TestExistingProjectDirectoriesHTTP(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	var updated core.Project
-	if err = json.Unmarshal(w.Body.Bytes(), &updated); err != nil || len(updated.Directories) != 2 || updated.ScratchDirectory != p.ScratchDirectory {
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil || len(updated.Directories) != 2 || updated.ScratchDirectory != p.ScratchDirectory {
 		t.Fatal(w.Body.String())
 	}
 	w = call("GET", "/api/state", nil, true)

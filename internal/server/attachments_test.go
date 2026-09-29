@@ -8,7 +8,6 @@ import (
 	"image/png"
 	"mime/multipart"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,30 +25,9 @@ type formFile struct {
 // form, as the dashboard does with files.
 func formServer(t *testing.T) (*app.App, func(method, path, body string) *httptest.ResponseRecorder, func(path, text string, files ...formFile) *httptest.ResponseRecorder) {
 	t.Helper()
-	dir := t.TempDir()
-	cfg := config.Default()
-	store, err := core.Open(filepath.Join(dir, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	a := app.New(core.NewService(store, cfg), cfg, filepath.Join(dir, "config.json"), app.Options{})
-	auth, _ := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
-	h := New(a, auth)
-	send := func(method, path, kind string, body *bytes.Buffer) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, "http://127.0.0.1:8340"+path, body)
-		r.RemoteAddr = "127.0.0.1:4321"
-		r.Header.Set("Authorization", "Bearer "+auth.admin)
-		r.Header.Set("X-Requested-With", "crew-assistant")
-		if kind != "" {
-			r.Header.Set("Content-Type", kind)
-		}
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w
-	}
+	a, auth, h := newDashboard(t, config.Default())
 	call := func(method, path, body string) *httptest.ResponseRecorder {
-		return send(method, path, "", bytes.NewBufferString(body))
+		return send(h, auth, method, path, strings.NewReader(body), asOwner)
 	}
 	form := func(path, text string, files ...formFile) *httptest.ResponseRecorder {
 		var body bytes.Buffer
@@ -60,7 +38,7 @@ func formServer(t *testing.T) (*app.App, func(method, path, body string) *httpte
 			part.Write(f.data)
 		}
 		mw.Close()
-		return send("POST", path, mw.FormDataContentType(), &body)
+		return send(h, auth, "POST", path, &body, caller{owner: true, csrf: true, contentType: mw.FormDataContentType()})
 	}
 	return a, call, form
 }
