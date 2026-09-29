@@ -31,6 +31,10 @@ const since = (at: string, now: number) =>
 export const turnFor = (task: Task, turns: Turn[]) =>
   turns.find((t) => t.task_id === task.id);
 
+/** Every turn running on a request, as a reviewer and QA checking one draft. */
+export const turnsFor = (task: Task, turns: Turn[]) =>
+  turns.filter((t) => t.task_id === task.id);
+
 export const isQuiet = (turn: Turn, now: number) =>
   since(turn.last_activity_at, now) > quietAfter;
 

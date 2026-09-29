@@ -1,12 +1,28 @@
 import type { ReactNode } from "react";
 import { requestHref } from "./router";
 import { pmLandingLine } from "./landing";
-import { atWork } from "./members";
+import { atWork, memberOf, workingSeats } from "./members";
 import { decisionFor, isOpenMessage, needsYou, requestStep } from "./stages";
 import { TaskActivity } from "./TaskActivity";
 import { Avatar } from "./Avatar";
 import { Icon, Pill, TaskRef } from "./ui";
 import type { Decision, Member, State, Task, Turn } from "./api";
+
+/**
+ * The members at work on a request now, one for each seat at work, or the
+ * one about to pick it up when no seat is.
+ */
+function workers(task: Task, state: State) {
+  const seats = workingSeats(task, state.turns);
+  if (!seats.length) {
+    const next = atWork(task, state.members);
+    return next ? [next] : [];
+  }
+  return seats.flatMap((r) => {
+    const member = memberOf(r, state.members);
+    return member ? [member] : [];
+  });
+}
 
 export function CardList({ tasks, state }: { tasks: Task[]; state: State }) {
   return (
@@ -16,7 +32,7 @@ export function CardList({ tasks, state }: { tasks: Task[]; state: State }) {
           <BoardCard
             task={t}
             decision={decisionFor(t, state.decisions)}
-            worker={atWork(t, state.members)}
+            workers={workers(t, state)}
             turns={state.turns}
             activity={<TaskActivity task={t} state={state} />}
           />
@@ -29,15 +45,15 @@ export function CardList({ tasks, state }: { tasks: Task[]; state: State }) {
 export function BoardCard({
   task,
   decision,
-  worker,
+  workers = [],
   turns,
   activity,
   children,
 }: {
   task: Task;
   decision?: Decision;
-  /** The member at work on it now, if a member is. */
-  worker?: Member;
+  /** The members at work on it now, such as a reviewer and QA side by side. */
+  workers?: Member[];
   /** The turns running now, when known, so the step says who is at work. */
   turns?: Turn[];
   activity?: ReactNode;
@@ -60,7 +76,9 @@ export function BoardCard({
       {/* A to-do card says only who or what its start waits for. */}
       {(task.stage !== "todo" || task.waiting) && (
         <p className="board-card-step">
-          {worker && <Avatar of={worker} size={20} />}
+          {workers.map((m, i) => (
+            <Avatar key={`${m.id}.${i}`} of={m} size={20} />
+          ))}
           {needsYou(task) ? (
             <Pill tone="needs" dot>
               {requestStep(task, decision, turns)}

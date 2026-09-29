@@ -101,7 +101,7 @@ export function ProjectPage({
       )}
       {tab === "brief" && <BriefTab project={project} refresh={refresh} />}
       {tab === "team" && (
-        <TeamTab project={project} members={state.members} refresh={refresh} />
+        <TeamTab project={project} state={state} refresh={refresh} />
       )}
       {tab === "config" && (
         <ConfigTab

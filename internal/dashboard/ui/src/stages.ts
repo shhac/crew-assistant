@@ -1,12 +1,13 @@
 import { recordedTime } from "./ui";
 import { approveLabel, isCode } from "./landing";
 import { engineLabel } from "./engines";
-import { holds, pmSeat, taskPlaybook } from "./members";
+import { holds, pmSeat, taskPlaybook, workingSeats } from "./members";
 import {
   pendingDecisions,
   type Decision,
   type Playbook,
   type Project,
+  type Role,
   type Task,
   type TeamMessage,
   type Turn,
@@ -34,6 +35,26 @@ const active = (task: Task) =>
   task.status === "reviewing" ||
   task.status === "deciding" ||
   task.status === "landing";
+
+/**
+ * How many requests may be under way at once, as the server works it out:
+ * the owner's setting, or else one for each implementer seat.
+ */
+export const activeCap = (playbook: Playbook) =>
+  playbook.max_active && playbook.max_active > 0
+    ? playbook.max_active
+    : Math.max(1, playbook.roles.filter((r) => holds(r, "implementer")).length);
+
+/**
+ * "2 of 3 under way": a project's requests counted against its cap, counting
+ * exactly those the cap counts, so none waiting on the owner, on checks and
+ * reviews, or on the to-do list; "" for a project with no team.
+ */
+export function capLine(project: Project, tasks: Task[]) {
+  if (!project.playbook) return "";
+  const count = projectTasks(project, tasks).filter(active).length;
+  return `${count} of ${activeCap(project.playbook)} under way`;
+}
 
 /** Started and not yet back with the owner or finished. */
 export const underWay = (task: Task) =>
@@ -252,6 +273,8 @@ export function requestStep(
   const round = task.round > 1 ? `Round ${task.round} · ` : "";
   const code = isCode(task.playbook);
   const idle = !!turns && !turns.some((t) => t.task_id === task.id);
+  // The seats at work on it, as its turns and the steps taken name them.
+  const seats = workingSeats(task, turns ?? []);
   const withSeat = (name: string) => `${round}With ${seatWords(task, name)}`;
   if (task.waiting && task.status !== "waiting" && !finished(task))
     return `${round}${waitingWords(task, task.waiting)}`;
@@ -272,15 +295,23 @@ export function requestStep(
     case "designing":
       return `With ${task.checking || roleName(task, "designer", "the designer")} for design input`;
     case "writing": {
-      const writer = roleName(
-        task,
-        "implementer",
-        code ? "Implementer" : "Writer",
-      );
+      const writer =
+        seats[0]?.name ??
+        roleName(task, "implementer", code ? "Implementer" : "Writer");
       return idle ? withSeat(writer) : `${round}${writer} working`;
     }
     case "reviewing":
     case "deciding": {
+      // Checks of one draft run side by side, so each checker at work shows.
+      const checkers = seats.filter(
+        (r) => holds(r, "reviewer") || holds(r, "qa"),
+      );
+      if (checkers.length) {
+        // Before their turns show, every checker that took a check is named.
+        if (idle)
+          return `${round}With ${checkers.map((r) => seatWords(task, r.name)).join(" and ")}`;
+        return `${round}${checkers.map((r) => checkWords(task, r)).join(" · ")}`;
+      }
       if (task.stage !== "qa") {
         const reviewer =
           task.checking || roleName(task, "reviewer", "Reviewer");
@@ -313,6 +344,13 @@ export function requestStep(
       return "Stopped";
   }
   return task.status;
+}
+
+/** "Rune reviewing" or "QA running make check": one checker at work. */
+function checkWords(task: Task, role: Role) {
+  if (!holds(role, "qa")) return `${role.name} reviewing`;
+  const check = task.playbook?.check;
+  return check ? `${role.name} running ${check}` : `${role.name} checking`;
 }
 
 export function requestTone(task: Task): Tone {

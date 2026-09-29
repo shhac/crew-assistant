@@ -1,6 +1,6 @@
-import { requestHref } from "./router";
+import { projectHref, requestHref } from "./router";
 import { pmLandingLine } from "./landing";
-import { latestFirst, projectTasks, requestStep } from "./stages";
+import { capLine, latestFirst, projectTasks, requestStep } from "./stages";
 import { boardColumns, doneLabel, readyLabel } from "./boardLanes";
 import { AskForm } from "./AskForm";
 import { CardList } from "./BoardCard";
@@ -24,6 +24,7 @@ export function Board({
   const done = latestFirst(at("done"));
   const stopped = at("stopped");
   const cards = (list: Task[]) => <CardList tasks={list} state={state} />;
+  const cap = capLine(project, state.tasks);
   return (
     <div className="board-page">
       <AskForm project={project} refresh={refresh} />
@@ -32,6 +33,11 @@ export function Board({
           <LaneTitle label={readyLabel(project)} count={ready.length} />
           {cards(ready)}
         </section>
+      )}
+      {tasks.length > 0 && cap && (
+        <p className="board-cap muted small">
+          {cap} · <a href={projectHref(project.id, "config")}>Tasks at once</a>
+        </p>
       )}
       {tasks.length === 0 ? (
         <p className="muted">Nothing asked for yet.</p>

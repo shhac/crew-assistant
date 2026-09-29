@@ -12,9 +12,9 @@ import {
   roleAtWork,
   taskRoles,
   workingKind,
+  workingSeats,
 } from "./members";
 import { Avatar } from "./Avatar";
-import { turnFor } from "./turns";
 import { ErrorNotice, Icon, Pill, counted, sinceLabel, useAction } from "./ui";
 import {
   messageTeam,
@@ -73,7 +73,7 @@ export function TeamSeats({
 }) {
   const team = taskRoles(task, project);
   if (!team.length) return null;
-  const turn = turnFor(task, state.turns);
+  const working = new Set(workingSeats(task, state.turns).map((r) => r.name));
   const next = finished(task) ? undefined : roleAtWork(task)?.name;
   return (
     <section className="section" aria-label="Team">
@@ -95,7 +95,7 @@ export function TeamSeats({
                 <span className="seat-name">{r.name}</span>
                 <span className="muted small">{kindsLabel(r.kinds)}</span>
                 <span className="seat-note small">
-                  {turn?.seat === r.name ? (
+                  {working.has(r.name) ? (
                     <Pill tone="work" dot>
                       Working now
                     </Pill>

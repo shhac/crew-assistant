@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeCap,
+  capLine,
   decisionFor,
   decisionKind,
   isOpenMessage,
@@ -465,5 +467,96 @@ describe("projects", () => {
     expect(taskPlaybook(task({ playbook: pb }), project(writing))).toBe(pb);
     expect(taskPlaybook(task({}), project(writing))).toBe(writing);
     expect(taskPlaybook(undefined, undefined)).toBeUndefined();
+  });
+});
+
+describe("several requests under way", () => {
+  const two: Playbook = {
+    ...code(),
+    roles: [
+      {
+        name: "Claudius",
+        kinds: ["implementer"],
+        engine: "claude",
+        member: "m1",
+      },
+      {
+        name: "Claudius #2",
+        kinds: ["implementer"],
+        engine: "claude",
+        member: "m1",
+      },
+      ...code().roles.slice(1),
+    ],
+  };
+  it("caps them as the server does: the setting, or one per implementer seat", () => {
+    expect(activeCap(code())).toBe(1);
+    expect(activeCap(two)).toBe(2);
+    expect(activeCap({ ...two, max_active: 5 })).toBe(5);
+    expect(activeCap({ ...two, roles: [] })).toBe(1);
+  });
+  it("counts exactly the requests the cap counts", () => {
+    const counted = (
+      [
+        "researching",
+        "designing",
+        "writing",
+        "reviewing",
+        "deciding",
+        "landing",
+      ] as const
+    ).map((status, i) => task({ id: `a${i}`, status }));
+    const not = (
+      [
+        "queued",
+        "triage",
+        "waiting",
+        "awaiting",
+        "landed",
+        "delivered",
+        "stopped",
+      ] as const
+    ).map((status, i) => task({ id: `b${i}`, status }));
+    const other = task({ id: "c", project_id: "q", status: "writing" });
+    expect(capLine(project(two), [...counted, ...not, other])).toBe(
+      "6 of 2 under way",
+    );
+    expect(capLine(project(), counted)).toBe("");
+  });
+  it("names the seat that took the step, and every checker of one draft", () => {
+    const pb = code();
+    const writer = task({
+      status: "writing",
+      roles: two.roles,
+      playbook: two,
+      claims: [{ step: "writing", seat: "Claudius #2" }],
+    });
+    expect(requestStep(writer)).toBe("Claudius #2 working");
+    expect(requestStep(writer, undefined, [])).toBe("With Claudius #2");
+    const checked = task({
+      status: "reviewing",
+      stage: "reviewing",
+      checking: "Reviewer",
+      roles: pb.roles,
+      playbook: pb,
+      claims: [
+        { step: "reviewing", seat: "Reviewer", shared: true },
+        { step: "reviewing", seat: "QA", shared: true },
+      ],
+    });
+    expect(requestStep(checked)).toBe(
+      "Reviewer reviewing · QA running make check",
+    );
+    // Before their turns show, every checker that took a check is named.
+    expect(requestStep(checked, undefined, [])).toBe(
+      "With the reviewer and QA",
+    );
+    // A turn a stopped daemon left behind is held, not at work.
+    expect(
+      requestStep({
+        ...checked,
+        claims: [{ step: "reviewing", seat: "QA", held: "still running" }],
+      }),
+    ).toBe("Reviewer reviewing");
   });
 });

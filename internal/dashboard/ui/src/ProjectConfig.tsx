@@ -3,9 +3,10 @@ import { Folders } from "./ProjectFolders";
 import { RunRecipeSettings } from "./RunRecipe";
 import { LandingSettings } from "./ProjectLanding";
 import { TeamSettings } from "./TeamSettings";
-import { isCode } from "./stages";
+import { activeCap, isCode } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
 import {
+  setParallel,
   setPrefix,
   setWorkspace,
   type Member,
@@ -34,6 +35,9 @@ export function ConfigTab({
   return (
     <div className="tab-stack">
       <TeamSettings project={project} members={members} refresh={refresh} />
+      {playbook && (
+        <TasksAtOnce project={project} playbook={playbook} refresh={refresh} />
+      )}
       {code && (
         <>
           <LandingSettings
@@ -52,6 +56,106 @@ export function ConfigTab({
       <Folders project={project} refresh={refresh} />
       <TaskIDs project={project} refresh={refresh} />
     </div>
+  );
+}
+
+/** The most requests a project may have under way at once, as the server allows. */
+const mostAtOnce = 10;
+
+/**
+ * How many of the project's requests may be under way at once. Seats bound
+ * the steps; this bounds the requests started, so work finishes before more
+ * starts. Unset, it is one per implementer seat.
+ */
+function TasksAtOnce({
+  project,
+  playbook,
+  refresh,
+}: {
+  project: Project;
+  playbook: Playbook;
+  refresh: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(playbook.max_active ?? 0));
+  const { busy, error, run } = useAction();
+  const cap = activeCap(playbook);
+  const perSeat = activeCap({ ...playbook, max_active: 0 });
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    await run(async () => {
+      await setParallel(project.id, Number(value));
+      await refresh();
+      setEditing(false);
+    });
+  }
+  if (editing)
+    return (
+      <section className="tab-panel card" aria-label="Tasks at once">
+        <form className="form" aria-label="Tasks at once" onSubmit={save}>
+          <h2>Tasks at once</h2>
+          <label htmlFor="config-max-active">
+            Requests under way at once
+            <select
+              id="config-max-active"
+              className="field"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+            >
+              <option value="0">One per implementer seat ({perSeat})</option>
+              {Array.from({ length: mostAtOnce }, (_, i) => (
+                <option key={i + 1} value={String(i + 1)}>
+                  {i + 1}
+                </option>
+              ))}
+            </select>
+            <span className="hint">
+              Requests past this wait on the to-do list, in order. Ones waiting
+              on you don't count.
+            </span>
+          </label>
+          <ErrorNotice error={error} />
+          <div className="actions">
+            <button className="btn btn-primary" type="submit" disabled={busy}>
+              Save
+            </button>
+            <button
+              className="btn btn-quiet"
+              type="button"
+              disabled={busy}
+              onClick={() => setEditing(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </section>
+    );
+  return (
+    <section className="tab-panel card" aria-label="Tasks at once">
+      <div className="panel-head">
+        <h2>Tasks at once</h2>
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={() => {
+            setValue(String(playbook.max_active ?? 0));
+            setEditing(true);
+          }}
+        >
+          Edit
+        </button>
+      </div>
+      <dl className="facts">
+        <div className="fact-row">
+          <dt>Under way</dt>
+          <dd>
+            Up to {cap} at once
+            {!playbook.max_active && " (one per implementer seat)"}
+          </dd>
+        </div>
+      </dl>
+    </section>
   );
 }
 

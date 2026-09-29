@@ -10,8 +10,9 @@ import {
   teamChoice,
   teamWith,
   workingKind,
+  workingSeats,
 } from "./members";
-import type { Member, Playbook, Project, Role, Task } from "./api";
+import type { Member, Playbook, Project, Role, Task, Turn } from "./api";
 
 const ada: Member = {
   id: "m1",
@@ -51,6 +52,64 @@ const task = (t: Partial<Task>): Task => ({
   revisions: [],
   verdicts: [],
   ...t,
+});
+
+describe("the seats at work on a request", () => {
+  const seats: Role[] = [
+    { name: "Ada", kinds: ["implementer"], engine: "claude", member: "m1" },
+    { name: "Ada #2", kinds: ["implementer"], engine: "claude", member: "m1" },
+    ...roles.slice(1),
+  ];
+  const turn = (seat: string, role: Turn["role"]): Turn => ({
+    project_id: "p",
+    task_id: "t",
+    role,
+    seat,
+    started_at: "",
+    last_activity_at: "",
+    tool_calls: 0,
+    edits: 0,
+    output_tokens: 0,
+  });
+  it("is the seat that took the step, not the first seat of its kind", () => {
+    const writing = task({
+      status: "writing",
+      roles: seats,
+      claims: [{ step: "writing", seat: "Ada #2" }],
+    });
+    expect(workingSeats(writing, []).map((r) => r.name)).toEqual(["Ada #2"]);
+    expect(atWork(writing, [ada])).toBe(ada);
+    expect(
+      atWork({ ...writing, claims: [{ step: "writing", seat: "Rune" }] }, [
+        ada,
+        rune,
+      ]),
+    ).toBe(rune);
+  });
+  it("is every seat with a turn running, then every seat that took a step", () => {
+    const checked = task({
+      status: "reviewing",
+      roles: seats,
+      checking: "Rune",
+      claims: [
+        { step: "reviewing", seat: "Reviewer", shared: true },
+        { step: "reviewing", seat: "Rune", shared: true },
+        { step: "reviewing", seat: "Gone", held: "still running" },
+      ],
+    });
+    const other = { ...turn("Ada", "implementer"), task_id: "u" };
+    expect(
+      workingSeats(checked, [other, turn("Rune", "reviewer")]).map(
+        (r) => r.name,
+      ),
+    ).toEqual(["Rune", "Reviewer"]);
+    // The checker named leads among those that took a step.
+    expect(atWork(checked, [ada, rune])).toBe(rune);
+    // A seat its team no longer lists still reads by its turn.
+    expect(workingSeats(task({}), [turn("Old", "qa")])).toEqual([
+      { name: "Old", kinds: ["qa"], engine: "", member: undefined },
+    ]);
+  });
 });
 
 describe("a request's team", () => {

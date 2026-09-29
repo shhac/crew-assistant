@@ -475,6 +475,19 @@ export interface Wait {
   cap?: number;
   engine?: string;
 }
+/**
+ * A step of a task a seat has taken and not yet finished. Checks of one
+ * draft are shared, so a reviewer and QA can each hold one at once.
+ */
+export interface Claim {
+  /** The task status the step is for, or "message" or "adopt". */
+  step: string;
+  /** Empty for a step no seat takes, such as deciding or landing. */
+  seat?: string;
+  shared?: boolean;
+  /** Why a turn a stopped daemon left behind is held, if it is. */
+  held?: string;
+}
 
 export interface Task {
   id: string;
@@ -498,6 +511,8 @@ export interface Task {
   detail?: string;
   /** Who or what the next step waits for, while it is ready and can't start. */
   waiting?: Wait;
+  /** The steps seats have taken and not yet finished. */
+  claims?: Claim[];
   roles?: Role[];
   playbook?: Playbook;
   max_rounds?: number;

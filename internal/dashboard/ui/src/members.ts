@@ -7,6 +7,7 @@ import type {
   Role,
   Task,
   TeamInput,
+  Turn,
 } from "./api";
 import { choiceFor, engineLabel } from "./engines";
 
@@ -217,13 +218,48 @@ export function roleMember(
   );
 }
 
+/** The seats that have taken a step of a request and not yet finished it. */
+const claimedSeats = (task: Task) =>
+  (task.claims ?? []).flatMap((c) => (c.seat && !c.held ? [c.seat] : []));
+
 /**
- * The seat at work on a request now, or next to pick it up: the researcher
- * while it researches, the designer while it gives design input, the
- * implementer while it writes, the checker named while it is checked, and no
- * one otherwise.
+ * The seats at work on a request now: each with a turn running, then each
+ * that has taken a step whose turn has yet to show, so a reviewer and QA
+ * checking one draft are both there. A seat its team no longer lists still
+ * reads by its name.
+ */
+export function workingSeats(task: Task, turns: Turn[]): Role[] {
+  const out: Role[] = [];
+  const add = (name: string, turn?: Turn) => {
+    if (out.some((r) => r.name === name)) return;
+    out.push(
+      task.roles?.find((r) => r.name === name) ?? {
+        name,
+        kinds: turn ? [turn.role] : [],
+        engine: "",
+        member: turn?.member,
+      },
+    );
+  };
+  for (const t of turns) if (t.task_id === task.id) add(t.seat, t);
+  for (const name of claimedSeats(task)) add(name);
+  return out;
+}
+
+/**
+ * The seat at work on a request now, or next to pick it up: the seat that
+ * has taken its step, then the researcher while it researches, the designer
+ * while it gives design input, the implementer while it writes, the checker
+ * named while it is checked, and no one otherwise. Of several seats of one
+ * kind, the one that took the step is named, as Claudius #2 rather than
+ * Claudius.
  */
 export function roleAtWork(task: Task): Role | undefined {
+  const claimed = claimedSeats(task).flatMap(
+    (name) => task.roles?.filter((r) => r.name === name) ?? [],
+  );
+  if (claimed.length)
+    return claimed.find((r) => r.name === task.checking) ?? claimed[0];
   if (task.status === "writing")
     return task.roles?.find((r) => holds(r, "implementer"));
   if (task.status === "researching" || task.status === "designing") {

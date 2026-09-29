@@ -1,6 +1,8 @@
-import { href, memberHref, projectHref } from "./router";
+import { href, memberHref, projectHref, requestHref } from "./router";
 import { isCode } from "./landing";
 import { engineLabel } from "./engines";
+import { boardColumns, readyLabel } from "./boardLanes";
+import { finished, projectTasks } from "./stages";
 import {
   holds,
   kindLabel,
@@ -22,6 +24,8 @@ import {
   type Playbook,
   type Project,
   type Role,
+  type State,
+  type Task,
 } from "./api";
 
 /** What a place on the team is called: a writing team's implementer writes. */
@@ -45,14 +49,15 @@ const nobody: Partial<Record<MemberKind, string>> = {
 
 export function TeamTab({
   project,
-  members,
+  state,
   refresh,
 }: {
   project: Project;
-  members: Member[];
+  state: State;
   refresh: () => Promise<void>;
 }) {
   const playbook = project.playbook;
+  const members = state.members;
   return (
     <div className="tab-stack">
       <section className="tab-panel card" aria-label="Team">
@@ -62,7 +67,7 @@ export function TeamTab({
             <Seats
               project={project}
               playbook={playbook}
-              members={members}
+              state={state}
               refresh={refresh}
             />
             <MemberRoles playbook={playbook} members={members} />
@@ -94,14 +99,15 @@ export function TeamTab({
 function Seats({
   project,
   playbook,
-  members,
+  state,
   refresh,
 }: {
   project: Project;
   playbook: Playbook;
-  members: Member[];
+  state: State;
   refresh: () => Promise<void>;
 }) {
+  const members = state.members;
   const code = isCode(playbook);
   const { busy, error, run } = useAction();
   async function fill(kind: MemberKind, id: string) {
@@ -126,8 +132,9 @@ function Seats({
         ))}
       </ul>
       <SeatCopies
+        project={project}
         playbook={playbook}
-        members={members}
+        state={state}
         busy={busy}
         onAdd={(seat) =>
           void run(async () => {
@@ -157,18 +164,27 @@ function Seats({
  * Claudius #2. A seat can go while another holds the same roles.
  */
 function SeatCopies({
+  project,
   playbook,
-  members,
+  state,
   busy,
   onAdd,
   onRemove,
 }: {
+  project: Project;
   playbook: Playbook;
-  members: Member[];
+  state: State;
   busy: boolean;
   onAdd: (seat: string) => void;
   onRemove: (seat: string) => void;
 }) {
+  const members = state.members;
+  const tasks = projectTasks(project, state.tasks);
+  const lanes = boardColumns(project, tasks).flatMap((c) => c.lanes);
+  const where = (task: Task) =>
+    task.stage === "ready"
+      ? readyLabel(project)
+      : (lanes.find((l) => l.stage === task.stage)?.label ?? "");
   const alike = (a: Role, b: Role) =>
     a.kinds.length === b.kinds.length &&
     a.kinds.every((kind) => b.kinds.includes(kind));
@@ -176,40 +192,72 @@ function SeatCopies({
     <div className="section">
       <p className="label">Seats</p>
       <ul className="seats rows" aria-label="Seats">
-        {playbook.roles.map((role) => (
-          <li key={role.name} className="seat">
-            <span className="seat-role">
-              <RoleName role={role} members={members} />
-            </span>
-            <span className="seat-who muted small">{seatSummary(role)}</span>
-            <span className="seat-actions">
-              <button
-                type="button"
-                className="btn btn-quiet btn-sm"
-                disabled={busy}
-                onClick={() => onAdd(role.name)}
-              >
-                Add a seat like {role.name}
-              </button>
-              {playbook.roles.some((o) => o !== role && alike(o, role)) && (
+        {playbook.roles.map((role) => {
+          const on = seatTask(role, tasks, state);
+          return (
+            <li key={role.name} className="seat">
+              <span className="seat-role">
+                <RoleName role={role} members={members} />
+              </span>
+              <span className="seat-who muted small">
+                {seatSummary(role)}
+                {on && (
+                  <>
+                    {" · "}
+                    <a href={requestHref(project.id, on.id)}>
+                      On {on.ref || on.objective}
+                      {where(on) && ` · ${where(on)}`}
+                    </a>
+                  </>
+                )}
+              </span>
+              <span className="seat-actions">
                 <button
                   type="button"
                   className="btn btn-quiet btn-sm"
                   disabled={busy}
-                  onClick={() => onRemove(role.name)}
+                  onClick={() => onAdd(role.name)}
                 >
-                  Remove {role.name}
+                  Add a seat like {role.name}
                 </button>
-              )}
-            </span>
-          </li>
-        ))}
+                {playbook.roles.some((o) => o !== role && alike(o, role)) && (
+                  <button
+                    type="button"
+                    className="btn btn-quiet btn-sm"
+                    disabled={busy}
+                    onClick={() => onRemove(role.name)}
+                  >
+                    Remove {role.name}
+                  </button>
+                )}
+              </span>
+            </li>
+          );
+        })}
       </ul>
       <p className="hint">
         Each seat works on one step at a time. Seats filled from one member
         check a draft as one.
       </p>
     </div>
+  );
+}
+
+/**
+ * The request a seat is on now: the one its turn runs on, or else one whose
+ * step it has taken; none while it is idle or keeping the to-do list.
+ */
+function seatTask(role: Role, tasks: Task[], state: State) {
+  const turn = state.turns.find(
+    (t) => t.seat === role.name && tasks.some((task) => task.id === t.task_id),
+  );
+  return (
+    tasks.find((t) => t.id === turn?.task_id) ??
+    tasks.find(
+      (t) =>
+        !finished(t) &&
+        !!t.claims?.some((c) => c.seat === role.name && !c.held),
+    )
   );
 }
 
