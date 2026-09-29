@@ -9,7 +9,7 @@ import {
   type Project,
 } from "./api";
 import { ConversationMarkdown } from "./ConversationMarkdown";
-import { dateLabel } from "./ui";
+import { dateLabel, useAction } from "./ui";
 
 /** Who a message in a past conversation is from, in a word or two. */
 function byline(role: string, origin: string | undefined, name: string) {
@@ -37,8 +37,7 @@ export function ChatHistory({
 }) {
   const [list, setList] = useState<ConversationEntry[] | null>(null);
   const [open, setOpen] = useState<Conversation | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const { busy, error, setError, run } = useAction();
   useEffect(() => {
     listConversations()
       .then((reply) => setList(reply.conversations || []))
@@ -53,17 +52,11 @@ export function ChatHistory({
     }
   }
   async function resume(id: string) {
-    setBusy(true);
-    setError("");
-    try {
+    await run(async () => {
       await resumeConversation(id);
       await onResumed();
       onClose();
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
   return (
     <section className="chat-history" aria-label="Past conversations">
@@ -139,8 +132,8 @@ export function ChatHistory({
         </ul>
       ) : (
         <p className="muted small">
-          No past conversations yet. /new or /clear starts a fresh one and
-          keeps this one here.
+          No past conversations yet. /new or /clear starts a fresh one and keeps
+          this one here.
         </p>
       )}
     </section>

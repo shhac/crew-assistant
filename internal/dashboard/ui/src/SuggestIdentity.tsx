@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Panel } from "./SettingsPanel";
 import { Avatar, hasFace } from "./Avatar";
-import { ErrorNotice } from "./ui";
+import { ErrorNotice, useAction } from "./ui";
 import { api, errorText, type AvatarSpec, type Face } from "./api";
 
 /** Who a suggestion is for. */
@@ -57,8 +57,7 @@ export function SuggestIdentity({
     questions: [],
   });
   const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const { busy, error, setError, run } = useAction();
   const [used, setUsed] = useState("");
   const log = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -85,9 +84,7 @@ export function SuggestIdentity({
   async function interview(e?: FormEvent) {
     e?.preventDefault();
     if (busy || demo) return;
-    setBusy(true);
-    setError("");
-    try {
+    await run(async () => {
       const next = await api<SetupState>(`${setupPath(subject)}/interview`, {
         method: "POST",
         body: JSON.stringify({ message: message.trim() }),
@@ -98,11 +95,7 @@ export function SuggestIdentity({
         questions: next.questions || [],
       });
       setMessage("");
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
   async function startOver() {
     setError("");

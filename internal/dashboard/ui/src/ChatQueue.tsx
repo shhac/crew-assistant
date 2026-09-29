@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errorText, type ChatTurn } from "./api";
-import { Icon } from "./ui";
+import { Icon, useAction } from "./ui";
 
 /** Only the fields the queue works with, taken from the turn itself. */
 type QueuedTurn = Pick<ChatTurn, "id" | "message" | "revision">;
@@ -58,8 +58,7 @@ export function ChatQueue({
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const { busy, error, setError, run } = useAction();
   const [order, setOrder] = useState<string[] | null>(null);
   const [holding, setHolding] = useState<{ id: string; reason: string } | null>(
     null,
@@ -123,9 +122,7 @@ export function ChatQueue({
     : turns;
 
   async function save(turn: QueuedTurn) {
-    setBusy(true);
-    setError("");
-    try {
+    await run(async () => {
       await api(`/api/chat/messages/${encodeURIComponent(turn.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ message: draft, revision: turn.revision }),
@@ -134,29 +131,23 @@ export function ChatQueue({
       setDraft("");
       setHolding(null);
       await onChanged();
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function commit(next: string[]) {
-    setBusy(true);
-    setError("");
-    try {
-      await api("/api/chat/queue", {
-        method: "PUT",
-        body: JSON.stringify({ order: next, revision }),
-      });
-      setOrder(null);
-      await onChanged();
-    } catch (err) {
-      setError(errorText(err));
-      setOrder(null);
-    } finally {
-      setBusy(false);
-    }
+    await run(async () => {
+      try {
+        await api("/api/chat/queue", {
+          method: "PUT",
+          body: JSON.stringify({ order: next, revision }),
+        });
+        setOrder(null);
+        await onChanged();
+      } catch (err) {
+        setOrder(null);
+        throw err;
+      }
+    });
   }
 
   function move(id: string, by: number) {

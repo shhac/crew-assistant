@@ -206,9 +206,9 @@ export function typingIn(event: KeyboardEvent) {
  * useAction runs one owner action at a time: it marks the component busy,
  * clears the last error, and shows a failure as the error.
  */
-export function useAction() {
+export function useAction(initialError = "") {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
     setError("");

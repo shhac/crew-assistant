@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { dateLabel, ErrorNotice, recordedTime } from "./ui";
+import { dateLabel, ErrorNotice, recordedTime, useAction } from "./ui";
 import { api, errorText, type Memory, type State } from "./api";
 
 const groups = [
@@ -28,30 +28,23 @@ export function MemoryView({
 }) {
   const [content, setContent] = useState("");
   const [kind, setKind] = useState("preference");
-  const [busy, setBusy] = useState(false);
+  const { busy, error, setError, run } = useAction();
   // Keyed per memory: acting on one must not disable every other.
   const [pending, setPending] = useState<string | null>(null);
-  const [error, setError] = useState("");
   const [confirm, setConfirm] = useState<string | null>(null);
   const [correcting, setCorrecting] = useState<string | null>(null);
   const [correction, setCorrection] = useState("");
   async function add(e: FormEvent) {
     e.preventDefault();
     if (!content.trim()) return;
-    setBusy(true);
-    setError("");
-    try {
+    await run(async () => {
       await api("/api/memories", {
         method: "POST",
         body: JSON.stringify({ content: content.trim(), kind }),
       });
       setContent("");
       await refresh();
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
   async function correct(id: string) {
     if (!correction.trim()) return;

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { ErrorNotice } from "./ui";
-import { api, errorText } from "./api";
+import { ErrorNotice, useAction } from "./ui";
+import { api } from "./api";
 
 export function Login({
   onSuccess,
@@ -10,24 +10,17 @@ export function Login({
   initialError?: string;
 }) {
   const [token, setToken] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(initialError);
+  const { busy, error, run } = useAction(initialError);
   async function login(e: FormEvent) {
     e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
+    await run(async () => {
       await api("/api/session", {
         method: "POST",
         body: JSON.stringify({ token: token.trim() }),
       });
       setToken("");
       await onSuccess();
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
   return (
     <div className="pairing">
