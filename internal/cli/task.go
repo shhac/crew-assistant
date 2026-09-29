@@ -2,7 +2,6 @@ package cli
 
 import (
 	"cmp"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -173,19 +172,6 @@ func (o *options) snapshot() (core.Snapshot, error) {
 	var snap core.Snapshot
 	err := o.requestInto("GET", "/api/state", nil, &snap)
 	return snap, err
-}
-
-// requestInto is request with the daemon's answer decoded into out.
-func (o *options) requestInto(method, path string, value, out any) error {
-	v, err := o.request(method, path, value)
-	if err != nil {
-		return err
-	}
-	data, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, out)
 }
 
 func taskPath(t core.Task, rest string) string {

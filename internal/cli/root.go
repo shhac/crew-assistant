@@ -141,25 +141,33 @@ func (o *options) runtime() (runtimeInfo, error) {
 	return info, nil
 }
 func (o *options) request(method, path string, value any) (any, error) {
+	var result any
+	if err := o.requestInto(method, path, value, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (o *options) requestInto(method, path string, value, out any) error {
 	info, err := o.runtime()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	token, err := os.ReadFile(filepath.Join(o.runtimeDir(), "admin-token"))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var body io.Reader
 	if value != nil {
 		b, err := json.Marshal(value)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		body = bytes.NewReader(b)
 	}
 	req, err := http.NewRequest(method, info.LocalURL+path, body)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+string(token))
 	req.Header.Set("X-Requested-With", "crew-assistant")
@@ -167,20 +175,30 @@ func (o *options) request(method, path string, value any) (any, error) {
 	client := &http.Client{Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, errors.New("could not reach daemon; check crew-assistant serve and the selected --state path")
+		return errors.New("could not reach daemon; check crew-assistant serve and the selected --state path")
 	}
 	defer resp.Body.Close()
-	var result any
-	if err = json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&result); err != nil {
-		return nil, err
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return err
 	}
 	if resp.StatusCode >= 400 {
-		if m, ok := result.(map[string]any); ok {
-			return nil, fmt.Errorf("%v", m["error"])
-		}
-		return nil, fmt.Errorf("daemon returned HTTP %d", resp.StatusCode)
+		return daemonError(resp.StatusCode, data)
 	}
-	return result, nil
+	return json.NewDecoder(bytes.NewReader(data)).Decode(out)
+}
+
+// daemonError is the daemon's own message when it sent one. A reply that isn't
+// JSON at all says why it couldn't be read instead.
+func daemonError(status int, data []byte) error {
+	var reply any
+	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&reply); err != nil {
+		return err
+	}
+	if m, ok := reply.(map[string]any); ok {
+		return fmt.Errorf("%v", m["error"])
+	}
+	return fmt.Errorf("daemon returned HTTP %d", status)
 }
 func (o *options) saveConfig(c config.Config) error {
 	if err := os.MkdirAll(filepath.Dir(o.statePath), 0700); err != nil {
