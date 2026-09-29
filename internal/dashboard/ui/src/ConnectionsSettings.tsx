@@ -163,14 +163,16 @@ function ConnectionEditor({
           <select
             id={`connection-${index}-tool`}
             value={connection.tool}
-            onChange={(e) =>
+            onChange={(e) => {
+              const picked = tools.find((tool) => tool.id === e.target.value);
+              if (!picked) return;
               onChange({
                 ...connection,
-                tool: e.target.value as Connection["tool"],
+                tool: picked.id,
                 profiles: [],
                 import_assignments: false,
-              })
-            }
+              });
+            }}
           >
             {tools.map((tool) => (
               <option key={tool.id} value={tool.id}>

@@ -324,31 +324,37 @@ function toolOutcome(step: TurnStep) {
 /** The part of a tool's input that says what it did: its command or path. */
 function gist(input?: string) {
   if (!input) return "";
-  let value: unknown = input;
+  const line = inputLine(parsed(input)).replace(/\s+/g, " ").trim();
+  return line.length > 90 ? `${line.slice(0, 90)}…` : line;
+}
+
+function parsed(input: string): unknown {
   try {
-    value = JSON.parse(input);
+    return JSON.parse(input);
   } catch {
     // Cut short, so no longer JSON; its opening still says something.
+    return input;
   }
-  let line = "";
-  if (typeof value === "string") line = value;
-  else if (value && typeof value === "object") {
-    const fields = value as Record<string, unknown>;
-    const key = [
-      "command",
-      "cmd",
-      "file_path",
-      "path",
-      "pattern",
-      "query",
-      "url",
-      "description",
-    ].find((k) => typeof fields[k] === "string");
-    const first = Object.values(fields).find((v) => typeof v === "string");
-    line = String(key ? fields[key] : (first ?? ""));
-  }
-  line = line.replace(/\s+/g, " ").trim();
-  return line.length > 90 ? `${line.slice(0, 90)}…` : line;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object";
+
+function inputLine(value: unknown) {
+  if (typeof value === "string") return value;
+  if (!isRecord(value)) return "";
+  const key = [
+    "command",
+    "cmd",
+    "file_path",
+    "path",
+    "pattern",
+    "query",
+    "url",
+    "description",
+  ].find((k) => typeof value[k] === "string");
+  const first = Object.values(value).find((v) => typeof v === "string");
+  return String(key ? value[key] : (first ?? ""));
 }
 
 function pretty(input: string) {

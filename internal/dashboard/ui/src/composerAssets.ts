@@ -60,6 +60,14 @@ function looksLikeText(file: File) {
   );
 }
 
+function decodeUTF8(buf: ArrayBuffer): string | undefined {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Reads one file into a pending asset, or explains why it cannot be sent.
  * A file is never partly accepted.
@@ -76,16 +84,11 @@ export async function readAsset(
     return {
       error: `${name} can't be attached: it is ${exactSize(file.size)}, and a message can carry at most ${exactSize(MESSAGE_LIMIT_BYTES)}.`,
     };
-  let content: string;
-  try {
-    content = new TextDecoder("utf-8", { fatal: true }).decode(
-      await file.arrayBuffer(),
-    );
-  } catch {
+  const content = await file.arrayBuffer().then(decodeUTF8, () => undefined);
+  if (content === undefined)
     return {
       error: `${name} can't be attached: it is not readable UTF-8 text.`,
     };
-  }
   if (content.includes("\0"))
     return {
       error: `${name} can't be attached: it contains binary data.`,
