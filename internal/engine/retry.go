@@ -79,6 +79,12 @@ func (e *Engine) completeWithTools(ctx context.Context, messages []Message, tool
 	callCtx := ctx
 	var recoveryDeadline time.Time
 	var lastCause harness.Cause
+	exhausted := func(attempt int, cause harness.Cause, err error) (Message, Usage, error) {
+		if hookErr := e.retryEvent(ctx, RetryEvent{Status: "exhausted", Attempt: attempt, MaxRetries: policy.MaxRetries, Cause: cause}); hookErr != nil {
+			return Message{}, usage, hookErr
+		}
+		return Message{}, usage, err
+	}
 	for attempt := 0; ; attempt++ {
 		if err := callCtx.Err(); err != nil {
 			return Message{}, usage, err
@@ -105,10 +111,7 @@ func (e *Engine) completeWithTools(ctx context.Context, messages []Message, tool
 		}
 		lastCause = rejection.Cause
 		if attempt >= policy.MaxRetries {
-			if hookErr := e.retryEvent(ctx, RetryEvent{Status: "exhausted", Attempt: attempt, MaxRetries: policy.MaxRetries, Cause: rejection.Cause}); hookErr != nil {
-				return Message{}, usage, hookErr
-			}
-			return Message{}, usage, fmt.Errorf("model retry allowance exhausted after %d retries: %w", attempt, err)
+			return exhausted(attempt, rejection.Cause, fmt.Errorf("model retry allowance exhausted after %d retries: %w", attempt, err))
 		}
 		now := e.retryNow()
 		if recoveryDeadline.IsZero() {
@@ -124,10 +127,7 @@ func (e *Engine) completeWithTools(ctx context.Context, messages []Message, tool
 		}
 		// Never shorten a provider's Retry-After to squeeze an early call into budget.
 		if remaining <= 0 || delay >= remaining {
-			if hookErr := e.retryEvent(ctx, RetryEvent{Status: "exhausted", Attempt: attempt, MaxRetries: policy.MaxRetries, Cause: rejection.Cause}); hookErr != nil {
-				return Message{}, usage, hookErr
-			}
-			return Message{}, usage, fmt.Errorf("model recovery deadline prevents another attempt: %w", err)
+			return exhausted(attempt, rejection.Cause, fmt.Errorf("model recovery deadline prevents another attempt: %w", err))
 		}
 		event := RetryEvent{Status: "waiting", Attempt: attempt + 1, MaxRetries: policy.MaxRetries, Cause: rejection.Cause, Delay: delay, RetryAt: now.Add(delay)}
 		if hookErr := e.retryEvent(callCtx, event); hookErr != nil {
