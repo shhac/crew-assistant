@@ -23,6 +23,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/lifecycle"
 	"github.com/shhac/crew-assistant/internal/sample"
 	"github.com/shhac/crew-assistant/internal/server"
+	"github.com/shhac/crew-assistant/internal/statepath"
 	"github.com/spf13/cobra"
 )
 
@@ -142,7 +143,7 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 	}
 	info := runtimeInfo{URL: url, LocalURL: localURL, PID: os.Getpid(), Demo: demo}
 	b, _ := json.Marshal(info)
-	if err = os.WriteFile(filepath.Join(o.runtimeDir(), "daemon.json"), b, 0600); err != nil {
+	if err = statepath.WriteFileAtomic(filepath.Join(o.runtimeDir(), "daemon.json"), b); err != nil {
 		return err
 	}
 	defer os.Remove(filepath.Join(o.runtimeDir(), "daemon.json"))
