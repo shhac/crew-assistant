@@ -9,10 +9,8 @@ import {
 } from "./api";
 import { ConversationMarkdown } from "./ConversationMarkdown";
 import { Avatar } from "./Avatar";
-import { engineLabel } from "./engines";
-import { dateLabel, fullDateLabel, Icon } from "./ui";
+import { dateLabel, Icon } from "./ui";
 import { ChatQueue, type QueueHold } from "./ChatQueue";
-import { ToolActivity } from "./ToolActivity";
 import { ChatHistory } from "./ChatHistory";
 import {
   carriesFiles,
@@ -22,276 +20,23 @@ import {
   sizeLabel,
   type ComposerAsset,
 } from "./composerAssets";
-type VisibleTurn = Omit<ChatTurn, "status"> & {
-  status:
-    ChatTurn["status"] | "waiting" | "sending" | "unconfirmed" | "rejected";
-  /** What the composer held, so a refused message restores its attachments. */
-  draft?: { text: string; assets: ComposerAsset[] };
-};
-// A turn has spoken once its reply is in the thread; until then its newest
-// tool step is still the most recent thing the owner has to look at.
-const turnLive = (turn?: VisibleTurn) =>
-  turn?.status === "queued" || turn?.status === "running";
-const active = (turn: VisibleTurn) =>
-  ["waiting", "sending", "queued", "running"].includes(turn.status);
-// A turn in any of these states means the conversation is not waiting on the
-// owner: a message is on its way, being answered, or needs their recovery.
-const unsettled = (turn: VisibleTurn) =>
-  active(turn) || turn.status === "unconfirmed" || turn.status === "rejected";
+import {
+  active,
+  chronological,
+  commandIn,
+  commandLabel,
+  latestTurn,
+  turnLive,
+  unsettled,
+  wakeSummary,
+  type VisibleTurn,
+} from "./chatTurns";
+import { SessionLine } from "./ChatSessionLine";
+import { TurnStatus } from "./TurnStatus";
+
 // How long the conversation must stay settled before a next message is
 // suggested, so a reply that has only just landed is not raced.
 export const SUGGESTION_DELAY = 1200;
-function chronological(a: { created_at?: string }, b: { created_at?: string }) {
-  return (
-    (Date.parse(a.created_at || "") || 0) -
-    (Date.parse(b.created_at || "") || 0)
-  );
-}
-function latestTurn(
-  current: VisibleTurn | undefined,
-  incoming: ChatTurn,
-): VisibleTurn {
-  const rank = (status: VisibleTurn["status"]) =>
-    status === "waiting" ||
-    status === "sending" ||
-    status === "unconfirmed" ||
-    status === "rejected"
-      ? 0
-      : status === "queued"
-        ? 1
-        : status === "running"
-          ? 2
-          : 3;
-  // A poll begun before an acknowledgement must not undo its newer status.
-  return current && rank(current.status) > rank(incoming.status)
-    ? current
-    : incoming;
-}
-/**
- * What a wake-up says happened, for the owner. The message itself is written
- * for the assistant: it opens with a note to the model and lists each wake's
- * details line by line.
- */
-export function wakeSummary(content: string) {
-  const happened = wakeHappenings(content);
-  return happened.length ? happened.join(" · ") : "Checked in";
-}
-
-/** What each wake-up in the message saw happen, and nothing meant for the model. */
-export function wakeHappenings(content: string) {
-  return [...content.matchAll(/what happened: (.+)/g)].map((m) => m[1]);
-}
-
-/**
- * The command a message is, such as "compact", when the whole message is a
- * slash command; the daemon decides whether it knows it.
- */
-export function commandIn(text: string | undefined) {
-  // A turn read back without its text is not a command, and must not stop
-  // the chat from rendering.
-  return /^\/([A-Za-z][A-Za-z0-9_-]*)$/
-    .exec((text ?? "").trim())?.[1]
-    .toLowerCase();
-}
-
-/** What a command does, until it says what it did. */
-function commandLabel(command: string) {
-  switch (command) {
-    case "compact":
-      return "Summarize the conversation so far";
-    case "new":
-    case "clear":
-      return "Start a fresh conversation";
-  }
-  return "Command";
-}
-
-const percent = (part: number, whole: number) =>
-  `${Math.round((part / whole) * 100)}%`;
-
-/** The session in a line, leaving out whatever it has not reported. */
-function sessionParts(session: ChatSession) {
-  const parts = [engineLabel(session.engine), session.model];
-  if (session.context_used && session.context_window)
-    parts.push(
-      `${percent(session.context_used, session.context_window)} of context`,
-    );
-  if (session.input)
-    parts.push(`${percent(session.cached_input ?? 0, session.input)} cached`);
-  if (session.compactions) parts.push(`compacted ${session.compactions}×`);
-  return parts.filter(Boolean);
-}
-
-function sessionOpened(session: ChatSession) {
-  switch (session.opened) {
-    case "resumed":
-      return "Picked up where it left off";
-    case "rebuilt":
-      return "Started afresh: the last session couldn't be resumed";
-  }
-  return "";
-}
-
-const sessionCommands = [
-  { command: "compact", label: "Compact" },
-  { command: "new", label: "Start fresh" },
-];
-
-/**
- * The model session the conversation runs on, with the commands that act on
- * it. Both wait while anything is still being sent or answered.
- */
-function SessionLine({
-  session,
-  busy,
-  onCommand,
-}: {
-  session: ChatSession;
-  busy: boolean;
-  onCommand: (command: string) => void;
-}) {
-  const line = sessionParts(session).join(" · ");
-  const opened = sessionOpened(session);
-  return (
-    <div className="chat-session" role="group" aria-label="Model session">
-      <p className="chat-session-about">
-        <span className="chat-session-line">{line}</span>
-        {opened && <span className="chat-session-opened">{opened}</span>}
-      </p>
-      {sessionCommands.map(({ command, label }) => (
-        <button
-          key={command}
-          type="button"
-          className="btn btn-quiet btn-sm"
-          disabled={busy}
-          title={`${commandLabel(command)} (/${command})`}
-          onClick={() => onCommand(command)}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** A message's delivery, in a few words; nothing once all is well. */
-function delivery(turn: VisibleTurn) {
-  switch (turn.status) {
-    case "waiting":
-      return "Waiting to send";
-    case "sending":
-      return "Sending…";
-    case "unconfirmed":
-      return "Not confirmed yet";
-    case "rejected":
-      return "Not sent";
-    case "queued":
-      return "Queued";
-    case "cancelled":
-      return "Cancelled";
-    case "interrupted":
-      return "Stopped before finishing. Not retried.";
-    case "failed":
-      return "Failed. Not retried.";
-  }
-  return "";
-}
-/**
- * What happened to one owner message: its delivery state, any recovery the
- * owner can choose, the assistant's tool activity and its working indicator.
- * Rendered for a message that has a turn; absent when it has none.
- */
-function TurnStatus({
-  turn,
-  live,
-  name,
-  cancelling,
-  onCancel,
-  onRestore,
-  onDiscard,
-  onRetry,
-}: {
-  turn?: VisibleTurn;
-  /** Nothing in the thread is newer than this turn, and it has not replied. */
-  live?: boolean;
-  name: string;
-  cancelling: Set<string>;
-  onCancel: (turn: VisibleTurn) => void;
-  onRestore: (turn: VisibleTurn) => void;
-  onDiscard: (turn: VisibleTurn) => void;
-  onRetry: (turn: VisibleTurn) => void;
-}) {
-  if (!turn) return null;
-  const said = delivery(turn);
-  const retry = fullDateLabel(turn.retry_at);
-  return (
-    <div className="turn-status">
-      {said && (
-        <p className="turn-delivery">
-          {said}
-          {turn.status === "waiting" && (
-            <button
-              type="button"
-              className="link-button"
-              disabled={cancelling.has(turn.id)}
-              onClick={() => void onCancel(turn)}
-              aria-label={`Cancel message: ${turn.message}`}
-            >
-              Cancel
-            </button>
-          )}
-        </p>
-      )}
-      {turn.error && (
-        <p className="error" role="alert">
-          {turn.error}
-        </p>
-      )}
-      {turn.status === "unconfirmed" && (
-        <div className="turn-recovery">
-          <p className="muted small">
-            Retrying is safe: it can't start a second reply.
-          </p>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => void onRetry(turn)}
-          >
-            Retry
-          </button>
-        </div>
-      )}
-      {turn.status === "rejected" && (
-        <div className="turn-recovery actions">
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => onRestore(turn)}
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            className="btn btn-quiet btn-sm"
-            onClick={() => onDiscard(turn)}
-          >
-            Discard
-          </button>
-        </div>
-      )}
-      {!!turn.events?.length && (
-        <ToolActivity events={turn.events} live={live} />
-      )}
-      {turn.status === "running" && (
-        <p className="turn-working" role="status">
-          <span className="dot" aria-hidden="true" />
-          {turn.model_status || turn.loading_phrase || `${name} is working`}
-          {retry && <span className="muted small"> · retrying at {retry}</span>}
-        </p>
-      )}
-    </div>
-  );
-}
 export function ChatPanel({
   state,
   refresh,

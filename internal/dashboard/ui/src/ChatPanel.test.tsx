@@ -8,13 +8,8 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import {
-  ChatPanel,
-  commandIn,
-  SUGGESTION_DELAY,
-  wakeHappenings,
-  wakeSummary,
-} from "./ChatPanel";
+import { ChatPanel, SUGGESTION_DELAY } from "./ChatPanel";
+import { commandIn, wakeHappenings, wakeSummary } from "./chatTurns";
 import { ConversationMarkdown } from "./ConversationMarkdown";
 import {
   normalizeState,
