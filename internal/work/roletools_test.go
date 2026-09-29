@@ -198,6 +198,52 @@ func TestARoleCallsExactlyTheToolsItIsOffered(t *testing.T) {
 	}
 }
 
+// read_task shows a task's record, the files given for its current design,
+// and the tasks it links to in its own project alone; a verdict on an older
+// draft, or one whose question was answered, no longer counts.
+func TestATaskBriefShowsItsRecordAndOnlyItsProjectsLinks(t *testing.T) {
+	near := core.Task{ID: "t-near", Ref: "CA-2", ProjectID: "p", Status: core.TaskQueued, Objective: "Near work"}
+	far := core.Task{ID: "t-far", ProjectID: "elsewhere", Status: core.TaskQueued, Objective: "Secret elsewhere"}
+	task := core.Task{
+		ID: "t-1", Ref: "CA-1", ProjectID: "p", Status: core.TaskWriting, Stage: core.StageImplementing, Objective: "Write it",
+		Criteria:      []string{"Warm"},
+		Edits:         []core.TaskEdit{{By: "Rhea"}, {By: "Pim"}},
+		DependsOn:     []string{near.ID},
+		RelatesTo:     []string{far.ID},
+		Plan:          &core.Plan{Summary: "Short and warm", Changes: []string{"Open with thanks"}, OutOfScope: []string{"Gifts"}},
+		Design:        []core.DesignRequest{{ID: "d1", N: 1, Marked: true}, {ID: "d2", N: 2, Marked: true, Designer: "Dee", Input: "Cards"}},
+		CurrentDesign: "d2",
+		Revisions:     []core.Revision{{N: 1, Summary: "Old go"}, {N: 2, Summary: "First go"}},
+		Verdicts: []core.Verdict{
+			{Revision: 2, Role: core.RoleReviewer, Outcome: "fail", Summary: "Too long", Next: core.TaskWriting},
+			{Revision: 2, Role: core.RoleQA, Outcome: "question", Summary: "Asked and answered", Answered: true},
+			{Revision: 1, Role: core.RoleReviewer, Outcome: "pass", Summary: "Stale pass"},
+		},
+		Branch: "paul/thanks",
+	}
+	got := taskBrief(core.Snapshot{Tasks: []core.Task{task, near, far}}, "p", task, "- design 2 file: mock.svg\n")
+	for _, want := range []string{
+		"CA-1 (t-1) (" + core.TaskWriting + ", " + core.StageImplementing + "): Write it\n",
+		"- criterion: Warm\n",
+		"- title or requirements changed 2 times, last by Pim\n",
+		"- depends on CA-2 (t-near) (" + core.TaskQueued + "): Near work\n",
+		"Plan: Short and warm\n- change: Open with thanks\n- out of scope: Gifts\n",
+		"Current design, the target: design 2 by Dee: Cards\n- design 2 file: mock.svg\n",
+		"- superseded designs, not the target: 1\n",
+		"Latest draft 2: First go\n- " + core.RoleReviewer + ": fail Too long\n  recommends " + core.TaskWriting + ": -\n",
+		"Branch: paul/thanks\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"Secret", "answered", "Stale", "Notes:", "Attachments:"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("shows %q:\n%s", unwanted, got)
+		}
+	}
+}
+
 func TestATurnPlaysTheRoleItsStepCallsFor(t *testing.T) {
 	both := core.Role{Kinds: []string{core.RoleResearcher, core.RoleImplementer}}
 	qa := core.Role{Kinds: []string{core.RoleQA}}
