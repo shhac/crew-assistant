@@ -23,14 +23,10 @@ func New(a *app.App, auth *Auth) http.Handler {
 	registerMembers(mux, a)
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
 		s, err := a.Snapshot(r.Context())
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, struct {
+		reply(w, 200, struct {
 			core.Snapshot
 			Demo bool `json:"demo"`
-		}{s, a.Demo})
+		}{s, a.Demo}, err)
 	})
 	// Read-only and bounded: the logins are inspected, never used or changed.
 	mux.HandleFunc("GET /api/usage", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, a.Usage(r.Context())) })
@@ -41,11 +37,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 		if decode(w, r, &in) != nil {
 			return
 		}
-		if err := a.Core.AcknowledgeEvent(r.Context(), r.PathValue("id"), in.Note); err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, map[string]bool{"acknowledged": true})
+		reply(w, 200, map[string]bool{"acknowledged": true}, a.Core.AcknowledgeEvent(r.Context(), r.PathValue("id"), in.Note))
 	})
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, a.Config()) })
 	mux.HandleFunc("GET /api/config/defaults", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, configDefaults()) })
@@ -54,29 +46,17 @@ func New(a *app.App, auth *Auth) http.Handler {
 		if decodeConfig(w, r, &c) != nil {
 			return
 		}
-		if err := a.UpdateConfig(c); err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, c)
+		reply(w, 200, c, a.UpdateConfig(c))
 	})
 	mux.HandleFunc("GET /api/connection-profiles", func(w http.ResponseWriter, r *http.Request) {
 		result, err := a.DiscoverConnectionProfiles(r.Context(), r.URL.Query().Get("tool"))
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, result)
+		reply(w, 200, result, err)
 	})
 	// Suggestions for a new assistant or a new member: subject is assistant
 	// or member.
 	mux.HandleFunc("GET /api/setup/{subject}", func(w http.ResponseWriter, r *http.Request) {
 		state, err := a.IdentitySetup(r.PathValue("subject"))
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, state)
+		reply(w, 200, state, err)
 	})
 	mux.HandleFunc("POST /api/setup/{subject}/interview", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -88,18 +68,10 @@ func New(a *app.App, auth *Auth) http.Handler {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 		defer cancel()
 		state, err := a.InterviewIdentity(ctx, r.PathValue("subject"), in.Message)
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, state)
+		reply(w, 200, state, err)
 	})
 	mux.HandleFunc("DELETE /api/setup/{subject}", func(w http.ResponseWriter, r *http.Request) {
-		if err := a.ResetIdentitySetup(r.PathValue("subject")); err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, map[string]bool{"reset": true})
+		reply(w, 200, map[string]bool{"reset": true}, a.ResetIdentitySetup(r.PathValue("subject")))
 	})
 
 	mux.HandleFunc("POST /api/chat", func(w http.ResponseWriter, r *http.Request) {
@@ -112,11 +84,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 		defer cancel()
 		v, err := a.Chat(ctx, in.Message)
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, v)
+		reply(w, 200, v, err)
 	})
 	mux.HandleFunc("POST /api/projects", func(w http.ResponseWriter, r *http.Request) {
 		var in core.ProjectInput
@@ -124,11 +92,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 			return
 		}
 		v, err := a.Core.CreateProject(r.Context(), in)
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 201, v)
+		reply(w, 201, v, err)
 	})
 	mux.HandleFunc("POST /api/decisions/{id}/resolve", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -139,11 +103,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 			return
 		}
 		v, err := a.Work.ResolveDecision(r.Context(), r.PathValue("id"), in.Choice, in.Answer)
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, v)
+		reply(w, 200, v, err)
 	})
 	mux.HandleFunc("POST /api/decisions/{id}/dismiss", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -153,11 +113,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 			return
 		}
 		v, err := a.Work.DismissDecision(r.Context(), r.PathValue("id"), in.Reason)
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, v)
+		reply(w, 200, v, err)
 	})
 	mux.HandleFunc("POST /api/memories", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -172,11 +128,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 			in.Key = in.Content
 		}
 		v, err := a.Core.RememberKind(r.Context(), in.Key, in.Content, in.Kind, "owner")
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 201, v)
+		reply(w, 201, v, err)
 	})
 	// Correcting is deliberately its own route: recording and correcting are
 	// different acts, and the original memory is kept either way.
@@ -189,18 +141,10 @@ func New(a *app.App, auth *Auth) http.Handler {
 			return
 		}
 		v, err := a.Core.Correct(r.Context(), r.PathValue("id"), in.Content, in.Kind)
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 201, v)
+		reply(w, 201, v, err)
 	})
 	mux.HandleFunc("DELETE /api/memories/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if err := a.Core.Forget(r.Context(), r.PathValue("id")); err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, map[string]bool{"deleted": true})
+		reply(w, 200, map[string]bool{"deleted": true}, a.Core.Forget(r.Context(), r.PathValue("id")))
 	})
 	mux.HandleFunc("POST /api/control", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -209,18 +153,10 @@ func New(a *app.App, auth *Auth) http.Handler {
 		if decode(w, r, &in) != nil {
 			return
 		}
-		if err := a.Core.SetPaused(r.Context(), in.Paused); err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, in)
+		reply(w, 200, in, a.Core.SetPaused(r.Context(), in.Paused))
 	})
 	mux.HandleFunc("POST /api/sync", func(w http.ResponseWriter, r *http.Request) {
-		if err := a.SyncLinear(r.Context()); err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, map[string]bool{"synced": true})
+		reply(w, 200, map[string]bool{"synced": true}, a.SyncLinear(r.Context()))
 	})
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "unknown API endpoint") })
 	assets, err := fs.Sub(dashboard.Assets, "assets")
@@ -263,6 +199,14 @@ func problem(w http.ResponseWriter, err error) {
 		status = http.StatusServiceUnavailable
 	}
 	fail(w, status, ownerText(err))
+}
+
+func reply(w http.ResponseWriter, status int, v any, err error) {
+	if err != nil {
+		problem(w, err)
+		return
+	}
+	respond(w, status, v)
 }
 
 // ownerText is an error as the owner reads it: without the sentinel that

@@ -48,10 +48,6 @@ func registerFilesystem(mux *http.ServeMux, a *app.App) {
 			return
 		}
 		result, err := a.Core.SetProjectDirectories(r.Context(), r.PathValue("id"), in.Directories)
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, result)
+		reply(w, 200, result, err)
 	})
 }

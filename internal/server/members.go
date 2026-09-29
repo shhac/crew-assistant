@@ -16,11 +16,7 @@ func registerMembers(mux *http.ServeMux, a *app.App) {
 			return
 		}
 		v, err := a.CreateMember(r.Context(), in)
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, v)
+		reply(w, 200, v, err)
 	})
 	mux.HandleFunc("PUT /api/members/{id}", func(w http.ResponseWriter, r *http.Request) {
 		var in core.MemberInput
@@ -28,18 +24,10 @@ func registerMembers(mux *http.ServeMux, a *app.App) {
 			return
 		}
 		v, err := a.Core.SaveMember(r.Context(), r.PathValue("id"), in)
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, v)
+		reply(w, 200, v, err)
 	})
 	mux.HandleFunc("DELETE /api/members/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if err := a.Core.DeleteMember(r.Context(), r.PathValue("id")); err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, map[string]bool{"deleted": true})
+		reply(w, 200, map[string]bool{"deleted": true}, a.Core.DeleteMember(r.Context(), r.PathValue("id")))
 	})
 	mux.HandleFunc("POST /api/members/{id}/avatar", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -48,11 +36,7 @@ func registerMembers(mux *http.ServeMux, a *app.App) {
 		if decode(w, r, &in) != nil {
 			return
 		}
-		if err := a.DrawMember(r.Context(), r.PathValue("id"), in.Look); err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 202, map[string]bool{"drawing": true})
+		reply(w, 202, map[string]bool{"drawing": true}, a.DrawMember(r.Context(), r.PathValue("id"), in.Look))
 	})
 	registerAssistants(mux, a)
 	// Avatars are named by a hash of the picture, so a name never shows a
@@ -73,18 +57,10 @@ func registerMembers(mux *http.ServeMux, a *app.App) {
 			return
 		}
 		v, err := a.Core.AddLearning(r.Context(), r.PathValue("id"), core.LearnedByOwner, in)
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, v)
+		reply(w, 200, v, err)
 	})
 	mux.HandleFunc("DELETE /api/members/{id}/learnings/{learning}", func(w http.ResponseWriter, r *http.Request) {
 		v, err := a.Core.ForgetLearning(r.Context(), r.PathValue("id"), r.PathValue("learning"))
-		if err != nil {
-			problem(w, err)
-			return
-		}
-		respond(w, 200, v)
+		reply(w, 200, v, err)
 	})
 }
