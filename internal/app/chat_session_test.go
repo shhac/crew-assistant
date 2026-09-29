@@ -22,7 +22,6 @@ type fakeChat struct {
 	spec    chatSpec
 	sent    []string
 	call    string // a tool to call on the next turn
-	callErr bool
 	told    string // what the tool call was answered with
 	failed  bool
 	closed  bool
