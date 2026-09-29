@@ -211,10 +211,15 @@ func chatOutcomeStatus(runErr error, stopped bool) (status, reason string) {
 }
 
 // answerWaiter hands a finished turn's outcome to the caller waiting on it,
-// if one still is.
+// if one still is. The send never blocks: a waiter whose one slot is already
+// full (a stop closed it, or a cancel answered it) has its answer, and a
+// blocked send would hang the chat queue, and with it a graceful stop.
 func (a *App) answerWaiter(id string, outcome chatOutcome) {
 	if w, ok := a.chatWaiters.Load(id); ok {
-		w.(chan chatOutcome) <- outcome
+		select {
+		case w.(chan chatOutcome) <- outcome:
+		default:
+		}
 	}
 }
 
