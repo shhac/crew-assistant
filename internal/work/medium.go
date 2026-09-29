@@ -192,3 +192,29 @@ func slugify(text string) string {
 	}
 	return out
 }
+
+// RevisionPreview returns what one revision holds, for the owner to read.
+func (lp *Loop) RevisionPreview(ctx context.Context, projectID, taskID string, n int) ([]media.File, error) {
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	p, ok := findProject(snap, projectID)
+	if !ok {
+		return nil, core.ErrNotFound
+	}
+	t, ok := findTask(snap, projectID, taskID)
+	if !ok {
+		return nil, core.ErrNotFound
+	}
+	for _, r := range t.Revisions {
+		if r.N == n {
+			m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
+			if err != nil {
+				return nil, err
+			}
+			return m.preview(ctx, t, r)
+		}
+	}
+	return nil, core.ErrNotFound
+}
