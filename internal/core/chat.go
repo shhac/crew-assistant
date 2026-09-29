@@ -271,16 +271,14 @@ func (s *Service) SetChatLoadingPhrase(ctx context.Context, id, phrase string) e
 		return errors.New("loading phrase must be a short single line")
 	}
 	return s.store.update(ctx, func(v *Snapshot) error {
-		for i := range v.ChatTurns {
-			if v.ChatTurns[i].ID == id {
-				if v.ChatTurns[i].Status != "running" {
-					return nil
-				}
-				v.ChatTurns[i].LoadingPhrase = phrase
-				return nil
-			}
+		t := chatTurn(v, id)
+		if t == nil {
+			return ErrNotFound
 		}
-		return ErrNotFound
+		if t.Status == "running" {
+			t.LoadingPhrase = phrase
+		}
+		return nil
 	})
 }
 

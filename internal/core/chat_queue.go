@@ -51,28 +51,21 @@ func liveHold(v *Snapshot, now time.Time) *ChatHold {
 	if !v.ChatHold.Active(now) {
 		return nil
 	}
-	for i := range v.ChatTurns {
-		if v.ChatTurns[i].ID == v.ChatHold.TurnID {
-			if v.ChatTurns[i].Status != "queued" {
-				return nil
-			}
-			return v.ChatHold
-		}
+	if t := chatTurn(v, v.ChatHold.TurnID); t == nil || t.Status != "queued" {
+		return nil
 	}
-	return nil
+	return v.ChatHold
 }
 
 func queuedTurn(v *Snapshot, id string) (*ChatTurn, error) {
-	for i := range v.ChatTurns {
-		if v.ChatTurns[i].ID != id {
-			continue
-		}
-		if v.ChatTurns[i].Status != "queued" {
-			return nil, fmt.Errorf("this message already started: %w", ErrConflict)
-		}
-		return &v.ChatTurns[i], nil
+	t := chatTurn(v, id)
+	if t == nil {
+		return nil, ErrNotFound
 	}
-	return nil, ErrNotFound
+	if t.Status != "queued" {
+		return nil, fmt.Errorf("this message already started: %w", ErrConflict)
+	}
+	return t, nil
 }
 
 // HoldChat takes or refreshes the lease on a queued turn. Taking a hold on a

@@ -50,15 +50,14 @@ func (s *Service) SetChatModelStatus(ctx context.Context, id, status string, ret
 		return errors.New("model status too long")
 	}
 	return s.store.update(ctx, func(v *Snapshot) error {
-		for i := range v.ChatTurns {
-			if v.ChatTurns[i].ID == id {
-				if v.ChatTurns[i].Status == "running" {
-					v.ChatTurns[i].ModelStatus = status
-					v.ChatTurns[i].RetryAt = retryAt
-				}
-				return nil
-			}
+		t := chatTurn(v, id)
+		if t == nil {
+			return ErrNotFound
 		}
-		return ErrNotFound
+		if t.Status == "running" {
+			t.ModelStatus = status
+			t.RetryAt = retryAt
+		}
+		return nil
 	})
 }
