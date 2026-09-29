@@ -157,26 +157,21 @@ func (a *App) Status(id, name, state, detail string) {
 	a.statuses[id] = core.Integration{ID: id, Name: name, Status: state, Detail: detail}
 	a.mu.Unlock()
 }
-func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
-	s, err := a.Core.Snapshot(ctx)
-	if err != nil {
-		return s, err
-	}
-	cfg := a.Config()
-	s.Stopping = a.Stopping()
-	if a.Work != nil {
-		s.Turns = a.Work.Turns()
-	}
-	s.Integrations = []core.Integration{{ID: "model", Name: "Assistant model", Status: "not_configured", Detail: "Choose your assistant in Settings"}, {ID: "slack", Name: "Slack bot messaging", Status: "not_configured", Detail: "Sends and receives owner direct messages. Configure owner identity and Socket Mode credentials"}}
+
+// configuredIntegrations is what the config says of each integration. The
+// connections it marks in ignoreLive have their import switched off, so a live
+// status left over from an earlier import no longer applies.
+func configuredIntegrations(cfg config.Config) ([]core.Integration, map[string]bool) {
+	list := []core.Integration{{ID: "model", Name: "Assistant model", Status: "not_configured", Detail: "Choose your assistant in Settings"}, {ID: "slack", Name: "Slack bot messaging", Status: "not_configured", Detail: "Sends and receives owner direct messages. Configure owner identity and Socket Mode credentials"}}
 	if seated, ok := cfg.Seated(); ok && seated.Model.Model != "" {
-		s.Integrations[0].Status = "configured"
-		s.Integrations[0].Detail = strings.Join([]string{seated.Model.Engine, seated.Model.Model, seated.Model.Effort}, " / ")
+		list[0].Status = "configured"
+		list[0].Detail = strings.Join([]string{seated.Model.Engine, seated.Model.Model, seated.Model.Effort}, " / ")
 	} else if ok {
-		s.Integrations[0].Detail = "Choose " + seated.Name + "'s model on the Team page"
+		list[0].Detail = "Choose " + seated.Name + "'s model on the Team page"
 	}
 	ignoreLive := map[string]bool{}
 	if cfg.LegacyLinearImportEnabled() {
-		s.Integrations = append(s.Integrations, core.Integration{ID: "linear", Name: "Linear assignment import", Status: "configured", Detail: "Optional import from selected teams; local projects remain independent"})
+		list = append(list, core.Integration{ID: "linear", Name: "Linear assignment import", Status: "configured", Detail: "Optional import from selected teams; local projects remain independent"})
 	}
 	for _, c := range cfg.Connections {
 		state, detail := "configured", "Reading only, through CLI accounts: "+strings.Join(c.Profiles, ", ")
@@ -191,21 +186,40 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 				state, detail = "unavailable", "Choose the CLI default account for Notion"
 			}
 		}
-		s.Integrations = append(s.Integrations, core.Integration{ID: "connection:" + c.ID, Name: c.Name, Status: state, Detail: detail})
+		list = append(list, core.Integration{ID: "connection:" + c.ID, Name: c.Name, Status: state, Detail: detail})
 	}
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if status, ok := a.statuses["chat"]; ok {
-		s.Integrations = append(s.Integrations, status)
+	return list, ignoreLive
+}
+
+func withLiveStatuses(list []core.Integration, live map[string]core.Integration, ignoreLive map[string]bool) []core.Integration {
+	if status, ok := live["chat"]; ok {
+		list = append(list, status)
 	}
-	for i, st := range s.Integrations {
-		if live, ok := a.statuses[st.ID]; ok && !ignoreLive[st.ID] {
+	for i, st := range list {
+		if status, ok := live[st.ID]; ok && !ignoreLive[st.ID] {
 			// A live status reports state, not relationships; keep the link
 			// the configuration established.
-			live.ProjectID = st.ProjectID
-			s.Integrations[i] = live
+			status.ProjectID = st.ProjectID
+			list[i] = status
 		}
 	}
+	return list
+}
+
+func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
+	s, err := a.Core.Snapshot(ctx)
+	if err != nil {
+		return s, err
+	}
+	cfg := a.Config()
+	s.Stopping = a.Stopping()
+	if a.Work != nil {
+		s.Turns = a.Work.Turns()
+	}
+	integrations, ignoreLive := configuredIntegrations(cfg)
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	s.Integrations = withLiveStatuses(integrations, a.statuses, ignoreLive)
 	if s.Assistant.ID != "" {
 		d := a.drawing[drawingKey(s.Assistant.ID)]
 		s.Assistant.Drawing, s.Assistant.DrawError = d.busy, d.failure
