@@ -3,9 +3,6 @@ package cli
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -34,23 +31,7 @@ func standInDaemon(t *testing.T, snap core.Snapshot) (*options, func() []string)
 		mu.Unlock()
 		json.NewEncoder(w).Encode(work.TaskPlace{ProjectID: r.PathValue("project"), TaskID: r.PathValue("task"), Workspace: "/work/" + r.PathValue("task")})
 	})
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-
-	o := &options{statePath: filepath.Join(t.TempDir(), "state.db")}
-	if err := os.MkdirAll(o.runtimeDir(), 0700); err != nil {
-		t.Fatal(err)
-	}
-	info, err := json.Marshal(runtimeInfo{URL: server.URL, LocalURL: server.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(o.runtimeDir(), "daemon.json"), info, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(o.runtimeDir(), "admin-token"), []byte("stand-in-token"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	o := standIn(t, mux, "stand-in-token")
 	return o, func() []string {
 		mu.Lock()
 		defer mu.Unlock()

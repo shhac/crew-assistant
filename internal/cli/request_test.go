@@ -1,11 +1,7 @@
 package cli
 
 import (
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -13,26 +9,10 @@ import (
 // looks for a running daemon.
 func replyingDaemon(t *testing.T, status int, body string) *options {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return standIn(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
-	}))
-	t.Cleanup(server.Close)
-	o := &options{statePath: filepath.Join(t.TempDir(), "state.db")}
-	if err := os.MkdirAll(o.runtimeDir(), 0700); err != nil {
-		t.Fatal(err)
-	}
-	info, err := json.Marshal(runtimeInfo{URL: server.URL, LocalURL: server.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(o.runtimeDir(), "daemon.json"), info, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(o.runtimeDir(), "admin-token"), []byte("token"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	return o
+	}), "token")
 }
 
 func TestRequestReportsTheDaemonsRefusal(t *testing.T) {

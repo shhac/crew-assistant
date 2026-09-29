@@ -30,6 +30,8 @@ type options struct {
 	// version is the running build, said on startup so a log shows which
 	// daemon it came from.
 	version string
+	// transport replaces the network in tests; nil talks to the daemon.
+	transport http.RoundTripper
 }
 
 func Run(version string) { libcli.Run(NewRoot(version)) }
@@ -172,7 +174,7 @@ func (o *options) requestInto(method, path string, value, out any) error {
 	req.Header.Set("Authorization", "Bearer "+string(token))
 	req.Header.Set("X-Requested-With", "crew-assistant")
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{Transport: o.transport, Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
 		return errors.New("could not reach daemon; check crew-assistant serve and the selected --state path")
