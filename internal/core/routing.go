@@ -144,12 +144,7 @@ func (s *Service) AskResearch(ctx context.Context, taskID string, ask ResearchAs
 	if err := ask.Owner.validTaskDecision(); err != nil {
 		return Task{}, err
 	}
-	var out Task
-	err := s.store.update(ctx, func(v *Snapshot) error {
-		t := task(v, taskID)
-		if t == nil {
-			return ErrNotFound
-		}
+	return s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		if t.Status != TaskReviewing && t.Status != TaskDeciding {
 			return fmt.Errorf("the task is no longer being checked: %w", ErrConflict)
 		}
@@ -168,10 +163,8 @@ func (s *Service) AskResearch(ctx context.Context, taskID string, ask ResearchAs
 		t.Failures, t.RetryAt = 0, time.Time{}
 		t.UpdatedAt = now
 		derive(v, t)
-		out = *t
 		return nil
 	})
-	return out, err
 }
 
 // Where a checker can recommend a task goes next: back to the implementer,

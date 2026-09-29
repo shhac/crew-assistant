@@ -7,10 +7,20 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/statepath"
 )
+
+// Project finds a project by id.
+func (v Snapshot) Project(id string) (Project, bool) {
+	i := slices.IndexFunc(v.Projects, func(p Project) bool { return p.ID == id })
+	if i < 0 {
+		return Project{}, false
+	}
+	return v.Projects[i], true
+}
 
 // StateDirectory is derived from the actual opened database, not config defaults.
 func (s *Service) StateDirectory() string { return s.store.stateDirectory }
@@ -75,19 +85,12 @@ func (s *Service) SetProjectDirectories(ctx context.Context, id string, director
 	if err != nil {
 		return Project{}, err
 	}
-	var out Project
-	err = s.store.update(ctx, func(v *Snapshot) error {
-		p := project(v, id)
-		if p == nil {
-			return ErrNotFound
-		}
+	return s.editProject(ctx, id, func(p *Project, v *Snapshot) error {
 		p.Directories = normalized
 		p.UpdatedAt = s.now().UTC()
-		out = *p
 		record(v, p.UpdatedAt, id, "project.directories_updated", "Folders changed")
 		return nil
 	})
-	return out, err
 }
 
 func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (Project, error) {

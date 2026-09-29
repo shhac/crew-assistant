@@ -42,18 +42,11 @@ func (s *Service) UpdateBrief(ctx context.Context, projectID string, in BriefInp
 	if !required(in.Goal) {
 		return Project{}, errors.New("a brief needs a goal")
 	}
-	var out Project
-	err := s.store.update(ctx, func(v *Snapshot) error {
-		p := project(v, projectID)
-		if p == nil {
-			return ErrNotFound
-		}
+	return s.editProject(ctx, projectID, func(p *Project, v *Snapshot) error {
 		now := s.now().UTC()
 		p.Brief = Brief{Version: p.Brief.Version + 1, Goal: strings.TrimSpace(in.Goal), Audience: strings.TrimSpace(in.Audience), Constraints: strings.TrimSpace(in.Constraints), Criteria: cleanList(in.Criteria), UpdatedAt: now}
 		p.UpdatedAt = now
-		out = *p
 		record(v, now, p.ID, "brief.updated", fmt.Sprintf("Brief is now version %d", p.Brief.Version))
 		return nil
 	})
-	return out, err
 }

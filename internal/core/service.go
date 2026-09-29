@@ -106,6 +106,42 @@ func project(v *Snapshot, id string) *Project {
 	}
 	return nil
 }
+
+// editProject changes one project atomically and returns it as changed.
+func (s *Service) editProject(ctx context.Context, id string, fn func(*Project, *Snapshot) error) (Project, error) {
+	var out Project
+	err := s.store.update(ctx, func(v *Snapshot) error {
+		p := project(v, id)
+		if p == nil {
+			return ErrNotFound
+		}
+		if err := fn(p, v); err != nil {
+			return err
+		}
+		out = *p
+		return nil
+	})
+	return out, err
+}
+
+// editTaskRecord changes one task's record atomically and returns it as
+// changed; an empty projectID finds the task in any project.
+func (s *Service) editTaskRecord(ctx context.Context, projectID, taskID string, fn func(*Task, *Snapshot) error) (Task, error) {
+	var out Task
+	err := s.store.update(ctx, func(v *Snapshot) error {
+		t := task(v, taskID)
+		if t == nil || (projectID != "" && t.ProjectID != projectID) {
+			return ErrNotFound
+		}
+		if err := fn(t, v); err != nil {
+			return err
+		}
+		out = *t
+		return nil
+	})
+	return out, err
+}
+
 func required(fields ...string) bool {
 	for _, f := range fields {
 		if strings.TrimSpace(f) == "" {

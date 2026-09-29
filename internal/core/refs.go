@@ -251,25 +251,17 @@ func (s *Service) SetProjectPrefix(ctx context.Context, id, prefix string) (Proj
 	if err != nil {
 		return Project{}, err
 	}
-	var out Project
-	err = s.store.update(ctx, func(v *Snapshot) error {
-		p := project(v, id)
-		if p == nil {
-			return ErrNotFound
-		}
+	return s.editProject(ctx, id, func(p *Project, v *Snapshot) error {
 		if prefixTaken(v, prefix, p.ID) {
 			return fmt.Errorf("another project already uses %s: %w", prefix, ErrConflict)
 		}
 		if p.Prefix == prefix {
-			out = *p
 			return nil
 		}
 		old := p.Prefix
 		p.Prefix = prefix
 		p.UpdatedAt = s.now().UTC()
-		out = *p
 		record(v, p.UpdatedAt, p.ID, "project.prefix_updated", fmt.Sprintf("Task IDs now start %s- instead of %s-", prefix, old))
 		return nil
 	})
-	return out, err
 }

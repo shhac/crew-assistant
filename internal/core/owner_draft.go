@@ -18,12 +18,7 @@ const DraftByOwner = "owner"
 // runs, since a broken target costs more than one check. A decision the
 // task waited on is closed, since the draft it asked about is superseded.
 func (s *Service) AdoptDraft(ctx context.Context, taskID string, r Revision, approve bool) (Task, error) {
-	var out Task
-	err := s.store.update(ctx, func(v *Snapshot) error {
-		t := task(v, taskID)
-		if t == nil {
-			return ErrNotFound
-		}
+	return s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		switch {
 		case t.Finished():
 			return fmt.Errorf("“%s” has finished: %w", t.Objective, ErrConflict)
@@ -55,8 +50,6 @@ func (s *Service) AdoptDraft(ctx context.Context, taskID string, r Revision, app
 		t.UpdatedAt = now
 		recordTask(v, now, t, "task.drafted", fmt.Sprintf("The owner changed %s by hand: draft %d", t.Objective, r.N))
 		derive(v, t)
-		out = *t
 		return nil
 	})
-	return out, err
 }

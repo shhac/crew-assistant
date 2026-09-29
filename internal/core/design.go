@@ -138,12 +138,7 @@ func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk) (
 	if err := ask.Owner.validTaskDecision(); err != nil {
 		return Task{}, err
 	}
-	var out Task
-	err := s.store.update(ctx, func(v *Snapshot) error {
-		t := task(v, taskID)
-		if t == nil {
-			return ErrNotFound
-		}
+	return s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		if t.Status != TaskResearching && t.Status != TaskWriting {
 			return fmt.Errorf("the task is no longer researching or being written: %w", ErrConflict)
 		}
@@ -166,10 +161,8 @@ func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk) (
 		t.Design = append(t.Design, r)
 		t.UpdatedAt = now
 		derive(v, t)
-		out = *t
 		return nil
 	})
-	return out, err
 }
 
 // DesignReply is what the designer answered a request with.
@@ -201,12 +194,7 @@ func (s *Service) RecordDesign(ctx context.Context, taskID, requestID string, re
 			return Task{}, err
 		}
 	}
-	var out Task
-	err := s.store.update(ctx, func(v *Snapshot) error {
-		t := task(v, taskID)
-		if t == nil {
-			return ErrNotFound
-		}
+	return s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		r := t.OpenDesign()
 		if t.Status != TaskDesigning || r == nil || r.ID != requestID {
 			return fmt.Errorf("the task is no longer with the designer: %w", ErrConflict)
@@ -229,10 +217,8 @@ func (s *Service) RecordDesign(ctx context.Context, taskID, requestID string, re
 		}
 		t.UpdatedAt = now
 		derive(v, t)
-		out = *t
 		return nil
 	})
-	return out, err
 }
 
 // markCurrent makes the design current names the task's current design:

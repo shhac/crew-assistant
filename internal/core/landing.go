@@ -120,12 +120,7 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 	if d.Land && d.Method != LandSquash && d.Method != LandKeepCommits {
 		return Task{}, fmt.Errorf("a change lands by %s or %s", LandSquash, LandKeepCommits)
 	}
-	var out Task
-	err := s.store.update(ctx, func(v *Snapshot) error {
-		t := task(v, taskID)
-		if t == nil {
-			return ErrNotFound
-		}
+	return s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		p := project(v, t.ProjectID)
 		if p == nil {
 			return ErrNotFound
@@ -144,7 +139,6 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 			recordTask(v, now, t, activityPMLanding, fmt.Sprintf("The PM held %s: %s", t.Objective, d.Reason))
 			openTaskDecision(v, t, DecisionDelivery, hold, now)
 			derive(v, t)
-			out = *t
 			return nil
 		}
 		if why := signedOff(v, *t); len(why) > 0 {
@@ -156,21 +150,14 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 		// push are still to come, and "landed" is said once they succeed.
 		recordTask(v, now, t, activityPMLanding, fmt.Sprintf("The PM approved %s to land %s: %s", t.Objective, d.How(), d.Reason))
 		derive(v, t)
-		out = *t
 		return nil
 	})
-	return out, err
 }
 
 // LandAheadOfPM is the owner landing a signed-off change themselves while it
 // waits on the PM's decision: their approval, as if they had been asked.
 func (s *Service) LandAheadOfPM(ctx context.Context, projectID, taskID string) (Task, error) {
-	var out Task
-	err := s.store.update(ctx, func(v *Snapshot) error {
-		t := task(v, taskID)
-		if t == nil || t.ProjectID != projectID {
-			return ErrNotFound
-		}
+	return s.editTaskRecord(ctx, projectID, taskID, func(t *Task, v *Snapshot) error {
 		if !pmDeciding(v, *t) {
 			if why := signedOff(v, *t); t.Status == TaskDeciding && len(why) > 0 {
 				return fmt.Errorf("it is not signed off: %s: %w", strings.Join(why, "; "), ErrConflict)
@@ -183,8 +170,6 @@ func (s *Service) LandAheadOfPM(ctx context.Context, projectID, taskID string) (
 		t.Status, t.DecisionID, t.ResumeStatus, t.Detail, t.UpdatedAt = TaskLanding, "", "", "Landing", now
 		recordTask(v, now, t, "task.landing", "You're landing "+t.Objective+" ahead of the PM")
 		derive(v, t)
-		out = *t
 		return nil
 	})
-	return out, err
 }

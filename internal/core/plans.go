@@ -118,12 +118,7 @@ func reaches(v *Snapshot, from, to string, seen map[string]bool) bool {
 // implementer starts. A task whose work has begun is never sent back to the
 // queue, nor made to wait for more: its drafts and branch stay.
 func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, dependsOn []string) (Task, error) {
-	var out Task
-	err := s.store.update(ctx, func(v *Snapshot) error {
-		t := task(v, taskID)
-		if t == nil {
-			return ErrNotFound
-		}
+	return s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		// A task stopped while the researcher worked stays stopped.
 		if t.Status != TaskResearching {
 			return fmt.Errorf("the task is no longer being researched: %w", ErrConflict)
@@ -161,10 +156,8 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 			p.listChanged()
 		}
 		derive(v, t)
-		out = *t
 		return nil
 	})
-	return out, err
 }
 
 // researcherLinker is how the links a task's researcher adds are marked.
