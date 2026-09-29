@@ -183,21 +183,31 @@ func joinSeat(playbook *core.Playbook, seat int, m core.Member, kind string) {
 
 // SetTeam applies a team choice made in the dashboard or by the assistant.
 func (lp *Loop) SetTeam(ctx context.Context, projectID string, in TeamChoice) (core.Project, error) {
-	snap, err := lp.Core.Snapshot(ctx)
-	if err != nil {
-		return core.Project{}, err
+	p, err := lp.Core.EditPlaybook(ctx, projectID, func(snap *core.Snapshot, p *core.Project, pb *core.Playbook) error {
+		playbook, err := chosenTeam(in, *snap, *p)
+		if err != nil {
+			return err
+		}
+		*pb = playbook
+		return nil
+	})
+	// Queued work may have been waiting on a team, so look again now.
+	if err == nil {
+		lp.Nudge()
 	}
-	var current *core.Playbook
-	if p, ok := findProject(snap, projectID); ok {
-		current = p.Playbook
-	}
-	playbook, err := teamFrom(in, snap, current)
+	return p, err
+}
+
+// chosenTeam is the team a choice makes for a project, keeping what the
+// choice doesn't cover from the team it has.
+func chosenTeam(in TeamChoice, snap core.Snapshot, p core.Project) (core.Playbook, error) {
+	playbook, err := teamFrom(in, snap, p.Playbook)
 	if err != nil {
-		return core.Project{}, err
+		return core.Playbook{}, err
 	}
 	// A member who stays in the same seat keeps the copy the team has; changes
 	// to the member since reach this team when it is given the seat again.
-	if p, ok := findProject(snap, projectID); ok && p.Playbook != nil && p.Playbook.Template == playbook.Template {
+	if p.Playbook != nil && p.Playbook.Template == playbook.Template {
 		for k, r := range playbook.Roles {
 			i := slices.IndexFunc(p.Playbook.Roles, func(c core.Role) bool { return r.Member != "" && c.Member == r.Member })
 			if i >= 0 && sameKinds(p.Playbook.Roles[i].Kinds, r.Kinds) {
@@ -209,16 +219,12 @@ func (lp *Loop) SetTeam(ctx context.Context, projectID string, in TeamChoice) (c
 	// way again, as it did when the member was given its seat.
 	playbook.NameSeats()
 	// How much of the project's work runs at once is its own setting.
-	if p, ok := findProject(snap, projectID); ok && p.Playbook != nil {
+	if p.Playbook != nil {
 		playbook.MaxActive = p.Playbook.MaxActive
 	}
 	if playbook.Medium == core.MediumGit {
-		p, ok := findProject(snap, projectID)
-		if !ok {
-			return core.Project{}, core.ErrNotFound
-		}
 		if playbook.Repo, err = teamRepo(p, playbook.Repo); err != nil {
-			return core.Project{}, err
+			return core.Playbook{}, err
 		}
 		// Choosing a team never changes where its work lands or how QA runs
 		// the app; those are settings of their own.
@@ -231,15 +237,21 @@ func (lp *Loop) SetTeam(ctx context.Context, projectID string, in TeamChoice) (c
 		recipe := in.Run.Trimmed()
 		playbook.Run = &recipe
 	}
-	if err = playbook.Validate(); err != nil {
-		return core.Project{}, err
-	}
-	// Queued work may have been waiting on a team, so look again now.
-	p, err := lp.Core.SetPlaybook(ctx, projectID, playbook)
-	if err == nil {
-		lp.Nudge()
-	}
-	return p, err
+	return playbook, nil
+}
+
+// editPlaybook changes the team a project has, in one step. codeOnly, when
+// set, is what to say if the team doesn't work on code.
+func (lp *Loop) editPlaybook(ctx context.Context, projectID, codeOnly string, change func(snap *core.Snapshot, p *core.Project, pb *core.Playbook) error) (core.Project, error) {
+	return lp.Core.EditPlaybook(ctx, projectID, func(snap *core.Snapshot, p *core.Project, pb *core.Playbook) error {
+		if codeOnly != "" && (p.Playbook == nil || p.Playbook.Medium != core.MediumGit) {
+			return errors.New(codeOnly)
+		}
+		if p.Playbook == nil {
+			return errors.New("choose a team first")
+		}
+		return change(snap, p, pb)
+	})
 }
 
 // teamRepo is the repository a code team works on: one of the project's own
@@ -266,18 +278,19 @@ func sameKinds(a, b []string) bool {
 // is given as many again, filled like the first. Every other seat keeps the
 // copy it has, and requests under way keep the team they started with.
 func (lp *Loop) SetSeat(ctx context.Context, projectID, kind, memberID string) (core.Project, error) {
-	snap, err := lp.Core.Snapshot(ctx)
-	if err != nil {
-		return core.Project{}, err
+	p, err := lp.editPlaybook(ctx, projectID, "", func(snap *core.Snapshot, _ *core.Project, pb *core.Playbook) error {
+		return giveSeat(pb, kind, memberID, *snap)
+	})
+	// Queued work may have been waiting on a researcher or a PM, so look
+	// again.
+	if err == nil {
+		lp.Nudge()
 	}
-	p, ok := findProject(snap, projectID)
-	if !ok {
-		return core.Project{}, core.ErrNotFound
-	}
-	if p.Playbook == nil {
-		return core.Project{}, errors.New("choose a team first")
-	}
-	playbook := *p.Playbook
+	return p, err
+}
+
+// giveSeat is the change SetSeat makes to a team.
+func giveSeat(playbook *core.Playbook, kind, memberID string, snap core.Snapshot) error {
 	base, templated := playbook.TemplateSeat(kind)
 	// No template has a PM or a designer, so only they may join a team
 	// without a seat for it; research can be left out only where the
@@ -286,10 +299,10 @@ func (lp *Loop) SetSeat(ctx context.Context, projectID, kind, memberID string) (
 		memberID = ""
 	}
 	if !templated && (!memberOnly(kind) || memberID == NoResearcher) {
-		return core.Project{}, fmt.Errorf("a %s team has no %s", playbook.Template, kind)
+		return fmt.Errorf("a %s team has no %s", playbook.Template, kind)
 	}
 	if memberID == NoResearcher && kind != core.RoleResearcher {
-		return core.Project{}, fmt.Errorf("only research can be left out of a team")
+		return fmt.Errorf("only research can be left out of a team")
 	}
 	// The role keeps as many seats as it had, so the work it runs at once
 	// stays as the owner set it: Claudius and Claudius #2 given back to the
@@ -312,10 +325,10 @@ func (lp *Loop) SetSeat(ctx context.Context, projectID, kind, memberID string) (
 	default:
 		m, err := memberFor(kind, memberID, snap)
 		if err != nil {
-			return core.Project{}, err
+			return err
 		}
 		if seat := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Member == m.ID }); seat >= 0 {
-			joinSeat(&playbook, seat, m, kind)
+			joinSeat(playbook, seat, m, kind)
 			filled = playbook.Roles[seat].Name
 			break
 		}
@@ -325,19 +338,10 @@ func (lp *Loop) SetSeat(ctx context.Context, projectID, kind, memberID string) (
 	}
 	for ; filled != "" && seats > 1; seats-- {
 		if _, err := playbook.AddSeat(filled); err != nil {
-			return core.Project{}, err
+			return err
 		}
 	}
-	if err = playbook.Validate(); err != nil {
-		return core.Project{}, err
-	}
-	// Queued work may have been waiting on a researcher or a PM, so look
-	// again.
-	p, err = lp.Core.SetPlaybook(ctx, projectID, playbook)
-	if err == nil {
-		lp.Nudge()
-	}
-	return p, err
+	return nil
 }
 
 // AddSeat adds another seat filled like the named one: Claudius gains
@@ -360,26 +364,10 @@ func (lp *Loop) RemoveSeat(ctx context.Context, projectID, seat string) (core.Pr
 }
 
 func (lp *Loop) changeSeats(ctx context.Context, projectID string, change func(*core.Playbook) error) (core.Project, error) {
-	snap, err := lp.Core.Snapshot(ctx)
-	if err != nil {
-		return core.Project{}, err
-	}
-	p, ok := findProject(snap, projectID)
-	if !ok {
-		return core.Project{}, core.ErrNotFound
-	}
-	if p.Playbook == nil {
-		return core.Project{}, errors.New("choose a team first")
-	}
-	playbook := *p.Playbook
-	if err = change(&playbook); err != nil {
-		return core.Project{}, err
-	}
-	if err = playbook.Validate(); err != nil {
-		return core.Project{}, err
-	}
+	p, err := lp.editPlaybook(ctx, projectID, "", func(_ *core.Snapshot, _ *core.Project, pb *core.Playbook) error {
+		return change(pb)
+	})
 	// A seat added may be free for work waiting on one.
-	p, err = lp.Core.SetPlaybook(ctx, projectID, playbook)
 	if err == nil {
 		lp.Nudge()
 	}
@@ -407,55 +395,31 @@ type Workspace struct {
 // SetWorkspace changes where a code team works and nothing else: its roles,
 // check and landing stay as they are.
 func (lp *Loop) SetWorkspace(ctx context.Context, projectID string, in Workspace) (core.Project, error) {
-	snap, err := lp.Core.Snapshot(ctx)
-	if err != nil {
-		return core.Project{}, err
-	}
-	p, ok := findProject(snap, projectID)
-	if !ok {
-		return core.Project{}, core.ErrNotFound
-	}
-	if p.Playbook == nil || p.Playbook.Medium != core.MediumGit {
-		return core.Project{}, errors.New("a workspace is for code teams; choose a code team first")
-	}
-	playbook := *p.Playbook
-	if playbook.Repo, err = teamRepo(p, in.Repo); err != nil {
-		return core.Project{}, err
-	}
-	playbook.BranchPrefix = strings.TrimSpace(in.BranchPrefix)
-	if playbook.BranchPrefix == "" {
-		playbook.BranchPrefix = core.Templates[playbook.Template].BranchPrefix
-	}
-	playbook.Prepare = append([]string(nil), in.Prepare...)
-	playbook.Sign = in.Sign
-	if err = playbook.Validate(); err != nil {
-		return core.Project{}, err
-	}
-	return lp.Core.SetPlaybook(ctx, projectID, playbook)
+	return lp.editPlaybook(ctx, projectID, "a workspace is for code teams; choose a code team first", func(_ *core.Snapshot, p *core.Project, playbook *core.Playbook) error {
+		repo, err := teamRepo(*p, in.Repo)
+		if err != nil {
+			return err
+		}
+		playbook.Repo = repo
+		playbook.BranchPrefix = strings.TrimSpace(in.BranchPrefix)
+		if playbook.BranchPrefix == "" {
+			playbook.BranchPrefix = core.Templates[playbook.Template].BranchPrefix
+		}
+		playbook.Prepare = append([]string(nil), in.Prepare...)
+		playbook.Sign = in.Sign
+		return nil
+	})
 }
 
 // SetLanding sets what landing means for a code project. The owner and the
 // assistant can; nothing inside the project can. Tasks already under way keep
 // the policy they started with.
 func (lp *Loop) SetLanding(ctx context.Context, projectID string, land core.LandPolicy) (core.Project, error) {
-	snap, err := lp.Core.Snapshot(ctx)
-	if err != nil {
-		return core.Project{}, err
-	}
-	p, ok := findProject(snap, projectID)
-	if !ok {
-		return core.Project{}, core.ErrNotFound
-	}
-	if p.Playbook == nil || p.Playbook.Medium != core.MediumGit {
-		return core.Project{}, errors.New("landing policies are for code teams; choose a code team first")
-	}
-	playbook := *p.Playbook
-	land.Means, land.Target, land.GitHub = strings.TrimSpace(land.Means), strings.TrimSpace(land.Target), strings.TrimSpace(land.GitHub)
-	playbook.Land = land
-	if err = playbook.Validate(); err != nil {
-		return core.Project{}, err
-	}
-	return lp.Core.SetPlaybook(ctx, projectID, playbook)
+	return lp.editPlaybook(ctx, projectID, "landing policies are for code teams; choose a code team first", func(_ *core.Snapshot, _ *core.Project, playbook *core.Playbook) error {
+		land.Means, land.Target, land.GitHub = strings.TrimSpace(land.Means), strings.TrimSpace(land.Target), strings.TrimSpace(land.GitHub)
+		playbook.Land = land
+		return nil
+	})
 }
 
 // SetRunRecipe sets how QA starts a code project to use it, or with nil
@@ -463,55 +427,28 @@ func (lp *Loop) SetLanding(ctx context.Context, projectID string, land core.Land
 // assistant can; the team only proposes one. Tasks already under way keep
 // the recipe they started with.
 func (lp *Loop) SetRunRecipe(ctx context.Context, projectID string, recipe *core.RunRecipe) (core.Project, error) {
-	snap, err := lp.Core.Snapshot(ctx)
-	if err != nil {
-		return core.Project{}, err
-	}
-	p, ok := findProject(snap, projectID)
-	if !ok {
-		return core.Project{}, core.ErrNotFound
-	}
-	if p.Playbook == nil || p.Playbook.Medium != core.MediumGit {
-		return core.Project{}, errors.New("run recipes are for code teams; choose a code team first")
-	}
-	playbook := *p.Playbook
-	playbook.Run = nil
-	if recipe != nil {
-		trimmed := recipe.Trimmed()
-		playbook.Run = &trimmed
-	}
-	if err = playbook.Validate(); err != nil {
-		return core.Project{}, err
-	}
-	return lp.Core.SetPlaybook(ctx, projectID, playbook)
+	return lp.editPlaybook(ctx, projectID, "run recipes are for code teams; choose a code team first", func(_ *core.Snapshot, _ *core.Project, playbook *core.Playbook) error {
+		playbook.Run = nil
+		if recipe != nil {
+			trimmed := recipe.Trimmed()
+			playbook.Run = &trimmed
+		}
+		return nil
+	})
 }
 
 // SetSeatBrowser sets whether the team's QA uses its engine's own browser,
 // and which connected one, for this project only; the member it was copied
 // from keeps its own setting.
 func (lp *Loop) SetSeatBrowser(ctx context.Context, projectID string, browser core.Browser) (core.Project, error) {
-	snap, err := lp.Core.Snapshot(ctx)
-	if err != nil {
-		return core.Project{}, err
-	}
-	p, ok := findProject(snap, projectID)
-	if !ok {
-		return core.Project{}, core.ErrNotFound
-	}
-	if p.Playbook == nil {
-		return core.Project{}, errors.New("choose a team first")
-	}
-	playbook := *p.Playbook
-	playbook.Roles = slices.Clone(playbook.Roles)
-	k := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Holds(core.RoleQA) })
-	if k < 0 {
-		return core.Project{}, errors.New("this team has no QA")
-	}
-	playbook.Roles[k].Browser = core.Browser{On: browser.On, Name: strings.TrimSpace(browser.Name)}
-	if err = playbook.Validate(); err != nil {
-		return core.Project{}, err
-	}
-	return lp.Core.SetPlaybook(ctx, projectID, playbook)
+	return lp.editPlaybook(ctx, projectID, "", func(_ *core.Snapshot, _ *core.Project, playbook *core.Playbook) error {
+		k := slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Holds(core.RoleQA) })
+		if k < 0 {
+			return errors.New("this team has no QA")
+		}
+		playbook.Roles[k].Browser = core.Browser{On: browser.On, Name: strings.TrimSpace(browser.Name)}
+		return nil
+	})
 }
 
 // RevisionPreview returns what one revision holds, for the owner to read.

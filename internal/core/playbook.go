@@ -541,14 +541,34 @@ func (p Playbook) FreeName(k int, name string) string {
 // SetPlaybook replaces how a project's work gets done. Tasks already started
 // keep the roles they started with.
 func (s *Service) SetPlaybook(ctx context.Context, projectID string, playbook Playbook) (Project, error) {
-	if err := playbook.Validate(); err != nil {
-		return Project{}, err
-	}
+	return s.EditPlaybook(ctx, projectID, func(_ *Snapshot, _ *Project, pb *Playbook) error {
+		*pb = playbook
+		return nil
+	})
+}
+
+// EditPlaybook changes a project's team in one step, so edits made at the
+// same time never undo each other. change gets a copy of the team, empty when
+// the project has none, and the state as it stands; it must not call back
+// into the Service, which is busy with this change until it returns. Tasks
+// already started keep the roles they started with.
+func (s *Service) EditPlaybook(ctx context.Context, projectID string, change func(snap *Snapshot, p *Project, pb *Playbook) error) (Project, error) {
 	var out Project
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		p := project(v, projectID)
 		if p == nil {
 			return ErrNotFound
+		}
+		var playbook Playbook
+		if p.Playbook != nil {
+			playbook = *p.Playbook
+			playbook.Roles = slices.Clone(playbook.Roles)
+		}
+		if err := change(v, p, &playbook); err != nil {
+			return err
+		}
+		if err := playbook.Validate(); err != nil {
+			return err
 		}
 		p.Playbook = &playbook
 		p.UpdatedAt = s.now().UTC()
