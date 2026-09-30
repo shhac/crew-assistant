@@ -211,6 +211,7 @@ export function ConfirmAction({
   confirming,
   onConfirming,
   trigger,
+  triggerClassName = "",
   confirm,
   busy = false,
   onConfirm,
@@ -220,6 +221,7 @@ export function ConfirmAction({
   confirming: boolean;
   onConfirming: (confirming: boolean) => void;
   trigger: string;
+  triggerClassName?: string;
   confirm: string;
   busy?: boolean;
   onConfirm: () => void;
@@ -253,7 +255,8 @@ export function ConfirmAction({
       {children}
       <button
         type="button"
-        className="btn btn-quiet btn-sm"
+        className={`btn btn-quiet btn-sm ${triggerClassName}`}
+        disabled={busy}
         onClick={() => onConfirming(true)}
       >
         {trigger}

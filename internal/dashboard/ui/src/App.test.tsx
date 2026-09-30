@@ -905,6 +905,11 @@ describe("settings", () => {
     expect(
       await screen.findByLabelText(/^Suggestions and loading lines/),
     ).toHaveProperty("value", "");
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /Codex.*Command and sign-in folder/,
+      }),
+    );
     await waitFor(() =>
       expect(screen.getByLabelText("Codex program")).toHaveProperty(
         "placeholder",
@@ -916,7 +921,7 @@ describe("settings", () => {
       target: { value: "/fixture/other-login" },
     });
     fireEvent.click(
-      within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole(
+      within(screen.getByRole("dialog", { name: "Edit Codex" })).getByRole(
         "button",
         { name: "Save" },
       ),

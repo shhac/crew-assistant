@@ -89,6 +89,14 @@ export function Settings({
       setSaved(draft);
     });
   }
+  async function saveEngines(engines: Config["engines"]) {
+    if (!saved) return;
+    const next = { ...saved, engines };
+    await putConfig(next);
+    setSaved(next);
+    setDraft((d) => (d ? { ...d, engines } : d));
+    await refresh().catch(() => {});
+  }
   // Appearance is applied and kept at once; it never waits on other edits.
   async function chooseAppearance(theme: Appearance) {
     if (!saved || !draft) return;
@@ -164,9 +172,10 @@ export function Settings({
                   </Panel>
                   <Panel title="Engines">
                     <EngineSettings
-                      config={draft}
+                      config={saved!}
                       defaults={defaults}
-                      onChange={setDraft}
+                      onSave={saveEngines}
+                      disabled={saving.busy}
                     />
                   </Panel>
                 </>

@@ -33,7 +33,7 @@
   font-size: 15px;
 }
 
-.settings
+:is(.settings, .engine-dialog)
   :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
   width: 100%;
   min-height: 36px;
@@ -480,6 +480,115 @@
     flex-wrap: wrap;
   }
   .memory-add {
+    flex-wrap: wrap;
+  }
+}
+.engine-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.engine-settings {
+  container-type: inline-size;
+}
+@container (max-width: 560px) {
+  .engine-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.engine-card,
+.connection-row {
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.engine-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  min-height: 72px;
+}
+.engine-card-text {
+  flex: 1;
+}
+.engine-card-text,
+.connection-row > span {
+  display: grid;
+  gap: 4px;
+}
+.engine-card:hover:not(:disabled),
+.connection-row:hover:not(:disabled) {
+  background: var(--sunken);
+}
+.engine-card:disabled,
+.connection-row:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.engine-card:focus-visible,
+.connection-row:focus-visible {
+  outline: 2px solid var(--line-strong);
+  outline-offset: 2px;
+}
+.api-connections-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.connection-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 60px;
+  padding: 12px 14px;
+  border: 0;
+  background: var(--surface);
+}
+.connection-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.engine-dialog {
+  width: min(520px, calc(100% - 32px));
+}
+.engine-dialog > form {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 92px);
+}
+.engine-dialog-body {
+  overflow-y: auto;
+  min-height: 0;
+}
+.engine-dialog-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.engine-dialog .dialog-head,
+.engine-dialog .dialog-foot {
+  flex-shrink: 0;
+  gap: 12px;
+}
+.engine-dialog .dialog-head h2 {
+  flex: 1;
+}
+.engine-remove {
+  margin-right: auto;
+}
+@media (max-width: 560px) {
+  .engine-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .engine-card {
     flex-wrap: wrap;
   }
 }

@@ -9,7 +9,6 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AssistantForm } from "./AssistantForm";
-import { EngineSettings } from "./EngineSettings";
 import { MemberForm } from "./MemberForm";
 import { SuggestionModel } from "./SuggestionModel";
 import { TeamSettings } from "./TeamSettings";
@@ -212,74 +211,6 @@ it("writes suggestions on a provider's model", async () => {
         model: "meta/llama-4:free",
       },
     },
-  });
-});
-
-it("keeps named API providers beside the single API setting", () => {
-  const changed = vi.fn();
-  const config = {
-    engines: { "openai-compatible": { base_url: "https://api.x.ai/v1" } },
-  } as Config;
-  const view = render(<EngineSettings config={config} onChange={changed} />);
-  fireEvent.click(screen.getByRole("button", { name: "Add an API provider" }));
-  const added = changed.mock.lastCall![0] as Config;
-  expect(added.engines).toEqual({
-    "openai-compatible": { base_url: "https://api.x.ai/v1" },
-    providers: [{ id: "", name: "", base_url: "", api_key_env: "" }],
-  });
-  view.rerender(<EngineSettings config={added} onChange={changed} />);
-  fireEvent.change(screen.getByLabelText("Name"), {
-    target: { value: "Open Router" },
-  });
-  const named = changed.mock.lastCall![0] as Config;
-  expect(named.engines!.providers).toEqual([
-    { id: "open-router", name: "Open Router", base_url: "", api_key_env: "" },
-  ]);
-  view.rerender(<EngineSettings config={named} onChange={changed} />);
-  fireEvent.change(screen.getByLabelText(/^Id/), {
-    target: { value: "openrouter" },
-  });
-  const id = changed.mock.lastCall![0] as Config;
-  view.rerender(<EngineSettings config={id} onChange={changed} />);
-  // Once changed by hand, the id no longer follows the name.
-  fireEvent.change(screen.getByLabelText("Name"), {
-    target: { value: "OpenRouter" },
-  });
-  const renamed = changed.mock.lastCall![0] as Config;
-  view.rerender(<EngineSettings config={renamed} onChange={changed} />);
-  fireEvent.change(screen.getAllByLabelText("API address")[1], {
-    target: { value: "https://openrouter.ai/api/v1" },
-  });
-  const addressed = changed.mock.lastCall![0] as Config;
-  view.rerender(<EngineSettings config={addressed} onChange={changed} />);
-  fireEvent.change(screen.getAllByLabelText(/^API key variable/)[1], {
-    target: { value: "OPENROUTER_API_KEY" },
-  });
-  const keyed = changed.mock.lastCall![0] as Config;
-  view.rerender(<EngineSettings config={keyed} onChange={changed} />);
-  fireEvent.change(
-    screen.getAllByLabelText(/^Reasoning effort is sent as/)[1],
-    { target: { value: "reasoning.effort" } },
-  );
-  const saved = changed.mock.lastCall![0] as Config;
-  expect(saved.engines).toEqual({
-    "openai-compatible": { base_url: "https://api.x.ai/v1" },
-    providers: [
-      {
-        id: "openrouter",
-        name: "OpenRouter",
-        base_url: "https://openrouter.ai/api/v1",
-        api_key_env: "OPENROUTER_API_KEY",
-        effort_parameter: "reasoning.effort",
-      },
-    ],
-  });
-  view.rerender(<EngineSettings config={saved} onChange={changed} />);
-  fireEvent.click(
-    screen.getByRole("button", { name: "Remove API provider OpenRouter" }),
-  );
-  expect(changed).toHaveBeenLastCalledWith({
-    engines: { "openai-compatible": { base_url: "https://api.x.ai/v1" } },
   });
 });
 

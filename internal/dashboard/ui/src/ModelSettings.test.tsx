@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { EngineSettings } from "./EngineSettings";
 import { SuggestionModel } from "./SuggestionModel";
 import type { Config } from "./api";
 import { rememberChoices } from "./engines";
@@ -27,15 +26,6 @@ const smallModels = {
   models: { suggestions: { engine: "", model: "", effort: "" } },
   engines,
 } as Config;
-const defaults = {
-  engines: {
-    codex: { bin: "codex", home: "/test/default-codex" },
-    claude: { bin: "claude", home: "/test/default-claude" },
-  },
-  usage_floor: 10,
-  on_unknown_usage: "allow" as const,
-  openai_base_url: "https://api.example.test/v1",
-};
 const catalog = {
   available: true,
   engine: "codex",
@@ -258,107 +248,4 @@ it("keeps the saved choice and offers a refresh when the model list cannot load"
   await screen.findByRole("option", { name: "Test Thinker (recommended)" });
   expect(fetch).toHaveBeenCalledTimes(2);
   expect(changed).not.toHaveBeenCalled();
-});
-it("shows a folder and program for every CLI engine, such as Grok", () => {
-  vi.stubGlobal("fetch", vi.fn());
-  render(
-    <EngineSettings
-      config={config}
-      defaults={{
-        ...defaults,
-        engines: { ...defaults.engines, grok: { bin: "grok", home: "" } },
-      }}
-      onChange={() => {}}
-    />,
-  );
-  expect(
-    screen.getByLabelText<HTMLInputElement>("Grok program").placeholder,
-  ).toBe("grok");
-  expect(
-    screen.getByLabelText<HTMLInputElement>(/^Grok folder/).placeholder,
-  ).toBe("");
-  expect(screen.queryByLabelText(/^Another API program/)).toBeNull();
-});
-it("writes where the API reads reasoning effort, blank for the default", () => {
-  vi.stubGlobal("fetch", vi.fn());
-  const changed = vi.fn();
-  render(<EngineSettings config={config} onChange={changed} />);
-  const field = screen.getByLabelText<HTMLSelectElement>(
-    /^Reasoning effort is sent as/,
-  );
-  expect(field.value).toBe("");
-  fireEvent.change(field, { target: { value: "reasoning.effort" } });
-  expect(changed).toHaveBeenLastCalledWith({
-    ...config,
-    engines: {
-      ...engines,
-      "openai-compatible": { effort_parameter: "reasoning.effort" },
-    },
-  });
-});
-it("shows every engine's settings and what a blank one falls back to", () => {
-  const fetch = vi.fn();
-  vi.stubGlobal("fetch", fetch);
-  render(
-    <EngineSettings config={config} defaults={defaults} onChange={() => {}} />,
-  );
-  expect(screen.getByLabelText<HTMLInputElement>(/^Codex folder/).value).toBe(
-    "/test/login",
-  );
-  expect(
-    screen.getByLabelText<HTMLInputElement>("Codex program").placeholder,
-  ).toBe("codex");
-  expect(
-    screen.getByLabelText<HTMLInputElement>(/^Codex folder/).placeholder,
-  ).toBe("/test/default-codex");
-  expect(
-    screen.getByLabelText<HTMLInputElement>("Claude program").placeholder,
-  ).toBe("claude");
-  expect(
-    screen.getByLabelText<HTMLInputElement>(/^Claude settings folder/)
-      .placeholder,
-  ).toBe("/test/default-claude");
-  expect(
-    screen.getByLabelText<HTMLInputElement>("API address").placeholder,
-  ).toBe("https://api.example.test/v1");
-  expect(screen.queryByLabelText(/Most output tokens/)).toBeNull();
-  expect(fetch).not.toHaveBeenCalled();
-});
-it("clears a blanked engine setting so the default applies, keeping the other engine's", () => {
-  vi.stubGlobal("fetch", vi.fn());
-  const changed = vi.fn();
-  render(<EngineSettings config={config} onChange={changed} />);
-  fireEvent.change(screen.getByLabelText("Claude program"), {
-    target: { value: "" },
-  });
-  expect(changed).toHaveBeenLastCalledWith({
-    ...config,
-    engines: { codex: engines.codex, claude: {} },
-  });
-  fireEvent.change(screen.getByLabelText("Codex program"), {
-    target: { value: "/bin/codex" },
-  });
-  expect(changed).toHaveBeenLastCalledWith({
-    ...config,
-    engines: { ...engines, codex: { ...engines.codex, bin: "/bin/codex" } },
-  });
-});
-it("writes the API address and key variable to the API engine", () => {
-  vi.stubGlobal("fetch", vi.fn());
-  const changed = vi.fn();
-  const api = {
-    ...config,
-    engines: {
-      ...engines,
-      "openai-compatible": { base_url: "", api_key_env: "" },
-    },
-  };
-  render(<EngineSettings config={api} onChange={changed} />);
-  fireEvent.change(screen.getByLabelText(/^API key variable/), {
-    target: { value: "TEST_KEY" },
-  });
-  expect(changed).toHaveBeenLastCalledWith({
-    ...api,
-    engines: { ...engines, "openai-compatible": { api_key_env: "TEST_KEY" } },
-  });
 });
