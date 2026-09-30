@@ -329,6 +329,7 @@ export interface Finding {
   note: string;
 }
 export interface Verdict {
+  text_version?: number;
   revision: number;
   /** Exactly what was checked: the commit, or a document draft's digest. */
   ref?: string;
@@ -548,6 +549,7 @@ export interface Task {
   checking?: string;
   /** With the designer for design input, in the stage of whoever asked. */
   with_designer?: boolean;
+  text_version?: number;
   /** Waiting on a decision the owner has already made; it resumes next. */
   answered?: boolean;
   detail?: string;

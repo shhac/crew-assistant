@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Avatar } from "./Avatar";
-import { engineLabel } from "./engines";
-import { kindsLabel, memberOf, roleAtWork, taskRoles } from "./members";
+import { MemberIdentity } from "./MemberIdentity";
+import { stageFlow } from "./taskFlow";
+import { holds, memberOf, roleAtWork, taskRoles } from "./members";
 import { MessageForm, MessageView } from "./TeamThread";
 import { isCode, taskPlaybook } from "./stages";
 import { waitingLine, workingParts } from "./turns";
@@ -45,6 +45,22 @@ export function MemberPanel({
   const { steps, error } = useSteps(task, seat, state);
   useEffect(() => back.current?.focus(), []);
   const messages = (task.messages ?? []).filter((m) => m.to === seat);
+  const stages = stageFlow(task, project, state).filter(
+    (r) => r.role?.name === seat,
+  );
+  const recordPending =
+    stages.length > 0 &&
+    !holds(role ?? {}, "pm") &&
+    !(holds(role ?? {}, "implementer") && task.revisions?.length);
+  const pending =
+    stages.every((r) => r.state === "not-started" && !r.previous.length) &&
+    !state.turns.some((t) => t.task_id === task.id && t.seat === seat) &&
+    !messages.length &&
+    task.plan?.role !== seat &&
+    !task.verdicts?.some((v) => v.role === seat) &&
+    !task.design?.some((d) => d.designer === seat && d.answered_at) &&
+    !steps?.length &&
+    (recordPending || (steps !== undefined && !error));
   const made = isCode(taskPlaybook(task, project)) ? "change" : "draft";
   return (
     <section className="member-panel" aria-labelledby="member-title">
@@ -59,38 +75,59 @@ export function MemberPanel({
         </button>
       </div>
       <header className="member-header">
-        {member && <Avatar of={member} size={40} />}
-        <div>
-          <h2 id="member-title">{seat}</h2>
-          {role && (
-            <p className="muted small">
-              {[
-                kindsLabel(role.kinds),
-                [engineLabel(role.engine), role.model]
-                  .filter(Boolean)
-                  .join(" "),
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          )}
-        </div>
+        <MemberIdentity
+          role={role ?? { name: seat, engine: "", kinds: [] }}
+          member={member}
+          size={40}
+          headingId="member-title"
+        />
       </header>
+      <ErrorNotice error={error} />
       {!role ? (
         <p className="muted">{seat} isn't on this request's team.</p>
       ) : (
         <>
-          <MemberStatus task={task} seat={seat} state={state} steps={steps} />
-          <ErrorNotice error={error} />
-          <Timeline
-            steps={steps ?? []}
-            messages={messages}
-            seat={seat}
-            loaded={!!steps}
-            renderMessage={(m) => (
-              <MessageView key={m.id} message={m} member={member} made={made} />
-            )}
-          />
+          {pending ? (
+            <section className="task-member-pending" aria-label="Not started">
+              <p>
+                <Icon name="Clock" size={18} /> <strong>Not started</strong>
+              </p>
+              {!stages.length && (
+                <p className="soft">{seat} has no stage on this request.</p>
+              )}
+              {[...new Set(stages.map((r) => r.support))].map((support) => (
+                <p key={support} className="soft">
+                  {support}
+                </p>
+              ))}
+              <p className="muted small">
+                No work from {seat} on this request yet.
+              </p>
+            </section>
+          ) : (
+            <>
+              <MemberStatus
+                task={task}
+                seat={seat}
+                state={state}
+                steps={steps}
+              />
+              <Timeline
+                steps={steps ?? []}
+                messages={messages}
+                seat={seat}
+                loaded={!!steps}
+                renderMessage={(m) => (
+                  <MessageView
+                    key={m.id}
+                    message={m}
+                    member={member}
+                    made={made}
+                  />
+                )}
+              />
+            </>
+          )}
           <MessageForm
             project={project}
             task={task}

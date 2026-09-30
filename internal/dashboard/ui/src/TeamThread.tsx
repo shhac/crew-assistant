@@ -6,14 +6,9 @@ import {
   taskPlaybook,
   verdictOutcome,
 } from "./stages";
-import {
-  kindsLabel,
-  memberOf,
-  roleAtWork,
-  taskRoles,
-  workingKind,
-  workingSeats,
-} from "./members";
+import { kindLabel, memberOf, workingKind } from "./members";
+import { stageFlow } from "./taskFlow";
+import { MemberIdentity } from "./MemberIdentity";
 import { Avatar } from "./Avatar";
 import { ErrorNotice, Icon, Pill, counted, sinceLabel, useAction } from "./ui";
 import {
@@ -55,12 +50,8 @@ function prompt(role: Role | undefined, code: boolean) {
   return "Ask the reviewer to check something";
 }
 
-/**
- * A request's team, one entry per seat, each opening that member's panel.
- * The conversation itself lives in the panel; here each says only whether
- * it is at work and whether a message to it is waiting.
- */
-export function TeamSeats({
+/** Ordered task stages; member panels remain addressed by seat. */
+export function TeamFlow({
   project,
   task,
   state,
@@ -69,53 +60,145 @@ export function TeamSeats({
   project: Project;
   task: Task;
   state: State;
-  onOpen: (seat: string) => void;
+  onOpen: (seat: string, stage: string) => void;
 }) {
-  const team = taskRoles(task, project);
-  if (!team.length) return null;
-  const working = new Set(workingSeats(task, state.turns).map((r) => r.name));
-  const next = finished(task) ? undefined : roleAtWork(task)?.name;
+  const rows = stageFlow(task, project, state);
+  if (!rows.length) return null;
+  // Counts belong to the current, then next, then last occurrence of a seat.
+  const countRows = new Map<string, string>();
+  for (const row of rows) {
+    if (!row.role) continue;
+    const own = rows.filter((r) => r.role?.name === row.role?.name);
+    countRows.set(
+      row.role.name,
+      (own.find((r) => r.state === "working" || r.state === "interrupted") ??
+        own.find((r) => r.state === "not-started") ??
+        own.at(-1))!.key,
+    );
+  }
   return (
     <section className="section" aria-label="Team">
       <h3>Team</h3>
-      <ul className="seats">
-        {team.map((r) => {
-          const member = memberOf(r, state.members);
-          const messages = (task.messages ?? []).filter((m) => m.to === r.name);
+      <ol className="task-stage-flow">
+        {rows.map((row) => {
+          const messages =
+            countRows.get(row.role?.name ?? "") === row.key
+              ? (task.messages ?? []).filter((m) => m.to === row.role?.name)
+              : [];
           const open = messages.filter(isOpenMessage).length;
-          return (
-            <li key={r.name}>
-              <button
-                type="button"
-                className="seat"
-                data-seat={r.name}
-                onClick={() => onOpen(r.name)}
+          const content = (
+            <>
+              <span
+                className="task-stage-marker"
+                aria-hidden="true"
+                data-progress={row.state}
               >
-                {member && <Avatar of={member} size={24} />}
-                <span className="seat-name">{r.name}</span>
-                <span className="muted small">{kindsLabel(r.kinds)}</span>
-                <span className="seat-note small">
-                  {working.has(r.name) ? (
-                    <Pill tone="work" dot>
-                      Working now
-                    </Pill>
-                  ) : next === r.name ? (
-                    <span className="muted">Up next</span>
-                  ) : null}
-                  {open > 0 ? (
-                    <Pill tone="wait">{counted(open, "message")} waiting</Pill>
-                  ) : messages.length > 0 ? (
-                    <span className="muted">
-                      {counted(messages.length, "message")}
-                    </span>
-                  ) : null}
-                </span>
-                <Icon name="Chevron" size={14} />
-              </button>
+                {row.state === "working" ? (
+                  <span className="dot" />
+                ) : (
+                  <Icon
+                    name={row.state === "done" ? "Check" : "Clock"}
+                    size={18}
+                  />
+                )}
+              </span>
+              <span className="task-stage-content">
+                <strong>
+                  {row.label}
+                  {row.roundLabel && ` · ${row.roundLabel}`}
+                </strong>
+                {row.role && (
+                  <MemberIdentity
+                    role={row.role}
+                    member={memberOf(row.role, state.members)}
+                    detail={kindLabel(row.kind)}
+                  />
+                )}
+                <span className="soft small">{row.support}</span>
+                {row.exception?.tone === "block" && (
+                  <span className="soft small">{row.exception.text}</span>
+                )}
+              </span>
+              <span className="task-stage-meta small">
+                <Pill
+                  tone={
+                    row.state === "working"
+                      ? "work"
+                      : row.state === "done"
+                        ? "done"
+                        : row.state === "interrupted"
+                          ? ""
+                          : "wait"
+                  }
+                  dot={row.state === "working"}
+                >
+                  {row.state === "working"
+                    ? "Working now"
+                    : row.state === "done"
+                      ? "Done"
+                      : row.state === "interrupted"
+                        ? "Incomplete"
+                        : "Not started"}
+                </Pill>
+                {row.exception && (
+                  <Pill
+                    tone={
+                      row.exception.tone === "stopped" ? "" : row.exception.tone
+                    }
+                  >
+                    {row.exception.tone === "block" && (
+                      <Icon name="Alert" size={14} />
+                    )}{" "}
+                    {row.exception.tone === "block"
+                      ? "Blocked"
+                      : row.exception.text}
+                  </Pill>
+                )}
+                {open > 0 ? (
+                  <span className="muted">
+                    {counted(open, "message")} waiting
+                  </span>
+                ) : messages.length > 0 ? (
+                  <span className="muted">
+                    {counted(messages.length, "message")}
+                  </span>
+                ) : null}
+                {row.role && <Icon name="Chevron" size={14} />}
+              </span>
+            </>
+          );
+          return (
+            <li key={row.key} data-progress={row.state}>
+              {row.role ? (
+                <button
+                  type="button"
+                  className="task-stage-row"
+                  data-seat={row.role.name}
+                  data-stage={row.key}
+                  onClick={() => onOpen(row.role!.name, row.key)}
+                >
+                  {content}
+                </button>
+              ) : (
+                <div className="task-stage-row">{content}</div>
+              )}
+              {row.previous.length > 0 && (
+                <details className="task-stage-previous small">
+                  <summary>Previous work ({row.previous.length})</summary>
+                  <ul>
+                    {row.previous.map((p, i) => (
+                      <li key={i}>
+                        {p.label} · {p.outcome}
+                        {p.at && ` · ${sinceLabel(p.at)}`}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </li>
           );
         })}
-      </ul>
+      </ol>
     </section>
   );
 }

@@ -86,6 +86,19 @@ function rule(css: string, selector: string) {
 }
 
 describe("the bounded box's style", () => {
+  it("keeps the stage connector on the full list item, through padding and disclosures", () => {
+    const track = rule(requestCSS, ".task-stage-flow > li");
+    expect(track).toContain("var(--line)");
+    expect(track).toMatch(/1px 100%\s+no-repeat/);
+    expect(requestCSS).not.toContain(".task-stage-marker::after");
+    expect(requestCSS).not.toContain(".task-stage-flow > li + li");
+    expect(rule(requestCSS, ".task-stage-flow > li:first-child")).toContain(
+      "calc(100% - 24px)",
+    );
+    expect(rule(requestCSS, ".task-stage-flow > li:last-child")).toContain(
+      "1px 24px",
+    );
+  });
   it("has a height of its own that scrolls by itself, on any screen", () => {
     const box = rule(requestCSS, ".bounded");
     expect(box).toContain("max-height: min(60vh, 560px);");

@@ -1196,15 +1196,17 @@ describe("a team member's panel", () => {
   const writing = (overrides: Partial<Task> = {}) =>
     started({ status: "writing", stage: "implementing", ...overrides });
   const seatButton = (name: string) =>
-    within(screen.getByRole("region", { name: "Team" })).getByRole("button", {
-      name: new RegExp(`^${name}`),
-    });
+    [
+      ...screen
+        .getByRole("region", { name: "Team" })
+        .querySelectorAll<HTMLButtonElement>("button[data-seat]"),
+    ].find((b) => b.dataset.seat === name)!;
   const box = (panel: HTMLElement) =>
     within(panel).getByLabelText("Message") as HTMLTextAreaElement;
   beforeEach(() => sessionStorage.clear());
   afterEach(() => window.history.replaceState(null, "", "/"));
 
-  it("shows each member of the team with a way in, and keeps the conversation for the panel", () => {
+  it("shows stages in work order with a way in, and keeps the conversation for the member panel", () => {
     show(
       project(),
       {
@@ -1231,8 +1233,8 @@ describe("a team member's panel", () => {
     expect(
       within(team)
         .getAllByRole("button")
-        .map((b) => b.getAttribute("data-seat")),
-    ).toEqual(["Implementer", "Reviewer", "QA"]);
+        .map((b) => b.getAttribute("data-stage")),
+    ).toEqual(["implementer:Implementer", "reviewer:Reviewer", "qa:QA"]);
     expect(
       within(seatButton("Implementer")).getByText("Working now"),
     ).toBeTruthy();
@@ -1263,7 +1265,13 @@ describe("a team member's panel", () => {
       ),
     );
     const panel = await screen.findByRole("region", { name: "Reviewer" });
-    expect(within(panel).getByText("Reviewer · Codex")).toBeTruthy();
+    expect(within(panel).getByRole("img", { name: "Codex" })).toBeTruthy();
+    expect(
+      within(panel).getByRole("region", { name: "Not started" }),
+    ).toBeTruthy();
+    expect(
+      within(panel).queryByText(/Nothing from|last active|Activity/),
+    ).toBeNull();
     expect(screen.queryByRole("region", { name: "Plan" })).toBeNull();
     const back = within(panel).getByRole("button", {
       name: "Back to the request",
@@ -1291,6 +1299,27 @@ describe("a team member's panel", () => {
     );
     expect(window.location.hash).toBe("#/projects/p1/requests/t1");
     expect(screen.getByRole("region", { name: "Plan" })).toBeTruthy();
+  });
+
+  it("returns focus to Build when the same seat also researches", async () => {
+    const roles = [
+      { name: "Ash", kinds: ["researcher", "implementer"], engine: "claude" },
+      ...codeTeam().roles.slice(1),
+    ];
+    routed(project(), { tasks: [writing({ roles })] }, requestHref("p1", "t1"));
+    const build = () =>
+      document.querySelector<HTMLButtonElement>(
+        'button[data-stage="implementer:Ash"]',
+      )!;
+    expect(
+      document.querySelector('button[data-stage="researcher:Ash"]'),
+    ).toBeTruthy();
+    fireEvent.click(build());
+    const panel = await screen.findByRole("region", { name: "Ash" });
+    fireEvent.click(
+      within(panel).getByRole("button", { name: "Back to the request" }),
+    );
+    await waitFor(() => expect(document.activeElement).toBe(build()));
   });
 
   it("shows what the member was asked, wrote and ran, with long output folded away", async () => {
@@ -1568,7 +1597,7 @@ describe("a team member's panel", () => {
     expect(screen.getByRole("button", { name: "Send to Rune" })).toBeTruthy();
   });
 
-  it("lists a seat that only researches or keeps the list, with nothing to send it", () => {
+  it("shows research in the flow and keeps read-only seats accessible through their routes", () => {
     const researcher = {
       name: "Researcher",
       kinds: ["researcher"],
@@ -1587,11 +1616,11 @@ describe("a team member's panel", () => {
       roles: [researcher, ada, ...codeTeam().roles.slice(1), pia],
     });
     show(project(), { tasks: [researching] }, { request: "t1" });
-    expect(within(seatButton("Researcher")).getByText("Up next")).toBeTruthy();
     expect(
-      within(seatButton("Ada")).getByText("Researcher and implementer"),
+      within(seatButton("Researcher")).getByText("Working now"),
     ).toBeTruthy();
-    expect(seatButton("Pia")).toBeTruthy();
+    expect(within(seatButton("Ada")).getByText("Implementer")).toBeTruthy();
+    expect(seatButton("Pia")).toBeUndefined();
     cleanup();
     for (const seat of ["Researcher", "Pia"]) {
       show(project(), { tasks: [researching] }, { request: "t1", seat });

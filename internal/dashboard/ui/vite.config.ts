@@ -17,6 +17,6 @@ export default defineConfig({
   test: {
     testTimeout: 15000,
     setupFiles: ["./src/testSetup.ts"],
-    css: { include: [/styles\/(request|chat)\.css/] },
+    css: { include: [/styles\/(request|chat|base|tokens)\.css/] },
   },
 });

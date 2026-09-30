@@ -8,7 +8,7 @@ import { RequestEdits, RequestNotes } from "./RequestNotes";
 import { RequestDesign, RequestPlan, RequestResearch } from "./RequestPlan";
 import { RequestRelations } from "./RequestRelations";
 import { TaskActivity } from "./TaskActivity";
-import { TeamSeats } from "./TeamThread";
+import { TeamFlow } from "./TeamThread";
 import {
   decisionFor,
   finished,
@@ -74,16 +74,21 @@ export function RequestPanel({
   // back to both.
   const scrolled = useRef(0);
   const lastSeat = useRef(seat);
+  const lastStage = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
     const was = lastSeat.current;
     lastSeat.current = seat;
     if (seat || !was || !body.current) return;
     body.current.scrollTop = scrolled.current;
-    [...body.current.querySelectorAll<HTMLButtonElement>("button[data-seat]")]
-      .find((b) => b.dataset.seat === was)
-      ?.focus();
+    const buttons = [
+      ...body.current.querySelectorAll<HTMLButtonElement>("button[data-seat]"),
+    ].filter((b) => b.dataset.seat === was);
+    (
+      buttons.find((b) => b.dataset.stage === lastStage.current) ?? buttons[0]
+    )?.focus();
   }, [seat]);
-  const openSeat = (name: string) => {
+  const openSeat = (name: string, stage: string) => {
+    lastStage.current = stage;
     scrolled.current = body.current?.scrollTop ?? 0;
     onSeat(name);
   };
@@ -172,7 +177,7 @@ export function RequestPanel({
               full
             />
           )}
-          <TeamSeats
+          <TeamFlow
             project={project}
             task={task}
             state={state}

@@ -255,13 +255,15 @@ describe("several requests under way at once", () => {
       "Claudius #2 working",
     );
     expect(within(seat("Claudius #2")).getByText("Working now")).toBeTruthy();
-    expect(within(seat("Claudius")).queryByText("Working now")).toBeNull();
-    expect(within(seat("Claudius")).queryByText("Up next")).toBeNull();
+    expect(seat("Claudius")).toBeNull();
     cleanup();
     show(project(), busy(), { request: "t3" });
     expect(within(seat("Rune")).getByText("Working now")).toBeTruthy();
     expect(within(seat("Quinn")).getByText("Working now")).toBeTruthy();
-    expect(within(seat("Claudius #2")).queryByText("Working now")).toBeNull();
+    expect(seat("Claudius #2")).toBeNull();
+    expect(
+      within(seat("Claudius")).getByText(/Builder not recorded/),
+    ).toBeTruthy();
   });
 
   it("says on the Team tab which request each seat is on, and where it is", () => {
