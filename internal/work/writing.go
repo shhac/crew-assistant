@@ -150,7 +150,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	// The draft counts only once the project's records hold it; the handoff
 	// carries the round's whole outcome until then.
 	revision.Summary = text.Clip(reply, 2000)
-	h := core.Handoff{Revision: revision, Writer: writer, Session: result.Session, Seen: seen, Reply: reply, Request: applied, WakeErrors: wakeErrors, Unreachable: parseOwnerSteps(unmet, n, t.Criteria, t.OwnerSteps)}
+	h := core.Handoff{Revision: revision, Writer: writer, Session: result.Session, Seen: seen, Reply: reply, Request: applied, WakeErrors: wakeErrors, Unreachable: parseOwnerSteps(unmet, n, t.Criteria, t.OwnersAlready())}
 	if ok {
 		r.Learnings = nil
 		h.Seat = &r

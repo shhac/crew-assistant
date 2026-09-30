@@ -370,3 +370,17 @@ func TestAnOwnerStepIsNotRaisedAgain(t *testing.T) {
 		t.Fatalf("raised: %+v", got)
 	}
 }
+
+// A requirement of the brief the owner took on for a task is theirs for it:
+// the team isn't asked to meet it, and raising it again is ignored.
+func TestABriefRequirementTheOwnerTookIsNotTheTeams(t *testing.T) {
+	p := core.Project{Brief: core.Brief{Goal: "Tools", Criteria: []string{"CI is green on every platform", "The README says how"}}}
+	task := core.Task{Objective: "Write the design", OwnerSteps: []string{"Check the CI run"}, OwnerTook: []string{"CI is green on every platform"}}
+	brief := briefText(p, task)
+	if strings.Contains(brief, "1. CI is green") || !strings.Contains(brief, "The README says how") || !strings.Contains(brief, "Check the CI run") {
+		t.Fatalf("brief:\n%s", brief)
+	}
+	if got := parseOwnerSteps(`[{"requirement": "CI is green on every platform", "why": "no CI here"}]`, 2, task.Criteria, task.OwnersAlready()); len(got) != 0 {
+		t.Fatalf("raised again: %+v", got)
+	}
+}

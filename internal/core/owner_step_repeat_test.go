@@ -29,3 +29,27 @@ func TestAnOwnerStepProposedAgainIsKeptOnce(t *testing.T) {
 		t.Fatalf("owner steps: %q", again.OwnerSteps)
 	}
 }
+
+// A requirement of the brief the owner took on for a task stays in the brief,
+// so the team may raise it again; proposing it again adds no second step.
+func TestABriefRequirementTakenOnIsKeptOnce(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	task, err := s.QueueTask(testContext, p.ID, TaskInput{Objective: "Write the design"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	brief := p.Brief.Criteria[0]
+	for _, step := range []string{"Check CI is green on every platform", "Confirm the CI run passes everywhere"} {
+		d, err := s.OpenTaskDecision(testContext, task.ID, DecisionEscalation, DecisionInput{Title: "Owner step?", Context: "c", Recommendation: "r", Choices: []string{"Make it an owner step", "Stop"}, OwnerStep: &OwnerStep{Criterion: brief, Step: step}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task, err = s.MakeOwnerStep(testContext, task.ID, d.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(task.OwnerSteps) != 1 || len(task.OwnerTook) != 1 || task.OwnerTook[0] != brief {
+		t.Fatalf("steps %q, took %q", task.OwnerSteps, task.OwnerTook)
+	}
+}

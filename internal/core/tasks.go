@@ -177,6 +177,10 @@ type Task struct {
 	// the change lands. See owner_steps.go.
 	Unreachable []Unreachable `json:"unreachable,omitempty"`
 	OwnerSteps  []string      `json:"owner_steps,omitempty"`
+	// OwnerTook is each requirement the owner took on as one of those
+	// steps, as the task or its brief states it. One of the brief's stays
+	// in the brief, and is the owner's for this task alone.
+	OwnerTook []string `json:"owner_took,omitempty"`
 	// Proposal is the pull request a task lands through, and the branch the
 	// project owns for it.
 	Proposal  *Proposal `json:"proposal,omitempty"`

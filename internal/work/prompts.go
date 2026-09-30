@@ -21,7 +21,9 @@ func briefText(p core.Project, t core.Task) string {
 		fmt.Fprintf(&b, "Constraints: %s\n", p.Brief.Constraints)
 	}
 	fmt.Fprintf(&b, "\nThis task: %s\n", t.Objective)
-	criteria := append(append([]string{}, p.Brief.Criteria...), t.Criteria...)
+	// A brief's requirement the owner took on for this task stays in the
+	// brief, and is listed with the owner's steps instead.
+	criteria := slices.DeleteFunc(append(slices.Clone(p.Brief.Criteria), t.Criteria...), func(c string) bool { return slices.Contains(t.OwnerTook, c) })
 	if len(criteria) > 0 {
 		b.WriteString("\nThe result must meet every one of these criteria:\n")
 		b.WriteString(numbered(criteria))
