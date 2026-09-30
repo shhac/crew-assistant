@@ -137,7 +137,11 @@ func parsePlan(reply string, designs bool) (core.Plan, []string, string, error) 
 		OutOfScope   []string `json:"out_of_scope"`
 		Questions    []string `json:"questions"`
 		DependsOn    []string `json:"depends_on"`
-		Design       string   `json:"design"`
+		SplitOff     []struct {
+			Title        string   `json:"title"`
+			Requirements []string `json:"requirements"`
+		} `json:"split_off"`
+		Design string `json:"design"`
 	}
 	if err := decodeReply(reply, &in); err != nil {
 		return core.Plan{}, nil, "", errors.New("the plan was not valid JSON")
@@ -171,5 +175,10 @@ func parsePlan(reply string, designs bool) (core.Plan, []string, string, error) 
 	plan.Exists = keep(in.Exists)
 	plan.OutOfScope = keep(in.OutOfScope)
 	plan.Questions = listed(in.Questions, maxPlanItems)
+	for _, part := range in.SplitOff {
+		if title := strings.TrimSpace(part.Title); title != "" && len(plan.SplitOff) < core.MaxSplitOff {
+			plan.SplitOff = append(plan.SplitOff, core.SplitPart{Objective: text.Clip(title, 500), Criteria: listed(part.Requirements, maxPlanItems)})
+		}
+	}
 	return plan, listed(in.DependsOn, maxPlanItems), design, nil
 }

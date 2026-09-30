@@ -18,6 +18,10 @@ export function RequestPlan({ plan }: { plan: Plan }) {
     { label: "If a step stops part-way", items: plan.failure_paths ?? [] },
     { label: "Tests", items: plan.tests ?? [] },
     { label: "Out of scope", items: plan.out_of_scope ?? [] },
+    {
+      label: "Split off",
+      items: (plan.split_off ?? []).map((part) => part.objective),
+    },
   ].filter((p) => p.items.length > 0);
   const points = parts.reduce((n, p) => n + p.items.length, 0);
   const [open, setOpen] = useState(points <= foldAfter);

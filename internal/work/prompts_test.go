@@ -3,6 +3,7 @@ package work
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -219,5 +220,43 @@ func TestTheResearcherPlansFailurePathsAndTestsAndFlagsASplit(t *testing.T) {
 	}
 	if !strings.Contains(d, split) || strings.Contains(d, "failure_paths") || strings.Contains(d, "the failure paths") {
 		t.Fatalf("a document's plan asks only for the split: %s", d)
+	}
+}
+
+// Whatever a plan leaves for later it lists as parts to split off, which
+// everyone working on the task then sees are not theirs.
+func TestAPlanListsWhatItSplitsOff(t *testing.T) {
+	code := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit}}
+	docs := core.Project{Brief: core.Brief{Goal: "Write notes"}}
+	task := core.Task{Objective: "Add Feature"}
+	narrows := "whenever the plan narrows the task and leaves part of it for later, each part left over, under split_off with a title and requirements. Each is queued as a new task that waits for this one"
+	contract := `"split_off": [{"title": "a part left for later", "requirements": ["..."]}]}`
+	for _, prompt := range []string{researcherPrompt(code, task, nil), researcherPrompt(docs, task, nil)} {
+		if !strings.Contains(prompt, narrows) || !strings.Contains(prompt, contract) || !strings.Contains(prompt, "Once the owner agrees, list the parts left over under split_off.") {
+			t.Fatalf("the researcher is not asked for split parts: %s", prompt)
+		}
+	}
+
+	parts := []map[string]any{{"title": " ", "requirements": []string{"lost"}}, {"title": " Export CSV ", "requirements": []string{"Every column", " ", "Quoted"}}}
+	for i := range core.MaxSplitOff + 2 {
+		parts = append(parts, map[string]any{"title": fmt.Sprintf("Part %d", i)})
+	}
+	reply, _ := json.Marshal(map[string]any{"summary": "Only the core.", "split_off": parts})
+	plan, _, _, err := parsePlan(string(reply), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.SplitOff) != core.MaxSplitOff || plan.SplitOff[0].Objective != "Export CSV" || !slices.Equal(plan.SplitOff[0].Criteria, []string{"Every column", "Quoted"}) || plan.SplitOff[1].Objective != "Part 0" {
+		t.Fatalf("split off %+v", plan.SplitOff)
+	}
+	shown := planText(core.Task{Plan: &plan})
+	if !strings.Contains(shown, "Split off into later tasks (not part of this one):\n- Export CSV\n- Part 0\n") {
+		t.Fatalf("the plan as shown: %s", shown)
+	}
+	if replan := replanText(core.Task{Plan: &plan}); !strings.Contains(replan, "- Export CSV\n") {
+		t.Fatalf("planning again shows what was split off: %s", replan)
+	}
+	if plain := planText(core.Task{Plan: &core.Plan{Summary: "All of it."}}); strings.Contains(plain, "Split off") {
+		t.Fatalf("a plan that splits nothing off: %s", plain)
 	}
 }

@@ -125,6 +125,10 @@ type Task struct {
 	// LinkedBy records who set each of this task's links, keyed by relation
 	// and task; see links.go.
 	LinkedBy map[string]LinkMark `json:"linked_by,omitempty"`
+	// SplitFrom is the task this one was split off from by that task's
+	// researcher, which a later plan for it matches rather than queues again;
+	// see plans.go.
+	SplitFrom string `json:"split_from,omitempty"`
 	// Blocks names the tasks that depend on this one. Derived with Stage.
 	Blocks   []string  `json:"blocks,omitempty"`
 	Verdicts []Verdict `json:"verdicts"`

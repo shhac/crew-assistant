@@ -94,6 +94,34 @@ func TestATaskThatDependsOnUnlandedWorkWaitsAndIsResearchedAgain(t *testing.T) {
 	}
 }
 
+func TestWhatAPlanSplitsOffIsQueuedToWaitForTheTask(t *testing.T) {
+	a, runner, p := plannedCode(t, 6, `{"summary": "Only export.", "changes": ["add export.go"], "split_off": [{"title": "Import CSV", "requirements": ["Reads what export writes"]}]}`)
+	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Export and import CSV"})
+	task = taskNow(t, a, task.ID)
+	snap, _ := a.Core.Snapshot(context.Background())
+	var split []core.Task
+	for _, other := range snap.Tasks {
+		if other.SplitFrom == task.ID {
+			split = append(split, other)
+		}
+	}
+	if len(split) != 1 || split[0].Objective != "Import CSV" || !slices.Equal(split[0].Criteria, []string{"Reads what export writes"}) || split[0].Status != core.TaskQueued || !slices.Equal(split[0].DependsOn, []string{task.ID}) || len(split[0].WaitsFor) != 1 {
+		t.Fatalf("split off %+v", split)
+	}
+	if len(task.Revisions) == 0 || task.Plan.SplitOff[0].Task != split[0].ID {
+		t.Fatalf("the task goes on without the part: %s %+v", task.Status, task.Plan)
+	}
+	var told bool
+	for _, spec := range runner.seen {
+		if spec.Write && strings.Contains(spec.Prompt, "Split off into later tasks (not part of this one):\n- Import CSV") {
+			told = true
+		}
+	}
+	if !told {
+		t.Fatal("the implementer was not told what was split off")
+	}
+}
+
 func TestAPlanThatCannotBeReadIsKeptAsWritten(t *testing.T) {
 	a, _, p := plannedCode(t, 6, "no json here", "still no json")
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add A"})

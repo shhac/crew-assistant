@@ -648,6 +648,11 @@ func planText(t core.Task) string {
 	section("What the record must say if a step stops part-way", t.Plan.FailurePaths)
 	section("Tests", t.Plan.Tests)
 	section("Out of scope", t.Plan.OutOfScope)
+	var split []string
+	for _, part := range t.Plan.SplitOff {
+		split = append(split, part.Objective)
+	}
+	section("Split off into later tasks (not part of this one)", split)
 	return b.String()
 }
 
@@ -701,8 +706,9 @@ Plan this task before anything is written. Read what you need to, and change not
 	}
 	b.WriteString(`- what is out of scope, so the implementer does not drift;
 - what is unclear enough that the owner must answer before work starts. Ask only what you cannot reasonably decide; the implementer uses judgment for the rest;
-- which of the project's other unfinished tasks, below, this one cannot start before, because it builds on what they will change.
-If it needs more than about 10 changes or would touch more than about 30 files, it is too big to review well in one piece: ask the owner, in your questions, whether to split it, and say into what.
+- which of the project's other unfinished tasks, below, this one cannot start before, because it builds on what they will change;
+- whenever the plan narrows the task and leaves part of it for later, each part left over, under split_off with a title and requirements. Each is queued as a new task that waits for this one, so this task's implementer leaves it alone.
+If it needs more than about 10 changes or would touch more than about 30 files, it is too big to review well in one piece: ask the owner, in your questions, whether to split it, and say into what. Once the owner agrees, list the parts left over under split_off.
 `)
 	if len(others) > 0 {
 		b.WriteString("\nThe project's other unfinished tasks:\n")
@@ -721,7 +727,7 @@ If it needs more than about 10 changes or would touch more than about 30 files, 
 	if code {
 		changes += `"failure_paths": ["..."], "tests": ["..."], `
 	}
-	plan := `{"summary": "the plan in a few sentences", "exists": ["..."], ` + changes + `"out_of_scope": ["..."], "questions": ["only what the owner must answer"], "depends_on": ["ids of tasks above this one must wait for, each readable (such as CA-3) or canonical"]}`
+	plan := `{"summary": "the plan in a few sentences", "exists": ["..."], ` + changes + `"out_of_scope": ["..."], "questions": ["only what the owner must answer"], "depends_on": ["ids of tasks above this one must wait for, each readable (such as CA-3) or canonical"], "split_off": [{"title": "a part left for later", "requirements": ["..."]}]}`
 	// The reply can ask for design input only while the hand-off is offered,
 	// so the contract a role follows never contradicts the guide above it.
 	if designsFor(t, researcher) && t.DesignsAt(core.TaskResearching) < core.DesignLimit {

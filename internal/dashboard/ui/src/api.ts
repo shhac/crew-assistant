@@ -440,6 +440,8 @@ export interface Plan {
   tests?: string[];
   out_of_scope?: string[];
   questions?: string[];
+  /** Parts left for later, each queued as a task that waits for this one. */
+  split_off?: { objective: string; task?: string }[];
   /** The seat that researched it. */
   role: string;
   at: string;

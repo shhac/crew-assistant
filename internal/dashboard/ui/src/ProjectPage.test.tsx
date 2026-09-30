@@ -871,10 +871,38 @@ describe("a request", () => {
     expect(within(plan).getByText("What exists")).toBeTruthy();
     expect(within(plan).getByText("Add a cache in front of it")).toBeTruthy();
     expect(within(plan).queryByText("Out of scope")).toBeNull();
+    expect(within(plan).queryByText("Split off")).toBeNull();
     expect(within(plan).queryByRole("button")).toBeNull();
     expect(
       within(plan).getByText("Researched by Researcher · 5 min ago"),
     ).toBeTruthy();
+  });
+  it("lists what the plan split off into later tasks", () => {
+    show(
+      project(),
+      {
+        tasks: [
+          started({
+            status: "writing",
+            stage: "implementing",
+            plan: {
+              summary: "Wrap the lookup in a cache.",
+              split_off: [
+                { objective: "Evict old entries", task: "t2" },
+                { objective: "Warm the cache on start", task: "t3" },
+              ],
+              role: "Researcher",
+              at: "2026-09-21T10:00:00Z",
+            },
+          }),
+        ],
+      },
+      { request: "t1" },
+    );
+    const plan = screen.getByRole("region", { name: "Plan" });
+    expect(within(plan).getByText("Split off")).toBeTruthy();
+    expect(within(plan).getByText("Evict old entries")).toBeTruthy();
+    expect(within(plan).getByText("Warm the cache on start")).toBeTruthy();
   });
   it("folds a long plan to its summary until asked", () => {
     show(

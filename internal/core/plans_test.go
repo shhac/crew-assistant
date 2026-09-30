@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -257,6 +258,201 @@ func TestAPlanMovesTheTaskOnAndNeverMakesALoop(t *testing.T) {
 	back, _ := s.RecordPlan(testContext, c.ID, Plan{Summary: "C builds on A"}, []string{"not-a-task", c.ID, a.ID})
 	if back.Status != TaskQueued || back.Plan != nil || back.Base != "" || back.Branch != "" || len(back.WaitsFor) != 1 {
 		t.Fatalf("a task that waits goes back to the queue to plan again later: %+v", back)
+	}
+}
+
+// splitTasks is the tasks split off from id, in the order they were queued.
+func splitTasks(t *testing.T, s *Service, id string) []Task {
+	t.Helper()
+	snap, _ := s.Snapshot(testContext)
+	var out []Task
+	for _, task := range snap.Tasks {
+		if task.SplitFrom == id {
+			out = append(out, task)
+		}
+	}
+	return out
+}
+
+func activityOf(t *testing.T, s *Service, taskID, kind string) []string {
+	t.Helper()
+	snap, _ := s.Snapshot(testContext)
+	var out []string
+	for _, a := range snap.Activity {
+		if a.TaskID == taskID && a.Kind == kind {
+			out = append(out, a.Summary)
+		}
+	}
+	return out
+}
+
+func setStatus(t *testing.T, s *Service, id, status string) {
+	t.Helper()
+	if _, err := s.UpdateTask(testContext, id, func(t *Task, _ *Project) (string, error) {
+		t.Status = status
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAPlanQueuesWhatItSplitsOffAndWhatWaitedWaitsForItToo(t *testing.T) {
+	s, _ := fixture(t)
+	p := plannedProject(t, s)
+	a, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "A"})
+	waiting, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "D", DependsOn: []string{a.ID}})
+	begun, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "E", DependsOn: []string{a.ID}})
+	done, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "F", DependsOn: []string{a.ID}})
+	if started, _, _ := s.NextTask(testContext); started.ID != a.ID {
+		t.Fatal(started)
+	}
+	setStatus(t, s, begun.ID, TaskWriting)
+	setStatus(t, s, done.ID, TaskStopped)
+	planned, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A, not the rest", SplitOff: []SplitPart{
+		{Objective: " Export as CSV ", Criteria: []string{"Every column", " "}},
+		{Objective: "Import CSV"},
+	}}, nil)
+	if err != nil || planned.Status != TaskWriting {
+		t.Fatalf("%+v %v", planned, err)
+	}
+	split := splitTasks(t, s, a.ID)
+	if len(split) != 2 || split[0].Objective != "Export as CSV" || !slices.Equal(split[0].Criteria, []string{"Every column"}) || split[1].Objective != "Import CSV" {
+		t.Fatalf("split off %+v", split)
+	}
+	for _, part := range split {
+		if part.ProjectID != p.ID || part.Status != TaskQueued || !slices.Equal(part.DependsOn, []string{a.ID}) || part.LinkedBy["depends_on:"+a.ID].By != "role:researcher" || part.Ref == "" {
+			t.Fatalf("a split part %+v", part)
+		}
+	}
+	if got := planned.Plan.SplitOff; len(got) != 2 || got[0].Task != split[0].ID || got[1].Task != split[1].ID {
+		t.Fatalf("the plan names %+v", got)
+	}
+	if got := activityOf(t, s, a.ID, "task.split"); len(got) != 1 || got[0] != "Split Export as CSV; Import CSV off A" {
+		t.Fatalf("the original's activity %q", got)
+	}
+	if got := activityOf(t, s, split[0].ID, "task.queued"); len(got) != 1 || got[0] != "Export as CSV split off A" {
+		t.Fatalf("the part's activity %q", got)
+	}
+	snap, _ := s.Snapshot(testContext)
+	d, _ := findSnapshotTask(snap, waiting.ID)
+	if !slices.Equal(d.DependsOn, []string{a.ID, split[0].ID, split[1].ID}) || d.LinkedBy["depends_on:"+split[1].ID].By != "role:researcher" {
+		t.Fatalf("a task that waited for A waits for the parts too: %+v %+v", d.DependsOn, d.LinkedBy)
+	}
+	if got := activityOf(t, s, waiting.ID, "task.linked"); len(got) != 2 {
+		t.Fatalf("its activity %q", got)
+	}
+	for _, id := range []string{begun.ID, done.ID} {
+		if other, _ := findSnapshotTask(snap, id); !slices.Equal(other.DependsOn, []string{a.ID}) || len(activityOf(t, s, id, "task.linked")) != 0 {
+			t.Fatalf("begun or finished work was made to wait: %+v", other)
+		}
+	}
+	// A split part never waits for its sibling.
+	if !slices.Equal(split[1].DependsOn, []string{a.ID}) {
+		t.Fatal(split[1].DependsOn)
+	}
+}
+
+func TestPlanningAgainNeverQueuesAPartTwice(t *testing.T) {
+	s, _ := fixture(t)
+	p := plannedProject(t, s)
+	a, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "A"})
+	s.NextTask(testContext)
+	asked, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", Questions: []string{"Which?"}, SplitOff: []SplitPart{{Objective: "Export CSV"}, {Objective: "Import CSV"}, {Objective: "Print"}}}, nil)
+	if err != nil || asked.Status != TaskResearching || len(splitTasks(t, s, a.ID)) != 3 {
+		t.Fatalf("questions keep the plan and queue its parts: %+v %v", asked, err)
+	}
+	first := splitTasks(t, s, a.ID)
+	// The owner stops one part, and the PM renames another.
+	setStatus(t, s, first[1].ID, TaskStopped)
+	if _, err := s.EditTask(testContext, EditInput{Project: p.ID, Task: first[2].ID, By: "Pim", Kind: RolePM, Objective: "Print a report"}); err != nil {
+		t.Fatal(err)
+	}
+	// A task comes to wait for A while its questions are open.
+	late, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "Late", DependsOn: []string{a.ID}})
+	s.UpdateTask(testContext, a.ID, func(t *Task, _ *Project) (string, error) {
+		t.Plan.Answered = true
+		return "", nil
+	})
+	// Spacing repeated or taken away, and case changed, name the same part.
+	again, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", SplitOff: []SplitPart{{Objective: "export  csv"}, {Objective: "ExportCSV"}, {Objective: "IMPORT CSV"}, {Objective: "print"}, {Objective: "Share"}, {Objective: "share "}}}, nil)
+	if err != nil || again.Status != TaskWriting {
+		t.Fatalf("%+v %v", again, err)
+	}
+	split := splitTasks(t, s, a.ID)
+	if len(split) != 4 || split[3].Objective != "Share" || split[1].Status != TaskStopped {
+		t.Fatalf("only the new part is queued: %+v", split)
+	}
+	var named []string
+	for _, part := range again.Plan.SplitOff {
+		named = append(named, part.Task)
+	}
+	if !slices.Equal(named, []string{split[0].ID, split[1].ID, split[2].ID, split[3].ID}) {
+		t.Fatalf("the plan names %v", named)
+	}
+	// It waits for every part still to do, those queued before included,
+	// but not for the one the owner stopped.
+	snap, _ := s.Snapshot(testContext)
+	waiting, _ := findSnapshotTask(snap, late.ID)
+	if !slices.Equal(waiting.DependsOn, []string{a.ID, split[0].ID, split[2].ID, split[3].ID}) || len(activityOf(t, s, late.ID, "task.linked")) != 3 {
+		t.Fatalf("a task that came to wait for A: %v", waiting.DependsOn)
+	}
+	// Each plan's activity names every part it splits off, those queued
+	// before included, by the title each has now. The clock is frozen, so
+	// the plans' activity has the same time and no order between them.
+	if got := activityOf(t, s, a.ID, "task.split"); len(got) != 2 || !slices.Contains(got, "Split Export CSV; Import CSV; Print a report; Share off A") || !slices.Contains(got, "Split Export CSV; Import CSV; Print off A") {
+		t.Fatalf("the original's activity %q", got)
+	}
+
+	// A plan that only names parts queued before queues nothing and still
+	// names them.
+	s.UpdateTask(testContext, a.ID, func(t *Task, _ *Project) (string, error) {
+		t.Status, t.Plan.Answered = TaskResearching, true
+		return "", nil
+	})
+	reused, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", SplitOff: []SplitPart{{Objective: "Print"}, {Objective: "share"}}}, nil)
+	if err != nil || len(splitTasks(t, s, a.ID)) != 4 || len(reused.Plan.SplitOff) != 2 || reused.Plan.SplitOff[0].Task != split[2].ID || reused.Plan.SplitOff[1].Task != split[3].ID {
+		t.Fatalf("a plan of parts queued before: %+v %v", reused.Plan, err)
+	}
+	if got := activityOf(t, s, a.ID, "task.split"); len(got) != 3 || !slices.Contains(got, "Split Print a report; Share off A") {
+		t.Fatalf("the original's activity %q", got)
+	}
+}
+
+func TestOnlyAKeptPlanSplitsWorkOff(t *testing.T) {
+	s, _ := fixture(t)
+	p := plannedProject(t, s)
+	a, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "A"})
+	b, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "B"})
+	if started, _, _ := s.NextTask(testContext); started.ID != a.ID {
+		t.Fatal(started)
+	}
+	parts := []SplitPart{{Objective: " "}}
+	for i := range MaxSplitOff + 2 {
+		parts = append(parts, SplitPart{Objective: fmt.Sprintf("Part %d", i)})
+	}
+	// A task sent back to the queue to wait keeps no plan, and splits
+	// nothing off.
+	back, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "After B", SplitOff: parts}, []string{b.ID})
+	if err != nil || back.Status != TaskQueued || back.Plan != nil || len(splitTasks(t, s, a.ID)) != 0 {
+		t.Fatalf("%+v %v", back, err)
+	}
+	setStatus(t, s, a.ID, TaskResearching)
+	s.UpdateTask(testContext, a.ID, func(t *Task, _ *Project) (string, error) {
+		t.DependsOn = nil
+		return "", nil
+	})
+	planned, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", SplitOff: parts}, nil)
+	split := splitTasks(t, s, a.ID)
+	if err != nil || len(split) != MaxSplitOff || split[0].Objective != "Part 0" || len(planned.Plan.SplitOff) != MaxSplitOff {
+		t.Fatalf("a blank part and those past the limit are left out: %+v %v", split, err)
+	}
+	snap, _ := s.Snapshot(testContext)
+	count := len(snap.Tasks)
+	if _, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "again", SplitOff: []SplitPart{{Objective: "Late"}}}, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("a task no longer researching took a plan: %v", err)
+	}
+	if snap, _ = s.Snapshot(testContext); len(snap.Tasks) != count {
+		t.Fatal("a refused plan queued work")
 	}
 }
 
