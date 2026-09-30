@@ -22,6 +22,17 @@ export function resetLabel(value?: string) {
   );
 }
 
+export function asOfLabel(value?: string) {
+  const at = recordedTime(value);
+  if (!at) return "";
+  return `as of ${at.toLocaleString(
+    undefined,
+    Date.now() - at.valueOf() < 24 * 60 * 60_000
+      ? { hour: "2-digit", minute: "2-digit" }
+      : { weekday: "short", hour: "2-digit", minute: "2-digit" },
+  )}`;
+}
+
 const percent = (n: number) => `${Math.round(n)}%`;
 
 /** "Credits: 12.50 USD", or "12.5 credits" when the unit is credits itself. */
@@ -47,7 +58,7 @@ function describe(u: EngineUsage) {
       shown: `Rate-limited until ${limited}`,
       credits: "",
     };
-  if (u.missing || u.windows.length === 0)
+  if (u.windows.length === 0 && !credits)
     return {
       name,
       // Out when last measured stays out until a check measures otherwise.
@@ -59,6 +70,21 @@ function describe(u: EngineUsage) {
         .filter(Boolean)
         .join(", "),
       credits,
+    };
+  if (u.windows.length === 0)
+    return {
+      name,
+      tone: u.level === "exhausted" || limited ? "tone-block" : "",
+      summary: [
+        limited && `rate-limited until ${limited}`,
+        u.level === "exhausted" && "out of usage",
+        u.missing,
+        credits,
+      ]
+        .filter(Boolean)
+        .join(", "),
+      shown: u.level === "exhausted" ? "Out of usage" : credits,
+      credits: u.level === "exhausted" ? credits : "",
     };
   const tightest = u.windows.reduce((a, b) =>
     b.left_percent < a.left_percent ? b : a,
@@ -112,6 +138,7 @@ function describe(u: EngineUsage) {
  */
 export function UsageStatus() {
   const [usage, setUsage] = useState<EngineUsage[] | null>(null);
+  const [readAt, setReadAt] = useState<string>();
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let live = true;
@@ -120,7 +147,10 @@ export function UsageStatus() {
         (value) => {
           if (!live) return;
           const ok = Array.isArray(value);
-          if (ok) setUsage(value);
+          if (ok) {
+            setUsage(value);
+            setReadAt(new Date().toISOString());
+          }
           setFailed(!ok);
         },
         () => live && setFailed(true),
@@ -140,16 +170,35 @@ export function UsageStatus() {
     <div className="usage">
       <ul className="usage-list" aria-label="Usage left">
         {usage.map((u) => {
-          const row = describe(u);
+          const hasFigures = u.windows.length > 0 || !!u.credits;
+          const asOf = u.as_of || (failed && hasFigures ? readAt : undefined);
+          // A past reset belonged to the earlier read, not a coming reset.
+          const resetStillAhead = (value?: string) => {
+            const at = recordedTime(value);
+            return asOf && at && at.valueOf() <= Date.now() ? undefined : value;
+          };
+          const row = describe({
+            ...u,
+            resets_at: resetStillAhead(u.resets_at),
+            windows: u.windows.map((w) => ({
+              ...w,
+              resets_at: resetStillAhead(w.resets_at),
+            })),
+          });
+          const age = asOfLabel(asOf);
+          const reason =
+            asOf || (u.windows.length === 0 && hasFigures) ? u.missing : "";
           return (
             <li
               key={u.provider ? `${u.engine}/${u.provider}` : u.engine}
               className={`usage-row ${row.tone}`.trim()}
-              aria-label={`${row.name}: ${row.summary}`}
+              aria-label={`${row.name}: ${[row.summary, age].filter(Boolean).join(", ")}`}
             >
               <p className="usage-line">
                 <span className="usage-name">{row.name}</span>
-                <span className="usage-figure">{row.shown ?? row.summary}</span>
+                <span className="usage-figure">
+                  {[row.shown ?? row.summary, age].filter(Boolean).join(" · ")}
+                </span>
               </p>
               {row.left !== undefined && (
                 <div
@@ -163,12 +212,13 @@ export function UsageStatus() {
                   <span style={{ width: `${row.left}%` }} />
                 </div>
               )}
-              {(row.resets || row.windows || row.credits) && (
+              {(row.resets || row.windows || row.credits || reason) && (
                 <p className="hint">
                   {[
                     row.resets && `Resets ${row.resets}`,
                     row.windows,
                     row.credits,
+                    reason,
                   ]
                     .filter(Boolean)
                     .join(" · ")}

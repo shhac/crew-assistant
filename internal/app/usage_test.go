@@ -1,9 +1,13 @@
 package app
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -123,5 +127,102 @@ func TestSmallModelsAskTheSidebarsMeter(t *testing.T) {
 	a := usageApp(t, false)
 	if a.small.outOfUsage == nil || a.small.outOfUsage(a.Config().Harness("codex", "gpt-6-luna", "low")) {
 		t.Fatal("not wired to the loop's meter, or out of usage with no reading")
+	}
+}
+
+// The test binary is a synthetic Codex account server, never a real login.
+func init() {
+	if os.Getenv("CREW_USAGE_TEST_CLI") != "1" || !slices.Contains(os.Args[1:], "app-server") {
+		return
+	}
+	os.Exit(usageTestCLI())
+}
+
+func usageTestCLI() int {
+	home := os.Getenv("CODEX_HOME")
+	mode, err := os.ReadFile(filepath.Join(home, "used"))
+	if err != nil {
+		return 1
+	}
+	lines := bufio.NewScanner(os.Stdin)
+	out := json.NewEncoder(os.Stdout)
+	for lines.Scan() {
+		var request struct {
+			ID     json.RawMessage
+			Method string
+		}
+		if json.Unmarshal(lines.Bytes(), &request) != nil {
+			return 2
+		}
+		var result any
+		switch request.Method {
+		case "initialize":
+			result = map[string]any{}
+		case "initialized":
+			continue
+		case "account/read":
+			result = map[string]any{"account": map[string]any{"type": "chatgpt", "email": "fixture@example.test", "planType": "plus"}, "requiresOpenaiAuth": true}
+		case "account/rateLimits/read":
+			var used float64
+			if json.Unmarshal(mode, &used) != nil {
+				return 3
+			}
+			result = map[string]any{"rateLimits": map[string]any{"limitId": "codex",
+				"primary": map[string]any{"usedPercent": used, "windowDurationMins": 300, "resetsAt": time.Now().Add(time.Hour).Unix()}}}
+		default:
+			return 4 // No inference or other account action is supported.
+		}
+		if out.Encode(map[string]any{"id": request.ID, "result": result}) != nil {
+			return 5
+		}
+	}
+	return 0
+}
+
+func TestStoppingUsageLoadsKeptFigures(t *testing.T) {
+	for _, used := range []string{"58", "100"} {
+		t.Run(used, func(t *testing.T) {
+			t.Setenv("CREW_USAGE_TEST_CLI", "1")
+			seed := usageApp(t, false)
+			cfg := seed.Config()
+			bin, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.Engines.Codex.Bin, cfg.Engines.Codex.Home = bin, t.TempDir()
+			if err := os.WriteFile(filepath.Join(cfg.Engines.Codex.Home, "used"), []byte(used), 0600); err != nil {
+				t.Fatal(err)
+			}
+			previous := New(seed.Core, cfg, seed.configPath, Options{})
+			before := time.Now()
+			good := previous.Usage(context.Background())[0]
+			after := time.Now()
+			if len(good.Windows) != 1 || good.AsOf != nil {
+				t.Fatal(good)
+			}
+
+			// The second app shares state, but has an empty meter after restarting.
+			restarted := New(seed.Core, cfg, seed.configPath, Options{})
+			stopped, stop := context.WithCancel(context.Background())
+			stop()
+			restarted.setStop(lifecycle.Stop{Graceful: stopped, Force: context.Background()})
+			got := restarted.Usage(context.Background())[0]
+			reason := "not checked while stopping"
+			if used == "100" {
+				reason = "out of usage when last checked; " + reason
+			}
+			if len(got.Windows) != 1 || got.Windows[0].LeftPercent != good.Windows[0].LeftPercent ||
+				got.AsOf == nil || got.AsOf.Before(before) || got.AsOf.After(after) ||
+				got.Missing != reason || got.Level != good.Level {
+				t.Fatal(got)
+			}
+			// Stopping must not start the CLI, even when it would now return other data.
+			if err := os.WriteFile(filepath.Join(cfg.Engines.Codex.Home, "used"), []byte("0"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if again := restarted.Usage(context.Background())[0]; again.Windows[0].LeftPercent != got.Windows[0].LeftPercent {
+				t.Fatal(again)
+			}
+		})
 	}
 }

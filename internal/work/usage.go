@@ -63,13 +63,18 @@ func (lp *Loop) UsageWait(ctx context.Context, engine string) (time.Time, string
 // one is used, or none.
 func (lp *Loop) Usage(ctx context.Context, engine string, wait time.Duration) quota.Remaining {
 	h := lp.Config().Harness(engine, "", "")
-	read := make(chan quota.Reading, 1)
-	go func() { read <- lp.meter.Observe(context.WithoutCancel(ctx), h) }()
+	read := make(chan quota.Remaining, 1)
+	go func() {
+		r := lp.meter.Observe(context.WithoutCancel(ctx), h)
+		// A look finishing after the caller's wait still preserves its figures.
+		read <- lp.describeUsage(engine, h, r)
+	}()
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	var r quota.Reading
 	select {
-	case r = <-read:
+	case out := <-read:
+		return out
 	case <-timer.C:
 		if last, ok := lp.meter.Cached(h); ok {
 			r = last
@@ -87,15 +92,17 @@ func (lp *Loop) Usage(ctx context.Context, engine string, wait time.Duration) qu
 func (lp *Loop) LastUsage(engine string) (quota.Remaining, bool) {
 	h := lp.Config().Harness(engine, "", "")
 	r, ok := lp.meter.Cached(h)
-	return lp.describeUsage(engine, h, r), ok
+	out := lp.describeUsage(engine, h, r)
+	return out, ok || out.AsOf != nil
 }
 
 func (lp *Loop) describeUsage(engine string, h config.Harness, r quota.Reading) quota.Remaining {
 	fiveHour, week := lp.Config().Engines.Floors(engine)
 	out := quota.Describe(r, h, quota.Floors{FiveHour: fiveHour, Week: week}, time.Now())
+	out = lp.keepUsage(engine, h, r, out)
 	// With nothing measured now, a login last measured spent is still
 	// taken as spent, as the small models take it.
-	if len(out.Windows) == 0 && lp.meter.Spent(h) {
+	if (len(out.Windows) == 0 || out.AsOf != nil) && lp.meter.Spent(h) {
 		out.Level, out.Missing = quota.LevelExhausted, "out of usage when last checked; "+out.Missing
 	}
 	return out

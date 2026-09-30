@@ -40,8 +40,10 @@ type Window struct {
 
 // Remaining is what a login reports it has left, only as the CLI measured it.
 type Remaining struct {
-	Level   Level    `json:"level"`
-	Windows []Window `json:"windows"`
+	// AsOf marks figures retained from an earlier successful read.
+	AsOf    *time.Time `json:"as_of,omitempty"`
+	Level   Level      `json:"level"`
+	Windows []Window   `json:"windows"`
 	// ResetsAt is when the level eases: the last reset among the windows
 	// that set it, when each of them said.
 	ResetsAt *time.Time `json:"resets_at,omitempty"`

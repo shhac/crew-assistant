@@ -43,8 +43,11 @@ func (a *App) Usage(ctx context.Context) []EngineUsage {
 			out[i].Remaining = quota.Remaining{Level: quota.LevelUnknown, Windows: []quota.Window{}, Missing: "not checked in the demo"}
 		case stopping:
 			last, ok := a.Work.LastUsage(name)
-			if !ok && last.Level != quota.LevelExhausted {
+			if last.AsOf != nil || (!ok && last.Level != quota.LevelExhausted) {
 				last.Missing = "not checked while stopping"
+				if last.Level == quota.LevelExhausted {
+					last.Missing = "out of usage when last checked; " + last.Missing
+				}
 			}
 			out[i].Remaining = last
 		default:

@@ -942,6 +942,7 @@ export interface UsageWindow {
 }
 /** What one engine's login reports it has left. */
 export interface EngineUsage {
+  as_of?: string;
   engine: string;
   /**
    * An API provider, listed only while it rests for its rate limit, and

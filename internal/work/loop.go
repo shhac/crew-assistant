@@ -58,6 +58,7 @@ type Loop struct {
 	Demo        bool
 	runner      roles.Runner
 	meter       *quota.Meter
+	keptUsage   usageStore
 	// github reads and merges pull requests; githubURL is where git pushes.
 	// Both are replaced in tests.
 	github    github.Client
