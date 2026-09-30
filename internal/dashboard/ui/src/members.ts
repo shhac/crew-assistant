@@ -277,3 +277,8 @@ export function roleAtWork(task: Task): Role | undefined {
 /** The member at work on a request now, if a member fills that seat. */
 export const atWork = (task: Task, members: Member[]) =>
   memberOf(roleAtWork(task), members);
+
+/** Details beside a name whose icon identifies the engine. */
+export const memberDetail = (m: Member) =>
+  [kindsLabel(m.kinds), m.model].filter(Boolean).join(" · ");
+export const assistantDetail = (a: AssistantProfile) => a.model.model ?? "";

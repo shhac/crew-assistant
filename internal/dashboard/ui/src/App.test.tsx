@@ -1090,10 +1090,10 @@ describe("the team", () => {
     const card = await screen.findByRole("link", { name: /^Ada/ });
     expect(card.getAttribute("href")).toBe("#/team/m1");
     expect(card.querySelector("img")?.getAttribute("width")).toBe("40");
-    expect(within(card).getByText("Implementer · Claude opus")).toBeTruthy();
+    expect(within(card).getByText("Implementer · opus")).toBeTruthy();
     expect(within(card).getByText("In 2 projects · 2 learnings")).toBeTruthy();
     const rune = screen.getByRole("link", { name: /^Rune/ });
-    expect(within(rune).getByText("Researcher and QA · Claude")).toBeTruthy();
+    expect(within(rune).getByText("Researcher and QA")).toBeTruthy();
     expect(rune.textContent).not.toMatch(/project|learning/);
   });
   it("creates a member and opens it", async () => {
@@ -1199,10 +1199,10 @@ describe("the team", () => {
     ).toBeTruthy();
     const card = within(assistants).getByRole("link", { name: /^Milo/ });
     expect(card.getAttribute("href")).toBe("#/team/assistant/milo");
-    expect(within(card).getByText("Codex gpt-6-astra")).toBeTruthy();
+    expect(within(card).getByText("gpt-6-astra")).toBeTruthy();
     expect(within(card).getByText("Your assistant")).toBeTruthy();
     const fern = within(assistants).getByRole("link", { name: /^Fern/ });
-    expect(within(fern).getByText("An API local")).toBeTruthy();
+    expect(within(fern).getByText("local")).toBeTruthy();
     expect(within(fern).queryByText("Your assistant")).toBeNull();
     expect(
       within(assistants).getByRole("button", { name: "New assistant" }),
@@ -1338,7 +1338,7 @@ describe("the team", () => {
     });
     window.history.replaceState(null, "", "/#/team/assistant/milo");
     render(<App />);
-    expect(await screen.findByRole("heading", { name: "Milo" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /^Milo/ })).toBeTruthy();
     expect(screen.getByText("Calm and brief.")).toBeTruthy();
     expect(
       screen.getByText("Milo is your assistant.", { exact: false }),
@@ -1546,7 +1546,7 @@ describe("the team", () => {
     state.projects = [staffed("p1"), staffed("p2", "completed")];
     window.history.replaceState(null, "", "/#/team/m1");
     render(<App />);
-    expect(await screen.findByRole("heading", { name: "Ada" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /^Ada/ })).toBeTruthy();
     const projects = screen.getByRole("region", { name: "Projects" });
     expect(
       within(projects)

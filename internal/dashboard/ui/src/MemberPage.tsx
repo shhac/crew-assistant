@@ -1,10 +1,11 @@
+import { ProviderIcon } from "./ProviderIcon";
 import { useState } from "react";
 import { Avatar } from "./Avatar";
 import { MemberForm } from "./MemberForm";
 import { DrawingStatus, LookForm } from "./Redraw";
 import { href, projectHref } from "./router";
 import { Learnings } from "./MemberLearnings";
-import { memberProjects, memberSummary } from "./members";
+import { memberProjects, memberDetail } from "./members";
 import { ConfirmAction, ErrorNotice, useAction } from "./ui";
 import {
   deleteMember,
@@ -81,8 +82,11 @@ function MemberHead({
     <div className="member-head">
       <Avatar of={member} size={64} />
       <div className="member-head-text">
-        <h1>{member.name}</h1>
-        <p className="soft">{memberSummary(member)}</p>
+        <h1>
+          {member.name}
+          <ProviderIcon engine={member.engine} />
+        </h1>
+        {memberDetail(member) && <p className="soft">{memberDetail(member)}</p>}
         {member.description && <p>{member.description}</p>}
       </div>
       <div className="actions">

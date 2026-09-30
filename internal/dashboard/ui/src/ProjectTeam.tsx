@@ -1,7 +1,7 @@
+import { ProviderIcon } from "./ProviderIcon";
 import { useState } from "react";
 import { href, memberHref, projectHref, requestHref } from "./router";
 import { isCode } from "./landing";
-import { engineLabel } from "./engines";
 import { boardColumns, readyLabel } from "./boardLanes";
 import { finished, projectTasks } from "./stages";
 import { holds, kindLabel, kindsLabel, memberOf } from "./members";
@@ -228,29 +228,33 @@ function RoleGroup({
             {seats.map((role) => {
               const member = memberOf(role, members);
               const on = seatTask(role, tasks, state);
+              const notes = [
+                role.member ? seatSummary(role) : "Template default",
+                role.member && !member ? "No longer on your team" : "",
+                member && !holds(member, kind)
+                  ? "Kept here; no longer holds this role on your team"
+                  : "",
+              ].filter(Boolean);
               return (
                 <li key={role.name} className="seat-copy">
                   <span className="seat-copy-name">
                     <RoleName role={role} members={members} />
+                    <ProviderIcon engine={role.engine} />
                   </span>
-                  <span className="seat-copy-note muted small">
-                    {role.member
-                      ? seatSummary(role)
-                      : `Template default · ${engineLabel(role.engine)}`}
-                    {role.member && !member && " · No longer on your team"}
-                    {member &&
-                      !holds(member, kind) &&
-                      " · Kept here; no longer holds this role on your team"}
-                    {on && (
-                      <>
-                        {" · "}
-                        <a href={requestHref(project.id, on.id)}>
-                          On {on.ref || on.objective}
-                          {where(on) && ` · ${where(on)}`}
-                        </a>
-                      </>
-                    )}
-                  </span>
+                  {(notes.length > 0 || on) && (
+                    <span className="seat-copy-note muted small">
+                      {notes.join(" · ")}
+                      {on && (
+                        <>
+                          {notes.length > 0 && " · "}
+                          <a href={requestHref(project.id, on.id)}>
+                            On {on.ref || on.objective}
+                            {where(on) && ` · ${where(on)}`}
+                          </a>
+                        </>
+                      )}
+                    </span>
+                  )}
                   <button
                     type="button"
                     className="btn btn-quiet btn-sm seat-remove"
@@ -297,14 +301,9 @@ function RoleGroup({
   );
 }
 
-/**
- * "Claude", or "Researcher and implementer · Claude" for a seat that holds
- * more than the role it is listed under.
- */
+/** The extra kinds a seat holds alongside its listed role. */
 function seatSummary(role: Role) {
-  return role.kinds.length > 1
-    ? [kindsLabel(role.kinds), engineLabel(role.engine)].join(" · ")
-    : engineLabel(role.engine);
+  return role.kinds.length > 1 ? kindsLabel(role.kinds) : "";
 }
 
 /**

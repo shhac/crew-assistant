@@ -276,9 +276,13 @@ describe("several requests under way at once", () => {
       [...document.querySelectorAll<HTMLLIElement>(".seat-copy")].find(
         (li) => li.querySelector(".seat-copy-name")?.textContent === name,
       )!;
-    expect(row("Claudius").querySelector(".seat-copy-note")?.textContent).toBe(
-      "Claude",
-    );
+    expect(row("Claudius").querySelector(".seat-copy-note")).toBeNull();
+    expect(
+      within(row("Claudius")).getByRole("img", { name: "Claude" }),
+    ).toBeTruthy();
+    expect(
+      row("Claudius #2").querySelector(".seat-copy-note")?.textContent,
+    ).toBe("On CA-2 · Implementing");
     const on = within(row("Claudius #2")).getByRole("link", {
       name: "On CA-2 · Implementing",
     });

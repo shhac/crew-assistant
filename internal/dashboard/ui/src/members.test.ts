@@ -1,3 +1,11 @@
+import {
+  memberDetail,
+  assistantDetail,
+  memberSummary,
+  assistantSummary,
+} from "./members";
+import { rememberChoices } from "./engines";
+import { testChoices } from "./testEngines";
 import { describe, expect, it } from "vitest";
 import {
   atWork,
@@ -317,4 +325,22 @@ describe("a team to save", () => {
       deliver_to: "/work/out",
     });
   });
+});
+
+it("keeps team details separate from summaries used elsewhere", () => {
+  rememberChoices(testChoices);
+  expect(memberDetail({ ...ada, model: "opus" })).toBe("Implementer · opus");
+  expect(memberDetail(ada)).toBe("Implementer");
+  expect(memberSummary({ ...ada, model: "opus" })).toBe(
+    "Implementer · Claude opus",
+  );
+  const a = {
+    id: "a",
+    name: "A",
+    personality: "",
+    model: { engine: "codex", model: "gpt-6-astra", effort: "", max_tokens: 0 },
+  };
+  expect(assistantDetail(a)).toBe("gpt-6-astra");
+  expect(assistantDetail({ ...a, model: { ...a.model, model: "" } })).toBe("");
+  expect(assistantSummary(a)).toBe("Codex gpt-6-astra");
 });

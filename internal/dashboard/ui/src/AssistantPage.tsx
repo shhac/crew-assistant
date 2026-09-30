@@ -1,9 +1,11 @@
+import { shownProvider, useProviders } from "./providers";
+import { ProviderIcon } from "./ProviderIcon";
 import { useState } from "react";
 import { Avatar } from "./Avatar";
 import { AssistantForm } from "./AssistantForm";
 import { DrawingStatus, LookForm } from "./Redraw";
 import { href } from "./router";
-import { assistantSummary } from "./members";
+import { assistantDetail } from "./members";
 import { ConfirmAction, ErrorNotice, recordedTime, useAction } from "./ui";
 import {
   deleteAssistant,
@@ -79,6 +81,12 @@ function AssistantHead({
   profile: AssistantProfile;
   refresh: () => Promise<void>;
 }) {
+  const providers = useProviders(profile.model.engine === "openai-compatible");
+  const providerLabel =
+    profile.model.engine === "openai-compatible"
+      ? (providers.find((p) => p.id === shownProvider(profile.model.provider))
+          ?.label ?? "Another API")
+      : undefined;
   const [mode, setMode] = useState<"view" | "edit" | "redraw">("view");
   if (mode === "edit")
     return (
@@ -97,8 +105,13 @@ function AssistantHead({
     <div className="member-head">
       <Avatar of={profile} size={64} />
       <div className="member-head-text">
-        <h1>{profile.name}</h1>
-        <p className="soft">{assistantSummary(profile)}</p>
+        <h1>
+          {profile.name}
+          <ProviderIcon engine={profile.model.engine} label={providerLabel} />
+        </h1>
+        {assistantDetail(profile) && (
+          <p className="soft">{assistantDetail(profile)}</p>
+        )}
         {profile.personality && <p>{profile.personality}</p>}
       </div>
       <div className="actions">

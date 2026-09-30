@@ -2153,6 +2153,17 @@ describe("the project's tabs", () => {
     const team = screen.getByRole("region", { name: "Team" });
     const ada = within(seat("Implementer")).getByRole("link", { name: "Ada" });
     expect(ada.getAttribute("href")).toBe("#/team/m1");
+    const copy = ada.closest(".seat-copy")! as HTMLElement;
+    expect(within(copy).getByRole("img", { name: "Claude" })).toBeTruthy();
+    expect(copy.querySelector(".seat-copy-note")).toBeNull();
+    expect(within(copy).queryByText("Claude")).toBeNull();
+    const template = seat("Reviewer").querySelector(
+      ".seat-copy",
+    )! as HTMLElement;
+    expect(within(template).getByRole("img", { name: "Codex" })).toBeTruthy();
+    expect(within(template).getByText("Template default")).toBeTruthy();
+    expect(within(template).queryByText("Template default · Codex")).toBeNull();
+
     expect(ada.querySelector("img")?.getAttribute("width")).toBe("20");
     expect(
       within(
@@ -2177,9 +2188,7 @@ describe("the project's tabs", () => {
       { tab: "team" },
     );
     expect(
-      within(seat("Implementer")).getByText(
-        "Researcher and implementer · Claude",
-      ),
+      within(seat("Implementer")).getByText("Researcher and implementer"),
     ).toBeTruthy();
     expect(screen.queryByText("Members on this team")).toBeNull();
     expect(screen.queryByRole("list", { name: "Seats" })).toBeNull();
@@ -2217,7 +2226,9 @@ describe("the project's tabs", () => {
   it("lists everyone in each role, and adds only members who hold it", async () => {
     show(staffed(), { members: crew }, { tab: "team" });
     expect(
-      within(seat("Reviewer")).getByText("Template default · Codex"),
+      within(seat("Reviewer")).getByText("Template default", {
+        selector: ".seat-copy-note",
+      }),
     ).toBeTruthy();
     expect(
       options(within(seat("Reviewer")).getByLabelText("Add to Reviewer")),
@@ -2312,7 +2323,7 @@ describe("the project's tabs", () => {
           within(seat(role)).getByRole("link", { name: "Ada" }),
         ).toBeTruthy();
         expect(
-          within(seat(role)).getByText("Researcher and implementer · Claude"),
+          within(seat(role)).getByText("Researcher and implementer"),
         ).toBeTruthy();
       }
     });
@@ -2499,9 +2510,39 @@ describe("the project's tabs", () => {
   it("shows a member who has left as no longer on the team, without their page", () => {
     show(staffed(), { members: crew.slice(1) }, { tab: "team" });
     const implementer = seat("Implementer");
+    expect(implementer.querySelector(".seat-copy-note")?.textContent).toBe(
+      "No longer on your team",
+    );
+    expect(
+      within(implementer).getByRole("img", { name: "Claude" }),
+    ).toBeTruthy();
     expect(within(implementer).queryByRole("link")).toBeNull();
     expect(
       within(implementer).getByText(/No longer on your team/),
+    ).toBeTruthy();
+  });
+  it("keeps a request note without a leading separator", () => {
+    const p = staffed();
+    show(
+      p,
+      {
+        members: crew,
+        tasks: [
+          task({
+            ref: "CA-99",
+            claims: [{ step: "writing", seat: "Ada" }],
+            status: "writing",
+            project_id: p.id,
+            roles: p.playbook!.roles,
+          }),
+        ],
+      },
+      { tab: "team" },
+    );
+    const note = seat("Implementer").querySelector(".seat-copy-note");
+    expect(note?.textContent).toMatch(/^On CA-99/);
+    expect(
+      within(seat("Implementer")).getByRole("img", { name: "Claude" }),
     ).toBeTruthy();
   });
   it("shows one role at a time when asked", () => {

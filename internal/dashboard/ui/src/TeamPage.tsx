@@ -1,3 +1,5 @@
+import { shownProvider, useProviders } from "./providers";
+import { ProviderIcon } from "./ProviderIcon";
 import { useState } from "react";
 import { MemberForm } from "./MemberForm";
 import { AssistantForm } from "./AssistantForm";
@@ -9,12 +11,12 @@ import {
 } from "./SuggestIdentity";
 import { assistantHref, href, memberHref } from "./router";
 import {
-  assistantSummary,
+  assistantDetail,
   holds,
   kindWord,
   memberKinds,
   memberProjects,
-  memberSummary,
+  memberDetail,
 } from "./members";
 import { engineLabel } from "./engines";
 import { Avatar } from "./Avatar";
@@ -124,6 +126,9 @@ export function TeamPage({
     "crew-assistant.team-sort",
     memberSortOf,
   );
+  const providers = useProviders(
+    state.assistants.some((a) => a.model.engine === "openai-compatible"),
+  );
   const seated = state.assistant.id;
   const noMembers = !state.members.length;
   const members = state.members
@@ -169,6 +174,13 @@ export function TeamPage({
               <AssistantCard
                 key={a.id}
                 assistant={a}
+                providerLabel={
+                  a.model.engine === "openai-compatible"
+                    ? (providers.find(
+                        (p) => p.id === shownProvider(a.model.provider),
+                      )?.label ?? "Another API")
+                    : undefined
+                }
                 seated={a.id === seated}
               />
             ))}
@@ -273,17 +285,27 @@ export function TeamPage({
 function AssistantCard({
   assistant,
   seated,
+  providerLabel,
 }: {
   assistant: AssistantProfile;
   seated: boolean;
+  providerLabel?: string;
 }) {
   return (
     <li>
       <a className="member-card card" href={assistantHref(assistant.id)}>
         <Avatar of={assistant} size={40} />
         <span className="member-card-text">
-          <span className="member-name">{assistant.name}</span>
-          <span className="soft small">{assistantSummary(assistant)}</span>
+          <span className="member-name">
+            {assistant.name}
+            <ProviderIcon
+              engine={assistant.model.engine}
+              label={providerLabel}
+            />
+          </span>
+          {assistantDetail(assistant) && (
+            <span className="soft small">{assistantDetail(assistant)}</span>
+          )}
           {assistant.drawing ? (
             <span className="muted small">Drawing…</span>
           ) : (
@@ -309,8 +331,13 @@ function MemberCard({ member, state }: { member: Member; state: State }) {
       <a className="member-card card" href={memberHref(member.id)}>
         <Avatar of={member} size={40} />
         <span className="member-card-text">
-          <span className="member-name">{member.name}</span>
-          <span className="soft small">{memberSummary(member)}</span>
+          <span className="member-name">
+            {member.name}
+            <ProviderIcon engine={member.engine} />
+          </span>
+          {memberDetail(member) && (
+            <span className="soft small">{memberDetail(member)}</span>
+          )}
           {member.drawing ? (
             <span className="muted small">Drawing…</span>
           ) : (

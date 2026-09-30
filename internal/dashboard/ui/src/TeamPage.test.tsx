@@ -1,6 +1,17 @@
+import * as api from "./api";
+import { rememberChoices } from "./engines";
+import { testChoices } from "./testEngines";
+import { AssistantPage } from "./AssistantPage";
+import { MemberPage } from "./MemberPage";
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { TeamPage } from "./TeamPage";
 import { normalizeState, type Member } from "./api";
 
@@ -141,5 +152,103 @@ describe("TeamPage members", () => {
     fireEvent.click(screen.getByRole("button", { name: "PM" }));
     sortBy("Engine");
     expect(names()).toEqual(["Cy"]);
+  });
+});
+
+describe("provider names beside team names", () => {
+  beforeEach(() => rememberChoices(testChoices));
+  const ada = {
+    ...state.members[1],
+    kinds: ["implementer"] as Member["kinds"],
+    model: "opus",
+  };
+  const assistant = (engine: string): api.AssistantProfile => ({
+    id: "a1",
+    name: "Iris",
+    personality: "",
+    model: {
+      engine,
+      model: "sample",
+      effort: "",
+      max_tokens: 0,
+      provider: engine === "openai-compatible" ? "or" : undefined,
+    },
+  });
+  it("shows the member icon after the name and omits the provider from details", () => {
+    render(
+      <TeamPage
+        state={{ ...state, members: [ada] }}
+        refresh={async () => {}}
+      />,
+    );
+    const card = screen.getByText("Ada").closest(".member-card")!;
+    const icon = within(card as HTMLElement).getByRole("img", {
+      name: "Claude",
+    });
+    expect(icon.parentElement?.className).toBe("member-name");
+    expect(
+      within(card as HTMLElement).getByText("Implementer · opus"),
+    ).toBeTruthy();
+    expect(within(card as HTMLElement).queryByText(/Claude/)).toBeNull();
+  });
+  it("shows a Codex assistant", () => {
+    render(
+      <TeamPage
+        state={{ ...state, assistants: [assistant("codex")] }}
+        refresh={async () => {}}
+      />,
+    );
+    expect(
+      screen.getAllByRole("img", { name: "Codex" }).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("sample")).toBeTruthy();
+  });
+  it.each([false, true])(
+    "labels an API assistant when loading fails: %s",
+    async (fails) => {
+      const get = vi.spyOn(api, "getProviders");
+      if (fails) get.mockRejectedValue(new Error("offline"));
+      else get.mockResolvedValue([{ id: "or", label: "OpenRouter" }]);
+      render(
+        <TeamPage
+          state={{ ...state, assistants: [assistant("openai-compatible")] }}
+          refresh={async () => {}}
+        />,
+      );
+      expect(
+        await screen.findByRole("img", {
+          name: fails ? "Another API" : "OpenRouter",
+        }),
+      ).toBeTruthy();
+      expect(get).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("uses the same details on a member page", () => {
+    render(<MemberPage member={ada} state={state} refresh={async () => {}} />);
+    expect(
+      within(screen.getByRole("heading", { level: 1 })).getByRole("img", {
+        name: "Claude",
+      }),
+    ).toBeTruthy();
+    expect(screen.getByText("Implementer · opus")).toBeTruthy();
+  });
+  it("labels a named API on the assistant page", async () => {
+    vi.spyOn(api, "getProviders").mockResolvedValue([
+      { id: "or", label: "OpenRouter" },
+    ]);
+    render(
+      <AssistantPage
+        profile={assistant("openai-compatible")}
+        state={state}
+        refresh={async () => {}}
+      />,
+    );
+    expect(
+      await within(screen.getByRole("heading", { level: 1 })).findByRole(
+        "img",
+        { name: "OpenRouter" },
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("sample")).toBeTruthy();
   });
 });
