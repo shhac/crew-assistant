@@ -113,6 +113,7 @@ function TeamEditor({
   const [template, setTemplate] = useState(playbook?.template ?? "draft");
   const code = template === "code";
   const [check, setCheck] = useState(playbook?.check ?? "");
+  const [loopback, setLoopback] = useState(playbook?.check_loopback === true);
   const [writer, setWriter] = useState(current?.writer_engine || "claude");
   const [reviewer, setReviewer] = useState(current?.reviewer_engine || "codex");
   const [rounds, setRounds] = useState(String(playbook?.max_rounds ?? 3));
@@ -122,16 +123,17 @@ function TeamEditor({
   async function save(e: FormEvent) {
     e.preventDefault();
     await run(async () => {
+      const team = teamWith(current ?? {}, {
+        template,
+        writer_engine: writer,
+        reviewer_engine: reviewer,
+        max_rounds: rounds,
+        check: check.trim(),
+        deliver_to: deliverTo,
+      });
       await setTeam(
         project.id,
-        teamWith(current ?? {}, {
-          template,
-          writer_engine: writer,
-          reviewer_engine: reviewer,
-          max_rounds: rounds,
-          check: check.trim(),
-          deliver_to: deliverTo,
-        }),
+        code ? { ...team, check_loopback: loopback ? "yes" : "no" } : team,
       );
       await refresh();
       onDone();
@@ -187,17 +189,33 @@ function TeamEditor({
           </label>
         </div>
         {code ? (
-          <label htmlFor="team-check">
-            QA runs
-            <input
-              id="team-check"
-              className="field"
-              value={check}
-              placeholder="make check"
-              onChange={(e) => setCheck(e.target.value)}
-              required
-            />
-          </label>
+          <>
+            <label htmlFor="team-check">
+              QA runs
+              <input
+                id="team-check"
+                className="field"
+                value={check}
+                placeholder="make check"
+                onChange={(e) => setCheck(e.target.value)}
+                required
+              />
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={loopback}
+                onChange={(e) => setLoopback(e.target.checked)}
+                aria-describedby="team-loopback-hint"
+              />
+              <span>Let the check use this machine's own network</span>
+            </label>
+            <p className="hint" id="team-loopback-hint">
+              For tests that start a local server. Nothing beyond this machine
+              is reachable. QA needs to be on Claude: Codex can't limit its
+              network to this machine.
+            </p>
+          </>
         ) : (
           <div className="control">
             Copy approved drafts to

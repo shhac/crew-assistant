@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/roles"
 	"github.com/shhac/crew-assistant/internal/text"
@@ -127,6 +128,9 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 	}
 	spec.Read = append(append([]string(nil), spec.Read...), c.read...)
 	app.apply(&spec)
+	if checker.Holds(core.RoleQA) && playbook != nil && playbook.CheckLoopback && config.Supports(checker.Engine, config.UseLoopback) {
+		spec.Loopback = true
+	}
 	var shots *screenshots
 	if app.running() && app.images {
 		shots = &screenshots{next: spec.Observer}

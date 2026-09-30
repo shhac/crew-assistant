@@ -111,6 +111,9 @@ type Playbook struct {
 	// Otherwise it runs in the read-only checkout itself. Either way the
 	// revision checked stays exactly as it was recorded.
 	CheckInCopy bool `json:"check_in_copy,omitempty"`
+	// CheckLoopback lets QA's check bind and reach this machine's own
+	// addresses, for tests that start a local server; never wider network.
+	CheckLoopback bool `json:"check_loopback,omitempty"`
 	// Run is how QA starts the project and reaches it on this machine, to
 	// use the app as well as run the check; nil keeps QA to the check.
 	Run *RunRecipe `json:"run,omitempty"`

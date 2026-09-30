@@ -1905,6 +1905,9 @@ describe("the project's tabs", () => {
     fireEvent.change(within(team).getByLabelText("QA runs"), {
       target: { value: "make check" },
     });
+    fireEvent.click(
+      within(team).getByLabelText("Let the check use this machine's own network"),
+    );
     // Where the work happens is set on the Config tab.
     for (const moved of [
       "Repository",
@@ -1936,6 +1939,7 @@ describe("the project's tabs", () => {
           check: "make check",
           prepare: [],
           sign: "",
+          check_loopback: "yes",
         },
       },
     ]);

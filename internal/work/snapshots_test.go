@@ -666,6 +666,38 @@ func TestQACanRunTheCheckInAWritableCopy(t *testing.T) {
 	}
 }
 
+// A library's tests may start a local server, which QA's sandbox refuses
+// unless the team lets the check use this machine's own addresses, on an
+// engine that can limit a network to them. Only QA is let, and saving the
+// team again without saying keeps the setting.
+func TestQAsCheckCanUseThisMachinesNetwork(t *testing.T) {
+	a, code, p, task := codeTask(t, pass, pass)
+	ctx := context.Background()
+	quinn, err := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Quinn", Kinds: []string{core.RoleQA}, Engine: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", QA: quinn.ID, CheckInCopy: "yes", CheckLoopback: "yes"}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", QA: quinn.ID})
+	if err != nil || !saved.Playbook.CheckLoopback || !saved.Playbook.CheckInCopy {
+		t.Fatalf("saving the team without them dropped the check's settings: %+v, %v", saved.Playbook, err)
+	}
+	loopback := map[bool]bool{}
+	a.runner = checkRunner{codeRunner: code, onCheck: func(spec roles.Spec) {
+		loopback[spec.Write] = spec.Loopback
+	}}
+	task = settleCode(t, a, task.ID)
+	if task.Status != core.TaskWaiting || !loopback[true] || loopback[false] {
+		t.Fatalf("loopback by QA (true) and the reviewer (false): %v, task %s", loopback, task.Status)
+	}
+	off, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", QA: quinn.ID, CheckLoopback: "no"})
+	if err != nil || off.Playbook.CheckLoopback || !off.Playbook.CheckInCopy {
+		t.Fatalf("turning it off: %+v, %v", off.Playbook, err)
+	}
+}
+
 func snapshotOf(t *testing.T, a *Loop) core.Snapshot {
 	t.Helper()
 	snap, err := a.Core.Snapshot(context.Background())
