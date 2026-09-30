@@ -1,4 +1,5 @@
 import type { Activity } from "./api";
+import { recordedTime } from "./ui";
 
 /**
  * Readable descriptions for recorded activity kinds. Unknown kinds fall back to
@@ -57,7 +58,7 @@ const retiredFamilies = new Set(["agent", "work_item", "worker"]);
 
 /**
  * Kinds that report a step of work rather than something the owner acts on;
- * they are there on request, not by default.
+ * they form the Steps filter.
  */
 const routine = new Set([
   "task.awaiting",
@@ -88,41 +89,128 @@ export function isRoutineActivity(kind?: string): boolean {
   return !!kind && routine.has(kind);
 }
 
-export interface ActivityGroup {
-  entry: Activity;
-  label: string;
-  count: number;
-  routine: boolean;
+export type ActivityFilter = "all" | "needs" | "outcomes" | "steps";
+
+export function matchesFilter(
+  kind: string | undefined,
+  filter: ActivityFilter,
+): boolean {
+  if (filter === "all") return true;
+  if (filter === "steps") return isRoutineActivity(kind);
+  if (filter === "needs")
+    return kind === "decision.opened" || kind === "task.waiting";
+  return [
+    "task.landed",
+    "task.delivered",
+    "task.stopped",
+    "task.pm_landing",
+  ].includes(kind || "");
 }
 
-/**
- * Collapses an adjacent run of the same routine kind within one project into a
- * single row. Entries are expected newest first; the newest entry of a run
- * represents it, so the count never implies a fresher event than was recorded.
- */
-export function groupActivity(
+export interface ActivityRow {
+  key: string;
+  taskId?: string;
+  entry: Activity;
+  entries: Activity[];
+  others: number;
+}
+export interface ActivityDay {
+  key: string;
+  label: string;
+  rows: ActivityRow[];
+}
+
+export function activityDayKey(date: Date): string {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+/** Input is the project's newest-first feed. Invalid times stay reachable. */
+export function foldActivity(
   entries: Activity[],
-  limit?: number,
-): ActivityGroup[] {
-  const groups: ActivityGroup[] = [];
+  filter: ActivityFilter,
+  now: Date,
+): ActivityDay[] {
+  const today = activityDayKey(now);
+  const yesterday = activityDayKey(
+    new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1),
+  );
+  const days = new Map<string, ActivityDay>();
   for (const entry of entries) {
-    const previous = groups[groups.length - 1];
-    const collapsible =
-      previous &&
-      previous.routine &&
-      isRoutineActivity(entry.kind) &&
-      previous.entry.kind === entry.kind &&
-      (previous.entry.project_id || "") === (entry.project_id || "");
-    if (collapsible) {
-      previous.count += 1;
-      continue;
+    if (!matchesFilter(entry.kind, filter)) continue;
+    const date = recordedTime(entry.created_at);
+    const key = date ? activityDayKey(date) : "undated";
+    let day = days.get(key);
+    if (!day) {
+      day = {
+        key,
+        label:
+          key === today
+            ? "Today"
+            : key === yesterday
+              ? "Yesterday"
+              : date
+                ? date.toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                  })
+                : "Undated",
+        rows: [],
+      };
+      days.set(key, day);
     }
-    groups.push({
-      entry,
-      label: activityLabel(entry.kind),
-      count: 1,
-      routine: isRoutineActivity(entry.kind),
-    });
+    const previous = day.rows[day.rows.length - 1];
+    if (entry.task_id && previous?.taskId === entry.task_id) {
+      previous.entries.push(entry);
+      previous.key = entry.id;
+      previous.others++;
+    } else {
+      day.rows.push({
+        key: entry.id,
+        taskId: entry.task_id,
+        entry,
+        entries: [entry],
+        others: 0,
+      });
+    }
   }
-  return limit ? groups.slice(0, limit) : groups;
+  const result = [...days.values()].sort((a, b) =>
+    a.key === "undated"
+      ? 1
+      : b.key === "undated"
+        ? -1
+        : b.key.localeCompare(a.key),
+  );
+  for (const day of result) for (const row of day.rows) row.entries.reverse();
+  return result;
+}
+
+/** Page on All, never the active filter. New arrivals do not move the cutoff. */
+export function pageActivity(
+  days: ActivityDay[],
+  now: Date,
+  loadedThrough?: string,
+): { oldestKey?: string; hasOlder: boolean } {
+  let end = loadedThrough
+    ? days.findIndex((day) => day.key === loadedThrough)
+    : -1;
+  let count = 0;
+  const start = end + 1;
+  const recent = activityDayKey(
+    new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6),
+  );
+  for (let i = start; i < days.length; i++) {
+    if (
+      i > start &&
+      (count + days[i].rows.length > 50 ||
+        (!loadedThrough && days[i].key < recent))
+    )
+      break;
+    count += days[i].rows.length;
+    end = i;
+  }
+  return { oldestKey: days[end]?.key, hasOlder: end < days.length - 1 };
 }

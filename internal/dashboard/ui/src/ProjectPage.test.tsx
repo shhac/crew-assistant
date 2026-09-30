@@ -10,6 +10,7 @@ import {
   within,
 } from "@testing-library/react";
 import { ProjectPage } from "./ProjectPage";
+import { ActivityTab } from "./ProjectActivity";
 import { ConfigTab } from "./ProjectConfig";
 import { parseRoute, requestHref, type ProjectTab } from "./router";
 import { atBottom, layOutScrolling } from "./testScroll";
@@ -2896,7 +2897,7 @@ describe("the project's tabs", () => {
     );
     expect(screen.queryByRole("button", { name: "Land on main" })).toBeNull();
   });
-  it("shows what happened, with each step of work only on request", () => {
+  it("shows all project activity including steps", () => {
     show(
       project(),
       {
@@ -2927,10 +2928,119 @@ describe("the project's tabs", () => {
       { tab: "activity" },
     );
     expect(screen.getByText("Cache the lookups landed on main")).toBeTruthy();
-    expect(screen.queryByText("Reviewer checked draft 1")).toBeNull();
-    expect(screen.queryByText("Something elsewhere")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Show all steps (1)" }));
     expect(screen.getByText("Reviewer checked draft 1")).toBeTruthy();
+    expect(screen.queryByText("Something elsewhere")).toBeNull();
+    expect(screen.getByText("Reviewer checked draft 1")).toBeTruthy();
+  });
+});
+
+describe("paged project activity", () => {
+  const history = () =>
+    Array.from({ length: 300 }, (_, i) => ({
+      id: String(i),
+      project_id: "p1",
+      summary: `History ${i}`,
+      kind: i === 299 ? "decision.opened" : "project.created",
+      created_at: new Date(2026, 8, 30 - Math.floor(i / 10), 10).toISOString(),
+    }));
+  const activityState = (activity: State["activity"]) =>
+    normalizeState({
+      projects: [project()],
+      tasks: [task({ ref: "CA-37" })],
+      activity,
+    });
+  it("expands a six-event run only on request in chronological order", () => {
+    const activity = Array.from({ length: 6 }, (_, i) => ({
+      id: String(i),
+      project_id: "p1",
+      task_id: "t1",
+      kind: i === 0 ? "task.landed" : "task.writing",
+      summary: `Update ${i}`,
+      created_at: new Date().toISOString(),
+    }));
+    const { container } = render(
+      <ActivityTab project={project()} state={activityState(activity)} />,
+    );
+    const button = screen.getByRole("button", {
+      name: /CA-37.*Landed.*\+5 updates/,
+    });
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector(".activity-details")).toBeNull();
+    fireEvent.click(button);
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    expect(
+      [...container.querySelectorAll(".activity-details li")].map(
+        (li) => li.textContent?.match(/Update \d/)?.[0],
+      ),
+    ).toEqual([
+      "Update 5",
+      "Update 4",
+      "Update 3",
+      "Update 2",
+      "Update 1",
+      "Update 0",
+    ]);
+  });
+  it("bounds rows, keeps older decisions reachable through filters, and preserves pages on refresh", () => {
+    const activity = history();
+    const { container, rerender } = render(
+      <ActivityTab project={project()} state={activityState(activity)} />,
+    );
+    expect(
+      container.querySelectorAll(".activity-rows > li").length,
+    ).toBeLessThanOrEqual(50);
+    const needs = screen.getByRole("button", { name: "Needs you" });
+    fireEvent.click(needs);
+    expect(needs.getAttribute("aria-pressed")).toBe("true");
+    expect(
+      screen.getByText(
+        "Nothing here in the loaded activity; older history remains",
+      ),
+    ).toBeTruthy();
+    while (screen.queryByRole("button", { name: "Show older" }))
+      fireEvent.click(screen.getByRole("button", { name: "Show older" }));
+    expect(screen.getByText("History 299")).toBeTruthy();
+    rerender(
+      <ActivityTab
+        project={project()}
+        state={activityState([
+          { ...activity[0], id: "new", summary: "New arrival" },
+          ...activity,
+        ])}
+      />,
+    );
+    expect(screen.getByText("History 299")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(container.querySelectorAll(".activity-rows > li")).toHaveLength(301);
+  });
+  it("keeps a run expanded when a newer event joins it", () => {
+    const activity = [0, 1].map((i) => ({
+      id: String(i),
+      project_id: "p1",
+      task_id: "t1",
+      kind: "task.writing",
+      summary: `Draft ${i}`,
+      created_at: new Date().toISOString(),
+    }));
+    const { rerender } = render(
+      <ActivityTab project={project()} state={activityState(activity)} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /\+1 updates/ }));
+    rerender(
+      <ActivityTab
+        project={project()}
+        state={activityState([
+          { ...activity[0], id: "new", summary: "Latest" },
+          ...activity,
+        ])}
+      />,
+    );
+    expect(
+      screen
+        .getByRole("button", { name: /\+2 updates/ })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(screen.getByText("Draft 1")).toBeTruthy();
   });
 });
 
@@ -2992,7 +3102,7 @@ describe("readable request IDs", () => {
     const entry = screen.getByText("Cache the lookups landed on main", {
       exact: false,
     });
-    expect(within(entry).getByText("SE-1")).toBeTruthy();
+    expect(within(entry.closest("li")!).getByText("SE-1")).toBeTruthy();
   });
 
   it("renames the prefix from Config", async () => {
