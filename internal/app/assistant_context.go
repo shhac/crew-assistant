@@ -110,7 +110,18 @@ func recentlyFinished(tasks []core.Task, n int) map[string]bool {
 // taskOverview is an unfinished task as the assistant sees it each turn:
 // where it is and what it waits on, not how it is being built.
 func taskOverview(t core.Task) core.Task {
-	return core.Task{ID: t.ID, ProjectID: t.ProjectID, Number: t.Number, Ref: t.Ref, Objective: text.Clip(t.Objective, 300), Status: t.Status, Stage: t.Stage, Checking: t.Checking, Answered: t.Answered, WaitsFor: t.WaitsFor, DependsOn: t.DependsOn, Blocks: t.Blocks, RelatesTo: t.RelatesTo, Detail: text.Clip(t.Detail, 200), Round: t.Round, MaxRounds: t.MaxRounds, DecisionID: t.DecisionID, DirectionPending: t.DirectionPending, RetryAt: t.RetryAt, Proposal: t.Proposal, Branch: t.Branch, CreatedAt: t.CreatedAt, StartedAt: t.StartedAt, UpdatedAt: t.UpdatedAt}
+	return core.Task{ID: t.ID, ProjectID: t.ProjectID, Number: t.Number, Ref: t.Ref, Objective: text.Clip(t.Objective, 300), Status: t.Status, Stage: t.Stage, Checking: t.Checking, Answered: t.Answered, WaitsFor: t.WaitsFor, Blockers: openBlockers(t.Blockers), DependsOn: t.DependsOn, Blocks: t.Blocks, RelatesTo: t.RelatesTo, Detail: text.Clip(t.Detail, 200), Round: t.Round, MaxRounds: t.MaxRounds, DecisionID: t.DecisionID, DirectionPending: t.DirectionPending, RetryAt: t.RetryAt, Proposal: t.Proposal, Branch: t.Branch, CreatedAt: t.CreatedAt, StartedAt: t.StartedAt, UpdatedAt: t.UpdatedAt}
+}
+
+// openBlockers keeps clearing history out of the per-turn overview.
+func openBlockers(blockers []core.Blocker) []core.Blocker {
+	var open []core.Blocker
+	for _, b := range blockers {
+		if b.ClearedAt == nil {
+			open = append(open, b)
+		}
+	}
+	return open
 }
 
 // projectOverview is a project without its team's standing instructions,

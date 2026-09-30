@@ -122,6 +122,15 @@ var toolActions = map[string]toolAction{
 	"unlink_tasks": with(func(a *App, ctx context.Context, in engine.UnlinkTasksArgs) (any, error) {
 		return a.Work.UnlinkTasks(ctx, core.Link{Project: in.ProjectID, Task: in.TaskID, Other: in.OtherTaskID, By: core.LinkedByAssistant})
 	}),
+	"set_blocker": with(func(a *App, ctx context.Context, in engine.SetBlockerArgs) (any, error) {
+		if in.Holds != "" && in.Holds != "start" && in.Holds != "landing" {
+			return nil, errors.New("holds must be start or landing, or empty for start")
+		}
+		return a.Work.SetBlocker(ctx, core.BlockerInput{Project: in.ProjectID, Task: in.TaskID, Kind: in.Kind, Description: in.Description, Other: in.OtherTaskID, LandingOnly: in.Holds == "landing", By: core.LinkedByAssistant})
+	}),
+	"clear_blocker": with(func(a *App, ctx context.Context, in engine.ClearBlockerArgs) (any, error) {
+		return a.Work.ClearBlocker(ctx, in.ProjectID, in.TaskID, in.BlockerID, core.LinkedByAssistant, "cleared by the assistant")
+	}),
 	"order_tasks": with(func(a *App, ctx context.Context, in engine.OrderTasksArgs) (any, error) {
 		return a.Core.OrderTasks(ctx, in.ProjectID, in.TaskIDs, core.OrderedByAssistant)
 	}),
