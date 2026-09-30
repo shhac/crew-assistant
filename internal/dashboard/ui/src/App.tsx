@@ -26,6 +26,7 @@ import {
 import { useFavicon } from "./Avatar";
 import { ErrorNotice, useAction } from "./ui";
 import { useChatPane } from "./chatPane";
+import { useChatDraft } from "./chatDraft";
 import { useEngineChoices } from "./engines";
 
 export function App() {
@@ -40,6 +41,7 @@ export function App() {
   const [connectionError, setConnectionError] = useState("");
   const [newProject, setNewProject] = useState(false);
   const chat = useChatPane();
+  const draft = useChatDraft();
   const pause = useAction();
   const request = useRef(0);
   const refresh = useCallback(async () => {
@@ -269,6 +271,7 @@ export function App() {
           aria-label="Chat"
         >
           <ChatPanel
+            draft={draft}
             onProjectOpen={(id) => {
               window.location.hash = href({
                 page: "project",

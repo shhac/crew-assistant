@@ -8,7 +8,9 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import { ChatPanel, SUGGESTION_DELAY } from "./ChatPanel";
+import { ChatPanel as DraftPanel, SUGGESTION_DELAY } from "./ChatPanel";
+import { useChatDraft } from "./chatDraft";
+import type { ComponentProps } from "react";
 import { commandIn, wakeHappenings, wakeSummary } from "./chatTurns";
 import { ConversationMarkdown } from "./ConversationMarkdown";
 import {
@@ -35,6 +37,10 @@ afterEach(() => {
 });
 const initial = () =>
   normalizeState({ assistant: { name: "Iris", personality: "" } });
+function ChatPanel(props: Omit<ComponentProps<typeof DraftPanel>, "draft">) {
+  const draft = useChatDraft();
+  return <DraftPanel {...props} draft={draft} />;
+}
 function panel(
   state = initial(),
   refresh = vi.fn(async () => {}),

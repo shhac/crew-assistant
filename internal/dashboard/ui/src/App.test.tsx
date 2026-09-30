@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -146,6 +147,128 @@ describe("the shell", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Chat/ }));
     expect(screen.getByLabelText("Message Iris")).toBeTruthy();
   });
+  it.each([
+    ["pane", "shortcut"],
+    ["pane", "button"],
+    ["drawer", "button"],
+    ["drawer", "escape"],
+    ["drawer", "navigation"],
+  ])(
+    "keeps text and attachments when the %s closes by %s",
+    async (mode, close) => {
+      if (mode === "drawer") {
+        window.localStorage.setItem("crew-assistant.chat", "closed");
+        vi.stubGlobal("matchMedia", (query: string) => ({
+          matches: query.includes("max-width"),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+        }));
+      }
+      render(<App />);
+      await screen.findByRole("button", { name: /^Chat/ });
+      if (mode === "drawer")
+        fireEvent.click(screen.getByRole("button", { name: /^Chat/ }));
+      const field = await screen.findByLabelText("Message Iris");
+      if (mode === "drawer")
+        expect(screen.getByRole("dialog", { name: "Chat" })).toBeTruthy();
+      fireEvent.change(field, { target: { value: "Keep these notes" } });
+      const file = new File(["Notes"], "notes.txt", { type: "text/plain" });
+      file.arrayBuffer = async () => new TextEncoder().encode("Notes").buffer;
+      fireEvent.paste(field, {
+        clipboardData: { files: [file], types: ["Files"], getData: () => "" },
+      });
+      await screen.findByRole("button", {
+        name: "Remove attachment notes.txt",
+      });
+      const closeButton = screen.getByRole("button", { name: "Close chat" });
+      closeButton.focus();
+      if (close === "shortcut")
+        fireEvent.keyDown(closeButton, { key: "j", metaKey: true });
+      else if (close === "escape")
+        fireEvent.keyDown(closeButton, { key: "Escape" });
+      else if (close === "navigation") go("#/projects");
+      else fireEvent.click(closeButton);
+      await waitFor(() =>
+        expect(screen.queryByLabelText("Message Iris")).toBeNull(),
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^Chat/ }));
+      expect(await screen.findByLabelText("Message Iris")).toHaveProperty(
+        "value",
+        "Keep these notes",
+      );
+      expect(
+        screen.getByRole("button", { name: "Remove attachment notes.txt" }),
+      ).toBeTruthy();
+
+      // Sending and manually clearing both stay empty on another reopen.
+      if (close === "shortcut" || close === "escape") {
+        fireEvent.click(screen.getByRole("button", { name: "Send" }));
+        await waitFor(() =>
+          expect(
+            calls.some(
+              (c) =>
+                c.path === "/api/chat/messages" && c.options?.method === "POST",
+            ),
+          ).toBe(true),
+        );
+      } else {
+        fireEvent.change(screen.getByLabelText("Message Iris"), {
+          target: { value: "" },
+        });
+        fireEvent.click(
+          screen.getByRole("button", { name: "Remove attachment notes.txt" }),
+        );
+      }
+      fireEvent.click(screen.getByRole("button", { name: "Close chat" }));
+      fireEvent.click(screen.getByRole("button", { name: /^Chat/ }));
+      expect(await screen.findByLabelText("Message Iris")).toHaveProperty(
+        "value",
+        "",
+      );
+      expect(
+        screen.queryByRole("button", { name: "Remove attachment notes.txt" }),
+      ).toBeNull();
+    },
+  );
+
+  it("keeps a file read that finishes while chat is closed, returning to the compact editor", async () => {
+    render(<App />);
+    const field = await screen.findByLabelText("Message Iris");
+    fireEvent.change(field, { target: { value: "Slow notes" } });
+    let finish!: (value: ArrayBuffer) => void;
+    const file = new File(["Notes"], "slow.txt", { type: "text/plain" });
+    file.arrayBuffer = () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      });
+    fireEvent.paste(field, {
+      clipboardData: { files: [file], types: ["Files"], getData: () => "" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Write in a larger space" }),
+    );
+    const closeButton = screen.getByRole("button", { name: "Close chat" });
+    fireEvent.click(closeButton);
+    // Allow the read to finish while its original ChatPanel is unmounted.
+    await act(async () => {
+      finish(new TextEncoder().encode("Notes").buffer);
+    });
+    expect(screen.queryByLabelText("Message Iris")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Chat/ }));
+    expect(await screen.findByLabelText("Message Iris")).toHaveProperty(
+      "value",
+      "Slow notes",
+    );
+    await screen.findByRole("button", { name: "Remove attachment slow.txt" });
+    expect(
+      screen.queryByRole("dialog", { name: "Write a message" }),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Send" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+  });
+
   it("leaves ⌘J to a text field that has focus", async () => {
     render(<App />);
     const field = await screen.findByLabelText("Message Iris");

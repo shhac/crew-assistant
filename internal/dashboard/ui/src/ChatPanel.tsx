@@ -23,7 +23,6 @@ import {
   messageLimitError,
   readAsset,
   useFileDrop,
-  type ComposerAsset,
 } from "./composerAssets";
 import {
   active,
@@ -39,11 +38,13 @@ import {
 import { SessionLine } from "./ChatSessionLine";
 import { Composer } from "./Composer";
 import { TurnStatus } from "./TurnStatus";
+import type { ChatDraft } from "./chatDraft";
 
 // How long the conversation must stay settled before a next message is
 // suggested, so a reply that has only just landed is not raced.
 export const SUGGESTION_DELAY = 1200;
 export function ChatPanel({
+  draft,
   state,
   refresh,
   onClose,
@@ -52,6 +53,7 @@ export function ChatPanel({
   onProjectOpen,
   view,
 }: {
+  draft: ChatDraft;
   state: State;
   refresh: () => Promise<void>;
   onClose: () => void;
@@ -67,8 +69,9 @@ export function ChatPanel({
     if (priorLarge.current && !large) focusDraft();
     priorLarge.current = large;
   }, [large]);
-  const [message, setMessage] = useState("");
-  const draftRef = useRef("");
+  const { message, setMessage, assets, setAssets } = draft;
+  const draftRef = useRef(message);
+  draftRef.current = message;
   const [suggestion, setSuggestion] = useState<{
     after: string;
     text: string;
@@ -83,7 +86,6 @@ export function ChatPanel({
     // The owner's own words always replace a suggestion.
     if (value) setSuggestion(null);
   }
-  const [assets, setAssets] = useState<ComposerAsset[]>([]);
   const assetsRef = useRef(assets);
   assetsRef.current = assets;
   const [assetErrors, setAssetErrors] = useState<string[]>([]);
