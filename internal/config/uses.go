@@ -55,7 +55,9 @@ func Supports(engine string, use Use) bool {
 	case UseEfforts:
 		return harness.Support(e, harness.Models, harness.Effort).Usable()
 	case UseBrowser:
-		return Supports(engine, UseRoles) && harness.Support(e, harness.Session, harness.Browser).Usable()
+		// Every role runs sandboxed, so the browser is offered only where
+		// a sandboxed session admits it.
+		return Supports(engine, UseRoles) && harness.Support(e, harness.Session, harness.Browser).Usable() && harness.Support(e, harness.Session, harness.SandboxedBrowser).Usable()
 	case UseLoopback:
 		return Supports(engine, UseRoles) && harness.Support(e, harness.Session, harness.Loopback).Usable()
 	}
