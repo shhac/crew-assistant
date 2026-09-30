@@ -34,6 +34,135 @@ type parallelRunner struct {
 	onTurn func(ctx context.Context, seat, objective string, write bool) error
 }
 
+// QA returns a verdict rather than writing a draft, even though its scratch
+// workspace is writable.
+type stageRunner struct{ parallelRunner }
+
+func TestLandedBesideUsesOverlapUnlessOverallLimitIsOne(t *testing.T) {
+	for _, cap := range []int{0, 1, 2} {
+		t.Run(fmt.Sprint(cap), func(t *testing.T) {
+			a, p := parallelApp(t, &parallelRunner{}, cap)
+			ctx := context.Background()
+			first, sibling := queue(t, a, p, "A"), queue(t, a, p, "B")
+			var err error
+			first, err = a.Core.UpdateTask(ctx, first.ID, func(t *core.Task, _ *core.Project) (string, error) {
+				t.Status, t.StartedAt, t.Beside = core.TaskWriting, time.Now().Add(-time.Minute), []string{sibling.ID}
+				return "", nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.Core.UpdateTask(ctx, sibling.ID, func(t *core.Task, _ *core.Project) (string, error) {
+				t.Status = core.TaskDelivered
+				return "", nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			got, found, err := a.landedBeside(ctx, first)
+			if err != nil || found != (cap != 1) || found && got.ID != sibling.ID {
+				t.Fatalf("sibling %s, found %v: %v", got.ID, found, err)
+			}
+		})
+	}
+}
+
+func (r *stageRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
+	if strings.HasPrefix(turnSeat(spec), "QA") {
+		spec.Write = false
+	}
+	return r.parallelRunner.Run(ctx, spec)
+}
+
+func TestThreeWritersAndTwoQARunTogetherByDefault(t *testing.T) {
+	runner := &stageRunner{}
+	a, p := parallelApp(t, runner, 0)
+	cfg := a.Config()
+	cfg.Engines.Claude.RoleRuns, cfg.Engines.Codex.RoleRuns = nil, nil
+	a.Config = func() config.Config { return cfg }
+	ctx := context.Background()
+	qa, err := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Quinn", Kinds: []string{core.RoleQA}, Engine: "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	book := *p.Playbook
+	book.Check = "make check"
+	book.Roles = append(slices.Clone(book.Roles),
+		core.Role{Name: "Writer #2", Kinds: []string{core.RoleImplementer}, Engine: "claude"},
+		core.Role{Name: "Writer #3", Kinds: []string{core.RoleImplementer}, Engine: "claude"},
+		core.Role{Name: "QA", Kinds: []string{core.RoleQA}, Member: qa.ID, Engine: "codex"},
+		core.Role{Name: "QA #2", Kinds: []string{core.RoleQA}, Member: qa.ID, Engine: "codex"})
+	if p, err = a.Core.SetPlaybook(ctx, p.ID, book); err != nil {
+		t.Fatal(err)
+	}
+	first, second := queue(t, a, p, "A"), queue(t, a, p, "B")
+	// Produce real synthetic document snapshots, then mark only their reviews
+	// passed so both still need QA.
+	if _, err := a.loopStep(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range []core.Task{first, second} {
+		if got := taskByID(t, a, task.ID); len(got.Revisions) != 1 {
+			t.Fatalf("initial draft: %+v", got)
+		}
+		if _, err := a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, p *core.Project) (string, error) {
+			t.Verdicts = []core.Verdict{{Role: "Reviewer", Revision: 1, BriefVersion: p.Brief.Version, Outcome: core.VerdictPass}}
+			return "", nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"C", "D", "E"} {
+		queue(t, a, p, name)
+	}
+	started, release := make(chan struct{}, 5), make(chan struct{})
+	runner.onTurn = func(ctx context.Context, _, _ string, _ bool) error {
+		started <- struct{}{}
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	_, jobs, err := a.pass(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		close(release)
+		for _, job := range jobs {
+			<-job
+		}
+	}()
+	if len(jobs) != 5 {
+		snap, _ := a.Core.Snapshot(ctx)
+		for _, task := range snap.Tasks {
+			t.Logf("%s: %s place %s waiting %+v claims %+v", task.Objective, task.Status, task.Place, task.Waiting, task.Claims)
+		}
+		t.Fatalf("started %d jobs", len(jobs))
+	}
+	for i := 0; i < 5; i++ {
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+			t.Fatal("five turns did not start together")
+		}
+	}
+	if len(jobs) != 5 {
+		t.Fatalf("started %d turns", len(jobs))
+	}
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	if len(runner.twice) != 0 {
+		t.Fatalf("seat on two tasks: %v", runner.twice)
+	}
+	for _, seat := range []string{"Writer", "Writer #2", "Writer #3", "QA", "QA #2"} {
+		if runner.running[seat] != 1 {
+			t.Errorf("%s running %d turns", seat, runner.running[seat])
+		}
+	}
+}
+
 // turnSeat is the seat a turn runs as.
 func turnSeat(spec roles.Spec) string {
 	if l, ok := spec.Observer.(*liveTurn); ok {
@@ -159,11 +288,11 @@ func TestTheImplementerWritesTheNextTaskWhileOneIsChecked(t *testing.T) {
 	}
 }
 
-// With the default cap of one and one implementer, the next task starts
+// With an explicit cap of one and one implementer, the next task starts
 // only once the one under way waits on the owner, as before.
 func TestACapOfOneStartsTheNextTaskOnlyOnceTheFirstWaits(t *testing.T) {
 	runner := &parallelRunner{}
-	a, p := parallelApp(t, runner, 0)
+	a, p := parallelApp(t, runner, 1)
 	first, second := queue(t, a, p, "A"), queue(t, a, p, "B")
 	var during string
 	runner.onTurn = func(_ context.Context, _, objective string, write bool) error {
@@ -1154,7 +1283,7 @@ func TestChangingARoleKeepsItsSeats(t *testing.T) {
 	if got := implementers(p); !slices.Equal(got, []string{"Writer/", "Writer #2/"}) {
 		t.Fatalf("given back to the template: %v", got)
 	}
-	if p.Playbook.ActiveCap() != 2 || len(p.Playbook.Roles) != 3 {
+	if p.Playbook.ActiveCap() != 0 || len(p.Playbook.Roles) != 3 {
 		t.Fatalf("team %+v", p.Playbook.Roles)
 	}
 }

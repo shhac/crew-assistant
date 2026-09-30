@@ -116,7 +116,7 @@ func (lp *Loop) landedBeside(ctx context.Context, t core.Task) (core.Task, bool,
 		return core.Task{}, false, err
 	}
 	p, ok := findProject(snap, t.ProjectID)
-	if !ok || p.Playbook == nil || p.Playbook.ActiveCap() <= 1 || t.StartedAt.IsZero() {
+	if !ok || p.Playbook == nil || p.Playbook.MaxActive == 1 || t.StartedAt.IsZero() {
 		return core.Task{}, false, nil
 	}
 	var sibling core.Task

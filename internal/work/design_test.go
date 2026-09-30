@@ -57,6 +57,21 @@ func stepUntil(t *testing.T, a *Loop, id string, want func(core.Task) bool) core
 
 func withDesigner(task core.Task) bool { return task.Status == core.TaskDesigning }
 
+// Advance the handoff through scheduling without running the fake designer yet.
+func advanceDesignPlace(t *testing.T, a *Loop) {
+	t.Helper()
+	ctx := context.Background()
+	steps, err := a.Core.Schedule(ctx, func(core.Role) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range steps {
+		if err := a.Core.ReleaseClaim(ctx, step.Task.ID, step.Claim.Token); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // turns counts the role turns whose prompt says this.
 func turns(r *scriptedRunner, says string) []roles.Spec {
 	r.mu.Lock()
@@ -87,6 +102,8 @@ func TestTheResearcherHandsTheTaskToTheDesignerAndGetsItBack(t *testing.T) {
 	seatDesigner(t, a, p.ID)
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add A"})
 	task = stepUntil(t, a, task.ID, withDesigner)
+	advanceDesignPlace(t, a)
+	task = taskByID(t, a, task.ID)
 	if task.Stage != core.StageDesigning || !task.WithDesigner || task.Checking != "Dee" || task.Detail != "With Dee for design input" || task.Plan != nil {
 		t.Fatalf("with the designer: stage %s, with designer %v, checking %q, %q", task.Stage, task.WithDesigner, task.Checking, task.Detail)
 	}
@@ -144,6 +161,8 @@ func TestTheImplementerHandsTheTaskToTheDesignerAndGetsItBack(t *testing.T) {
 	a, p, task := loopApp(t, runner, "")
 	seatDesigner(t, a, p.ID)
 	held := stepUntil(t, a, task.ID, withDesigner)
+	advanceDesignPlace(t, a)
+	held = taskByID(t, a, held.ID)
 	if held.Stage != core.StageDesigning || !held.WithDesigner || held.Checking != "Dee" || len(held.Revisions) != 0 {
 		t.Fatalf("with the designer: stage %s %v %q, %d revisions", held.Stage, held.WithDesigner, held.Checking, len(held.Revisions))
 	}
@@ -217,7 +236,7 @@ func TestADesignerThatEscalatesBringsTheOwnerADecisionAndTheTaskGoesBack(t *test
 	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
 	task = stepUntil(t, a, task.ID, func(t core.Task) bool { return t.Status == core.TaskWaiting })
 	d := openDecision(t, a, task)
-	if !strings.Contains(d.Title, "Dee needs your call") || d.Recommendation != "A sidebar" || !strings.Contains(d.Context, "Evidence: Two teams") || !strings.Contains(d.Context, "2. A sidebar") || !strings.Contains(d.Context, "Consequences:") || task.Stage != core.StageResearching {
+	if !strings.Contains(d.Title, "Dee needs your call") || d.Recommendation != "A sidebar" || !strings.Contains(d.Context, "Evidence: Two teams") || !strings.Contains(d.Context, "2. A sidebar") || !strings.Contains(d.Context, "Consequences:") || task.Stage != core.StageDesigning {
 		t.Fatalf("escalation %+v, stage %s", d, task.Stage)
 	}
 	a.Core.AnswerDecision(ctx, d.ID, "Go with tabs")

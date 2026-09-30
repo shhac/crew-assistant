@@ -2,8 +2,258 @@ package core
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
+
+func TestOutsideWaitsRespectLimitSource(t *testing.T) {
+	for _, status := range []string{TaskWaiting, TaskAwaiting} {
+		for _, limits := range []map[string]int{nil, {StageReviewing: 1}} {
+			t.Run(status+"/"+mapLabel(limits), func(t *testing.T) {
+				s, _ := fixture(t)
+				p := staged(t, s, newProject(t, s), 0, limits)
+				tasks := queueAll(t, s, p, "A", "B")
+				claimed(t, s)
+				finish(t, s, tasks[0].ID, TaskReviewing)
+				claimed(t, s)
+				finish(t, s, tasks[0].ID, status)
+				finish(t, s, tasks[1].ID, TaskReviewing)
+				got := claimed(t, s)
+				if limits != nil {
+					if slices.Contains(got, "B: reviewing by Reviewer") {
+						t.Fatalf("outside wait stopped counting against explicit limit: %v", got)
+					}
+					if w := waiting(t, s, tasks[1].ID); w == nil || w.Kind != WaitStage || w.Stage != StageReviewing || w.Count != 1 {
+						t.Fatalf("explicit review limit did not hold B: %+v", w)
+					}
+					return
+				}
+				if !slices.Contains(got, "B: reviewing by Reviewer") {
+					t.Fatalf("outside wait blocked a free reviewer: %v", got)
+				}
+				if b := onBoard(t, s, tasks[1].ID); b.Place != StageReviewing || b.Waiting != nil {
+					t.Fatalf("B did not enter Reviewing: %+v", b)
+				}
+				// Coming back to a now-full stage evicts neither task.
+				finish(t, s, tasks[0].ID, TaskReviewing)
+				claimed(t, s)
+				for _, task := range tasks {
+					if got := onBoard(t, s, task.ID); got.Place != StageReviewing {
+						t.Fatalf("return evicted a task: %+v", got)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestExplicitReadyLimitCountsOwnerApproval(t *testing.T) {
+	s, _ := fixture(t)
+	p := staged(t, s, newProject(t, s), 0, map[string]int{StageReady: 1})
+	tasks := queueAll(t, s, p, "A", "B")
+	claimed(t, s)
+	for _, task := range tasks {
+		finish(t, s, task.ID, TaskReviewing)
+		claimed(t, s)
+		judge(t, s, task.ID, "Reviewer", VerdictPass)
+		judge(t, s, task.ID, "QA", VerdictPass)
+		finish(t, s, task.ID, TaskDeciding)
+		claimed(t, s)
+		if task.ID == tasks[0].ID {
+			if got := onBoard(t, s, task.ID); got.Place != StageReady {
+				t.Fatalf("A did not reach Ready: %+v", got)
+			}
+			finish(t, s, task.ID, TaskWaiting)
+			if err := s.store.update(testContext, func(v *Snapshot) error {
+				v.Decisions = append(v.Decisions, Decision{ID: "approval", ProjectID: p.ID, Kind: DecisionDelivery})
+				for i := range v.Tasks {
+					if v.Tasks[i].ID == task.ID {
+						v.Tasks[i].DecisionID = "approval"
+					}
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if w := waiting(t, s, tasks[1].ID); w == nil || w.Kind != WaitStage || w.Stage != StageReady || w.Count != 1 || w.Limit != 1 {
+		t.Fatalf("owner approval did not hold Ready: %+v", w)
+	}
+	finish(t, s, tasks[0].ID, TaskStopped)
+	claimed(t, s)
+	if got := onBoard(t, s, tasks[1].ID); got.Place != StageReady || got.Waiting != nil {
+		t.Fatalf("stopping did not free Ready: %+v", got)
+	}
+}
+
+func mapLabel(limits map[string]int) string {
+	if limits == nil {
+		return "seat default"
+	}
+	return "explicit limit"
+}
+
+func TestBackwardHandoffsDisplayBeforeScheduling(t *testing.T) {
+	for _, c := range []struct{ from, status, want string }{
+		{StageReviewing, TaskResearching, StageResearching},
+		{StageDesigning, TaskResearching, StageResearching},
+		{StageQA, TaskWriting, StageImplementing},
+	} {
+		t.Run(c.from+"/"+c.status, func(t *testing.T) {
+			s, _ := fixture(t)
+			p := newProject(t, s)
+			task := queueAll(t, s, p, "A")[0]
+			if _, err := s.UpdateTask(testContext, task.ID, func(t *Task, _ *Project) (string, error) {
+				t.Status, t.Place = c.status, c.from
+				return "", nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if got := onBoard(t, s, task.ID); got.Stage != c.want {
+				t.Fatalf("handoff displays %s, want %s", got.Stage, c.want)
+			}
+		})
+	}
+}
+
+func TestStageDefaultsCountSeatsOfEachRole(t *testing.T) {
+	p := Templates["draft"]
+	p.Roles = slices.Clone(p.Roles)
+	for stage, kind := range stageRole {
+		p.Roles = append(p.Roles, Role{Name: stage, Kinds: []string{kind}, Member: "same"}, Role{Name: stage + " #2", Kinds: []string{kind}, Member: "same"})
+	}
+	for stage, kind := range stageRole {
+		want := len(rolesOf(p.Roles, kind))
+		if got := p.StageLimit(stage); got != want {
+			t.Errorf("%s: %d, want %d", stage, got, want)
+		}
+		for _, n := range []int{1, 10} {
+			p.StageLimits = map[string]int{stage: n}
+			if p.StageLimit(stage) != n {
+				t.Errorf("%s override %d ignored", stage, n)
+			}
+		}
+		p.StageLimits = nil
+	}
+	for _, stage := range []string{StageReady, StageTodo, "unknown"} {
+		if p.StageLimit(stage) != 0 {
+			t.Errorf("roleless stage %s limited", stage)
+		}
+	}
+	if (Playbook{}).StageLimit(StageQA) != 0 {
+		t.Fatal("unstaffed QA limited")
+	}
+	for n := 0; n <= 10; n++ {
+		valid := Templates["draft"]
+		valid.MaxActive = n
+		if err := valid.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		if valid.ActiveCap() != n {
+			t.Fatalf("overall limit %d ignored", n)
+		}
+	}
+	invalid := Templates["draft"]
+	invalid.MaxActive = 11
+	if err := invalid.Validate(); err == nil || !strings.Contains(err.Error(), "0 for no overall limit") {
+		t.Fatalf("validation: %v", err)
+	}
+}
+
+func TestStoppingQAFreesItsDefaultPlaceAfterRestart(t *testing.T) {
+	s, tasks := bottleneck(t, nil)
+	claimed(t, s)
+	if b := onBoard(t, s, tasks[1].ID); b.Place != StageReviewing || b.Waiting == nil || b.Waiting.Stage != StageQA {
+		t.Fatalf("passed review should wait for QA: %+v", b)
+	}
+	if err := s.RecoverClaims(testContext, nil); err != nil {
+		t.Fatal(err)
+	}
+	claimed(t, s)
+	finish(t, s, tasks[0].ID, TaskStopped)
+	got := claimed(t, s)
+	if !slices.Contains(got, "B: reviewing by QA") {
+		t.Fatalf("stopping did not free QA: %v", got)
+	}
+	if stopped := onBoard(t, s, tasks[0].ID); stopped.Place != "" || len(stopped.Claims) != 0 {
+		t.Fatalf("stopped holds place or seat: %+v", stopped)
+	}
+	if b := onBoard(t, s, tasks[1].ID); b.Place != StageQA || b.Waiting != nil {
+		t.Fatalf("B did not enter QA: %+v", b)
+	}
+}
+
+// Three writers and two QA seats can hold five tasks together with no
+// overall cap. A passed review waiting for QA still holds Reviewing.
+func TestSeatDefaultsAllowFiveTasksAcrossStages(t *testing.T) {
+	s, _ := fixture(t)
+	p := staged(t, s, newProject(t, s), 0, nil,
+		Role{Name: "Writer #2", Kinds: []string{RoleImplementer}, Engine: "claude"},
+		Role{Name: "Writer #3", Kinds: []string{RoleImplementer}, Engine: "claude"},
+		Role{Name: "QA", Kinds: []string{RoleQA}, Member: "qa", Engine: "codex"},
+		Role{Name: "QA #2", Kinds: []string{RoleQA}, Member: "qa", Engine: "codex"})
+	tasks := queueAll(t, s, p, "A", "B", "C", "D", "E", "F", "G")
+	if got := claimed(t, s); len(got) != 3 {
+		t.Fatalf("writers: %v", got)
+	}
+	if w := waiting(t, s, tasks[3].ID); w == nil || *w != (Wait{Kind: WaitStage, Stage: StageImplementing, Count: 3, Limit: 3}) {
+		t.Fatalf("fourth: %+v", w)
+	}
+	for _, task := range tasks[:3] {
+		finish(t, s, task.ID, TaskReviewing)
+		claimed(t, s)
+		if got := onBoard(t, s, task.ID); got.Place != StageReviewing {
+			t.Fatalf("task did not reach Reviewing through scheduling: %+v", got)
+		}
+		judge(t, s, task.ID, "Reviewer", VerdictPass)
+		claimed(t, s)
+	}
+	claims := 0
+	for _, task := range tasks {
+		claims += len(onBoard(t, s, task.ID).Claims)
+	}
+	if claims != 5 {
+		t.Fatalf("two QA plus three new writers: %d claims", claims)
+	}
+	// C holds its finished review until QA has room.
+	if c := onBoard(t, s, tasks[2].ID); c.Place != StageReviewing || c.Stage != StageReviewing || c.Waiting == nil || c.Waiting.Stage != StageQA {
+		t.Fatalf("held C: %+v", c)
+	}
+	for _, task := range tasks[:5] {
+		got := onBoard(t, s, task.ID)
+		if !got.Active() || got.Waiting != nil && got.Waiting.Kind == WaitProjectCap {
+			t.Fatalf("not active without cap: %+v", got)
+		}
+	}
+	// Removing a seat evicts no task, and the pinned claims stay intact.
+	book := *p.Playbook
+	book.Roles = slices.DeleteFunc(slices.Clone(book.Roles), func(r Role) bool { return r.Name == "QA #2" })
+	if _, err := s.SetPlaybook(testContext, p.ID, book); err != nil {
+		t.Fatal(err)
+	}
+	claimed(t, s)
+	for _, task := range tasks[:2] {
+		if got := onBoard(t, s, task.ID); got.Place != StageQA || len(got.Claims) != 1 {
+			t.Fatalf("evicted QA: %+v", got)
+		}
+	}
+	finish(t, s, tasks[0].ID, TaskStopped)
+	claimed(t, s)
+	if c := onBoard(t, s, tasks[2].ID); c.Waiting == nil || c.Waiting.Count != 1 || c.Waiting.Limit != 1 {
+		t.Fatalf("still full: %+v", c.Waiting)
+	}
+	finish(t, s, tasks[1].ID, TaskStopped)
+	claimed(t, s)
+	if c := onBoard(t, s, tasks[2].ID); c.Place != StageQA || len(c.Claims) != 1 {
+		t.Fatalf("QA seat not freed: %+v", c)
+	}
+	for _, task := range tasks[:2] {
+		if got := onBoard(t, s, task.ID); got.Place != "" || len(got.Claims) != 0 {
+			t.Fatalf("stopped holds place or seat: %+v", got)
+		}
+	}
+}
 
 // staged gives p's team QA, the seats extra, cap tasks under way at once
 // and limits on its stages.
@@ -126,17 +376,16 @@ func TestAHeldTaskEntersAsSoonAsRoomFrees(t *testing.T) {
 	}
 }
 
-// With no limits set, the same work moves as it always has: every task
-// shows in the stage its work is in, and none waits for room.
-func TestNoStageLimitsWorkAsBefore(t *testing.T) {
-	s, tasks := bottleneck(t, nil)
+// Explicit limits above the defaults allow several held tasks per stage.
+func TestExplicitLimitsReplaceSeatDefaults(t *testing.T) {
+	s, tasks := bottleneck(t, map[string]int{StageImplementing: 10, StageReviewing: 10, StageQA: 10})
 	if got := claimed(t, s); !slices.Equal(got, []string{"C: reviewing by Reviewer", "D: writing by Writer"}) {
-		t.Fatalf("with no limits: %v", got)
+		t.Fatalf("with explicit limits: %v", got)
 	}
 	snap, _ := s.Snapshot(testContext)
-	for i, stage := range []string{StageQA, StageQA, StageReviewing, StageImplementing} {
+	for i, stage := range []string{StageQA, StageReviewing, StageReviewing, StageImplementing} {
 		got, _ := snap.FindTask(tasks[i].ID)
-		if got.Stage != stage || got.Stage != stageOf(&snap, got) {
+		if got.Stage != stage {
 			t.Errorf("%s shows in %s, want %s", got.Objective, got.Stage, stage)
 		}
 		if got.Waiting != nil && got.Waiting.Kind == WaitStage {
@@ -242,7 +491,7 @@ func TestChecksRunSideBySideWhateverQAHolds(t *testing.T) {
 // A draft the reviewer turned down stays in review, however full QA is,
 // and goes back without ever waiting for room.
 func TestADraftTurnedDownNeverWaitsForRoom(t *testing.T) {
-	s, tasks := bottleneck(t, map[string]int{StageQA: 1})
+	s, tasks := bottleneck(t, map[string]int{StageQA: 1, StageReviewing: 3})
 	claimed(t, s)
 	judge(t, s, tasks[2].ID, "Reviewer", VerdictRevise)
 	claimed(t, s)

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeCap,
   capLine,
+  stageLimit,
   decisionFor,
   decisionKind,
   isOpenMessage,
@@ -535,11 +536,11 @@ describe("several requests under way", () => {
       ...code().roles.slice(1),
     ],
   };
-  it("caps them as the server does: the setting, or one per implementer seat", () => {
-    expect(activeCap(code())).toBe(1);
-    expect(activeCap(two)).toBe(2);
+  it("caps them as the server does: the optional overall setting", () => {
+    expect(activeCap(code())).toBe(0);
+    expect(activeCap(two)).toBe(0);
     expect(activeCap({ ...two, max_active: 5 })).toBe(5);
-    expect(activeCap({ ...two, roles: [] })).toBe(1);
+    expect(activeCap({ ...two, roles: [] })).toBe(0);
   });
   it("counts exactly the requests the cap counts", () => {
     const counted = (
@@ -565,6 +566,9 @@ describe("several requests under way", () => {
     ).map((status, i) => task({ id: `b${i}`, status }));
     const other = task({ id: "c", project_id: "q", status: "writing" });
     expect(capLine(project(two), [...counted, ...not, other])).toBe(
+      "6 under way",
+    );
+    expect(capLine(project({ ...two, max_active: 2 }), counted)).toBe(
       "6 of 2 under way",
     );
     expect(capLine(project(), counted)).toBe("");
@@ -604,5 +608,46 @@ describe("several requests under way", () => {
         claims: [{ step: "reviewing", seat: "QA", held: "still running" }],
       }),
     ).toBe("Reviewer reviewing");
+  });
+});
+
+describe("stage defaults", () => {
+  it("counts seats for each role, including seats from one member", () => {
+    const roles = [
+      "researcher",
+      "designer",
+      "implementer",
+      "reviewer",
+      "qa",
+    ].flatMap((kind) =>
+      [1, 2].map((n) => ({
+        name: kind + n,
+        kinds: [kind],
+        member: kind,
+        engine: "codex",
+      })),
+    );
+    const pb = { ...code(), roles };
+    for (const stage of [
+      "researching",
+      "designing",
+      "implementing",
+      "reviewing",
+      "qa",
+    ] as const) {
+      expect(stageLimit(pb, stage)).toBe(2);
+      expect(stageLimit({ ...pb, stage_limits: { [stage]: 1 } }, stage)).toBe(
+        1,
+      );
+      expect(stageLimit({ ...pb, stage_limits: { [stage]: 5 } }, stage)).toBe(
+        5,
+      );
+      expect(stageLimit({ ...pb, stage_limits: { [stage]: 0 } }, stage)).toBe(
+        2,
+      );
+    }
+    expect(stageLimit(pb, "ready")).toBe(0);
+    expect(stageLimit({ ...pb, roles: [] }, "qa")).toBe(0);
+    expect(stageLimit(undefined, "implementing")).toBe(0);
   });
 });

@@ -59,6 +59,10 @@ func codeProject(t *testing.T, a *Loop, source string) core.Project {
 			a.StopTask(ctx, task.ProjectID, task.ID)
 		}
 	}
+	// These scripted scenarios assume tasks start one at a time.
+	if p, err = a.SetParallel(ctx, p.ID, 1); err != nil {
+		t.Fatal(err)
+	}
 	return p
 }
 

@@ -209,6 +209,10 @@ func loopApp(t *testing.T, runner *scriptedRunner, deliverTo string) (*Loop, cor
 	if err != nil {
 		t.Fatal(err)
 	}
+	// These scripted scenarios assume tasks start one at a time.
+	if p, err = a.SetParallel(ctx, p.ID, 1); err != nil {
+		t.Fatal(err)
+	}
 	if deliverTo != "" {
 		playbook := *p.Playbook
 		playbook.DeliverTo = deliverTo

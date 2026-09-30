@@ -53,13 +53,18 @@ func queueAll(t *testing.T, s *Service, p Project, objectives ...string) []Task 
 	return out
 }
 
-// With one implementer seat and the default cap of one, a project starts and
+// With one implementer seat and an explicit cap of one, a project starts and
 // moves its tasks as it did when the loop worked one task at a time: the
 // next queued task starts only once the one under way waits on the owner or
 // ends, and a task waiting on the owner or in triage never holds the cap.
 func TestOneSeatAndACapOfOneWorkAsBefore(t *testing.T) {
 	s, _ := fixture(t)
 	p := newProject(t, s)
+	playbook := *p.Playbook
+	playbook.MaxActive = 1
+	if _, err := s.SetPlaybook(testContext, p.ID, playbook); err != nil {
+		t.Fatal(err)
+	}
 	tasks := queueAll(t, s, p, "A", "B")
 	if got := claimed(t, s); !slices.Equal(got, []string{"A: writing by Writer"}) {
 		t.Fatalf("first look: %v", got)
@@ -151,8 +156,8 @@ func TestSeatsOfOneTemplateWorkApartAndJudgeAsOne(t *testing.T) {
 	if _, err := s.SetPlaybook(testContext, p.ID, playbook); err != nil {
 		t.Fatal(err)
 	}
-	if cap := playbook.ActiveCap(); cap != 2 {
-		t.Fatalf("the cap defaults to one per implementer seat: %d", cap)
+	if cap := playbook.ActiveCap(); cap != 0 {
+		t.Fatalf("the overall cap defaults to no limit: %d", cap)
 	}
 	tasks := queueAll(t, s, p, "A", "B")
 	if got := claimed(t, s); !slices.Equal(got, []string{"A: writing by Writer", "B: writing by Writer #2"}) {

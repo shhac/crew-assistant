@@ -10,7 +10,9 @@ import "slices"
 // implementing stage starts nothing more from To do. A move back to an
 // earlier stage never waits. Only Schedule moves a task's place, and only
 // for a task under way: one waiting on the owner, or on something outside
-// the team, stays where it is until it is under way again.
+// the team, stays where it is until it is under way again. It counts against
+// explicit limits, but not seat-derived capacity. Returning tasks are not evicted
+// if the stage is then full.
 
 // placeStage is the working stage t has reached, towards stage limits, or ""
 // for a task on the to-do list, in triage or finished. It is the board's
@@ -67,7 +69,8 @@ type held map[string]map[string]int
 
 // holdings brings each task's place up to date where that needs no room:
 // a task's first look, a move back, or leaving the working stages. It
-// counts where each task is, per project, for the moves that need room.
+// counts tasks per project for the moves that need room. Owner and outside
+// waits retain Place and count only against explicit stage limits.
 func holdings(v *Snapshot) held {
 	counts := held{}
 	for _, p := range v.Projects {
@@ -79,7 +82,9 @@ func holdings(v *Snapshot) held {
 		if stage == "" || t.Place == "" || !later(stage, t.Place) {
 			t.Place = stage
 		}
-		if t.Place != "" && counts[t.ProjectID] != nil {
+		p := project(v, t.ProjectID)
+		explicit := p != nil && p.Playbook != nil && p.Playbook.StageLimits[t.Place] > 0
+		if (t.Active() || explicit) && t.Place != "" && counts[t.ProjectID] != nil {
 			counts[t.ProjectID][t.Place]++
 		}
 	}

@@ -4,7 +4,7 @@ import { RunRecipeSettings } from "./RunRecipe";
 import { LandingSettings } from "./ProjectLanding";
 import { TeamSettings } from "./TeamSettings";
 import { boardColumns, readyLabel } from "./boardLanes";
-import { activeCap, isCode, stageLimit } from "./stages";
+import { isCode, stageLimit, stageRole } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
 import {
   setParallel,
@@ -47,11 +47,6 @@ export function ConfigTab({
             playbook={playbook}
             refresh={refresh}
           />
-          <StageLimits
-            project={project}
-            playbook={playbook}
-            refresh={refresh}
-          />
         </>
       )}
       {code && (
@@ -78,11 +73,15 @@ export function ConfigTab({
 /** The most requests a project may have under way at once, as the server allows. */
 const mostAtOnce = 10;
 
-/**
- * How many of the project's requests may be under way at once. Seats bound
- * the steps; this bounds the requests started, so work finishes before more
- * starts. Unset, it is one per implementer seat.
- */
+/** The stages of the project's board that can have a limit. */
+const limitStages = (project: Project) => [
+  ...boardColumns(project, [])
+    .flatMap((c) => c.lanes)
+    .filter((l) => l.stage !== "todo" && l.stage !== "triage"),
+  { stage: "ready" as Stage, label: readyLabel(project) },
+];
+
+/** Stage capacities and the optional overall limit. */
 function TasksAtOnce({
   project,
   playbook,
@@ -92,137 +91,63 @@ function TasksAtOnce({
   playbook: Playbook;
   refresh: () => Promise<void>;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(String(playbook.max_active ?? 0));
-  const { busy, error, run } = useAction();
-  const cap = activeCap(playbook);
-  const perSeat = activeCap({ ...playbook, max_active: 0 });
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    await run(async () => {
-      await setParallel(project.id, Number(value));
-      await refresh();
-      setEditing(false);
-    });
-  }
-  if (editing)
-    return (
-      <section className="tab-panel card" aria-label="Tasks at once">
-        <form className="form" aria-label="Tasks at once" onSubmit={save}>
-          <h2>Tasks at once</h2>
-          <label htmlFor="config-max-active">
-            Requests under way at once
-            <select
-              id="config-max-active"
-              className="field"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-            >
-              <option value="0">One per implementer seat ({perSeat})</option>
-              {Array.from({ length: mostAtOnce }, (_, i) => (
-                <option key={i + 1} value={String(i + 1)}>
-                  {i + 1}
-                </option>
-              ))}
-            </select>
-            <span className="hint">
-              Requests past this wait on the to-do list, in order. Ones waiting
-              on you don't count.
-            </span>
-          </label>
-          <ErrorNotice error={error} />
-          <div className="actions">
-            <button className="btn btn-primary" type="submit" disabled={busy}>
-              Save
-            </button>
-            <button
-              className="btn btn-quiet"
-              type="button"
-              disabled={busy}
-              onClick={() => setEditing(false)}
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
-      </section>
-    );
-  return (
-    <section className="tab-panel card" aria-label="Tasks at once">
-      <div className="panel-head">
-        <h2>Tasks at once</h2>
-        <button
-          type="button"
-          className="btn btn-sm"
-          onClick={() => {
-            setValue(String(playbook.max_active ?? 0));
-            setEditing(true);
-          }}
-        >
-          Edit
-        </button>
-      </div>
-      <dl className="facts">
-        <div className="fact-row">
-          <dt>Under way</dt>
-          <dd>
-            Up to {cap} at once
-            {!playbook.max_active && " (one per implementer seat)"}
-          </dd>
-        </div>
-      </dl>
-    </section>
-  );
-}
-
-/** The stages of the project's board that can have a limit, with their labels. */
-const limitStages = (project: Project) => [
-  ...boardColumns(project, [])
-    .flatMap((c) => c.lanes)
-    .filter((l) => l.stage !== "todo" && l.stage !== "triage"),
-  { stage: "ready" as Stage, label: readyLabel(project) },
-];
-
-/**
- * The most requests each stage of the board may hold at once. A request
- * done with a stage waits in it until the next has room, so a full stage
- * holds back the ones before it, back to To do. Unset, a stage has none.
- */
-function StageLimits({
-  project,
-  playbook,
-  refresh,
-}: {
-  project: Project;
-  playbook: Playbook;
-  refresh: () => Promise<void>;
-}) {
   const stages = limitStages(project);
+  const [saved, setSaved] = useState<{
+    source: Playbook;
+    actual: Playbook;
+  } | null>(null);
+  const shown = saved?.source === playbook ? saved.actual : playbook;
   const current = () =>
     Object.fromEntries(
-      stages.map((s) => [s.stage, String(stageLimit(playbook, s.stage))]),
+      stages.map((s) => [s.stage, String(shown.stage_limits?.[s.stage] || 0)]),
     );
   const [editing, setEditing] = useState(false);
   const [values, setValues] = useState<Record<string, string>>(current);
+  const [value, setValue] = useState(String(playbook.max_active || 0));
   const { busy, error, run } = useAction();
+  const defaults = { ...playbook, stage_limits: {} };
   async function save(e: FormEvent) {
     e.preventDefault();
     await run(async () => {
-      const limits: Partial<Record<Stage, number>> = {};
+      const limits = { ...shown.stage_limits };
       for (const s of stages) {
-        const n = Number(values[s.stage] ?? 0);
+        delete limits[s.stage];
+        const n = Number(values[s.stage] || 0);
         if (n > 0) limits[s.stage] = n;
       }
-      await setStageLimits(project.id, limits);
-      await refresh();
-      setEditing(false);
+      let actual = shown;
+      try {
+        if (
+          stages.some(
+            (s) =>
+              Number(values[s.stage] || 0) !==
+              (shown.stage_limits?.[s.stage] || 0),
+          )
+        ) {
+          await setStageLimits(project.id, limits);
+          actual = { ...actual, stage_limits: limits };
+        }
+        if (Number(value) !== (shown.max_active || 0)) {
+          await setParallel(project.id, Number(value));
+          actual = { ...actual, max_active: Number(value) };
+        }
+      } finally {
+        setSaved({ source: playbook, actual });
+        setEditing(false);
+        await refresh();
+      }
     });
   }
-  if (editing)
-    return (
-      <section className="tab-panel card" aria-label="Stage limits">
-        <form className="form" aria-label="Stage limits" onSubmit={save}>
-          <h2>Stage limits</h2>
+  const options = Array.from({ length: mostAtOnce }, (_, i) => (
+    <option key={i + 1} value={String(i + 1)}>
+      {i + 1}
+    </option>
+  ));
+  return (
+    <section className="tab-panel card" aria-label="Tasks at once">
+      {editing ? (
+        <form className="form" aria-label="Tasks at once" onSubmit={save}>
+          <h2>Tasks at once</h2>
           <div className="form-row">
             {stages.map((s) => (
               <label key={s.stage} htmlFor={`config-stage-${s.stage}`}>
@@ -230,26 +155,40 @@ function StageLimits({
                 <select
                   id={`config-stage-${s.stage}`}
                   className="field"
-                  value={values[s.stage] ?? "0"}
+                  value={values[s.stage] || "0"}
                   onChange={(e) =>
                     setValues({ ...values, [s.stage]: e.target.value })
                   }
                 >
-                  <option value="0">No limit</option>
-                  {Array.from({ length: mostAtOnce }, (_, i) => (
-                    <option key={i + 1} value={String(i + 1)}>
-                      {i + 1}
-                    </option>
-                  ))}
+                  <option value="0">
+                    {stageLimit(defaults, s.stage)
+                      ? `One per seat (${stageLimit(defaults, s.stage)})`
+                      : "No limit"}
+                  </option>
+                  {options}
                 </select>
               </label>
             ))}
+            <label htmlFor="config-max-active">
+              In all
+              <select
+                id="config-max-active"
+                className="field"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+              >
+                <option value="0">No overall limit</option>
+                {options}
+              </select>
+            </label>
           </div>
           <p className="hint">
             A request done with a stage waits in it until the next has room. To
-            do has no limit.
+            do has no limit. Requests past an overall limit wait on the to-do
+            list. Requests waiting on you or outside checks don't count toward
+            seat-based stage limits or the overall limit, but keep counting
+            toward stage limits you set.
           </p>
-          <ErrorNotice error={error} />
           <div className="actions">
             <button className="btn btn-primary" type="submit" disabled={busy}>
               Save
@@ -264,38 +203,52 @@ function StageLimits({
             </button>
           </div>
         </form>
-      </section>
-    );
-  const limited = stages.filter((s) => stageLimit(playbook, s.stage));
-  return (
-    <section className="tab-panel card" aria-label="Stage limits">
-      <div className="panel-head">
-        <h2>Stage limits</h2>
-        <button
-          type="button"
-          className="btn btn-sm"
-          onClick={() => {
-            setValues(current());
-            setEditing(true);
-          }}
-        >
-          Edit
-        </button>
-      </div>
-      {limited.length ? (
-        <dl className="facts">
-          {limited.map((s) => (
-            <div key={s.stage} className="fact-row">
-              <dt>{s.label}</dt>
-              <dd>Up to {stageLimit(playbook, s.stage)} at once</dd>
-            </div>
-          ))}
-        </dl>
       ) : (
-        <p className="muted">
-          No limits: a request moves on as soon as someone is free for it.
-        </p>
+        <>
+          <div className="panel-head">
+            <h2>Tasks at once</h2>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                setValues(current());
+                setValue(String(shown.max_active || 0));
+                setEditing(true);
+              }}
+            >
+              Edit
+            </button>
+          </div>
+          <dl className="facts">
+            {stages.map((s) => {
+              const limit = stageLimit(shown, s.stage);
+              return (
+                <div key={s.stage} className="fact-row">
+                  <dt>{s.label}</dt>
+                  <dd>
+                    {limit
+                      ? `Up to ${limit} at once (${
+                          shown.stage_limits?.[s.stage]
+                            ? "set by you"
+                            : `one per ${s.stage === "qa" ? s.label : stageRole[s.stage]} seat`
+                        })`
+                      : "No limit"}
+                  </dd>
+                </div>
+              );
+            })}
+            <div className="fact-row">
+              <dt>In all</dt>
+              <dd>
+                {shown.max_active
+                  ? `Up to ${shown.max_active} at once`
+                  : "No limit beyond the stages"}
+              </dd>
+            </div>
+          </dl>
+        </>
       )}
+      <ErrorNotice error={error} />
     </section>
   );
 }

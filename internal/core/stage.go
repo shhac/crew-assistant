@@ -34,9 +34,13 @@ func deriveWith(v *Snapshot, t *Task, index map[string][]string) {
 	// Where a project limits its stages, a task shows in the stage it
 	// holds: one waiting for room in the next, or for someone to take it
 	// up there, is still in the one it finished; see stage_limits.go.
-	if p := project(v, t.ProjectID); p != nil && p.Playbook != nil && len(p.Playbook.StageLimits) > 0 &&
+	if p := project(v, t.ProjectID); p != nil && p.Playbook != nil && p.Playbook.HasStageLimits() &&
 		t.Place != "" && !t.Finished() && t.Status != TaskQueued && t.Status != TaskTriage {
 		t.Stage = t.Place
+		// Backward handoffs never need room, even before Schedule updates Place.
+		if stage := placeStage(v, *t); t.Active() && stage != "" && !later(stage, t.Place) {
+			t.Stage = stage
+		}
 	}
 	t.PMDeciding = pmDeciding(v, *t)
 	t.Blocks = index[t.ID]

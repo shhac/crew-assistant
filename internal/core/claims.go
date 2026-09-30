@@ -517,7 +517,7 @@ func startQueued(v *Snapshot, p *Project, busy map[string]Wait, admit Admit, sta
 		if t.ProjectID != p.ID || t.Status != TaskQueued || heldBack(v, *t) {
 			continue
 		}
-		if limit := p.Playbook.ActiveCap(); active >= limit {
+		if limit := p.Playbook.ActiveCap(); limit > 0 && active >= limit {
 			waits[t.ID] = &Wait{Kind: WaitProjectCap, Active: active, Cap: limit}
 			break
 		}
@@ -761,14 +761,8 @@ func (s *Service) RecoverClaims(ctx context.Context, held map[string]string) err
 	})
 }
 
-// ActiveCap is how many of a project's tasks may be under way at once: the
-// owner's setting, or else one for each implementer seat.
-func (p Playbook) ActiveCap() int {
-	if p.MaxActive > 0 {
-		return p.MaxActive
-	}
-	return max(1, len(rolesOf(p.Roles, RoleImplementer)))
-}
+// ActiveCap is the optional overall limit; 0 means no overall limit.
+func (p Playbook) ActiveCap() int { return p.MaxActive }
 
 // CheckerGroup is the seats that judge a draft as one: the seats filled from
 // one team member, who are interchangeable, or one seat of no member. A

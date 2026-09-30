@@ -301,28 +301,28 @@ describe("several requests under way at once", () => {
         task(4, {}),
       ],
     });
-    // Unset, the cap is one per implementer seat.
+    // Unset, there is no overall cap.
     expect(document.querySelector(".board-cap")?.textContent).toBe(
-      "1 of 2 under way · Tasks at once",
+      "1 under way · Tasks at once",
     );
   });
 });
 
 describe("the project's cap on requests under way", () => {
   const card = () => screen.getByRole("region", { name: "Tasks at once" });
-  it("reads as one per implementer seat until set", () => {
+  it("shows seat defaults and the optional overall cap", () => {
     show(project(team()), {}, { tab: "config" });
     expect(card().querySelector("dd")?.textContent).toBe(
       "Up to 2 at once (one per implementer seat)",
     );
     cleanup();
     show(project(team({ max_active: 3 })), {}, { tab: "config" });
-    expect(card().querySelector("dd")?.textContent).toBe("Up to 3 at once");
+    expect(card().textContent).toContain("In allUp to 3 at once");
   });
-  it("sets a number, or goes back to one per implementer seat", async () => {
+  it("sets an overall limit or clears it", async () => {
     show(project(team()), {}, { tab: "config" });
     fireEvent.click(within(card()).getByRole("button", { name: "Edit" }));
-    const field = within(card()).getByLabelText(/Requests under way at once/);
+    const field = within(card()).getByLabelText("In all");
     expect((field as HTMLSelectElement).value).toBe("0");
     fireEvent.change(field, { target: { value: "4" } });
     fireEvent.click(within(card()).getByRole("button", { name: "Save" }));
@@ -339,10 +339,9 @@ describe("the project's cap on requests under way", () => {
     refresh.mockClear();
     show(project(team({ max_active: 4 })), {}, { tab: "config" });
     fireEvent.click(within(card()).getByRole("button", { name: "Edit" }));
-    fireEvent.change(
-      within(card()).getByLabelText(/Requests under way at once/),
-      { target: { value: "0" } },
-    );
+    fireEvent.change(within(card()).getByLabelText("In all"), {
+      target: { value: "0" },
+    });
     fireEvent.click(within(card()).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(writes()).toEqual([
@@ -350,6 +349,47 @@ describe("the project's cap on requests under way", () => {
         path: "/api/projects/p1/parallel",
         method: "PUT",
         body: { max_active: 0 },
+      },
+    ]);
+  });
+
+  it("refreshes and shows what saved if the overall limit fails after stage limits", async () => {
+    const original = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string, options: RequestInit = {}) => {
+        if (path.endsWith("/parallel")) {
+          return {
+            ok: false,
+            status: 400,
+            json: async () => ({ error: "Overall limit failed" }),
+          };
+        }
+        return original(path, options);
+      }),
+    );
+    show(project(team()), {}, { tab: "config" });
+    fireEvent.click(within(card()).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(card()).getByLabelText("Implementing"), {
+      target: { value: "3" },
+    });
+    fireEvent.change(within(card()).getByLabelText("In all"), {
+      target: { value: "4" },
+    });
+    fireEvent.click(within(card()).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(card().textContent).toContain("Overall limit failed"),
+    );
+    expect(refresh).toHaveBeenCalled();
+    expect(card().textContent).toContain(
+      "ImplementingUp to 3 at once (set by you)",
+    );
+    expect(card().textContent).toContain("In allNo limit beyond the stages");
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/stage-limits",
+        method: "PUT",
+        body: { stage_limits: { implementing: 3 } },
       },
     ]);
   });
@@ -394,6 +434,42 @@ describe("limits on how much each stage holds", () => {
   const count = (name: string) =>
     screen.getByRole("listitem", { name }).querySelector(".count")?.textContent;
 
+  it("shows and counts a backward handoff in its new lane before Place catches up", () => {
+    show(project(team()), {
+      tasks: [writing(3, "Claudius", { place: "reviewing" })],
+    });
+    expect(count("Implementing")).toBe("1 of 2");
+    expect(count("Reviewing")).toBe("0 of 1");
+    expect(
+      within(screen.getByRole("listitem", { name: "Implementing" })).getByText(
+        "Request 3",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("keeps waiting cards counting against explicit stage limits", () => {
+    const state = bottleneck();
+    state.tasks[1] = {
+      ...state.tasks[1],
+      status: "waiting",
+      waiting: undefined,
+    };
+    state.tasks[4] = { ...state.tasks[4], status: "awaiting" };
+    show(project(team({ stage_limits: limits })), state);
+    expect(count("Reviewing")).toBe("1 of 1");
+    expect(
+      screen
+        .getByRole("region", { name: "Ready to land" })
+        .querySelector(".count")?.textContent,
+    ).toBe("1 of 2");
+    expect(screen.getByText("Request 2")).toBeTruthy();
+    expect(screen.getByText("Request 5")).toBeTruthy();
+    cleanup();
+    show(project(team()), state);
+    expect(count("Reviewing")).toBe("0 of 1");
+    expect(screen.getByText("Request 2")).toBeTruthy();
+  });
+
   it("counts each stage against its limit, and a plain count without one", () => {
     show(project(team({ stage_limits: limits })), bottleneck());
     expect(count("QA")).toBe("1 of 1");
@@ -407,8 +483,16 @@ describe("limits on how much each stage holds", () => {
     ).toBe("1 of 2");
     cleanup();
     show(project(team()), bottleneck());
-    expect(count("QA")).toBe("1");
-    expect(count("Reviewing")).toBe("1");
+    expect(count("QA")).toBe("1 of 1");
+    expect(count("Reviewing")).toBe("1 of 1");
+    cleanup();
+    show(
+      project(
+        team({ roles: [...roles, { ...roles[0], name: "Claudius #3" }] }),
+      ),
+      bottleneck(),
+    );
+    expect(count("Implementing")).toBe("1 of 3");
   });
 
   it("counts Ready whenever a request holds it, wherever its card shows", () => {
@@ -457,10 +541,11 @@ describe("limits on how much each stage holds", () => {
     );
   });
 
-  const card = () => screen.getByRole("region", { name: "Stage limits" });
-  it("shows the limits set in Config, and none until set", () => {
+  const card = () => screen.getByRole("region", { name: "Tasks at once" });
+  it("shows seat defaults and explicit limits in Config", () => {
     show(project(team()), {}, { tab: "config" });
-    expect(card().textContent).toContain("No limits");
+    expect(card().textContent).toContain("No limit beyond the stages");
+    expect(card().textContent).toContain("QAUp to 1 at once (one per QA seat)");
     cleanup();
     show(
       project(team({ stage_limits: { qa: 1, ready: 2 } })),
@@ -472,7 +557,13 @@ describe("limits on how much each stage holds", () => {
     const rows = [...card().querySelectorAll(".fact-row")].map(
       (r) => r.textContent,
     );
-    expect(rows).toEqual(["QAUp to 1 at once", "Ready to landUp to 2 at once"]);
+    expect(rows).toEqual([
+      "ImplementingUp to 2 at once (one per implementer seat)",
+      "QAUp to 1 at once (set by you)",
+      "ReviewingUp to 1 at once (one per reviewer seat)",
+      "Ready to landUp to 2 at once (set by you)",
+      "In allNo limit beyond the stages",
+    ]);
   });
 
   it("sets a stage's limit, or takes it away", async () => {

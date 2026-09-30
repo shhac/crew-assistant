@@ -2,7 +2,7 @@ import { projectHref, requestHref } from "./router";
 import { pmLandingLine } from "./landing";
 import {
   capLine,
-  finished,
+  underWay,
   latestFirst,
   projectTasks,
   requestStep,
@@ -34,9 +34,20 @@ export function Board({
     <CardList tasks={list} state={state} project={project} />
   );
   // A stage with a limit counts the requests it holds, including those done
-  // with it and waiting for room in the next.
+  // with it and waiting for room in the next. Backward handoffs display
+  // immediately; checks can hold Ready before their displayed lane moves.
   const holds = (stage: Stage) =>
-    tasks.filter((t) => !finished(t) && (t.place || t.stage) === stage).length;
+    tasks.filter(
+      (t) =>
+        ((underWay(t) && t.status !== "awaiting") ||
+          ((project.playbook?.stage_limits?.[stage] ?? 0) > 0 &&
+            !["queued", "triage", "delivered", "landed", "stopped"].includes(
+              t.status,
+            ))) &&
+        (t.status === "reviewing" || t.status === "deciding"
+          ? t.place || t.stage
+          : t.stage) === stage,
+    ).length;
   const title = (stage: Stage, label: string, count: number) => {
     const limit = stageLimit(project.playbook, stage);
     return (

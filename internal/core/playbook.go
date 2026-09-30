@@ -128,10 +128,10 @@ type Playbook struct {
 	// the owner or the assistant sets it; nothing inside the project can.
 	Land LandPolicy `json:"land,omitzero"`
 	// MaxActive is how many of the project's tasks may be under way at once;
-	// 0 is one for each implementer seat. See ActiveCap.
+	// 0 means no overall limit. See ActiveCap.
 	MaxActive int `json:"max_active,omitempty"`
 	// StageLimits is the most tasks each working stage of the board may
-	// hold at once, keyed by stage; a stage missing, or 0, has no limit, and
+	// hold at once, keyed by stage; missing or 0 uses the role seat count, and
 	// To do and triage never have one. See StageLimit.
 	StageLimits map[string]int `json:"stage_limits,omitempty"`
 }
@@ -140,9 +140,31 @@ type Playbook struct {
 // order: each working stage, up to landing.
 var limitStages = []string{StageResearching, StageDesigning, StageImplementing, StageReviewing, StageQA, StageReady}
 
+// stageRole maps each stage to the role providing its default capacity.
+var stageRole = map[string]string{
+	StageResearching: RoleResearcher, StageDesigning: RoleDesigner,
+	StageImplementing: RoleImplementer, StageReviewing: RoleReviewer, StageQA: RoleQA,
+}
+
+// HasStageLimits reports whether any stage has an effective limit.
+func (p Playbook) HasStageLimits() bool {
+	for _, stage := range limitStages {
+		if p.StageLimit(stage) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // StageLimit is the most tasks the stage may hold at once, or 0 for no limit.
 func (p Playbook) StageLimit(stage string) int {
-	return p.StageLimits[stage]
+	if limit := p.StageLimits[stage]; limit > 0 {
+		return limit
+	}
+	if kind := stageRole[stage]; kind != "" {
+		return len(rolesOf(p.Roles, kind))
+	}
+	return 0
 }
 
 const (
@@ -255,20 +277,20 @@ func (p Playbook) Validate() error {
 		return errors.New("a playbook needs at least one implementer and at least one reviewer")
 	}
 	if p.MaxActive < 0 || p.MaxActive > maxActiveLimit {
-		return fmt.Errorf("max_active must be between 1 and %d, or 0 for one per implementer seat", maxActiveLimit)
+		return fmt.Errorf("max_active must be between 1 and %d, or 0 for no overall limit", maxActiveLimit)
 	}
 	for stage, limit := range p.StageLimits {
 		if !slices.Contains(limitStages, stage) {
 			return fmt.Errorf("stage_limits: %q is not a stage that can have a limit; use one of %s", stage, strings.Join(limitStages, ", "))
 		}
 		if limit < 0 || limit > maxActiveLimit {
-			return fmt.Errorf("stage_limits: %s must be between 1 and %d, or 0 for no limit", stage, maxActiveLimit)
+			return fmt.Errorf("stage_limits: %s must be between 1 and %d, or 0 for the role seat count (no limit for Ready)", stage, maxActiveLimit)
 		}
 	}
 	return nil
 }
 
-// maxActiveLimit bounds how many tasks a project may have under way at once.
+// maxActiveLimit bounds owner-set overall and stage limits.
 const maxActiveLimit = 10
 
 // seatKinds checks what one seat holds: known kinds, each once, and at most

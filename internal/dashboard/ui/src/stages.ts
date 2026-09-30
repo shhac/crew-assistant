@@ -37,24 +37,19 @@ const active = (task: Task) =>
   task.status === "deciding" ||
   task.status === "landing";
 
-/**
- * How many requests may be under way at once, as the server works it out:
- * the owner's setting, or else one for each implementer seat.
- */
-export const activeCap = (playbook: Playbook) =>
-  playbook.max_active && playbook.max_active > 0
-    ? playbook.max_active
-    : Math.max(1, playbook.roles.filter((r) => holds(r, "implementer")).length);
+/** Optional overall limit; zero means no overall limit. */
+export const activeCap = (playbook: Playbook) => playbook.max_active || 0;
 
 /**
- * "2 of 3 under way": a project's requests counted against its cap, counting
- * exactly those the cap counts, so none waiting on the owner, on checks and
- * reviews, or on the to-do list; "" for a project with no team.
+ * Requests under way, with the optional overall cap when set. Counts the
+ * same statuses as the server, excluding owner waits, outside checks and
+ * reviews, and the to-do list; "" for a project with no team.
  */
 export function capLine(project: Project, tasks: Task[]) {
   if (!project.playbook) return "";
   const count = projectTasks(project, tasks).filter(active).length;
-  return `${count} of ${activeCap(project.playbook)} under way`;
+  const cap = activeCap(project.playbook);
+  return `${count}${cap ? ` of ${cap}` : ""} under way`;
 }
 
 /** Started and not yet back with the owner or finished. */
@@ -262,11 +257,21 @@ export function stageLabel(stage: Stage, playbook?: Playbook) {
   return stage;
 }
 
-/**
- * The stage's limit, if it has one: the most requests it may hold at once.
- */
+/** The role whose seats supply each working stage's default capacity. */
+export const stageRole: Partial<Record<Stage, string>> = {
+  researching: "researcher",
+  designing: "designer",
+  implementing: "implementer",
+  reviewing: "reviewer",
+  qa: "qa",
+};
+
+/** The stage's limit: the most requests under way it may hold at once. */
 export const stageLimit = (playbook: Playbook | undefined, stage: Stage) =>
-  playbook?.stage_limits?.[stage] || 0;
+  playbook?.stage_limits?.[stage] ||
+  (stageRole[stage]
+    ? playbook?.roles.filter((r) => holds(r, stageRole[stage]!)).length || 0
+    : 0);
 
 /**
  * Who or what a ready step waits for, as "Waiting for Lucius (busy on

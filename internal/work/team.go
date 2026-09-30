@@ -482,7 +482,7 @@ func (lp *Loop) changeSeats(ctx context.Context, projectID string, change func(*
 }
 
 // SetParallel sets how many of a project's tasks may be under way at once:
-// 1 or more, or 0 for one per implementer seat. Tasks past it stay on the
+// 1 or more, or 0 for no overall limit. Tasks past it stay on the
 // to-do list, in order, until one finishes or waits on the owner.
 func (lp *Loop) SetParallel(ctx context.Context, projectID string, maxActive int) (core.Project, error) {
 	return lp.changeSeats(ctx, projectID, func(playbook *core.Playbook) error {
@@ -492,8 +492,9 @@ func (lp *Loop) SetParallel(ctx context.Context, projectID string, maxActive int
 }
 
 // SetStageLimits sets the most tasks each working stage of a project's
-// board may hold at once, keyed by stage; a stage left out, or 0, has no
-// limit. A task that finishes a stage waits in it for room in the next.
+// board may hold at once, keyed by stage; missing or 0 uses the role seat
+// count (Ready has no default limit). A finished stage holds its task until
+// the next has room.
 func (lp *Loop) SetStageLimits(ctx context.Context, projectID string, limits map[string]int) (core.Project, error) {
 	return lp.changeSeats(ctx, projectID, func(playbook *core.Playbook) error {
 		playbook.StageLimits = nil
