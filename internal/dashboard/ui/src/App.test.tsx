@@ -342,6 +342,11 @@ describe("the shell", () => {
     const panel = await screen.findByRole("complementary", {
       name: "Draft the note",
     });
+    // The request takes focus once it opens; typing starts only after that,
+    // or the panel would take focus from the chat mid-test.
+    await waitFor(() =>
+      expect(panel.contains(document.activeElement)).toBe(true),
+    );
     const field = screen.getByLabelText("Message Iris");
     field.focus();
     fireEvent.change(field, { target: { value: "/compact" } });
