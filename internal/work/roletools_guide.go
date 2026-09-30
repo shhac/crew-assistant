@@ -31,7 +31,7 @@ func (r roleTools) guideTools() string {
 		return guide + " add_note leaves a note on a task for the team and the owner. Answering changes nothing else, so say what you would change instead of changing it."
 	}
 	if r.manages {
-		return guide + fmt.Sprintf(" You also look after the tasks themselves. Where a task's title or requirements are messy, tidy them with edit_task; every change is kept and the owner can undo it. Where one task depends on another, set that up with link_tasks, and take back a link the team set with unlink_tasks. Where a task should be split, or needs a sibling, ask for the new one with queue_task (at most %d each time you look). add_note leaves a note on a task for the team and the owner.", maxPMQueued)
+		return guide + fmt.Sprintf(" You also look after the tasks themselves. set_blocker adds an external condition (manual or daemon_includes); clear_blocker clears a condition the team set. Where a task's title or requirements are messy, tidy them with edit_task; every change is kept and the owner can undo it. Where one task depends on another, set that up with link_tasks, and take back a link the team set with unlink_tasks. Where a task should be split, or needs a sibling, ask for the new one with queue_task (at most %d each time you look). add_note leaves a note on a task for the team and the owner.", maxPMQueued)
 	}
 	if r.taskID == "" {
 		return guide
@@ -80,6 +80,8 @@ func (r roleTools) definitions() []session.ToolDefinition {
 	}
 	if r.manages {
 		return append(defs,
+			session.ToolDefinition{Name: "set_blocker", Description: "Hold a task on an external condition. kind is manual or daemon_includes; description is a short condition (required for manual); other_task_id names the same project task whose landing the running daemon must include, or empty for manual; holds is start or landing. Owner conditions stay under owner control.", Schema: schema([]string{"task_id", "kind", "description", "other_task_id", "holds"})},
+			session.ToolDefinition{Name: "clear_blocker", Description: "Clear an external blocker the team set, by its blocker_id.", Schema: schema([]string{"task_id", "blocker_id"})},
 			session.ToolDefinition{Name: "edit_task", Description: "Tidy an unfinished task of this project. task_id is its readable or canonical id. title replaces its title, or empty to keep it. requirements replaces all its requirements, one to a line; none removes them all; empty keeps them. Every change is kept and the owner can undo it.", Schema: schema([]string{"task_id", "title", "requirements"})},
 			session.ToolDefinition{Name: "link_tasks", Description: "Link two of this project's tasks. relation is what task_id is to other_task_id: " + relationGuide([]string{core.RelationDependsOn, core.RelationBlocks, core.RelationRelatesTo}) + " A pair has one link; the owner's links stay as they are, and a task whose work has begun can't be made to wait.", Schema: schema([]string{"task_id", "relation", "other_task_id"})},
 			session.ToolDefinition{Name: "unlink_tasks", Description: "Take away a link between two of this project's tasks that the team set; links the owner or assistant set stay.", Schema: schema([]string{"task_id", "other_task_id"})},

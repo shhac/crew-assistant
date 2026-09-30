@@ -283,7 +283,7 @@ func TestRolesReadEveryNoteAPageAtATime(t *testing.T) {
 }
 
 // pmToolNames are the tools of every PM turn that decides something.
-const pmToolNames = "list_tasks read_task read_notes edit_task link_tasks unlink_tasks queue_task add_note"
+const pmToolNames = "list_tasks read_task read_notes set_blocker clear_blocker edit_task link_tasks unlink_tasks queue_task add_note"
 
 // specTools names the tools a turn was given.
 func specTools(spec roles.Spec) []string {

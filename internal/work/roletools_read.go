@@ -84,7 +84,7 @@ func linkedTo(a, b core.Task) bool {
 }
 
 func linksLine(snap core.Snapshot, t core.Task) string {
-	var parts []string
+	parts := blockerLines(t)
 	for _, l := range linkGroups(t) {
 		if len(l.ids) > 0 {
 			names := make([]string, len(l.ids))
@@ -144,6 +144,9 @@ func (r roleTools) read(ctx context.Context, id string) (string, error) {
 func taskBrief(snap core.Snapshot, projectID string, t core.Task, designFiles string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s (%s, %s): %s\n", t.Label(), t.Status, t.Stage, text.Clip(t.Objective, 600))
+	for _, line := range blockerLines(t) {
+		fmt.Fprintf(&b, "- %s\n", line)
+	}
 	for _, c := range t.Criteria {
 		fmt.Fprintf(&b, "- criterion: %s\n", text.Clip(c, 300))
 	}
@@ -209,4 +212,28 @@ func taskBrief(snap core.Snapshot, projectID string, t core.Task, designFiles st
 		fmt.Fprintf(&b, "Branch: %s\n", t.Branch)
 	}
 	return b.String()
+}
+
+func blockerLines(t core.Task) []string {
+	var out []string
+	for _, b := range t.Blockers {
+		if b.ClearedAt != nil {
+			continue
+		}
+		line := fmt.Sprintf("held until: %s (blocker %s, %s)", b.Description, b.ID, b.Kind)
+		if b.LandingOnly {
+			line += " (landing only)"
+		}
+		switch b.By {
+		case core.LinkedByOwner:
+			line += " (set by the owner)"
+		case core.LinkedByAssistant:
+			line += " (set by the assistant)"
+		}
+		if b.Check != "" {
+			line += ": " + b.Check
+		}
+		out = append(out, line)
+	}
+	return out
 }

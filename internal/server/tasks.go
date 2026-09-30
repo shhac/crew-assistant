@@ -11,6 +11,23 @@ import (
 // registerProjectTasks serves the outcomes the owner asks of a project, and
 // what those produced.
 func registerProjectTasks(mux *http.ServeMux, a *app.App) {
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/blockers", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Kind        string `json:"kind"`
+			Description string `json:"description"`
+			Task        string `json:"task"`
+			LandingOnly bool   `json:"landing_only"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.SetBlocker(r.Context(), core.BlockerInput{Project: r.PathValue("id"), Task: r.PathValue("task"), Kind: in.Kind, Description: in.Description, Other: in.Task, LandingOnly: in.LandingOnly, By: core.LinkedByOwner})
+		reply(w, 200, v, err)
+	})
+	mux.HandleFunc("DELETE /api/projects/{id}/tasks/{task}/blockers/{blocker}", func(w http.ResponseWriter, r *http.Request) {
+		v, err := a.Work.ClearBlocker(r.Context(), r.PathValue("id"), r.PathValue("task"), r.PathValue("blocker"), core.LinkedByOwner, "cleared by the owner")
+		reply(w, 200, v, err)
+	})
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/land", func(w http.ResponseWriter, r *http.Request) {
 		v, err := a.Work.LandTask(r.Context(), r.PathValue("id"), r.PathValue("task"))
 		reply(w, 200, v, err)

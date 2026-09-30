@@ -63,8 +63,12 @@ type Loop struct {
 	github    github.Client
 	githubURL func(repo string) string
 	prSeen    sync.Map
-	loopWake  chan struct{}
-	turns     turnRegister
+	// Build and Includes are injectable read-only observations of this daemon.
+	Build         func() (revision string, ok bool)
+	Includes      func(context.Context, string, string, string, string) (bool, error)
+	blockerChecks sync.Map
+	loopWake      chan struct{}
+	turns         turnRegister
 	// gate bounds role turns per engine and holds them back while the owner
 	// is busy; jobs are the claimed steps running now.
 	gate gate

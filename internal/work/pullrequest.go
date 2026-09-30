@@ -171,8 +171,25 @@ func (lp *Loop) reactTo(ctx context.Context, t core.Task, m gitMedium, r core.Re
 		return lp.answerPR(ctx, t, r, pr, prop, feedback)
 	}
 	if pr.Ready() {
-		if err := lp.github.Merge(ctx, land.GitHub, prop.Number, land.MergeMethod(), r.Ref); err == nil {
-			// The next look sees it merged and records the landing.
+		if _, err := lp.updateOpen(ctx, t.ID, func(current *core.Task, _ *core.Project) (string, error) {
+			if why := core.BlockerReasons(*current); len(why) > 0 && current.Delivering == nil {
+				return "", errDeliveryBlocked
+			}
+			current.Delivering = &core.Delivering{Revision: r.N, At: time.Now().UTC()}
+			return "", nil
+		}); err != nil {
+			if errors.Is(err, errDeliveryBlocked) {
+				return nil
+			}
+			return err
+		}
+		mergeErr := lp.github.Merge(ctx, land.GitHub, prop.Number, land.MergeMethod(), r.Ref)
+		// A successful request may only enqueue the merge. The next observation
+		// records MERGED; until then external conditions must still hold landing.
+		if err := lp.notDelivering(ctx, t.ID); err != nil {
+			return err
+		}
+		if mergeErr == nil {
 			return lp.setStatus(ctx, t.ID, core.TaskLanding, fmt.Sprintf("Merging pull request #%d", prop.Number))
 		}
 	}

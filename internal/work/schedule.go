@@ -70,6 +70,9 @@ func (lp *Loop) pass(ctx context.Context, waited bool) (bool, []<-chan any, erro
 	if err := lp.settleDeliveries(ctx, snap); err != nil {
 		return false, nil, err
 	}
+	if err := lp.checkBlockers(ctx, snap); err != nil {
+		return false, nil, err
+	}
 	if progressed, err := lp.settleAnswers(ctx, snap); progressed || err != nil {
 		return progressed, nil, err
 	}

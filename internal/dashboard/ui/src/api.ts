@@ -479,7 +479,7 @@ export interface Proposal {
 }
 /** Who or what a task's ready step waits for. */
 export interface Wait {
-  kind: "member" | "project_cap" | "engine_cap" | "owner" | "stage";
+  kind: "member" | "project_cap" | "engine_cap" | "owner" | "stage" | "blocker";
   /** The busy person's seat, and the member it is filled from, if any. */
   seat?: string;
   member?: string;
@@ -513,7 +513,20 @@ export interface Claim {
   held?: string;
 }
 
+export interface Blocker {
+  id: string;
+  kind: "manual" | "daemon_includes";
+  description: string;
+  task?: string;
+  landing_only?: boolean;
+  by: string;
+  at: string;
+  cleared_at?: string;
+  cleared_by?: string;
+  check?: string;
+}
 export interface Task {
+  blockers?: Blocker[];
   id: string;
   project_id: string;
   /** The task's readable ID, such as CA-12; empty before it has one. */
@@ -1355,4 +1368,30 @@ export interface FileSystemPage {
   parent: string | null;
   entries: FileSystemEntry[];
   next_cursor: string | null;
+}
+
+export function setBlocker(
+  projectID: string,
+  taskID: string,
+  body: {
+    kind: Blocker["kind"];
+    description: string;
+    task: string;
+    landing_only: boolean;
+  },
+) {
+  return api<Task>(
+    `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/blockers`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+export function clearBlocker(
+  projectID: string,
+  taskID: string,
+  blockerID: string,
+) {
+  return api<Task>(
+    `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/blockers/${encodeURIComponent(blockerID)}`,
+    { method: "DELETE" },
+  );
 }

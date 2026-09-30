@@ -159,10 +159,10 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 		t.DependsOn, t.UpdatedAt = deps, now
 		markAll(t, deps, researcherLinker(*t), now)
 		plan.At = now
-		waiting := waitsFor(v, *t)
+		waiting := append(waitsFor(v, *t), BlockerReasons(*t)...)
 		request := t.OpenResearch()
 		switch {
-		case len(waiting) > 0 && !begun:
+		case heldBack(v, *t) && !begun:
 			t.Status, t.Plan, t.Detail = TaskQueued, nil, ""
 			t.Base, t.From, t.Branch = "", "", ""
 			recordTask(v, now, t, "task.queued", fmt.Sprintf("%s waits for %s", t.Objective, strings.Join(waiting, ", ")))

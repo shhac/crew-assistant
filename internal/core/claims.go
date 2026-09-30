@@ -248,7 +248,7 @@ func (s *Service) Schedule(ctx context.Context, admit Admit) ([]Scheduled, error
 func queueOrder(v *Snapshot) []*Project {
 	next := func(p *Project) (time.Time, bool) {
 		for _, t := range v.Tasks {
-			if t.ProjectID == p.ID && t.Status == TaskQueued && len(waitsFor(v, t)) == 0 {
+			if t.ProjectID == p.ID && t.Status == TaskQueued && !heldBack(v, t) {
 				return t.CreatedAt, true
 			}
 		}
@@ -468,7 +468,15 @@ func offer(v *Snapshot, t *Task, busy map[string]Wait, admit Admit, now time.Tim
 			}
 			return out, waiting
 		}
+	case TaskDeciding:
+		p := project(v, t.ProjectID)
+		if p != nil && p.Playbook != nil && p.Playbook.Land.ByPM() && t.Playbook != nil && t.Playbook.Land.Way() == LandPush && holdsLanding(*t) {
+			return nil, &Wait{Kind: "blocker", On: strings.Join(BlockerReasons(*t), "; ")}
+		}
 	case TaskLanding:
+		if holdsLanding(*t) && t.Delivering == nil {
+			return nil, &Wait{Kind: "blocker", On: strings.Join(BlockerReasons(*t), "; ")}
+		}
 		// One landing at a time, counting one a stop cut off whose delivery
 		// has yet to be settled.
 		if slices.ContainsFunc(v.Tasks, func(o Task) bool {
@@ -506,7 +514,7 @@ func startQueued(v *Snapshot, p *Project, busy map[string]Wait, admit Admit, sta
 	var out []Scheduled
 	for i := range v.Tasks {
 		t := &v.Tasks[i]
-		if t.ProjectID != p.ID || t.Status != TaskQueued || len(waitsFor(v, *t)) > 0 {
+		if t.ProjectID != p.ID || t.Status != TaskQueued || heldBack(v, *t) {
 			continue
 		}
 		if limit := p.Playbook.ActiveCap(); active >= limit {

@@ -21,7 +21,7 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 		}
 		for i := range v.Tasks {
 			t := &v.Tasks[i]
-			if t.Status != TaskQueued || len(waitsFor(v, *t)) > 0 {
+			if t.Status != TaskQueued || heldBack(v, *t) {
 				continue
 			}
 			p := project(v, t.ProjectID)
@@ -67,7 +67,7 @@ func furthestAlong(tasks []Task, now time.Time) (Task, bool) {
 	var best Task
 	found := false
 	for _, t := range tasks {
-		if t.Active() && (!found || ahead(t, best, now)) {
+		if t.Active() && !(t.Status == TaskLanding && holdsLanding(t) && t.Delivering == nil) && (!found || ahead(t, best, now)) {
 			best, found = t, true
 		}
 	}

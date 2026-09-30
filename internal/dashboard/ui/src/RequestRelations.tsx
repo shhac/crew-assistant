@@ -1,3 +1,4 @@
+import { RequestBlockers } from "./RequestBlockers";
 import { useState, type FormEvent } from "react";
 import { requestHref } from "./router";
 import { kindWord } from "./members";
@@ -139,6 +140,13 @@ export function RequestRelations({
       {candidates.length > 0 && (
         <AddRelation candidates={candidates} busy={busy} onAdd={link} />
       )}
+      <RequestBlockers
+        project={project}
+        task={task}
+        tasks={others}
+        members={members}
+        refresh={refresh}
+      />
       <ErrorNotice error={error} />
     </section>
   );

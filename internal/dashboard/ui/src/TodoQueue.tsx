@@ -6,9 +6,19 @@ import { orderTasks, type Project, type Task } from "./api";
 
 /** What a queued request waits to land first, or "" when it waits for nothing. */
 const waitsLine = (task: Task) =>
-  task.waits_for?.length
-    ? `Waits for ${task.waits_for.map((w) => `“${w}”`).join(", ")}`
-    : "";
+  [
+    task.waits_for?.length
+      ? `Waits for ${task.waits_for.map((w) => `“${w}”`).join(", ")}`
+      : "",
+    ...(task.blockers ?? [])
+      .filter((b) => !b.cleared_at)
+      .map(
+        (b) =>
+          `Held until: ${b.description}${b.landing_only ? " (landing only)" : ""}`,
+      ),
+  ]
+    .filter(Boolean)
+    .join("; ");
 
 /**
  * The to-do list in the order work starts in. The owner can reorder it by
@@ -67,7 +77,7 @@ export function TodoQueue({
             onDragOver={(e) => dragging && e.preventDefault()}
             onDrop={(e) => drop(e, i)}
           >
-            <BoardCard task={t} project={project}>
+            <BoardCard task={t} project={project} showBlockers={false}>
               <Place
                 task={t}
                 index={i}

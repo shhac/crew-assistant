@@ -125,6 +125,8 @@ type Task struct {
 	// LinkedBy records who set each of this task's links, keyed by relation
 	// and task; see links.go.
 	LinkedBy map[string]LinkMark `json:"linked_by,omitempty"`
+	// Blockers keep external conditions and their clearing history.
+	Blockers []Blocker `json:"blockers,omitempty"`
 	// SplitFrom is the task this one was split off from by that task's
 	// researcher, which a later plan for it matches rather than queues again;
 	// see plans.go.

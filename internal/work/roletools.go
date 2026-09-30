@@ -155,6 +155,15 @@ func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (
 		}
 		_, err := r.lp.LinkTasks(ctx, l)
 		return changed("Linked.", err)
+	case "set_blocker":
+		if in["holds"] != "start" && in["holds"] != "landing" {
+			return "", errors.New("holds must be start or landing")
+		}
+		_, err := r.lp.SetBlocker(ctx, core.BlockerInput{Project: r.projectID, Task: taskID, Kind: in["kind"], Description: in["description"], Other: in["other_task_id"], LandingOnly: in["holds"] == "landing", By: r.by})
+		return changed("Blocked.", err)
+	case "clear_blocker":
+		_, err := r.lp.ClearBlocker(ctx, r.projectID, taskID, in["blocker_id"], r.by, "cleared by the team")
+		return changed("Cleared.", err)
 	case "edit_task":
 		e := core.EditInput{Project: r.projectID, Task: taskID, By: r.name, Kind: r.kind, While: while, Objective: in["title"], Criteria: replacement(in["requirements"])}
 		if add := strings.TrimSpace(in["add_requirement"]); add != "" {

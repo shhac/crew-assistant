@@ -59,6 +59,9 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 	if fresh, ok := findTask(snap, p.ID, t.ID); ok {
 		t = fresh
 	}
+	if len(core.BlockerReasons(t)) > 0 {
+		return nil
+	}
 	if failed := t.LandingFailures; len(failed) >= maxPMLandingFailures || (len(failed) > 0 && t.Round >= t.MaxRounds) {
 		return lp.askOwnerToLand(ctx, p, t, r, m, core.DecisionInput{
 			Title:          fmt.Sprintf("“%s” failed to land %s with the PM's approval", t.Objective, times(len(failed))),

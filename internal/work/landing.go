@@ -5,12 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 	"github.com/shhac/crew-assistant/internal/text"
 )
+
+// errDeliveryBlocked is a condition added after claim, before delivery began.
+// The update rolls back and the next schedule pass shows the normal blocker wait.
+var errDeliveryBlocked = errors.New("delivery waits on an external condition")
 
 // land takes the approved revision where the project's landing policy says:
 // a new branch, a fast-forward push onto the target, or the delivery folder.
@@ -49,9 +54,15 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 	// daemon restarted meanwhile is settled from where the change went,
 	// never left half done or landed unrecorded.
 	if _, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if why := core.BlockerReasons(*t); len(why) > 0 && t.Delivering == nil {
+			return "", errDeliveryBlocked
+		}
 		t.Delivering = &core.Delivering{Revision: r.N, At: time.Now().UTC()}
 		return "", nil
 	}); err != nil {
+		if errors.Is(err, errDeliveryBlocked) {
+			return nil
+		}
 		return err
 	}
 	target, err := m.deliver(context.WithoutCancel(ctx), t, r)
@@ -239,6 +250,9 @@ func (lp *Loop) LandTask(ctx context.Context, projectID, taskID string) (core.Ta
 	if !ok {
 		return core.Task{}, core.ErrNotFound
 	}
+	if why := core.BlockerReasons(t); len(why) > 0 {
+		return core.Task{}, fmt.Errorf("%s: %w", strings.Join(why, "; "), core.ErrConflict)
+	}
 	// A signed-off change waiting on the PM's decision lands on the owner's
 	// say-so instead, through the same landing.
 	if t.Status == core.TaskDeciding {
@@ -282,6 +296,9 @@ func (lp *Loop) LandTask(ctx context.Context, projectID, taskID string) (core.Ta
 		}
 	}
 	landing, err := lp.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if why := core.BlockerReasons(*t); len(why) > 0 {
+			return "", fmt.Errorf("%s: %w", strings.Join(why, "; "), core.ErrConflict)
+		}
 		if t.Status != core.TaskDelivered {
 			return "", core.ErrConflict
 		}

@@ -292,6 +292,8 @@ export function waitingWords(task: Task, wait: Wait, project?: Project) {
       return `Waiting for this project's cap (${wait.active} of ${wait.cap} active)`;
     case "engine_cap":
       return `Waiting for the ${engineLabel(wait.engine ?? "")} safety cap`;
+    case "blocker":
+      return wait.on ?? "Waiting on an external condition";
     case "owner":
       return "Waiting while you chat";
   }

@@ -59,6 +59,7 @@ export function BoardCard({
   project,
   activity,
   children,
+  showBlockers = true,
 }: {
   task: Task;
   decision?: Decision;
@@ -70,6 +71,8 @@ export function BoardCard({
   project?: Project;
   activity?: ReactNode;
   children?: ReactNode;
+  /** The queue includes these in its ordering hint instead. */
+  showBlockers?: boolean;
 }) {
   const open = (task.messages ?? []).filter(isOpenMessage).length;
   const blocks = task.blocks?.length ?? 0;
@@ -100,6 +103,15 @@ export function BoardCard({
           )}
         </p>
       )}
+      {showBlockers &&
+        (task.blockers ?? [])
+          .filter((b) => !b.cleared_at)
+          .map((b) => (
+            <p key={b.id} className="board-card-meta muted small">
+              Held until: {b.description}
+              {b.landing_only ? " (landing only)" : ""}
+            </p>
+          ))}
       {activity}
       {pm && <p className="board-card-meta muted small">{pm}</p>}
       {(open > 0 || blocks > 0) && (

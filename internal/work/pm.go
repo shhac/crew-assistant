@@ -206,6 +206,9 @@ func pmTasks(b *strings.Builder, snap core.Snapshot, p core.Project) {
 				fmt.Fprintf(b, "  changes: %s\n", text.Clip(strings.Join(t.Plan.Changes, "; "), 400))
 			}
 		}
+		for _, line := range blockerLines(t) {
+			fmt.Fprintf(b, "  %s\n", line)
+		}
 		if len(t.DependsOn) > 0 {
 			fmt.Fprintf(b, "  waits for: %s\n", waitsLine(snap.Tasks, t))
 		}
@@ -227,6 +230,9 @@ func pmTriage(b *strings.Builder, snap core.Snapshot, p core.Project) bool {
 		fmt.Fprintf(b, "- %s: %s\n", t.Label(), text.Clip(t.Objective, 300))
 		for _, c := range t.Criteria {
 			fmt.Fprintf(b, "  requirement: %s\n", text.Clip(c, 300))
+		}
+		for _, line := range blockerLines(t) {
+			fmt.Fprintf(b, "  %s\n", line)
 		}
 		if len(t.DependsOn) > 0 {
 			fmt.Fprintf(b, "  waits for: %s\n", waitsLine(snap.Tasks, t))
