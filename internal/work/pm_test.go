@@ -178,6 +178,16 @@ func TestThePMsAnswerAndWhatItIsTold(t *testing.T) {
 			t.Errorf("the PM isn't told %q", want)
 		}
 	}
+	for _, want := range []string{"treat it as the owner's priorities", "Never simply move back what they moved", "Give the reason in note", "Never ask the owner to approve or confirm an order", "only decisions the owner must make"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("missing guidance %q", want)
+		}
+	}
+	for _, old := range []string{"only place tasks queued since", "only what the owner must decide about the order"} {
+		if strings.Contains(prompt, old) {
+			t.Errorf("old guidance %q", old)
+		}
+	}
 	if strings.Contains(prompt, "Elsewhere") {
 		t.Error("the PM is told about another project's work")
 	}
@@ -354,6 +364,42 @@ func TestThePMKeepsSeeingTheOwnersAnswers(t *testing.T) {
 	for _, unwanted := range []string{"Not yours", "Still open?", "The owner told you"} {
 		if strings.Contains(prompt, unwanted) {
 			t.Fatalf("the prompt carries %q:\n%s", unwanted, prompt)
+		}
+	}
+}
+
+func TestThePMTurnReordersAfterTheOwner(t *testing.T) {
+	runner := &scriptedRunner{}
+	a, p, first, second := pmTeam(t, runner)
+	ctx := context.Background()
+	if _, err := a.Core.ApplyPM(ctx, p.ID, core.PMAnswer{Triage: []core.TriageRelease{{Task: second.ID, To: core.TriageToResearch}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Core.OrderTasks(ctx, p.ID, []string{second.ID, first.ID}, core.OrderedByOwner); err != nil {
+		t.Fatal(err)
+	}
+	runner.pm = []string{fmt.Sprintf(`{"order": [%q, %q], "note": "first unblocks more", "questions": []}`, first.ID, second.ID)}
+	seat, _ := p.PMSeat()
+	if err := a.pmTurn(ctx, p.ID, seat); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	project, _ := findProject(snap, p.ID)
+	var order []string
+	for _, task := range snap.Tasks {
+		if task.ProjectID == p.ID && task.Status == core.TaskQueued {
+			order = append(order, task.ID)
+		}
+	}
+	if !slices.Equal(order, []string{first.ID, second.ID}) || project.OrderedBy != core.OrderedByPM {
+		t.Fatalf("order %v by %q", order, project.OrderedBy)
+	}
+	if !activityHas(t, a, "(was "+second.Ref+", "+first.Ref+"): first unblocks more") {
+		t.Fatal("previous order missing")
+	}
+	for _, d := range snap.Decisions {
+		if d.Kind == core.DecisionPMQuestion && d.Status == core.DecisionOpen {
+			t.Fatal("reordering asked the owner")
 		}
 	}
 }

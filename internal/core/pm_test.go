@@ -2,6 +2,7 @@ package core
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -151,30 +152,88 @@ func TestThePMOrdersTheListAndSetsWhatWaitsForWhat(t *testing.T) {
 	}
 }
 
-func TestTheOwnersOrderStandsOverThePM(t *testing.T) {
+func TestThePMCanChangeAnOwnerOrAssistantOrder(t *testing.T) {
+	for _, by := range []string{OrderedByOwner, OrderedByAssistant} {
+		t.Run(by, func(t *testing.T) {
+			s, _ := fixture(t)
+			p := pmProject(t, s)
+			a, b := ask(t, s, p.ID, "a"), ask(t, s, p.ID, "b")
+			if _, err := s.OrderTasks(testContext, p.ID, []string{b.ID, a.ID}, by); err != nil {
+				t.Fatal(err)
+			}
+			_, seen := queuedOrder(t, s, p.ID)
+			if _, err := s.ApplyPM(testContext, p.ID, PMAnswer{SeenOrderedBy: seen.OrderedBy, SeenOrderedAt: seen.OrderedAt, Order: []string{a.Ref, b.Ref}, Note: "a unblocks more"}); err != nil {
+				t.Fatal(err)
+			}
+			got, project := queuedOrder(t, s, p.ID)
+			if !slices.Equal(got, []string{"a", "b"}) || project.OrderedBy != OrderedByPM {
+				t.Fatalf("order %v by %q", got, project.OrderedBy)
+			}
+			snap, _ := s.Snapshot(testContext)
+			want := "Changed the order to " + a.Ref + ", " + b.Ref + " (was " + b.Ref + ", " + a.Ref + "): a unblocks more"
+			if !slices.ContainsFunc(snap.Activity, func(e Activity) bool { return e.Kind == "task.ordered" && e.Summary == want }) {
+				t.Fatalf("activity %+v", snap.Activity)
+			}
+		})
+	}
+}
+
+func TestThePMLeavesAnOrderSetDuringItsLook(t *testing.T) {
+	for _, by := range []string{OrderedByOwner, OrderedByAssistant} {
+		t.Run(by, func(t *testing.T) {
+			s, _ := fixture(t)
+			p := pmProject(t, s)
+			a, b := ask(t, s, p.ID, "a"), ask(t, s, p.ID, "b")
+			if _, err := s.OrderTasks(testContext, p.ID, []string{a.ID, b.ID}, by); err != nil {
+				t.Fatal(err)
+			}
+			_, seen := queuedOrder(t, s, p.ID)
+			in := PMAnswer{SeenOrderedBy: seen.OrderedBy, SeenOrderedAt: seen.OrderedAt, Order: []string{a.ID, b.ID}, Depends: map[string][]string{a.ID: {b.ID}}}
+			at := s.now()
+			s.now = func() time.Time { return at.Add(time.Hour) }
+			if _, err := s.OrderTasks(testContext, p.ID, []string{b.ID, a.ID}, by); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.ApplyPM(testContext, p.ID, in); err != nil {
+				t.Fatal(err)
+			}
+			got, project := queuedOrder(t, s, p.ID)
+			if !slices.Equal(got, []string{"b", "a"}) || project.OrderedBy != by {
+				t.Fatalf("order %v by %q", got, project.OrderedBy)
+			}
+			snap, _ := s.Snapshot(testContext)
+			if !slices.Equal(task(&snap, a.ID).DependsOn, []string{b.ID}) {
+				t.Fatal("dependency was lost")
+			}
+			who := "you"
+			if by == OrderedByAssistant {
+				who = "the assistant"
+			}
+			if !slices.ContainsFunc(snap.Activity, func(e Activity) bool {
+				return e.Kind == "task.ordered" && strings.Contains(e.Summary, "Left the order as "+who+" set it while the PM was looking")
+			}) {
+				t.Fatalf("activity %+v", snap.Activity)
+			}
+			// The next look reads the new stamp and can reorder.
+			in.SeenOrderedBy, in.SeenOrderedAt = project.OrderedBy, project.OrderedAt
+			if _, err := s.ApplyPM(testContext, p.ID, in); err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := queuedOrder(t, s, p.ID); !slices.Equal(got, []string{"a", "b"}) {
+				t.Fatalf("fresh order %v", got)
+			}
+		})
+	}
+}
+
+func TestThePMIgnoresInvalidOrUnchangedOrders(t *testing.T) {
 	s, _ := fixture(t)
-	start := s.now()
 	p := pmProject(t, s)
 	a, b := ask(t, s, p.ID, "a"), ask(t, s, p.ID, "b")
-	if _, err := s.OrderTasks(testContext, p.ID, []string{b.ID, a.ID}, OrderedByOwner); err != nil {
-		t.Fatal(err)
-	}
-	if changed, _ := s.ApplyPM(testContext, p.ID, PMAnswer{Order: []string{a.ID, b.ID}}); changed != "" {
-		t.Fatalf("the PM overruled the owner: %s", changed)
-	}
-	s.now = func() time.Time { return start.Add(time.Hour) }
-	c := ask(t, s, p.ID, "c")
-	// A reply naming one task for every place changes nothing.
-	if changed, err := s.ApplyPM(testContext, p.ID, PMAnswer{Order: []string{a.ID, a.ID, a.ID}}); err != nil || changed != "" {
-		t.Fatalf("a repeated task changed %q: %v", changed, err)
-	}
-	// The PM may place the new task, but not swap the owner's two.
-	if _, err := s.ApplyPM(testContext, p.ID, PMAnswer{Order: []string{c.ID, a.ID, b.ID}}); err != nil {
-		t.Fatal(err)
-	}
-	got, project := queuedOrder(t, s, p.ID)
-	if !slices.Equal(got, []string{"c", "b", "a"}) || project.OrderedBy != OrderedByPM {
-		t.Fatalf("order %v by %q", got, project.OrderedBy)
+	for _, order := range [][]string{{a.ID, a.ID}, {a.ID}, {b.ID, a.ID, "extra"}, {a.ID, b.ID}} {
+		if changed, err := s.ApplyPM(testContext, p.ID, PMAnswer{Order: order}); err != nil || changed != "" {
+			t.Fatalf("order %v changed %q: %v", order, changed, err)
+		}
 	}
 }
 

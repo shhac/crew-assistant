@@ -22,6 +22,9 @@ type PMAnswer struct {
 	Order   []string
 	Depends map[string][]string
 	Note    string
+	// The order read before the PM's look.
+	SeenOrderedBy string
+	SeenOrderedAt time.Time
 }
 
 // TriageRelease is where the PM sends a task in triage: on to the team's
@@ -42,10 +45,8 @@ const (
 // ApplyPM puts the PM's decision into effect and marks the list looked at.
 // What each task waits for is checked like any other dependency: the same
 // project, and never a loop. The order applies only to exactly the queued
-// tasks. The owner's or the assistant's order stands: while it is newer than
-// every task queued since, the PM changes only what waits for what, and once
-// new work arrives it may place the new tasks but keeps their order for the
-// rest. Tasks leave triage first, so the order may place those sent on.
+// tasks. A newer owner or assistant order is preserved if it changed during
+// the look. Tasks leave triage first, so the order may place those sent on.
 // It reports what it changed.
 func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (string, error) {
 	var triaged, changed []string
@@ -82,15 +83,28 @@ func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (s
 			}
 			changed = append(changed, "what “"+t.Objective+"” waits for")
 		}
-		if order := pmOrder(v, p, in.Order); order != nil {
+		var orderLine string
+		stale := (p.OrderedBy == OrderedByOwner || p.OrderedBy == OrderedByAssistant) &&
+			(p.OrderedBy != in.SeenOrderedBy || !p.OrderedAt.Equal(in.SeenOrderedAt))
+		if stale && len(in.Order) > 0 {
+			who := "you"
+			if p.OrderedBy == OrderedByAssistant {
+				who = "the assistant"
+			}
+			orderLine = "Left the order as " + who + " set it while the PM was looking"
+		} else if order := pmOrder(v, p, in.Order); order != nil {
+			previous := orderRefs(v, queuedOf(v, projectID))
 			if _, err := reorder(v, projectID, order); err == nil {
 				p.OrderedBy, p.OrderedAt = OrderedByPM, now
-				changed = append(changed, "the order")
+				changed = append(changed, "the order to "+orderRefs(v, order)+" (was "+previous+")")
 			}
 		}
 		parts := slices.Clone(triaged)
 		if len(changed) > 0 {
 			parts = append(parts, "Changed "+strings.Join(changed, " and "))
+		}
+		if orderLine != "" {
+			parts = append(parts, orderLine)
 		}
 		summary := "The to-do list stays as it is"
 		if len(parts) > 0 {
@@ -179,40 +193,27 @@ func (v Snapshot) HasTriage(projectID string) bool {
 }
 
 // pmOrder is the order the PM may set, or nil to leave it. It must name
-// exactly the queued tasks and change something. When the owner or the
-// assistant ordered the list, their order holds for the tasks that were
-// there then; the PM only places tasks queued since.
+// exactly the queued tasks and change something.
 func pmOrder(v *Snapshot, p *Project, order []string) []string {
 	current := queuedOf(v, p.ID)
 	if !sameTasks(order, current) || slices.Equal(order, current) {
 		return nil
 	}
-	if p.OrderedBy != OrderedByOwner && p.OrderedBy != OrderedByAssistant {
-		return order
-	}
-	kept := slices.DeleteFunc(slices.Clone(current), func(id string) bool {
-		return task(v, id).CreatedAt.After(p.OrderedAt)
-	})
-	out := keepOrder(order, kept)
-	if slices.Equal(out, current) {
-		return nil
-	}
-	return out
+	return order
 }
 
-// keepOrder places kept tasks in their own order wherever order puts any
-// of them, leaving the other tasks where order put them.
-func keepOrder(order, kept []string) []string {
-	out := make([]string, 0, len(order))
-	next := 0
+// orderRefs names an order as the owner sees it, with canonical IDs as fallback.
+func orderRefs(v *Snapshot, order []string) string {
+	refs := make([]string, 0, len(order))
 	for _, id := range order {
-		if slices.Contains(kept, id) {
-			id = kept[next]
-			next++
+		t := task(v, id)
+		ref := t.Ref
+		if ref == "" {
+			ref = id
 		}
-		out = append(out, id)
+		refs = append(refs, ref)
 	}
-	return out
+	return strings.Join(refs, ", ")
 }
 
 // queuedOf is a project's queued tasks, in the order they start in.

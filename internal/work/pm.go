@@ -16,7 +16,7 @@ import (
 // managePM gives the team's PM one look at a project's to-do list after
 // something changed it: work queued, planned or finished. The PM sets the
 // order work starts in and what waits for what; it directs no one, and the
-// owner's or the assistant's order stands over it. A project with no PM
+// owner's or the assistant's order expresses the owner's priorities. A project with no PM
 // sends what waits in triage straight on, so nothing waits on a missing role.
 //
 // The PM's look is a step of the project, claimed as a task's steps are: it
@@ -102,6 +102,7 @@ func (lp *Loop) pmTurn(ctx context.Context, projectID string, seat core.Role) er
 	if parseErr != nil {
 		return lp.skipPM(ctx, p.ID, "its reply could not be read")
 	}
+	answer.SeenOrderedBy, answer.SeenOrderedAt = p.OrderedBy, p.OrderedAt
 	if _, err := lp.Core.ApplyPM(ctx, p.ID, answer); err != nil {
 		return err
 	}
@@ -172,11 +173,11 @@ func pmPrompt(snap core.Snapshot, p core.Project) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You keep the to-do list for the project %s. Goal: %s\n", p.Title, p.Brief.Goal)
 	b.WriteString(`
-Decide the order the queued tasks start in, and what each unfinished task has to wait for. A task waits for another when it builds on what the other will change; without stacking, a task never starts before what it waits for has landed. Put first what unblocks the most, then what the owner most needs. Keep the tasks themselves in order too: where a title or requirements are messy, tidy them; where a task should be split or needs a sibling, queue it; where one task depends on another, link them. Do not plan or build anything yourself, and do not direct, stop or land anyone's work.
+The order is yours to set directly. Never ask the owner to approve or confirm an order. Ask only for decisions only the owner can make, such as conflicting priorities in the brief or their words. Decide the order the queued tasks start in, and what each unfinished task has to wait for. A task waits for another when it builds on what the other will change; without stacking, a task never starts before what it waits for has landed. Put first what unblocks the most, then what the owner most needs. Keep the tasks themselves in order too: where a title or requirements are messy, tidy them; where a task should be split or needs a sibling, queue it; where one task depends on another, link them. Do not plan or build anything yourself, and do not direct, stop or land anyone's work.
 `)
 	switch p.OrderedBy {
 	case core.OrderedByOwner, core.OrderedByAssistant:
-		fmt.Fprintf(&b, "\nThe %s set the current order; keep it for the tasks that were there then, and only place tasks queued since.\n", p.OrderedBy)
+		fmt.Fprintf(&b, "\nThe %s set the current order; treat it as the owner's priorities. Keep it unless you have a concrete reason to change it, such as a dependency, new work or what unblocks the most. Never simply move back what they moved. Give the reason in note.\n", p.OrderedBy)
 	}
 	b.WriteString(pmToldText(snap, p))
 	pmTasks(&b, snap, p)
@@ -187,7 +188,7 @@ Tasks in triage are new work from the owner or the assistant, waiting for you be
 	}
 	b.WriteString(`
 Name each task by one id: its readable id, such as CA-3, or its canonical id. Reply with only this JSON object:
-{"triage": [{"task": "id of a task in triage", "to": "research or owner", "question": "for the owner only: what you need them to decide"}], "order": ["every queued task id, in the order they should start, with any you send on from triage"], "depends": [{"task": "id", "on": ["ids it must wait for; the full list, replacing what it has"]}], "note": "one line on what you changed and why", "questions": ["only what the owner must decide about the order"]}`)
+{"triage": [{"task": "id of a task in triage", "to": "research or owner", "question": "for the owner only: what you need them to decide"}], "order": ["every queued task id, in the order they should start, with any you send on from triage"], "depends": [{"task": "id", "on": ["ids it must wait for; the full list, replacing what it has"]}], "note": "one line on what you changed and why", "questions": ["only decisions the owner must make, such as conflicting priorities; never approval of an order"]}`)
 	return b.String()
 }
 

@@ -56,8 +56,8 @@ type Project struct {
 	// in the project catches up with it before it is delivered.
 	Landed *Landing `json:"landed,omitempty"`
 	// OrderedBy says who last set the to-do order: the owner, the assistant
-	// or the team's PM. The owner's or the assistant's order stands over the
-	// PM's until new work arrives.
+	// or the team's PM. Owner and assistant orders express the owner's
+	// priorities; the PM may change them for a stated reason.
 	OrderedBy string    `json:"ordered_by,omitempty"`
 	OrderedAt time.Time `json:"ordered_at,omitempty"`
 	// PMDue asks the team's PM to look at the to-do list again, after
