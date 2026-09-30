@@ -342,6 +342,12 @@ Reply with only this JSON object:
 {"outcome": ` + outcomes + `, "summary": "one or two sentences", "findings": [{"criterion": "...", "note": "..."}], "question": "for outcome question or research: what to ask, else empty", "next": "", "note": ""}`
 }
 
+// sandboxGuide keeps a checker's own sandbox from sending a draft round
+// after round: an implementer can't revise its way past a refusal it
+// doesn't share.
+const sandboxGuide = `
+If something fails only because your sandbox refused it, such as opening a port, writing outside the repository or reaching the network, say so in the finding and quote the refusal. Use "revise" only when the change could reasonably do without it, such as a test that could use an in-memory listener instead of a real one; otherwise use "question", saying what was refused, so the owner can decide rather than the implementer trying again.`
+
 // checkerPrompt asks a reviewer to judge a revision, or QA to run the check.
 func checkerPrompt(p core.Project, t core.Task, r core.Revision, checker core.Role, playbook *core.Playbook) string {
 	if checker.Holds(core.RoleQA) && playbook != nil {
@@ -354,6 +360,7 @@ func checkerPrompt(p core.Project, t core.Task, r core.Revision, checker core.Ro
 		b.WriteString(`Do not change, fix or commit anything; only run the check and read its output.
 Use "pass" if it exits successfully. Otherwise use "revise", with one finding per failing test, build error or check, quoting the key lines of output in the note.
 Use "question" only if the check cannot run at all for a reason the implementer cannot fix (for example a missing tool), and say what is missing.`)
+		b.WriteString(sandboxGuide)
 		b.WriteString(verdictFormat(t))
 		return b.String()
 	}
@@ -375,6 +382,7 @@ Review it as a careful senior engineer, against the task and every criterion abo
 - "revise" when something should change, with one finding per issue, naming the criterion or file it concerns;
 - "question" only when the task is genuinely ambiguous and you cannot judge without the owner.`)
 		b.WriteString(reviewDepth(earlier != "", true))
+		b.WriteString(sandboxGuide)
 		b.WriteString(verdictFormat(t))
 		return b.String()
 	}

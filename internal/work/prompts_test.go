@@ -70,6 +70,26 @@ func TestAReviewerIsShownTheEarlierFindingsAndAskedForEverything(t *testing.T) {
 	}
 }
 
+// A check the checker's own sandbox refused is the owner's to settle, unless
+// the change could do without it; otherwise the implementer loops on it.
+func TestACheckerRaisesASandboxRefusalWithTheOwner(t *testing.T) {
+	code := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit, Check: "make check"}}
+	task := reviewedTask()
+	rev := task.Revisions[4]
+	docs := core.Project{Brief: core.Brief{Goal: "Write notes"}}
+	for name, prompt := range map[string]string{
+		"code reviewer": checkerPrompt(code, task, rev, core.Role{Name: "Reviewer", Kinds: []string{core.RoleReviewer}}, code.Playbook),
+		"QA":            checkerPrompt(code, task, rev, core.Role{Name: "QA", Kinds: []string{core.RoleQA}}, code.Playbook),
+	} {
+		if !strings.Contains(prompt, sandboxGuide) {
+			t.Fatalf("the %s prompt lacks the sandbox guide: %s", name, prompt)
+		}
+	}
+	if strings.Contains(reviewerPrompt(docs, task, rev), sandboxGuide) {
+		t.Fatal("a reviewer of documents runs nothing a sandbox could refuse")
+	}
+}
+
 // The implementer accounts for everything it was asked for before it hands
 // a draft on, so a gap shows in its own reply rather than a review.
 func TestTheImplementerAccountsForEveryFindingAndPlanItem(t *testing.T) {
