@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -215,5 +216,63 @@ func TestOnlyTheReplyUsedTeachesTheResearcher(t *testing.T) {
 	}
 	if len(whens) != 1 || whens[0] != "A plan that was used" {
 		t.Fatalf("learned %v", whens)
+	}
+}
+
+func TestMissingDesignerIsRecordedWithThePlanAndVisible(t *testing.T) {
+	for _, seated := range []bool{false, true} {
+		t.Run(fmt.Sprintf("designer=%v", seated), func(t *testing.T) {
+			a, _, p := plannedCode(t, 6, `{"summary":"Add icons.", "needs_designer":"  New provider icons need drawings.  "}`)
+			if seated {
+				seatDesigner(t, a, p.ID)
+			}
+			task, err := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add icons"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			task = stepUntil(t, a, task.ID, func(t core.Task) bool { return t.Plan != nil })
+			want := ""
+			if !seated {
+				want = "New provider icons need drawings."
+			}
+			if task.Plan.NeedsDesigner != want {
+				t.Fatalf("plan: %+v", task.Plan)
+			}
+			notice := "Needs visual design, but no designer is on the team: " + want
+			for _, view := range []string{taskBrief(core.Snapshot{}, p.ID, task, ""), planText(task)} {
+				if strings.Contains(view, "Needs visual design") != !seated || (!seated && !strings.Contains(view, notice)) {
+					t.Fatalf("view: %s", view)
+				}
+			}
+			snap, err := a.Core.Snapshot(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, _ := findTask(snap, "", task.ID)
+			if stored.Plan == nil || stored.Plan.NeedsDesigner != want {
+				t.Fatalf("stored: %+v", stored.Plan)
+			}
+		})
+	}
+}
+
+func TestMissingDesignerFlagIsOptionalBoundedAndIndependentOfHandOff(t *testing.T) {
+	plan, _, design, err := parsePlan(`{"summary":"Add a command.", "design":"ignored"}`, false, true)
+	if err != nil || design != "" || plan.NeedsDesigner != "" {
+		t.Fatalf("%+v %q %v", plan, design, err)
+	}
+	reply := `{"summary":"Add icons.", "needs_designer":"` + strings.Repeat("x", maxPlanItem+100) + `"}`
+	for _, tc := range []struct{ designs, missing bool }{{false, true}, {true, false}, {false, false}} {
+		plan, _, _, err := parsePlan(reply, tc.designs, tc.missing)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := ""
+		if tc.missing {
+			want = strings.Repeat("x", maxPlanItem) + "…"
+		}
+		if plan.NeedsDesigner != want {
+			t.Fatalf("flag length %d, want %d", len(plan.NeedsDesigner), len(want))
+		}
 	}
 }

@@ -159,6 +159,9 @@ func taskBrief(snap core.Snapshot, projectID string, t core.Task, designFiles st
 	}
 	if t.Plan != nil {
 		fmt.Fprintf(&b, "Plan: %s\n", text.Clip(t.Plan.Summary, 800))
+		if t.Plan.NeedsDesigner != "" {
+			fmt.Fprintf(&b, "Needs visual design, but no designer is on the team: %s\n", t.Plan.NeedsDesigner)
+		}
 		for _, c := range t.Plan.Changes {
 			fmt.Fprintf(&b, "- change: %s\n", text.Clip(c, 300))
 		}

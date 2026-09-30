@@ -643,6 +643,9 @@ func planText(t core.Task) string {
 			fmt.Fprintf(&b, "- %s\n", item)
 		}
 	}
+	if t.Plan.NeedsDesigner != "" {
+		fmt.Fprintf(&b, "Needs visual design, but no designer is on the team: %s\n", t.Plan.NeedsDesigner)
+	}
 	section("What already exists", t.Plan.Exists)
 	section("What will change", t.Plan.Changes)
 	section("What the record must say if a step stops part-way", t.Plan.FailurePaths)
@@ -723,11 +726,17 @@ If it needs more than about 10 changes or would touch more than about 30 files, 
 	if guide := designGuide(t, researcher, core.TaskResearching, "ask with the design reply below instead of a plan, and plan once the answer is back."); guide != "" {
 		b.WriteString("\n" + strings.TrimSpace(guide) + "\n")
 	}
+	_, hasDesigner := t.Designer()
+	needsDesigner := ""
+	if !hasDesigner {
+		fmt.Fprintf(&b, "\nNo designer is on this team. If the task needs %s, say why in needs_designer instead of silently going ahead; otherwise leave it empty.\n", visualDesignWork)
+		needsDesigner = `"needs_designer": "why this task needs visual design, or empty", `
+	}
 	changes := `"changes": ["..."], `
 	if code {
 		changes += `"failure_paths": ["..."], "tests": ["..."], `
 	}
-	plan := `{"summary": "the plan in a few sentences", "exists": ["..."], ` + changes + `"out_of_scope": ["..."], "questions": ["only what the owner must answer"], "depends_on": ["ids of tasks above this one must wait for, each readable (such as CA-3) or canonical"], "split_off": [{"title": "a part left for later", "requirements": ["..."]}]}`
+	plan := `{"summary": "the plan in a few sentences", "exists": ["..."], ` + needsDesigner + changes + `"out_of_scope": ["..."], "questions": ["only what the owner must answer"], "depends_on": ["ids of tasks above this one must wait for, each readable (such as CA-3) or canonical"], "split_off": [{"title": "a part left for later", "requirements": ["..."]}]}`
 	// The reply can ask for design input only while the hand-off is offered,
 	// so the contract a role follows never contradicts the guide above it.
 	if designsFor(t, researcher) && t.DesignsAt(core.TaskResearching) < core.DesignLimit {

@@ -30,6 +30,11 @@ export function RequestPlan({ plan }: { plan: Plan }) {
     <section className="section plan" aria-label="Plan">
       <h3>Plan</h3>
       <p>{plan.summary}</p>
+      {plan.needs_designer && (
+        <p className="label" role="note">
+          Needs visual design, but no designer is on the team: {plan.needs_designer}
+        </p>
+      )}
       {open ? (
         parts.map((p) => (
           <div key={p.label} className="plan-part">

@@ -125,7 +125,7 @@ func TestTheResearchersReplyContractOffersDesignOnlyWhileItCanAsk(t *testing.T) 
 	if got := contract(withDee); !strings.Contains(got, `{"design": "your question for the designer"}`) || !strings.Contains(got, `"summary"`) {
 		t.Fatalf("with a designer, the contract should offer a plan or a design question: %s", got)
 	}
-	if _, _, got, err := parsePlan(`{"design": "your question for the designer"}`, true); err != nil || got != "your question for the designer" {
+	if _, _, got, err := parsePlan(`{"design": "your question for the designer"}`, true, false); err != nil || got != "your question for the designer" {
 		t.Fatalf("the contract's design form should be read as a hand-off: %q %v", got, err)
 	}
 	used := withDee
@@ -180,8 +180,9 @@ func TestATeamWithoutADesignerNeverHandsATaskOver(t *testing.T) {
 	coded, researcher, p := plannedCode(t, 6)
 	queued, _ := coded.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add A"})
 	queued = taskNow(t, coded, queued.ID)
-	if len(queued.Design) != 0 || strings.Contains(turns(&researcher.scriptedRunner, "Plan this task")[0].Prompt, "design") {
-		t.Fatal("a researcher without a designer was told about one")
+	prompt := turns(&researcher.scriptedRunner, "Plan this task")[0].Prompt
+	if len(queued.Design) != 0 || strings.Contains(prompt, `{"design":`) || !strings.Contains(prompt, "No designer is on this team") || queued.Plan.NeedsDesigner != "" {
+		t.Fatal("a researcher without a designer must flag visual work without offering a hand-off")
 	}
 }
 
@@ -337,5 +338,48 @@ func TestADesignerIsSeatedFromAMemberAloneOrBesideOtherRoles(t *testing.T) {
 	task := core.Task{Roles: []core.Role{{Name: "Ada", Kinds: []string{core.RoleImplementer, core.RoleDesigner}}}}
 	if designsFor(task, task.Roles[0]) {
 		t.Fatal("Ada was offered a hand-off to herself")
+	}
+}
+
+func TestVisualWorkGoesToTheDesignerBeforeBuilding(t *testing.T) {
+	researcher := core.Role{Name: "Researcher", Kinds: []string{core.RoleResearcher}}
+	writer := core.Role{Name: "Writer", Kinds: []string{core.RoleImplementer}}
+	designer := core.Role{Name: "Dee", Kinds: []string{core.RoleDesigner}}
+	task := core.Task{Round: 1, Roles: []core.Role{researcher, writer, designer}}
+	for _, prompt := range []string{researcherPrompt(core.Project{}, task, nil), writerPrompt(core.Project{}, task, "", true)} {
+		for _, want := range []string{"icons", "illustrations", "images", "significant layout or styling", "must go to Dee for design input before you plan or build it as final", "do not draw or invent those assets yourself"} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("missing %q in %s", want, prompt)
+			}
+		}
+		if strings.Contains(prompt, "needs_designer") {
+			t.Error("a seated designer should not produce a missing-seat flag")
+		}
+	}
+	for _, step := range []string{core.TaskResearching, core.TaskWriting} {
+		used := task
+		for range core.DesignLimit {
+			used.Design = append(used.Design, core.DesignRequest{Step: step, Round: 1})
+		}
+		guide := designGuide(used, researcher, step, "ask first")
+		if !strings.Contains(guide, "Go on with what you have") || !strings.Contains(guide, "owner instead") || strings.Contains(guide, "must go") {
+			t.Fatalf("limit guidance: %s", guide)
+		}
+	}
+}
+
+func TestNoDesignerGuidanceOnlyWhenTheSeatIsMissing(t *testing.T) {
+	researcher := core.Role{Name: "Researcher", Kinds: []string{core.RoleResearcher}}
+	task := core.Task{Roles: []core.Role{researcher}}
+	prompt := researcherPrompt(core.Project{}, task, nil)
+	for _, want := range []string{"No designer is on this team", visualDesignWork, "say why in needs_designer", `"needs_designer":`} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	task.Roles[0].Kinds = append(task.Roles[0].Kinds, core.RoleDesigner)
+	prompt = researcherPrompt(core.Project{}, task, nil)
+	if designsFor(task, task.Roles[0]) || strings.Contains(prompt, "needs_designer") || strings.Contains(prompt, `{"design":`) {
+		t.Fatalf("same-seat designer: %s", prompt)
 	}
 }

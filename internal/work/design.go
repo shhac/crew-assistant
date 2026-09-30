@@ -291,6 +291,8 @@ func designEntry(t core.Task, r core.DesignRequest) string {
 	return b.String()
 }
 
+const visualDesignWork = "new visual assets or visual design (icons, illustrations, images, significant layout or styling)"
+
 // designGuide tells a role at a step how to hand the task to the designer,
 // or that it has had all the design input this step allows.
 func designGuide(t core.Task, asker core.Role, step string, how string) string {
@@ -301,5 +303,5 @@ func designGuide(t core.Task, asker core.Role, step string, how string) string {
 	if n := t.DesignsAt(step); n >= core.DesignLimit {
 		return fmt.Sprintf("\n\nYou have had design input from %s %d times at this step, the most it allows. Go on with what you have; asking again brings the question to the owner instead.", designer.Name, n)
 	}
-	return fmt.Sprintf("\n\n%s is the team's designer. If you need design input before you can go on well, %s The task goes to %s and comes back to you with the answer.", designer.Name, how, designer.Name)
+	return fmt.Sprintf("\n\n%s is the team's designer. Work needing %s must go to %s for design input before you plan or build it as final; do not draw or invent those assets yourself. For that work, or if you need other design input before you can go on well, %s The task goes to %s and comes back to you with the answer.", designer.Name, visualDesignWork, designer.Name, how, designer.Name)
 }

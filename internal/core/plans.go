@@ -16,13 +16,14 @@ import (
 // when a step stops part-way, how it will be tested, what stays out, and
 // what is unclear. What the task waits for is kept on the task itself.
 type Plan struct {
-	Summary      string   `json:"summary"`
-	Exists       []string `json:"exists,omitempty"`
-	Changes      []string `json:"changes,omitempty"`
-	FailurePaths []string `json:"failure_paths,omitempty"`
-	Tests        []string `json:"tests,omitempty"`
-	OutOfScope   []string `json:"out_of_scope,omitempty"`
-	Questions    []string `json:"questions,omitempty"`
+	NeedsDesigner string   `json:"needs_designer,omitempty"`
+	Summary       string   `json:"summary"`
+	Exists        []string `json:"exists,omitempty"`
+	Changes       []string `json:"changes,omitempty"`
+	FailurePaths  []string `json:"failure_paths,omitempty"`
+	Tests         []string `json:"tests,omitempty"`
+	OutOfScope    []string `json:"out_of_scope,omitempty"`
+	Questions     []string `json:"questions,omitempty"`
 	// SplitOff is the parts of the task the plan leaves for later, each
 	// queued as a task of its own that waits for this one.
 	SplitOff []SplitPart `json:"split_off,omitempty"`

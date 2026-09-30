@@ -45,8 +45,9 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	var plan core.Plan
 	var dependsOn []string
 	var design string
+	_, hasDesigner := t.Designer()
 	reply, learned, _, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
-		plan, dependsOn, design, err = parsePlan(reply, designsFor(t, researcher))
+		plan, dependsOn, design, err = parsePlan(reply, designsFor(t, researcher), !hasDesigner)
 		return err
 	})
 	if err != nil {
@@ -127,17 +128,18 @@ const (
 // surrounding prose, and bounds what it keeps. Where the researcher can ask
 // for design input, a reply that asks needs no plan yet: the researcher plans
 // once the input is back.
-func parsePlan(reply string, designs bool) (core.Plan, []string, string, error) {
+func parsePlan(reply string, designs, noDesigner bool) (core.Plan, []string, string, error) {
 	var in struct {
-		Summary      string   `json:"summary"`
-		Exists       []string `json:"exists"`
-		Changes      []string `json:"changes"`
-		FailurePaths []string `json:"failure_paths"`
-		Tests        []string `json:"tests"`
-		OutOfScope   []string `json:"out_of_scope"`
-		Questions    []string `json:"questions"`
-		DependsOn    []string `json:"depends_on"`
-		SplitOff     []struct {
+		NeedsDesigner string   `json:"needs_designer"`
+		Summary       string   `json:"summary"`
+		Exists        []string `json:"exists"`
+		Changes       []string `json:"changes"`
+		FailurePaths  []string `json:"failure_paths"`
+		Tests         []string `json:"tests"`
+		OutOfScope    []string `json:"out_of_scope"`
+		Questions     []string `json:"questions"`
+		DependsOn     []string `json:"depends_on"`
+		SplitOff      []struct {
 			Title        string   `json:"title"`
 			Requirements []string `json:"requirements"`
 		} `json:"split_off"`
@@ -169,6 +171,9 @@ func parsePlan(reply string, designs bool) (core.Plan, []string, string, error) 
 		return out
 	}
 	plan := core.Plan{Summary: text.Clip(strings.TrimSpace(in.Summary), 3000)}
+	if noDesigner {
+		plan.NeedsDesigner = text.Clip(strings.TrimSpace(in.NeedsDesigner), maxPlanItem)
+	}
 	plan.Changes = keep(in.Changes)
 	plan.FailurePaths = keep(in.FailurePaths)
 	plan.Tests = keep(in.Tests)

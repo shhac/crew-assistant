@@ -432,6 +432,7 @@ export interface TeamMessage {
 }
 /** What the researcher worked out before anything was written. */
 export interface Plan {
+  needs_designer?: string;
   summary: string;
   exists?: string[];
   changes?: string[];
