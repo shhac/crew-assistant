@@ -358,3 +358,15 @@ func TestARequirementKeptForTheTeamGoesOnToAnotherRound(t *testing.T) {
 		}
 	})
 }
+
+// A step already the owner's is never raised again: quoting one, as worded
+// or in part, would bring the owner the same step reworded, round after
+// round.
+func TestAnOwnerStepIsNotRaisedAgain(t *testing.T) {
+	steps := []string{"After it lands, ask the designer on a real task to generate one image and check it shows up attached to the task."}
+	block := `[{"requirement": "ask the designer on a real task to generate one image", "why": "no network"}, {"requirement": "It opens in the owner's browser", "why": "no browser"}]`
+	got := parseOwnerSteps(block, 2, []string{"It opens in the owner's browser"}, steps)
+	if len(got) != 1 || got[0].Criterion != "It opens in the owner's browser" {
+		t.Fatalf("raised: %+v", got)
+	}
+}

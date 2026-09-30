@@ -140,7 +140,9 @@ func (s *Service) MakeOwnerStep(ctx context.Context, taskID, decisionID string) 
 		if step == "" {
 			step = d.OwnerStep.Criterion
 		}
-		if !slices.Contains(t.OwnerSteps, step) {
+		// A step proposed for what is already the owner's step would be the
+		// same check twice, reworded.
+		if !slices.Contains(t.OwnerSteps, step) && !slices.Contains(t.OwnerSteps, d.OwnerStep.Criterion) {
 			t.OwnerSteps = append(t.OwnerSteps, step)
 		}
 		t.SettleUnreachable(d.OwnerStep.Criterion)

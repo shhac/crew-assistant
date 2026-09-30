@@ -361,7 +361,7 @@ type ownerStepEntry struct {
 // requirements it can't meet from its sandbox on draft n, each matched to
 // the task's own criterion where it quotes one. A block that can't be read
 // says nothing.
-func parseOwnerSteps(block string, n int, criteria []string) []core.Unreachable {
+func parseOwnerSteps(block string, n int, criteria, ownerSteps []string) []core.Unreachable {
 	if block == "" {
 		return nil
 	}
@@ -375,6 +375,11 @@ func parseOwnerSteps(block string, n int, criteria []string) []core.Unreachable 
 	}
 	var out []core.Unreachable
 	for _, e := range entries {
+		// A step already the owner's would come back reworded, round
+		// after round.
+		if slices.Contains(ownerSteps, matchCriterion(ownerSteps, e.Requirement)) {
+			continue
+		}
 		c := matchCriterion(criteria, e.Requirement)
 		if c == "" || slices.ContainsFunc(out, func(u core.Unreachable) bool { return u.Criterion == c }) {
 			continue
