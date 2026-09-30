@@ -10,7 +10,7 @@ import {
 import { roleMember, taskRoles } from "./members";
 import { Avatar } from "./Avatar";
 import { VerdictEvidence } from "./VerdictEvidence";
-import { ErrorNotice, Pill, dateLabel } from "./ui";
+import { ErrorNotice, Pill, dateLabel, useNewestInView } from "./ui";
 import {
   errorText,
   revisionFiles,
@@ -35,6 +35,7 @@ export function Drafts({
   /** The decision above already shows the latest checks. */
   collapsed: boolean;
 }) {
+  const box = useNewestInView<HTMLDivElement>("top");
   const revisions = [...(task.revisions ?? [])].reverse();
   if (!revisions.length) return null;
   const playbook = taskPlaybook(task, project);
@@ -43,38 +44,44 @@ export function Drafts({
   return (
     <section className="section" aria-label="Drafts">
       <h3>{code ? "Changes" : "Drafts"}</h3>
-      {revisions.map((r, i) => (
-        <details key={r.n} className="draft card" open={i === 0 && !collapsed}>
-          <summary>
-            <span className="draft-name">
-              {code ? "Change" : "Draft"} {r.n}
-            </span>
-            <span className="draft-checks">
-              {(task.verdicts ?? [])
-                .filter((v) => v.revision === r.n)
-                .map((v, j) => (
-                  <VerdictChip
-                    key={j}
-                    verdict={v}
-                    member={roleMember(roles, v.role, members)}
-                  />
-                ))}
-            </span>
-            {r.at && (
-              <time className="muted small" dateTime={r.at}>
-                {dateLabel(r.at)}
-              </time>
-            )}
-          </summary>
-          <DraftDetail
-            project={project}
-            task={task}
-            revision={r}
-            code={code}
-            latest={i === 0}
-          />
-        </details>
-      ))}
+      <div className="bounded" {...box}>
+        {revisions.map((r, i) => (
+          <details
+            key={r.n}
+            className="draft card"
+            open={i === 0 && !collapsed}
+          >
+            <summary>
+              <span className="draft-name">
+                {code ? "Change" : "Draft"} {r.n}
+              </span>
+              <span className="draft-checks">
+                {(task.verdicts ?? [])
+                  .filter((v) => v.revision === r.n)
+                  .map((v, j) => (
+                    <VerdictChip
+                      key={j}
+                      verdict={v}
+                      member={roleMember(roles, v.role, members)}
+                    />
+                  ))}
+              </span>
+              {r.at && (
+                <time className="muted small" dateTime={r.at}>
+                  {dateLabel(r.at)}
+                </time>
+              )}
+            </summary>
+            <DraftDetail
+              project={project}
+              task={task}
+              revision={r}
+              code={code}
+              latest={i === 0}
+            />
+          </details>
+        ))}
+      </div>
     </section>
   );
 }

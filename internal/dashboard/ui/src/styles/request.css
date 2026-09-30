@@ -53,6 +53,39 @@
   border-color: var(--needs);
 }
 
+/* A list that grows each round, in a box of its own height that scrolls by
+   itself; long words and links inside it wrap rather than widen the panel. */
+.bounded {
+  min-width: 0;
+  max-height: min(60vh, 560px);
+  max-height: min(60dvh, 560px);
+  margin: 0;
+  padding: 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+div.bounded {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bounded pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.bounded table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .thread-messages {
   display: flex;
   flex-direction: column;
@@ -88,6 +121,7 @@
 
 .thread-text {
   white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 .thread-reply {
@@ -340,6 +374,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow-wrap: anywhere;
 }
 
 .findings,
@@ -351,6 +386,7 @@
   gap: 4px;
   padding-left: 18px;
   color: var(--soft);
+  overflow-wrap: anywhere;
 }
 
 .plan-part {

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { criteriaLines, errorText } from "./api";
 
 const icons: Record<string, string> = {
@@ -280,4 +280,40 @@ export function useAction(initialError = "") {
     }
   }
   return { busy, error, setError, run };
+}
+
+/**
+ * A list that grows each round, kept in a box of its own height (the
+ * `bounded` class) that shows its newest end: the bottom of a list kept
+ * oldest first, the top of one kept newest first. It goes there when the
+ * list first shows, and keeps following while the owner leaves it there;
+ * once they scroll away, a later reading leaves the box where they put it.
+ * Spread what it returns on the list element.
+ */
+export function useNewestInView<E extends HTMLElement>(
+  newest: "top" | "bottom",
+) {
+  const ref = useRef<E>(null);
+  const shown = useRef(false);
+  const atNewest = useRef(true);
+  useLayoutEffect(() => {
+    const box = ref.current;
+    if (!box) {
+      shown.current = false;
+      atNewest.current = true;
+      return;
+    }
+    if (shown.current && !atNewest.current) return;
+    shown.current = true;
+    box.scrollTop = newest === "top" ? 0 : box.scrollHeight;
+  });
+  function onScroll() {
+    const box = ref.current;
+    if (!box) return;
+    atNewest.current =
+      newest === "top"
+        ? box.scrollTop <= 2
+        : box.scrollHeight - box.scrollTop - box.clientHeight <= 2;
+  }
+  return { ref, onScroll, tabIndex: 0 };
 }

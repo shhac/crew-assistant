@@ -11,6 +11,7 @@ import {
 } from "@testing-library/react";
 import { ProjectPage } from "./ProjectPage";
 import { parseRoute, requestHref, type ProjectTab } from "./router";
+import { atBottom, layOutScrolling } from "./testScroll";
 import {
   normalizeState,
   type Decision,
@@ -1359,6 +1360,58 @@ describe("a team member's panel", () => {
     const status = within(panel).getByRole("status");
     expect(status.textContent).toMatch(/^Working · 3m · 2 tool calls/);
     expect(status.textContent).toContain("now: Read");
+  });
+
+  it("keeps a long run of work in a box of its own, open at the newest, losing none of it", async () => {
+    const undo = layOutScrolling();
+    try {
+      const replies = (from: number, to: number) =>
+        Array.from({ length: to - from + 1 }, (_, i) =>
+          step({
+            id: from + i,
+            item: `msg-${from + i}`,
+            at: ago(100 - from - i),
+            text: `Round ${from + i} done.`,
+          }),
+        );
+      steps.Implementer = replies(1, 40);
+      const { poll } = routed(
+        project(),
+        { tasks: [writing()] },
+        "#/projects/p1/requests/t1/team/Implementer",
+      );
+      const panel = await screen.findByRole("region", { name: "Implementer" });
+      await within(panel).findByText("Round 40 done.");
+      const activity = within(panel).getByRole("list", { name: "Activity" });
+      expect(activity.classList).toContain("bounded");
+      expect(activity.tabIndex).toBe(0);
+      expect(activity.children).toHaveLength(40);
+      for (let n = 1; n <= 40; n++)
+        expect(
+          activity.contains(within(panel).getByText(`Round ${n} done.`)),
+        ).toBe(true);
+      expect(atBottom(activity)).toBe(true);
+      // The status above and the message box below stay outside it.
+      expect(activity.contains(within(panel).getByRole("status"))).toBe(false);
+      expect(activity.contains(within(panel).getByLabelText("Message"))).toBe(
+        false,
+      );
+      expect(
+        within(panel)
+          .getAllByRole("button")
+          .map((b) => b.textContent?.trim()),
+      ).toEqual(["Back to the request", "Send to Implementer"]);
+      // Scrolled back to read, a later poll leaves the owner where they are.
+      activity.scrollTop = 200;
+      fireEvent.scroll(activity);
+      steps.Implementer = replies(1, 45);
+      poll({ tasks: [writing()], turns: [working("Implementer")] });
+      await within(panel).findByText("Round 45 done.");
+      expect(activity.children).toHaveLength(45);
+      expect(activity.scrollTop).toBe(200);
+    } finally {
+      undo();
+    }
   });
 
   it("sends a message from the panel, and shows it with the member's reply", async () => {

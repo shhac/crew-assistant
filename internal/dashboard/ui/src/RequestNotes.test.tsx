@@ -6,12 +6,13 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Drafts } from "./Drafts";
 import { RequestEdits, RequestNotes } from "./RequestNotes";
-import { RequestResearch } from "./RequestPlan";
+import { RequestDesign, RequestResearch } from "./RequestPlan";
 import type { Project, Task } from "./api";
 import { recordFetch, reply } from "./testFetch";
+import { atBottom, layOutScrolling } from "./testScroll";
 
 const project: Project = {
   id: "p1",
@@ -153,5 +154,128 @@ describe("a request's notes and changes", () => {
         "Recommends another revision: I want the closing warmer",
       ),
     ).toBeTruthy();
+  });
+});
+
+describe("lists that grow each round", () => {
+  let undo = () => {};
+  beforeEach(() => {
+    undo = layOutScrolling();
+  });
+  afterEach(() => undo());
+  const many = <T,>(n: number, make: (i: number) => T) =>
+    Array.from({ length: n }, (_, i) => make(i + 1));
+  /** The request's list in its box, and every entry still in it. */
+  function box(section: string, entries: number) {
+    const region = screen.getByRole("region", { name: section });
+    const bounded = region.querySelector(".bounded") as HTMLElement;
+    expect(bounded, `${section} is in a box`).toBeTruthy();
+    expect(bounded.tabIndex).toBe(0);
+    expect(bounded.children).toHaveLength(entries);
+    return bounded;
+  }
+
+  it("keeps many notes in a box of their own, open at the newest, with the form below it", () => {
+    const notes = many(30, (i) => ({
+      id: `n${i}`,
+      by: "Rune",
+      kind: "reviewer",
+      text: `Note ${i}`,
+      at: "",
+    }));
+    render(
+      <RequestNotes
+        task={{ ...task, notes }}
+        closed={false}
+        refresh={vi.fn()}
+      />,
+    );
+    const list = box("Notes", 30);
+    expect(list.tagName).toBe("OL");
+    for (const n of notes)
+      expect(list.contains(screen.getByText(n.text))).toBe(true);
+    expect(atBottom(list)).toBe(true);
+    expect(list.contains(screen.getByLabelText("Note"))).toBe(false);
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "Add note",
+    ]);
+  });
+
+  it("keeps many changes to what was asked in a box, open at the newest", () => {
+    const edits = many(20, (i) => ({
+      id: `e${i}`,
+      by: "Rhea",
+      kind: "researcher",
+      before: { objective: `Title ${i - 1}`, criteria: [] },
+      after: { objective: `Title ${i}`, criteria: [] },
+      at: "",
+    }));
+    render(
+      <RequestEdits
+        task={{ ...task, edits }}
+        closed={false}
+        refresh={async () => {}}
+      />,
+    );
+    const list = box("Changes to what was asked", 20);
+    expect(list.scrollTop).toBe(0);
+    expect(list.firstElementChild?.textContent).toContain("Title 20");
+    expect(list.lastElementChild?.textContent).toContain("Title 1");
+    expect(
+      screen.getAllByRole("button", { name: "Undo Rhea's change" }),
+    ).toHaveLength(20);
+  });
+
+  it("keeps many drafts and their verdicts in a box, the newest open at its top", () => {
+    recordFetch(() => reply({ files: [] }));
+    const revisions = many(25, (n) => ({ n, brief_version: 1, files: [] }));
+    const verdicts = many(25, (n) => ({
+      revision: n,
+      role: "Rune",
+      brief_version: 1,
+      outcome: "revise",
+      summary: `Verdict on ${n}`,
+    }));
+    render(
+      <Drafts
+        project={project}
+        task={{ ...task, revisions, verdicts }}
+        members={[]}
+        collapsed={false}
+      />,
+    );
+    const list = box("Drafts", 25);
+    expect(list.scrollTop).toBe(0);
+    const first = list.firstElementChild as HTMLDetailsElement;
+    expect(first.open).toBe(true);
+    expect(first.textContent).toContain("Draft 25");
+    for (const v of verdicts)
+      expect(list.contains(screen.getByText(v.summary))).toBe(true);
+  });
+
+  it("keeps the research and design asked for in boxes, open at the newest", () => {
+    const research = many(15, (i) => ({
+      id: `r${i}`,
+      from: "Rune",
+      round: i,
+      revision: i,
+      question: `Question ${i}`,
+    }));
+    render(<RequestResearch research={research} />);
+    const asked = box("Research asked for", 15);
+    expect(atBottom(asked)).toBe(true);
+    expect(asked.lastElementChild?.textContent).toContain("Question 15");
+    const design = many(15, (i) => ({
+      id: `d${i}`,
+      from: "Rhea",
+      step: "researching",
+      round: i,
+      question: `Look ${i}`,
+    }));
+    render(<RequestDesign task={{ ...task, design }} />);
+    const looks = box("Design input", 15);
+    expect(atBottom(looks)).toBe(true);
+    for (const d of design)
+      expect(looks.contains(screen.getByText(d.question))).toBe(true);
   });
 });

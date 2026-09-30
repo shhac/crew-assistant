@@ -1,5 +1,11 @@
 import { useState, type FormEvent } from "react";
-import { ErrorNotice, Icon, sinceLabel, useAction } from "./ui";
+import {
+  ErrorNotice,
+  Icon,
+  sinceLabel,
+  useAction,
+  useNewestInView,
+} from "./ui";
 import { sizeLabel, useFileDrop } from "./composerAssets";
 import { addPending, ATTACHMENT_ACCEPT, type PendingFile } from "./attachments";
 import { AttachmentList } from "./RequestAttachments";
@@ -36,6 +42,7 @@ export function RequestNotes({
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [refused, setRefused] = useState<string[]>([]);
   const { busy, error, run } = useAction();
+  const box = useNewestInView<HTMLOListElement>("bottom");
   const notes: Note[] = task.notes ?? [];
   const attachments = task.attachments ?? [];
   function attach(picked: File[]) {
@@ -64,7 +71,7 @@ export function RequestNotes({
     <section className="section thread" aria-label="Notes">
       <h3>Notes</h3>
       {notes.length > 0 && (
-        <ol className="thread-messages">
+        <ol className="thread-messages bounded" {...box}>
           {notes.map((n) => (
             <li key={n.id} className="thread-message">
               <p className="thread-line">
@@ -173,36 +180,39 @@ export function RequestEdits({
   refresh: () => Promise<void>;
 }) {
   const { busy, error, run } = useAction();
+  const box = useNewestInView<HTMLDivElement>("top");
   const edits: TaskEdit[] = [...(task.edits ?? [])].reverse();
   if (!edits.length) return null;
   return (
     <section className="section" aria-label="Changes to what was asked">
       <h3>Changes to what was asked</h3>
-      {edits.map((e) => (
-        <div key={e.id} className="plan-part">
-          <p className="label">
-            {who(e.by, e.kind)} {e.undoes ? "undid a change" : "changed it"}
-            {e.at && ` · ${sinceLabel(e.at)}`}
-          </p>
-          <EditDiff edit={e} />
-          {!closed && (
-            <button
-              type="button"
-              className="link-button small"
-              disabled={busy}
-              aria-label={`Undo ${who(e.by, e.kind)}'s change`}
-              onClick={() =>
-                void run(async () => {
-                  await undoTaskEdit(task.project_id, task.id, e.id);
-                  await refresh();
-                })
-              }
-            >
-              Undo
-            </button>
-          )}
-        </div>
-      ))}
+      <div className="bounded" {...box}>
+        {edits.map((e) => (
+          <div key={e.id} className="plan-part">
+            <p className="label">
+              {who(e.by, e.kind)} {e.undoes ? "undid a change" : "changed it"}
+              {e.at && ` · ${sinceLabel(e.at)}`}
+            </p>
+            <EditDiff edit={e} />
+            {!closed && (
+              <button
+                type="button"
+                className="link-button small"
+                disabled={busy}
+                aria-label={`Undo ${who(e.by, e.kind)}'s change`}
+                onClick={() =>
+                  void run(async () => {
+                    await undoTaskEdit(task.project_id, task.id, e.id);
+                    await refresh();
+                  })
+                }
+              >
+                Undo
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
       <ErrorNotice error={error} />
     </section>
   );

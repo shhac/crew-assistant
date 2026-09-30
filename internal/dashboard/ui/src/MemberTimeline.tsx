@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ConversationMarkdown } from "./ConversationMarkdown";
 import { kindLabel } from "./members";
-import { sinceLabel } from "./ui";
+import { sinceLabel, useNewestInView } from "./ui";
 import type { TeamMessage, TurnStep } from "./api";
 
 /** Past this, a reply shows its opening until the owner asks for the rest. */
@@ -13,7 +13,8 @@ type Entry =
 
 /**
  * Steps and messages as one conversation, oldest first so the newest sits
- * by the box. A message with no time goes last.
+ * by the box, in a box of its own that opens at the newest. A message with
+ * no time goes last.
  */
 export function Timeline({
   steps,
@@ -28,6 +29,7 @@ export function Timeline({
   loaded: boolean;
   renderMessage: (m: TeamMessage) => ReactNode;
 }) {
+  const box = useNewestInView<HTMLOListElement>("bottom");
   const entries: Entry[] = [
     ...steps.map((step) => ({ at: step.at, step })),
     ...messages.map((message) => ({ at: message.at ?? "", message })),
@@ -43,7 +45,7 @@ export function Timeline({
       </p>
     );
   return (
-    <ol className="member-timeline" aria-label="Activity">
+    <ol className="member-timeline bounded" aria-label="Activity" {...box}>
       {entries.map((e) =>
         e.message ? (
           renderMessage(e.message)

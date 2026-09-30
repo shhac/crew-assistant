@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pill, sinceLabel } from "./ui";
+import { Pill, sinceLabel, useNewestInView } from "./ui";
 import {
   AttachmentList,
   designState,
@@ -71,49 +71,52 @@ export function RequestDesign({
   designer?: string;
 }) {
   const attachments = task.attachments ?? [];
+  const box = useNewestInView<HTMLDivElement>("bottom");
   return (
     <section className="section plan" aria-label="Design input">
       <h3>Design input</h3>
-      {(task.design ?? []).map((r) => {
-        const state = designState(task, r);
-        return (
-          <div
-            key={r.id}
-            className={`plan-part${state === "superseded" ? " superseded" : ""}`}
-            aria-label={r.n ? `Design ${r.n}` : undefined}
-          >
-            {r.n ? (
-              <p className="design-title">
-                <span className="label">Design {r.n}</span>
-                {state && (
-                  <Pill tone={designTone[state]}>
-                    {designStateLabel[state]}
-                  </Pill>
-                )}
-              </p>
-            ) : null}
-            <p className="label">{r.from} asked</p>
-            <p>{r.question}</p>
-            {r.input ? (
-              <>
-                <p className="label">{r.designer} answered</p>
-                <p>{r.input}</p>
-              </>
-            ) : (
-              <p className="muted small">{unanswered(r, designer)}</p>
-            )}
-            <AttachmentList
-              task={task}
-              attachments={attachments.filter((a) => a.design === r.id)}
-            />
-            {state === "superseded" && (
-              <p className="muted small">
-                Not the current design: the team no longer works to it.
-              </p>
-            )}
-          </div>
-        );
-      })}
+      <div className="bounded" {...box}>
+        {(task.design ?? []).map((r) => {
+          const state = designState(task, r);
+          return (
+            <div
+              key={r.id}
+              className={`plan-part${state === "superseded" ? " superseded" : ""}`}
+              aria-label={r.n ? `Design ${r.n}` : undefined}
+            >
+              {r.n ? (
+                <p className="design-title">
+                  <span className="label">Design {r.n}</span>
+                  {state && (
+                    <Pill tone={designTone[state]}>
+                      {designStateLabel[state]}
+                    </Pill>
+                  )}
+                </p>
+              ) : null}
+              <p className="label">{r.from} asked</p>
+              <p>{r.question}</p>
+              {r.input ? (
+                <>
+                  <p className="label">{r.designer} answered</p>
+                  <p>{r.input}</p>
+                </>
+              ) : (
+                <p className="muted small">{unanswered(r, designer)}</p>
+              )}
+              <AttachmentList
+                task={task}
+                attachments={attachments.filter((a) => a.design === r.id)}
+              />
+              {state === "superseded" && (
+                <p className="muted small">
+                  Not the current design: the team no longer works to it.
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -124,18 +127,21 @@ export function RequestDesign({
  * being researched.
  */
 export function RequestResearch({ research }: { research: ResearchRequest[] }) {
+  const box = useNewestInView<HTMLDivElement>("bottom");
   return (
     <section className="section plan" aria-label="Research asked for">
       <h3>Research asked for</h3>
-      {research.map((r) => (
-        <div key={r.id} className="plan-part">
-          <p className="label">
-            {r.from} asked, checking draft {r.revision}
-          </p>
-          <p>{r.question}</p>
-          <p className="muted small">{researchState(r)}</p>
-        </div>
-      ))}
+      <div className="bounded" {...box}>
+        {research.map((r) => (
+          <div key={r.id} className="plan-part">
+            <p className="label">
+              {r.from} asked, checking draft {r.revision}
+            </p>
+            <p>{r.question}</p>
+            <p className="muted small">{researchState(r)}</p>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }

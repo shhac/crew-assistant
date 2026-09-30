@@ -40,18 +40,10 @@ export function MemberPanel({
   onClose: () => void;
 }) {
   const back = useRef<HTMLButtonElement>(null);
-  const end = useRef<HTMLDivElement>(null);
   const role = taskRoles(task, project).find((r) => r.name === seat);
   const member = memberOf(role, state.members);
   const { steps, error } = useSteps(task, seat, state);
   useEffect(() => back.current?.focus(), []);
-  // Opened at the newest, beside the box, once there is something to show.
-  const shown = useRef(false);
-  useEffect(() => {
-    if (shown.current || !steps?.length) return;
-    shown.current = true;
-    end.current?.scrollIntoView?.({ block: "end" });
-  }, [steps]);
   const messages = (task.messages ?? []).filter((m) => m.to === seat);
   const made = isCode(taskPlaybook(task, project)) ? "change" : "draft";
   return (
@@ -99,7 +91,6 @@ export function MemberPanel({
               <MessageView key={m.id} message={m} member={member} made={made} />
             )}
           />
-          <div ref={end} />
           <MessageForm
             project={project}
             task={task}
