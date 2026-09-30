@@ -38,7 +38,7 @@ export function RunRecipeSettings({
   return (
     <section className="tab-panel card" aria-label="Running the app">
       <div className="panel-head">
-        <h2>Running the app</h2>
+        <h3>Running the app</h3>
         <button
           type="button"
           className="btn btn-sm"
@@ -129,7 +129,7 @@ function RunRecipeEditor({
   }
   return (
     <form className="form" aria-label="Running the app" onSubmit={save}>
-      <h2>Running the app</h2>
+      <h3>Running the app</h3>
       <p className="hint">
         QA starts the app from a copy of each change, on this machine only:
         nothing else on the network can be reached, so setup runs offline.

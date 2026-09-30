@@ -24,7 +24,7 @@ const signing: Record<string, string> = {
   never: "Never signed",
 };
 
-/** How a project's team works, where its work happens and how it lands. */
+/** Work settings first, then landing, work locations and project identity. */
 export function ConfigTab({
   project,
   members,
@@ -37,35 +37,51 @@ export function ConfigTab({
   const playbook = project.playbook;
   const code = playbook && isCode(playbook);
   return (
-    <div className="tab-stack">
-      <ProjectName project={project} refresh={refresh} />
-      <TeamSettings project={project} members={members} refresh={refresh} />
-      {playbook && (
-        <>
+    <div className="tab-stack config-groups">
+      <section className="config-group">
+        <h2>How work runs</h2>
+        {playbook && (
           <TasksAtOnce
             project={project}
             playbook={playbook}
             refresh={refresh}
           />
-        </>
-      )}
+        )}
+        <TeamSettings project={project} members={members} refresh={refresh} />
+      </section>
       {code && (
-        <>
+        <section className="config-group">
+          <h2>Landing</h2>
           <LandingSettings
             project={project}
             playbook={playbook}
             refresh={refresh}
           />
-          <Workspace project={project} playbook={playbook} refresh={refresh} />
-          <RunRecipeSettings
-            project={project}
-            playbook={playbook}
-            refresh={refresh}
-          />
-        </>
+        </section>
       )}
-      <Folders project={project} refresh={refresh} />
-      <TaskIDs project={project} refresh={refresh} />
+      <section className="config-group">
+        <h2>Where work happens</h2>
+        <Folders project={project} refresh={refresh} />
+        {code && (
+          <>
+            <Workspace
+              project={project}
+              playbook={playbook}
+              refresh={refresh}
+            />
+            <RunRecipeSettings
+              project={project}
+              playbook={playbook}
+              refresh={refresh}
+            />
+          </>
+        )}
+      </section>
+      <section className="config-group">
+        <h2>Project identity</h2>
+        <ProjectName project={project} refresh={refresh} />
+        <TaskIDs project={project} refresh={refresh} />
+      </section>
     </div>
   );
 }
@@ -147,7 +163,7 @@ function TasksAtOnce({
     <section className="tab-panel card" aria-label="Tasks at once">
       {editing ? (
         <form className="form" aria-label="Tasks at once" onSubmit={save}>
-          <h2>Tasks at once</h2>
+          <h3>Tasks at once</h3>
           <div className="form-row">
             {stages.map((s) => (
               <label key={s.stage} htmlFor={`config-stage-${s.stage}`}>
@@ -206,7 +222,7 @@ function TasksAtOnce({
       ) : (
         <>
           <div className="panel-head">
-            <h2>Tasks at once</h2>
+            <h3>Tasks at once</h3>
             <button
               type="button"
               className="btn btn-sm"
@@ -279,7 +295,7 @@ function ProjectName({
     return (
       <section className="tab-panel card" aria-label="Name">
         <form className="form" aria-label="Name" onSubmit={save}>
-          <h2>Name</h2>
+          <h3>Name</h3>
           <label htmlFor="config-project-title">
             Name
             <input
@@ -317,7 +333,7 @@ function ProjectName({
   return (
     <section className="tab-panel card" aria-label="Name">
       <div className="panel-head">
-        <h2>Name</h2>
+        <h3>Name</h3>
         <button
           type="button"
           className="btn btn-sm"
@@ -366,7 +382,7 @@ function TaskIDs({
     return (
       <section className="tab-panel card" aria-label="Request IDs">
         <form className="form" aria-label="Request IDs" onSubmit={save}>
-          <h2>Request IDs</h2>
+          <h3>Request IDs</h3>
           <label htmlFor="config-task-prefix">
             Prefix
             <input
@@ -406,7 +422,7 @@ function TaskIDs({
   return (
     <section className="tab-panel card" aria-label="Request IDs">
       <div className="panel-head">
-        <h2>Request IDs</h2>
+        <h3>Request IDs</h3>
         <button
           type="button"
           className="btn btn-sm"
@@ -462,7 +478,7 @@ function Workspace({
   return (
     <section className="tab-panel card" aria-label="Workspace">
       <div className="panel-head">
-        <h2>Workspace</h2>
+        <h3>Workspace</h3>
         <button
           type="button"
           className="btn btn-sm"
@@ -543,7 +559,7 @@ function WorkspaceEditor({
   }
   return (
     <form className="form" aria-label="Workspace" onSubmit={save}>
-      <h2>Workspace</h2>
+      <h3>Workspace</h3>
       <div className="form-row">
         <label htmlFor="config-repo">
           Repository

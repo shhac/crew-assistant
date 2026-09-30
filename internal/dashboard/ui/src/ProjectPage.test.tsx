@@ -10,6 +10,7 @@ import {
   within,
 } from "@testing-library/react";
 import { ProjectPage } from "./ProjectPage";
+import { ConfigTab } from "./ProjectConfig";
 import { parseRoute, requestHref, type ProjectTab } from "./router";
 import { atBottom, layOutScrolling } from "./testScroll";
 import {
@@ -1959,6 +1960,88 @@ describe("whether a role is at work", () => {
     });
     for (const name of ["Queued", "Asks you", "Landing"])
       expect(line(card(name))).toBeUndefined();
+  });
+});
+
+describe("Config groups", () => {
+  const headings = (root: HTMLElement, level: number) =>
+    within(root)
+      .getAllByRole("heading", { level })
+      .map((h) => h.textContent);
+
+  it("groups code settings in day-to-day order", () => {
+    const { container } = show(project(), {}, { tab: "config" });
+    expect(headings(container, 2)).toEqual([
+      "How work runs",
+      "Landing",
+      "Where work happens",
+      "Project identity",
+    ]);
+    const cards = [
+      ["Tasks at once", "Team settings"],
+      ["Landing"],
+      ["Folders", "Workspace", "Running the app"],
+      ["Name", "Request IDs"],
+    ];
+    within(container)
+      .getAllByRole("heading", { level: 2 })
+      .forEach((h, i) => {
+        expect(headings(h.parentElement!, 3)).toEqual(cards[i]);
+        cards[i].forEach((name) => {
+          expect(
+            within(h.parentElement!).getByRole("region", { name }),
+          ).toBeTruthy();
+        });
+      });
+  });
+
+  it.each([writingTeam, undefined])(
+    "keeps populated groups without a code team (%s)",
+    (playbook) => {
+      const { container } = show(project({ playbook }), {}, { tab: "config" });
+      expect(headings(container, 2)).toEqual([
+        "How work runs",
+        "Where work happens",
+        "Project identity",
+      ]);
+      const groups = within(container).getAllByRole("heading", { level: 2 });
+      expect(headings(groups[0].parentElement!, 3)).toEqual(
+        playbook ? ["Tasks at once", "Team settings"] : ["Team settings"],
+      );
+      expect(headings(groups[1].parentElement!, 3)).toEqual(["Folders"]);
+      expect(headings(groups[2].parentElement!, 3)).toEqual([
+        "Name",
+        "Request IDs",
+      ]);
+      ["Landing", "Workspace", "Running the app"].forEach((name) => {
+        expect(screen.queryByRole("region", { name })).toBeNull();
+      });
+    },
+  );
+
+  it("keeps an unsaved Tasks at once edit across a project refresh", () => {
+    const p = project();
+    const { rerender } = render(
+      <ConfigTab project={p} members={[]} refresh={refresh} />,
+    );
+    const card = screen.getByRole("region", { name: "Tasks at once" });
+    fireEvent.click(within(card).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(card).getByLabelText("In all"), {
+      target: { value: "4" },
+    });
+    rerender(
+      <ConfigTab
+        project={{ ...p, playbook: { ...p.playbook! } }}
+        members={[]}
+        refresh={refresh}
+      />,
+    );
+    const form = screen.getByRole("form", { name: "Tasks at once" });
+    expect(within(form).getByLabelText("In all")).toHaveProperty("value", "4");
+    expect(within(form).getByRole("heading", { level: 3 }).textContent).toBe(
+      "Tasks at once",
+    );
+    expect(writes()).toEqual([]);
   });
 });
 

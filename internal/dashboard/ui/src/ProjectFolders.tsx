@@ -62,7 +62,7 @@ export function Folders({
   return (
     <section className="tab-panel card" aria-label="Folders">
       <div className="panel-head">
-        <h2>Folders</h2>
+        <h3>Folders</h3>
         {!editing && (
           <button
             type="button"

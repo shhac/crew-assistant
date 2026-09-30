@@ -40,7 +40,7 @@ export function TeamSettings({
   return (
     <section className="tab-panel card" aria-label="Team settings">
       <div className="panel-head">
-        <h2>Team settings</h2>
+        <h3>Team settings</h3>
         <button
           type="button"
           className="btn btn-sm"
@@ -146,7 +146,7 @@ function TeamEditor({
   return (
     <>
       <form className="form" onSubmit={save} aria-label="Team settings">
-        <h2>Team settings</h2>
+        <h3>Team settings</h3>
         {folders.length > 0 && (
           <label htmlFor="team-kind">
             Kind of work

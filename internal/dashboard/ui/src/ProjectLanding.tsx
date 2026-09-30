@@ -40,7 +40,7 @@ export function LandingSettings({
   return (
     <section className="tab-panel card" aria-label="Landing">
       <div className="panel-head">
-        <h2>Landing</h2>
+        <h3>Landing</h3>
         <button
           type="button"
           className="btn btn-sm"
@@ -148,7 +148,7 @@ function LandingEditor({
   }
   return (
     <form className="form" aria-label="Landing" onSubmit={save}>
-      <h2>Landing</h2>
+      <h3>Landing</h3>
       <div className="form-row">
         <label htmlFor="land-via">
           Lands as

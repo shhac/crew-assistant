@@ -1,4 +1,14 @@
 /* A project */
+.tab-stack.config-groups {
+  gap: 28px;
+}
+
+.config-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .project-page {
   max-width: none;
 }
