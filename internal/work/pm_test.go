@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
 )
@@ -330,5 +331,29 @@ func TestThePMIsToldWhatWaitsInTriage(t *testing.T) {
 	}
 	if prompt := pmPrompt(core.Snapshot{Tasks: snap.Tasks[:1]}, p); strings.Contains(prompt, "Tasks in triage are new work") {
 		t.Error("the PM is told about triage with nothing in it")
+	}
+}
+
+// The PM sees its latest answered questions on every look, not only the one
+// the answer arrived for, so it doesn't ask again; another project's stay
+// out, and so does a question still open.
+func TestThePMKeepsSeeingTheOwnersAnswers(t *testing.T) {
+	p := core.Project{ID: "p1", Title: "Notes", Brief: core.Brief{Goal: "Notes"}}
+	at := time.Date(2026, 9, 30, 18, 0, 0, 0, time.UTC)
+	snap := core.Snapshot{Decisions: []core.Decision{
+		{ProjectID: "p1", Kind: core.DecisionPMQuestion, Status: core.DecisionResolved, Context: "1. Has the daemon been restarted?", Answer: "Yes, it runs the new build.", CreatedAt: at},
+		{ProjectID: "p1", Kind: core.DecisionPMQuestion, Status: core.DecisionResolved, Context: "1. Which first?", Answer: "Keep the order as it is", CreatedAt: at.Add(time.Hour)},
+		{ProjectID: "p2", Kind: core.DecisionPMQuestion, Status: core.DecisionResolved, Context: "Elsewhere?", Answer: "Not yours", CreatedAt: at},
+		{ProjectID: "p1", Kind: core.DecisionPMQuestion, Status: core.DecisionOpen, Context: "Still open?", CreatedAt: at},
+	}}
+	prompt := pmPrompt(snap, p)
+	first, second := strings.Index(prompt, "Which first?"), strings.Index(prompt, "Has the daemon been restarted?")
+	if first < 0 || second < first || !strings.Contains(prompt, "The owner answered: Yes, it runs the new build.") {
+		t.Fatalf("the answers, newest first:\n%s", prompt)
+	}
+	for _, unwanted := range []string{"Not yours", "Still open?", "The owner told you"} {
+		if strings.Contains(prompt, unwanted) {
+			t.Fatalf("the prompt carries %q:\n%s", unwanted, prompt)
+		}
 	}
 }

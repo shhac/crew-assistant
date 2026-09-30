@@ -338,9 +338,7 @@ func escalationPrompt(snap core.Snapshot, p core.Project, t core.Task, current [
 		}
 		fmt.Fprintf(&b, "%d. %s%s: %s\n", i+1, f.Role, about, text.Clip(f.Note, 400))
 	}
-	if p.PMDirection != "" {
-		fmt.Fprintf(&b, "\nThe owner told you: %s\n", p.PMDirection)
-	}
+	b.WriteString(pmToldText(snap, p))
 	b.WriteString(`
 Judge what remains at the round limit, for the owner, who decides whether it gets another round, is accepted as it is, is accepted with a follow-up task for what remains, or stops. For each finding say whether it is narrow (a small, contained fix), whether it is a regression (it breaks something that worked), whether it repeats something an earlier round raised, and whether it is about the task's core purpose. Say whether the draft is heading the wrong way altogether, and whether any task waiting on this one needs what remains fixed before it can build on it: it waits only for this task, so it may start before a follow-up lands. Write the follow-up task for what remains so it stands alone, for someone who has not read this task. Only judge: do not change, queue or approve anything.
 

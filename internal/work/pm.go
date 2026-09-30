@@ -137,6 +137,35 @@ func (lp *Loop) askPMQuestions(ctx context.Context, p core.Project, seat core.Ro
 	return err
 }
 
+// maxPMAnswers is how many of its latest answered questions the PM sees on
+// every look.
+const maxPMAnswers = 5
+
+// pmToldText is what the owner has told the PM: anything given for this
+// look, and its latest answered questions about the project. An answer
+// outlives the look it arrived for, so the PM never asks it again.
+func pmToldText(snap core.Snapshot, p core.Project) string {
+	var b strings.Builder
+	if p.PMDirection != "" {
+		fmt.Fprintf(&b, "\nThe owner told you: %s\n", p.PMDirection)
+	}
+	var answered []core.Decision
+	for _, d := range snap.Decisions {
+		if d.ProjectID == p.ID && d.Kind == core.DecisionPMQuestion && d.Status == core.DecisionResolved && d.Answer != "" {
+			answered = append(answered, d)
+		}
+	}
+	if len(answered) == 0 {
+		return b.String()
+	}
+	slices.SortFunc(answered, func(x, y core.Decision) int { return y.CreatedAt.Compare(x.CreatedAt) })
+	b.WriteString("\nYour latest questions to the owner about this project, newest first, with their answers. Don't ask again what they have answered:\n")
+	for _, d := range answered[:min(len(answered), maxPMAnswers)] {
+		fmt.Fprintf(&b, "- You asked: %s\n  The owner answered: %s\n", text.Clip(strings.Join(strings.Fields(d.Context), " "), 600), text.Clip(d.Answer, 600))
+	}
+	return b.String()
+}
+
 // pmPrompt is everything the PM needs to order the list: the brief, every
 // unfinished task with its plan and what it waits for, and who set the order.
 func pmPrompt(snap core.Snapshot, p core.Project) string {
@@ -149,9 +178,7 @@ Decide the order the queued tasks start in, and what each unfinished task has to
 	case core.OrderedByOwner, core.OrderedByAssistant:
 		fmt.Fprintf(&b, "\nThe %s set the current order; keep it for the tasks that were there then, and only place tasks queued since.\n", p.OrderedBy)
 	}
-	if p.PMDirection != "" {
-		fmt.Fprintf(&b, "\nThe owner told you: %s\n", p.PMDirection)
-	}
+	b.WriteString(pmToldText(snap, p))
 	pmTasks(&b, snap, p)
 	if pmTriage(&b, snap, p) {
 		b.WriteString(`

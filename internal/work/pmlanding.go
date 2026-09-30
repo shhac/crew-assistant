@@ -208,9 +208,7 @@ If it lands, choose how. "squash" lands it as one commit worded from the request
 			fmt.Fprintf(&b, "  waits for: %s\n", waitsLine(snap.Tasks, other))
 		}
 	}
-	if p.PMDirection != "" {
-		fmt.Fprintf(&b, "\nThe owner told you: %s\n", p.PMDirection)
-	}
+	b.WriteString(pmToldText(snap, p))
 	b.WriteString(`
 Reply with only this JSON object:
 {"land": true or false, "how": "squash" or "fast-forward" when it lands, "reason": "one short line the owner reads on the task"}`)
