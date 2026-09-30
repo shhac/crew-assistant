@@ -90,6 +90,22 @@ func TestACheckerRaisesASandboxRefusalWithTheOwner(t *testing.T) {
 	}
 }
 
+// QA's check is judged with what the owner has said and the notes left on
+// the task, like every other role's turn: an answer to QA's own question
+// reaches it only this way.
+func TestQAsCheckCarriesTheOwnersDirectionAndNotes(t *testing.T) {
+	code := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit, Check: "make check"}}
+	task := reviewedTask()
+	task.Direction = []string{"Treat the refused socket binds as expected and give your verdict"}
+	task.Notes = []core.Note{{By: "owner", Kind: core.FromOwner, Text: "The overnight timeouts came from the laptop sleeping"}}
+	qa := checkerPrompt(code, task, task.Revisions[4], core.Role{Name: "QA", Kinds: []string{core.RoleQA}}, code.Playbook)
+	for _, want := range []string{"Treat the refused socket binds as expected and give your verdict", "their word stands over the rules below", "The overnight timeouts came from the laptop sleeping"} {
+		if !strings.Contains(qa, want) {
+			t.Fatalf("QA's prompt lacks %q: %s", want, qa)
+		}
+	}
+}
+
 // The implementer accounts for everything it was asked for before it hands
 // a draft on, so a gap shows in its own reply rather than a review.
 func TestTheImplementerAccountsForEveryFindingAndPlanItem(t *testing.T) {

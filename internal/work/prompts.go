@@ -32,13 +32,22 @@ func briefText(p core.Project, t core.Task) string {
 			fmt.Fprintf(&b, "- %s\n", s)
 		}
 	}
-	if len(t.Direction) > 0 {
-		b.WriteString("\nThe owner has also said:\n")
-		for _, d := range t.Direction {
-			fmt.Fprintf(&b, "- %s\n", d)
-		}
-	}
+	b.WriteString(ownerSaid(t))
 	b.WriteString(notesText(t))
+	return b.String()
+}
+
+// ownerSaid is the owner's direction on a task, including their answers to
+// the team's questions.
+func ownerSaid(t core.Task) string {
+	if len(t.Direction) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\nThe owner has also said:\n")
+	for _, d := range t.Direction {
+		fmt.Fprintf(&b, "- %s\n", d)
+	}
 	return b.String()
 }
 
@@ -355,6 +364,13 @@ func checkerPrompt(p core.Project, t core.Task, r core.Revision, checker core.Ro
 		fmt.Fprintf(&b, "This repository holds a proposed change for: %s\n\n", t.Objective)
 		if current, ok := t.CurrentDesignInput(); ok {
 			fmt.Fprintf(&b, "Its current design is design %d by %s; any earlier design is superseded and not the target.\n\n", current.N, current.Designer)
+		}
+		// QA's own questions are answered here, so it never asks them again.
+		if said := ownerSaid(t); said != "" {
+			b.WriteString(strings.TrimPrefix(said, "\n") + "Where the owner has said how to judge this check, their word stands over the rules below.\n\n")
+		}
+		if notes := notesText(t); notes != "" {
+			b.WriteString(strings.TrimPrefix(notes, "\n") + "\n")
 		}
 		fmt.Fprintf(&b, "Run exactly this from the repository root, once:\n\n    %s\n\n", playbook.Check)
 		b.WriteString(`Do not change, fix or commit anything; only run the check and read its output.
