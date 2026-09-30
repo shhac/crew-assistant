@@ -8,10 +8,86 @@ import {
   type Suggestion,
 } from "./SuggestIdentity";
 import { assistantHref, href, memberHref } from "./router";
-import { assistantSummary, memberProjects, memberSummary } from "./members";
+import {
+  assistantSummary,
+  holds,
+  kindWord,
+  memberKinds,
+  memberProjects,
+  memberSummary,
+} from "./members";
+import { engineLabel } from "./engines";
 import { Avatar } from "./Avatar";
 import { counted } from "./ui";
-import type { AssistantProfile, Member, State } from "./api";
+import type { AssistantProfile, Member, MemberKind, State } from "./api";
+
+type RoleShown = MemberKind | "all";
+
+const roleChoices: { id: RoleShown; label: string }[] = [
+  { id: "all", label: "All roles" },
+  ...memberKinds,
+];
+
+const memberSorts = [
+  { id: "name", label: "Name (A–Z)" },
+  { id: "role", label: "Role" },
+  { id: "engine", label: "Engine" },
+  { id: "newest", label: "Newest first" },
+] as const;
+type MemberSort = (typeof memberSorts)[number]["id"];
+
+const roleShownOf = (value: string): RoleShown =>
+  memberKinds.find((k) => k.id === value)?.id ?? "all";
+const memberSortOf = (value: string): MemberSort =>
+  memberSorts.find((s) => s.id === value)?.id ?? "name";
+
+const byName = (a: Member, b: Member) =>
+  a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+
+// A member with several kinds sorts with the earliest of them in team order.
+const roleRank = (m: Member) =>
+  Math.min(
+    ...m.kinds.map((kind) => memberKinds.findIndex((k) => k.id === kind)),
+    memberKinds.length,
+  );
+
+const createdAt = (m: Member) => {
+  const time = Date.parse(m.created_at ?? "");
+  return Number.isNaN(time) ? -Infinity : time;
+};
+
+const memberOrders: Record<MemberSort, (a: Member, b: Member) => number> = {
+  name: byName,
+  role: (a, b) => roleRank(a) - roleRank(b) || byName(a, b),
+  engine: (a, b) =>
+    engineLabel(a.engine).localeCompare(engineLabel(b.engine)) || byName(a, b),
+  newest: (a, b) => createdAt(b) - createdAt(a) || byName(a, b),
+};
+
+function storedChoice(key: string) {
+  try {
+    return localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** A choice kept in this browser, so the page opens the way it was left. */
+function useRemembered<T extends string>(
+  key: string,
+  read: (value: string) => T,
+) {
+  const [value, setValue] = useState(() => read(storedChoice(key)));
+  const remember = (next: T) => {
+    setValue(next);
+    try {
+      localStorage.setItem(key, next);
+    } catch {
+      // Storage can be unavailable; the choice still holds until a reload.
+    }
+  };
+  return [value, remember] as const;
+}
 
 export function TeamPage({
   state,
@@ -40,8 +116,19 @@ export function TeamPage({
       onUse={setSuggestion}
     />
   );
+  const [shown, setShown] = useRemembered(
+    "crew-assistant.team-role",
+    roleShownOf,
+  );
+  const [sort, setSort] = useRemembered(
+    "crew-assistant.team-sort",
+    memberSortOf,
+  );
   const seated = state.assistant.id;
   const noMembers = !state.members.length;
+  const members = state.members
+    .filter((m) => shown === "all" || holds(m, shown))
+    .sort(memberOrders[sort]);
   const newAssistant = (
     <button className="btn btn-primary" onClick={() => add("assistant")}>
       New assistant
@@ -132,11 +219,51 @@ export function TeamPage({
           </div>
         )}
         {!noMembers && (
+          <div className="member-controls">
+            <div
+              className="segmented role-filter"
+              role="group"
+              aria-label="Show"
+            >
+              {roleChoices.map((choice) => (
+                <button
+                  key={choice.id}
+                  type="button"
+                  aria-pressed={shown === choice.id}
+                  onClick={() => setShown(choice.id)}
+                >
+                  {choice.label}
+                </button>
+              ))}
+            </div>
+            <label className="member-sort" htmlFor="team-sort">
+              Sort by
+              <select
+                id="team-sort"
+                className="field"
+                value={sort}
+                onChange={(e) => setSort(memberSortOf(e.target.value))}
+              >
+                {memberSorts.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+        {!noMembers && members.length > 0 && (
           <ul className="member-list">
-            {state.members.map((m) => (
+            {members.map((m) => (
               <MemberCard key={m.id} member={m} state={state} />
             ))}
           </ul>
+        )}
+        {!noMembers && !members.length && (
+          <p className="muted small">
+            No member holds the {kindWord(shown)} role yet.
+          </p>
         )}
       </section>
     </div>
