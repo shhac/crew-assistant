@@ -946,6 +946,38 @@ describe("a request", () => {
       [...panel.querySelectorAll("ul.said li")].map((li) => li.textContent),
     ).toEqual(["Keep it short"]);
   });
+  it("moves a request waiting on the owner onto a team changed since it started", async () => {
+    const quinn = { ...codeTeam(), check_loopback: true };
+    quinn.roles = quinn.roles.map((r) =>
+      r.name === "QA" ? { ...r, name: "Quinn", engine: "claude" } : r,
+    );
+    show(
+      project({ playbook: quinn }),
+      { tasks: [started({ status: "waiting", stage: "qa" })] },
+      { request: "t1" },
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use the project's current team" }),
+    );
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      { path: "/api/projects/p1/tasks/t1/team", method: "POST", body: {} },
+    ]);
+    cleanup();
+    // Not while it is being worked on, nor once its team is the project's.
+    for (const t of [
+      started({ status: "writing", stage: "implementing" }),
+      started({ status: "waiting", stage: "qa", playbook: quinn }),
+    ]) {
+      show(project({ playbook: quinn }), { tasks: [t] }, { request: "t1" });
+      expect(
+        screen.queryByRole("button", {
+          name: "Use the project's current team",
+        }),
+      ).toBeNull();
+      cleanup();
+    }
+  });
   it("stops a request that isn't finished, and offers nothing for one that is", async () => {
     show(
       project(),
@@ -1906,7 +1938,9 @@ describe("the project's tabs", () => {
       target: { value: "make check" },
     });
     fireEvent.click(
-      within(team).getByLabelText("Let the check use this machine's own network"),
+      within(team).getByLabelText(
+        "Let the check use this machine's own network",
+      ),
     );
     // Where the work happens is set on the Config tab.
     for (const moved of [

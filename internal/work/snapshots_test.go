@@ -4,6 +4,7 @@ package work
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -695,6 +696,39 @@ func TestQAsCheckCanUseThisMachinesNetwork(t *testing.T) {
 	off, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", QA: quinn.ID, CheckLoopback: "no"})
 	if err != nil || off.Playbook.CheckLoopback || !off.Playbook.CheckInCopy {
 		t.Fatalf("turning it off: %+v, %v", off.Playbook, err)
+	}
+}
+
+// A task keeps the team it started with, so the owner moves one waiting on
+// them onto the project's team as it is now, such as a QA whose engine can
+// run the check; never one queued or being worked on.
+func TestATaskWaitingForTheOwnerCanTakeOnTheProjectsTeam(t *testing.T) {
+	a, _, p, task := codeTask(t, pass, ask)
+	ctx := context.Background()
+	if _, err := a.UseProjectTeam(ctx, p.ID, task.ID); !errors.Is(err, core.ErrConflict) {
+		t.Fatalf("a queued task took on the team: %v", err)
+	}
+	task = settleCode(t, a, task.ID)
+	if task.Status != core.TaskWaiting {
+		t.Fatalf("task %s", task.Status)
+	}
+	quinn, err := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Quinn", Kinds: []string{core.RoleQA}, Engine: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", QA: quinn.ID, CheckLoopback: "yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.UseProjectTeam(ctx, "elsewhere", task.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("another project's task: %v", err)
+	}
+	moved, err := a.UseProjectTeam(ctx, p.ID, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qa := slices.IndexFunc(moved.Playbook.Roles, func(r core.Role) bool { return r.Holds(core.RoleQA) })
+	if !moved.Playbook.CheckLoopback || qa < 0 || moved.Playbook.Roles[qa].Member != quinn.ID || moved.Roles[qa].Member != quinn.ID {
+		t.Fatalf("the task's team: %+v", moved.Playbook)
 	}
 }
 

@@ -115,6 +115,10 @@ func registerProjectTasks(mux *http.ServeMux, a *app.App) {
 		v, err := a.Core.TurnSteps(r.Context(), r.PathValue("id"), r.PathValue("task"), r.PathValue("seat"))
 		reply(w, 200, map[string]any{"steps": v}, err)
 	})
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/team", func(w http.ResponseWriter, r *http.Request) {
+		v, err := a.Work.UseProjectTeam(r.Context(), r.PathValue("id"), r.PathValue("task"))
+		reply(w, 200, v, err)
+	})
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/stop", func(w http.ResponseWriter, r *http.Request) {
 		v, err := a.Work.StopTask(r.Context(), r.PathValue("id"), r.PathValue("task"))
 		reply(w, 200, v, err)

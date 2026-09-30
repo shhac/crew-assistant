@@ -30,6 +30,7 @@ import {
   criteriaLines,
   landTask,
   stopTask,
+  adoptProjectTeam,
   type Project,
   type State,
   type Task,
@@ -250,7 +251,15 @@ function RequestActions({
 }) {
   const stopping = useAction();
   const landing = useAction();
+  const moving = useAction();
   const land = project.playbook?.land;
+  // A request keeps the team it started with; one waiting on the owner can
+  // take on the team as it is now.
+  const teamChanged =
+    task.status === "waiting" &&
+    !!project.playbook &&
+    !!task.playbook &&
+    JSON.stringify(project.playbook) !== JSON.stringify(task.playbook);
   const landsLater =
     (task.status === "delivered" &&
       isCode(project.playbook) &&
@@ -274,6 +283,20 @@ function RequestActions({
           Land on {land?.target}
         </button>
       )}
+      {teamChanged && (
+        <button
+          className="btn"
+          disabled={moving.busy}
+          onClick={() =>
+            void moving.run(async () => {
+              await adoptProjectTeam(task.project_id, task.id);
+              await refresh();
+            })
+          }
+        >
+          Use the project's current team
+        </button>
+      )}
       {!finished(task) && (
         <button
           className="btn btn-quiet btn-danger"
@@ -288,7 +311,7 @@ function RequestActions({
           Stop request
         </button>
       )}
-      <ErrorNotice error={stopping.error || landing.error} />
+      <ErrorNotice error={stopping.error || landing.error || moving.error} />
     </div>
   );
 }

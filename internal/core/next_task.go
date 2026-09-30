@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -40,11 +41,7 @@ func (s *Service) NextTask(ctx context.Context) (Task, bool, error) {
 // copies the roles with their members' learnings and starts round 1, with
 // the researcher if the team has one and the task has no plan yet.
 func startTask(v *Snapshot, p *Project, t *Task, now time.Time) {
-	pinned := *p.Playbook
-	pinned.Roles = append([]Role(nil), p.Playbook.Roles...)
-	pinned.Prepare = append([]string(nil), p.Playbook.Prepare...)
-	t.Playbook = &pinned
-	t.Roles = withLearnings(v, p.Playbook.Roles)
+	pinTeam(v, p, t)
 	t.MaxRounds = p.Playbook.MaxRounds
 	t.Round = 1
 	t.Status = TaskWriting
@@ -100,4 +97,35 @@ func (t Task) started() time.Time {
 		return t.StartedAt
 	}
 	return t.CreatedAt
+}
+
+// pinTeam gives a task the team its project has now, each seat with its
+// member's learnings.
+func pinTeam(v *Snapshot, p *Project, t *Task) {
+	pinned := *p.Playbook
+	pinned.Roles = append([]Role(nil), p.Playbook.Roles...)
+	pinned.Prepare = append([]string(nil), p.Playbook.Prepare...)
+	t.Playbook = &pinned
+	t.Roles = withLearnings(v, p.Playbook.Roles)
+}
+
+// UseProjectTeam moves a task that waits for the owner onto the team its
+// project has now. A task keeps the team it started with, so a change to the
+// team, such as a QA that can run the check, reaches it only this way. No
+// one may be working on it, and the kind of work stays the same. Checks the
+// new seats haven't made are made afresh.
+func (s *Service) UseProjectTeam(ctx context.Context, projectID, taskID string) (Task, error) {
+	return s.updateTask(ctx, taskID, func(v *Snapshot, t *Task, p *Project) (string, error) {
+		switch {
+		case t.ProjectID != projectID:
+			return "", ErrNotFound
+		case t.Status != TaskWaiting || len(t.Claims) > 0:
+			return "", fmt.Errorf("a request takes on the project's team only while it waits for you and no one is working on it: %w", ErrConflict)
+		case p.Playbook == nil || t.Playbook == nil || p.Playbook.Medium != t.Playbook.Medium:
+			return "", fmt.Errorf("the project's team does a different kind of work: %w", ErrConflict)
+		}
+		pinTeam(v, p, t)
+		t.MaxRounds = max(t.MaxRounds, p.Playbook.MaxRounds)
+		return t.Objective + " goes on with the project's current team: " + playbookSummary(*p.Playbook), nil
+	})
 }

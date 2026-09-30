@@ -1188,6 +1188,13 @@ export function stopTask(projectID: string, taskID: string) {
     { method: "POST", body: "{}" },
   );
 }
+/** Moves a request waiting on the owner onto the project's current team. */
+export function adoptProjectTeam(projectID: string, taskID: string) {
+  return api<Task>(
+    `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/team`,
+    { method: "POST", body: "{}" },
+  );
+}
 export async function revisionFiles(
   projectID: string,
   taskID: string,

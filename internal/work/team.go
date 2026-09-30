@@ -414,3 +414,13 @@ func (lp *Loop) SetStageLimits(ctx context.Context, projectID string, limits map
 		return nil
 	})
 }
+
+// UseProjectTeam moves a task that waits for the owner onto the team its
+// project has now; see core.Service.UseProjectTeam.
+func (lp *Loop) UseProjectTeam(ctx context.Context, projectID, taskID string) (core.Task, error) {
+	t, err := lp.Core.UseProjectTeam(ctx, projectID, taskID)
+	if err == nil {
+		lp.Nudge()
+	}
+	return t, err
+}
