@@ -19,7 +19,15 @@ import {
 } from "./api";
 import { fullDateLabel } from "./ui";
 import { reply, type Reply } from "./testFetch";
-beforeEach(() => vi.useFakeTimers());
+beforeEach(() => {
+  vi.useFakeTimers();
+  HTMLDialogElement.prototype.showModal = function () {
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.close = function () {
+    this.removeAttribute("open");
+  };
+});
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -206,8 +214,14 @@ describe("conversation", () => {
     const server = backend();
     render(panel());
     const input = screen.getByRole("textbox");
-    fireEvent.change(input, { target: { value: "A draft" } });
+    fireEvent.change(input, {
+      target: { value: "A draft\nwith another line" },
+    });
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+    expect(input).toHaveProperty("value", "A draft\nwith another line");
+    expect(
+      screen.getByRole("button", { name: "Send" }).hasAttribute("disabled"),
+    ).toBe(false);
     fireEvent.keyDown(input, { key: "Enter", isComposing: true });
     fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
     expect(server.posts()).toHaveLength(0);
@@ -1949,5 +1963,137 @@ describe("model session", () => {
     fireEvent.click(screen.getByRole("button", { name: "Past conversations" }));
     await tick(0);
     expect(line()).toBeNull();
+  });
+});
+
+describe("larger message editor", () => {
+  const open = () => {
+    fireEvent.click(
+      screen.getByRole("button", { name: "Write in a larger space" }),
+    );
+    return screen.getByRole("dialog", { name: "Write a message" });
+  };
+  it("keeps multiline text, attachments and focus across both sizes and polls", async () => {
+    const server = backend();
+    const view = render(panel());
+    const compact = screen.getByLabelText("Message Iris");
+    const text = "line one\nline two";
+    expect(
+      fireEvent.paste(compact, {
+        clipboardData: {
+          files: [],
+          types: ["text/plain"],
+          getData: () => text,
+        },
+      }),
+    ).toBe(true);
+    fireEvent.change(compact, { target: { value: text } });
+    fireEvent.drop(compact.closest("form")!, {
+      dataTransfer: {
+        files: [new File(["notes"], "notes.txt", { type: "text/plain" })],
+        types: ["Files"],
+      },
+    });
+    await tick(0);
+    const dialog = open();
+    const field = within(dialog).getByLabelText("Message Iris");
+    expect(compact.isConnected).toBe(false);
+    expect(document.activeElement).toBe(field);
+    expect(field).toHaveProperty("value", text);
+    expect(within(dialog).getByText("notes.txt")).toBeTruthy();
+    fireEvent.keyDown(field, { key: "Enter", shiftKey: true });
+    fireEvent.change(field, { target: { value: text + "\nthird line" } });
+    expect(server.posts()).toHaveLength(0);
+    expect(
+      within(dialog)
+        .getByRole("button", { name: "Send" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+    view.rerender(panel({ ...initial(), paused: true }));
+    await tick(6000);
+    expect(screen.getByRole("dialog", { name: "Write a message" })).toBe(
+      dialog,
+    );
+    expect(document.activeElement).toBe(field);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+    const restored = screen.getByLabelText("Message Iris");
+    expect(document.activeElement).toBe(restored);
+    expect(restored).toHaveProperty("value", text + "\nthird line");
+    expect(screen.getByText("notes.txt")).toBeTruthy();
+    open();
+    fireEvent.keyDown(screen.getByLabelText("Message Iris"), { key: "Enter" });
+    fireEvent.keyDown(screen.getByLabelText("Message Iris"), { key: "Enter" });
+    await tick(0);
+    expect(server.posts()).toHaveLength(1);
+    expect(JSON.parse(server.posts()[0][1]!.body as string).message).toContain(
+      text + "\nthird line",
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "Write a message" }),
+    ).toBeNull();
+    expect(screen.getByLabelText("Message Iris")).toHaveProperty("value", "");
+    expect(document.activeElement).toBe(screen.getByLabelText("Message Iris"));
+  });
+  it("keeps refused sends and their errors inside the editor", async () => {
+    const server = backend();
+    render(panel());
+    const field = screen.getByLabelText("Message Iris");
+    fireEvent.change(field, { target: { value: "/new" } });
+    fireEvent.drop(field.closest("form")!, {
+      dataTransfer: {
+        files: [new File(["notes"], "notes.txt", { type: "text/plain" })],
+        types: ["Files"],
+      },
+    });
+    await tick(0);
+    const dialog = open();
+    fireEvent.keyDown(within(dialog).getByLabelText("Message Iris"), {
+      key: "Enter",
+    });
+    expect(within(dialog).getByRole("alert").textContent).toContain(
+      "Send /new on its own",
+    );
+    expect(server.posts()).toHaveLength(0);
+    fireEvent.change(within(dialog).getByLabelText("Message Iris"), {
+      target: { value: "界".repeat(10000) },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
+    expect(within(dialog).getByRole("alert").textContent).toContain(
+      "the limit is",
+    );
+    expect(server.posts()).toHaveLength(0);
+    fireEvent.keyDown(within(dialog).getByRole("button", { name: "Done" }), {
+      key: "Escape",
+    });
+    expect(
+      screen.queryByRole("dialog", { name: "Write a message" }),
+    ).toBeNull();
+    expect(screen.getByLabelText("Message Iris")).toHaveProperty(
+      "value",
+      "界".repeat(10000),
+    );
+    expect(screen.getByText("notes.txt")).toBeTruthy();
+  });
+  it("takes the same suggestion with Tab in the large editor without sending", async () => {
+    const state = initial();
+    state.messages = [
+      {
+        id: "reply-large",
+        role: "assistant",
+        content: "Ready",
+        created_at: "2026-09-16T12:00:00Z",
+      },
+    ];
+    const server = backend([], (after) =>
+      reply({ after, suggestion: "Write the next chapter" }),
+    );
+    render(panel(state));
+    await tick(SUGGESTION_DELAY);
+    const dialog = open();
+    const field = within(dialog).getByLabelText("Message Iris");
+    expect(field.getAttribute("placeholder")).toBe("Write the next chapter");
+    fireEvent.keyDown(field, { key: "Tab" });
+    expect(field).toHaveProperty("value", "Write the next chapter");
+    expect(server.posts()).toHaveLength(0);
   });
 });

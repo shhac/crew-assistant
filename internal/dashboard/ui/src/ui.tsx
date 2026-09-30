@@ -30,6 +30,7 @@ const icons: Record<string, string> = {
   Chevron: "M9 5l7 7-7 7",
   Expand:
     "M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5M3 3l6 6M21 3l-6 6M3 21l6-6M21 21l-6-6",
+  WriteLarger: "M4 4h6M4 4v6M20 20h-6M20 20v-6M4 20l6-6M20 4l-6 6",
   Shrink: "M3 8h5V3M21 8h-5V3M8 21v-5H3M16 21v-5h5",
   Alert: "M12 3l9 17H3zM12 9v5M12 17h.01",
   Clock: "M12 3a9 9 0 100 18 9 9 0 000-18zM12 7v5l3 2",

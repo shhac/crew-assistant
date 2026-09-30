@@ -13,11 +13,10 @@ export default defineConfig({
   server: { proxy: { "/api": "http://127.0.0.1:8340" } },
   // jsdom rendering on a busy machine can outlast the default five seconds;
   // a slow run is not a failing one.
-  // Stylesheets are left out of tests, all but the one a test reads for the
-  // request view's rules.
+  // Stylesheets are left out of tests, except those read for layout contract tests.
   test: {
     testTimeout: 15000,
     setupFiles: ["./src/testSetup.ts"],
-    css: { include: [/styles\/request\.css/] },
+    css: { include: [/styles\/(request|chat)\.css/] },
   },
 });

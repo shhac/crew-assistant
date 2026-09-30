@@ -189,6 +189,11 @@ describe("the shell", () => {
       const field = screen.getByLabelText("Message Iris");
       field.focus();
       fireEvent.change(field, { target: { value: "Also mention pric" } });
+      fireEvent.click(
+        screen.getByRole("button", { name: "Write in a larger space" }),
+      );
+      const largeField = screen.getByLabelText("Message Iris");
+      expect(document.activeElement).toBe(largeField);
       const fetched = calls.filter((c) => c.path === "/api/state").length;
       state = { ...state, tasks: [{ ...state.tasks[0], detail: "Writing" }] };
       vi.advanceTimersByTime(5000);
@@ -196,15 +201,36 @@ describe("the shell", () => {
       expect(
         calls.filter((c) => c.path === "/api/state").length,
       ).toBeGreaterThan(fetched);
-      expect(document.activeElement).toBe(field);
+      expect(document.activeElement).toBe(largeField);
+      const done = screen.getByRole("button", { name: "Done" });
+      done.focus();
+      fireEvent.keyDown(done, { key: "Escape" });
+      expect(panel.isConnected).toBe(true);
+      const restored = screen.getByLabelText("Message Iris");
+      expect(restored).toHaveProperty("value", "Also mention pric");
+      expect(document.activeElement).toBe(restored);
       // Keys meant for the draft never reach the request.
-      fireEvent.keyDown(field, { key: " " });
-      fireEvent.keyDown(field, { key: "Escape" });
-      fireEvent.change(field, { target: { value: "Also mention pricing" } });
-      expect(document.activeElement).toBe(field);
-      expect(field).toHaveProperty("value", "Also mention pricing");
+      fireEvent.keyDown(restored, { key: " " });
+      fireEvent.keyDown(restored, { key: "Escape" });
+      fireEvent.change(restored, { target: { value: "Also mention pricing" } });
+      expect(document.activeElement).toBe(restored);
+      expect(restored).toHaveProperty("value", "Also mention pricing");
       expect(panel.isConnected).toBe(true);
       expect(window.location.hash).toBe("#/projects/p1/requests/t1");
+      fireEvent.click(
+        within(panel).getByRole("button", { name: /^Close$/ }),
+      );
+      await vi.waitFor(() => expect(panel.isConnected).toBe(false));
+      fireEvent.click(screen.getByText("Draft the note"));
+      await vi.waitFor(() =>
+        expect(
+          screen.getByRole("complementary", { name: "Draft the note" }),
+        ).toBeTruthy(),
+      );
+      expect(screen.getByLabelText("Message Iris")).toHaveProperty(
+        "value",
+        "Also mention pricing",
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -478,6 +504,27 @@ describe("the shell", () => {
     expect(screen.getByRole("dialog", { name: "Chat" })).toBe(drawer);
     expect(document.activeElement).toBe(field);
     expect(field).toHaveProperty("value", "Also mention pric");
+    fireEvent.click(
+      within(drawer).getByRole("button", { name: "Write in a larger space" }),
+    );
+    const editor = screen.getByRole("dialog", { name: "Write a message" });
+    const done = within(editor).getByRole("button", { name: "Done" });
+    done.focus();
+    expect(fireEvent.keyDown(done, { key: "Tab" })).toBe(true);
+    fireEvent.keyDown(done, { key: "j", metaKey: true });
+    expect(editor.isConnected).toBe(true);
+    fireEvent.keyDown(done, { key: "Escape" });
+    expect(
+      screen.queryByRole("dialog", { name: "Write a message" }),
+    ).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Chat" })).toBe(drawer);
+    expect(within(drawer).getByLabelText("Message Iris")).toHaveProperty(
+      "value",
+      "Also mention pric",
+    );
+    expect(document.activeElement).toBe(
+      within(drawer).getByLabelText("Message Iris"),
+    );
     // Away from the draft, Escape still closes the drawer, and only the drawer.
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Chat" })).toBeNull();

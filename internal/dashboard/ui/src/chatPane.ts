@@ -38,7 +38,12 @@ function useFocusTrap(
     if (!active) return;
     const prior = focusedElement();
     const keydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !typingIn(event)) {
+      if (inModal(event)) return;
+      if (
+        event.key === "Escape" &&
+        !event.defaultPrevented &&
+        !typingIn(event)
+      ) {
         event.preventDefault();
         escape.current();
       }
@@ -96,6 +101,7 @@ export function useChatPane() {
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (
+        !inModal(event) &&
         (event.metaKey || event.ctrlKey) &&
         event.key.toLowerCase() === "j" &&
         !typingIn(event)
@@ -147,4 +153,10 @@ export function useChatPane() {
       );
     },
   };
+}
+
+function inModal(event: KeyboardEvent) {
+  return (
+    event.target instanceof Element && !!event.target.closest("dialog[open]")
+  );
 }

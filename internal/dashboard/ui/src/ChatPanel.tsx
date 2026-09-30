@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import {
   api,
   APIError,
@@ -16,7 +22,6 @@ import {
   composeMessage,
   messageLimitError,
   readAsset,
-  sizeLabel,
   useFileDrop,
   type ComposerAsset,
 } from "./composerAssets";
@@ -32,6 +37,7 @@ import {
   type VisibleTurn,
 } from "./chatTurns";
 import { SessionLine } from "./ChatSessionLine";
+import { Composer } from "./Composer";
 import { TurnStatus } from "./TurnStatus";
 
 // How long the conversation must stay settled before a next message is
@@ -55,6 +61,12 @@ export function ChatPanel({
   /** Where the owner is in the dashboard; a change discards any suggestion. */
   view?: string;
 }) {
+  const [large, setLarge] = useState(false);
+  const priorLarge = useRef(false);
+  useEffect(() => {
+    if (priorLarge.current && !large) focusDraft();
+    priorLarge.current = large;
+  }, [large]);
   const [message, setMessage] = useState("");
   const draftRef = useRef("");
   const [suggestion, setSuggestion] = useState<{
@@ -414,6 +426,7 @@ export function ChatPanel({
       attached.length ? { text: submitted, assets: attached } : undefined,
     );
     setDraft("");
+    setLarge(false);
     assetsRef.current = [];
     setAssets([]);
     setAssetErrors([]);
@@ -458,6 +471,22 @@ export function ChatPanel({
       });
     }
   }
+  const composerProps = {
+    value: message,
+    onChange: setDraft,
+    assets,
+    onRemove: (id: string) =>
+      setAssets((current) => current.filter((a) => a.id !== id)),
+    reading,
+    suggestion: shownSuggestion,
+    onSubmit: send,
+    name,
+    showHint: messages.length === 0,
+    onExpand: () => setLarge(true),
+    dragging,
+    dropHandlers,
+    onPaste,
+  };
   return (
     <div className="chat">
       <header className="chat-head">
@@ -679,104 +708,26 @@ export function ChatPanel({
             }}
             onChanged={() => refreshRef.current()}
           />
-          {assetErrors.length > 0 && (
+          {!large && assetErrors.length > 0 && (
             <div className="error" role="alert">
               {assetErrors.map((text, i) => (
                 <p key={`${i}:${text}`}>{text}</p>
               ))}
             </div>
           )}
-          <form
-            className={`composer${dragging ? " dragging" : ""}`}
-            onSubmit={send}
-            {...dropHandlers}
-          >
-            <label className="sr-only" htmlFor="chat-message">
-              Message {name}
-            </label>
-            {(assets.length > 0 || reading > 0) && (
-              <ul className="attachments" aria-label="Attachments">
-                {assets.map((asset) => (
-                  <li key={asset.id}>
-                    <span className="attachment-name">{asset.name}</span>
-                    <span className="muted small">{sizeLabel(asset.size)}</span>
-                    <button
-                      type="button"
-                      className="btn btn-quiet btn-icon btn-sm"
-                      aria-label={`Remove attachment ${asset.name}`}
-                      onClick={() =>
-                        setAssets((current) =>
-                          current.filter((a) => a.id !== asset.id),
-                        )
-                      }
-                    >
-                      <Icon name="Close" size={12} />
-                    </button>
-                  </li>
-                ))}
-                {reading > 0 && <li className="muted small">Reading files…</li>}
-              </ul>
-            )}
-            <div className="composer-row">
-              <textarea
-                id="chat-message"
-                value={message}
-                onChange={(e) => setDraft(e.target.value)}
-                onPaste={onPaste}
-                // A suggestion is shown, never committed: the draft stays empty
-                // and Send stays disabled until the owner takes it.
-                placeholder={shownSuggestion || `Message ${name}`}
-                className={shownSuggestion ? "has-suggestion" : undefined}
-                rows={2}
-                maxLength={20000}
-                onKeyDown={(e) => {
-                  if (
-                    e.key === "Tab" &&
-                    shownSuggestion &&
-                    !e.shiftKey &&
-                    !e.altKey &&
-                    !e.ctrlKey &&
-                    !e.metaKey
-                  ) {
-                    // Accepting makes it an ordinary draft to edit; it is not sent.
-                    e.preventDefault();
-                    setDraft(shownSuggestion);
-                    return;
-                  }
-                  if (
-                    e.key === "Enter" &&
-                    !e.shiftKey &&
-                    !e.nativeEvent.isComposing &&
-                    e.keyCode !== 229
-                  ) {
-                    e.preventDefault();
-                    e.currentTarget.form?.requestSubmit();
-                  }
-                }}
-              />
-              <button
-                className="btn btn-primary btn-icon"
-                type="submit"
-                disabled={(!message.trim() && !assets.length) || reading > 0}
-                aria-label="Send"
-              >
-                <Icon name="Send" size={15} />
-              </button>
-            </div>
-            <p className="composer-hint">
-              {shownSuggestion ? (
-                <>
-                  <span className="kbd">Tab</span> takes the suggestion
-                </>
-              ) : messages.length > 0 ? null : (
-                <>
-                  <span className="kbd">Enter</span> sends ·{" "}
-                  <span className="kbd">Shift Enter</span> new line · drop text
-                  files to attach
-                </>
+          {!large && <Composer {...composerProps} />}
+          {large && (
+            <LargeEditor onDone={() => setLarge(false)}>
+              {assetErrors.length > 0 && (
+                <div className="error" role="alert">
+                  {assetErrors.map((text, i) => (
+                    <p key={i}>{text}</p>
+                  ))}
+                </div>
               )}
-            </p>
-          </form>
+              <Composer {...composerProps} large />
+            </LargeEditor>
+          )}
           {suggestionsOff && (
             <p className="muted small" role="status">
               {suggestionsOff}
@@ -785,5 +736,59 @@ export function ChatPanel({
         </div>
       )}
     </div>
+  );
+}
+
+function focusDraft() {
+  const field = document.getElementById(
+    "chat-message",
+  ) as HTMLTextAreaElement | null;
+  field?.focus();
+  field?.setSelectionRange(field.value.length, field.value.length);
+}
+
+function LargeEditor({
+  onDone,
+  children,
+}: {
+  onDone: () => void;
+  children: ReactNode;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current!;
+    element.showModal();
+    focusDraft();
+    return () => element.close();
+  }, []);
+  return (
+    <dialog
+      ref={dialog}
+      className="dialog composer-dialog"
+      aria-labelledby="composer-title"
+      onCancel={(event) => {
+        event.preventDefault();
+        onDone();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onDone();
+        }
+      }}
+    >
+      <div className="dialog-head">
+        <h2 id="composer-title">Write a message</h2>
+        <button
+          type="button"
+          className="btn btn-quiet"
+          aria-label="Done"
+          onClick={onDone}
+        >
+          Done
+        </button>
+      </div>
+      {children}
+    </dialog>
   );
 }

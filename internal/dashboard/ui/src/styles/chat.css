@@ -398,7 +398,11 @@
 
 .composer textarea {
   flex: 1;
-  min-height: 0;
+  field-sizing: content;
+  min-width: 0;
+  min-height: calc(2lh + 8px);
+  max-height: min(calc(10lh + 8px), 40vh);
+  overflow-y: auto;
   padding: 4px 0;
   border: 0;
   outline: 0;
@@ -448,4 +452,31 @@
   .chat-expand {
     display: none;
   }
+}
+
+.composer-dialog {
+  width: min(820px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+}
+.composer-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.composer-large {
+  min-height: 0;
+  overflow: auto;
+}
+.composer-large .composer-row {
+  flex-wrap: wrap;
+}
+.composer-large textarea {
+  flex: 1 0 100%;
+  field-sizing: fixed;
+  min-height: min(40vh, 240px);
+  height: 55dvh;
+  max-height: none;
+}
+.composer-large .composer-row > button {
+  margin-left: auto;
 }
