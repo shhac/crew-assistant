@@ -107,5 +107,6 @@ describe("the bounded box's style", () => {
     expect(requestCSS).toMatch(
       /\.findings,[^{]*\.plan-list,[^{]*\{[^}]*overflow-wrap: anywhere;/,
     );
+    expect(rule(requestCSS, ".relation-add .field")).toContain("min-width: 0;");
   });
 });

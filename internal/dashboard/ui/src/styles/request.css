@@ -452,9 +452,13 @@ div.bounded {
   gap: 8px;
 }
 
+/* A select is as wide as its longest option, a request's whole title, unless
+   it may shrink. */
 .relation-add .field {
   flex: 1 1 160px;
   width: auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .relation-add .relation-kind {
