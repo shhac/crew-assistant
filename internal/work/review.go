@@ -147,6 +147,9 @@ func (lp *Loop) askForJSON(ctx context.Context, spec roles.Spec, parse func(repl
 			return reply, learned, parseErr, err
 		}
 		reply, learned = splitBlock(result.Text, "learned")
+		if learned == "" {
+			learned = learnedField(reply)
+		}
 		if parseErr = parse(reply); parseErr == nil {
 			return reply, learned, nil, nil
 		}

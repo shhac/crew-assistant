@@ -99,13 +99,14 @@ func learnedGuide(r core.Role, afterJSON bool) string {
 	if r.Member == "" {
 		return ""
 	}
-	where := "you may end your reply with"
+	const entries = `[{"when": "the situation it applies to, in a few words", "learning": "what to do, and why"}]`
+	// Inside the object it survives an engine that keeps only the JSON of a
+	// reply, which dropped the block after it.
+	offer := "you may end your reply with:\n```learned\n" + entries + "\n```\n"
 	if afterJSON {
-		where = "you may add, after the JSON object,"
+		offer = "you may add it to the JSON object as:\n\"learned\": " + entries + "\n"
 	}
-	return "\n\nIf this turn taught you something you would do again in every project, " + where + ":\n```learned\n" +
-		`[{"when": "the situation it applies to, in a few words", "learning": "what to do, and why"}]` +
-		"\n```\nAt most two. Never put anything from this project in one: no names, paths, repositories, people, code or data; if an example helps, make one up. Leave out anything your learnings already cover. Most turns teach nothing new; then add nothing.\n"
+	return "\n\nIf this turn taught you something you would do again in every project, " + offer + "At most two. Never put anything from this project in one: no names, paths, repositories, people, code or data; if an example helps, make one up. Leave out anything your learnings already cover. Most turns teach nothing new; then add nothing.\n"
 }
 
 // recordLearned keeps what a member said it learned. A learning that breaks
@@ -125,6 +126,18 @@ func (lp *Loop) recordLearned(ctx context.Context, p core.Project, t core.Task, 
 	for _, l := range learned {
 		lp.Core.RecordLearning(ctx, r.Member, t.ID, core.LearningInput{When: l.When, Text: l.Learning, ProjectID: p.ID}, specific)
 	}
+}
+
+// learnedField is the learned list a JSON reply carries in its object, as a
+// block to parse.
+func learnedField(reply string) string {
+	var in struct {
+		Learned json.RawMessage `json:"learned"`
+	}
+	if decodeReply(reply, &in) != nil || len(in.Learned) == 0 || string(in.Learned) == "null" {
+		return ""
+	}
+	return string(in.Learned)
 }
 
 type learnedEntry struct {

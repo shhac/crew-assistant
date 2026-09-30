@@ -305,6 +305,25 @@ func TestAReplyCanHoldAWakeBlockAndALearnedBlockInEitherOrder(t *testing.T) {
 	}
 }
 
+// A reply that is only JSON keeps what it learned inside the object, which
+// an engine keeping just the JSON of a reply can't drop.
+func TestAJSONReplyCanHoldWhatItLearnedInItsObject(t *testing.T) {
+	reply := `{"outcome": "pass", "summary": "Fine.", "learned": [{"when": "a", "learning": "b"}]}`
+	if got := parseLearned(learnedField(reply)); len(got) != 1 || got[0].When != "a" {
+		t.Fatalf("learned in the object: %+v", got)
+	}
+	if _, err := parseVerdict(reply, false); err != nil {
+		t.Fatalf("the learned field broke the verdict: %v", err)
+	}
+	if learnedField(`{"outcome": "pass"}`) != "" || learnedField(`{"learned": null}`) != "" {
+		t.Fatal("a reply with nothing learned gave a block")
+	}
+	guide := learnedGuide(core.Role{Name: "Rune", Member: "m1", Kinds: []string{core.RoleReviewer}}, true)
+	if !strings.Contains(guide, `"learned": [`) || strings.Contains(guide, "```learned") {
+		t.Fatalf("a JSON role should be asked for the field: %q", guide)
+	}
+}
+
 func TestOnlyMembersAreAskedWhatTheyLearned(t *testing.T) {
 	if learnedGuide(core.Role{Name: "Writer", Kinds: []string{core.RoleImplementer}}, false) != "" {
 		t.Fatal("a template role has nowhere to keep a learning")
