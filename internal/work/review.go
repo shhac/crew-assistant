@@ -40,7 +40,7 @@ func (lp *Loop) check(ctx context.Context, p core.Project, t core.Task, m medium
 	if held, err := lp.holdForUsage(ctx, t, checker); held || err != nil {
 		return err
 	}
-	verdict, shots, err := lp.runChecker(ctx, p, t, r, checker, m, "")
+	verdict, shots, err := lp.runCheckerAwake(ctx, p, t, r, checker, m)
 	if err != nil {
 		return lp.roleFailed(ctx, t, checker.Name, err)
 	}
@@ -63,6 +63,32 @@ func (lp *Loop) check(ctx context.Context, p core.Project, t core.Task, m medium
 		return fmt.Sprintf("%s checked version %d of %s: %s", checker.Name, r.N, t.Objective, outcomeWords[verdict.Outcome]), nil
 	})
 	return err
+}
+
+// sleepAllowance is how long a check may sleep through before a failure it
+// found is put down to the sleep; a moment's sleep fires no timeouts.
+const sleepAllowance = time.Minute
+
+// runCheckerAwake runs a check once more when the machine slept through it
+// and it failed: a test's timeout keeps counting while a laptop's lid is
+// shut, so the failure may be the sleep's. A pass stands, since a sleep
+// fails checks and never passes them, as does a second run that slept too.
+func (lp *Loop) runCheckerAwake(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium) (core.Verdict, core.Screenshots, error) {
+	start := time.Now()
+	verdict, shots, err := lp.runChecker(ctx, p, t, r, checker, m, "")
+	if err != nil || verdict.Outcome == core.VerdictPass || lp.sleptSince(start) < sleepAllowance {
+		return verdict, shots, err
+	}
+	return lp.runChecker(ctx, p, t, r, checker, m, "")
+}
+
+// sleptSince is how long the machine slept since start: the wall clock
+// counts a sleep and the monotonic clock doesn't, on macOS and Linux alike.
+func (lp *Loop) sleptSince(start time.Time) time.Duration {
+	if lp.slept != nil {
+		return lp.slept(start)
+	}
+	return time.Now().Round(0).Sub(start.Round(0)) - time.Since(start)
 }
 
 // runChecker gives a fresh checking session the revision to judge, in a copy

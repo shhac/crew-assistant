@@ -80,6 +80,8 @@ type Loop struct {
 	// checked, when set, is told a checker's turn is over, before its
 	// verdict is recorded. Set in tests.
 	checked func(taskID, checker string)
+	// slept replaces how long the machine slept since a time. Set in tests.
+	slept func(start time.Time) time.Duration
 }
 
 func New(s *core.Service, cfg func() config.Config, demo bool) *Loop {
