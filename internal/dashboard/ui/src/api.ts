@@ -427,6 +427,9 @@ export interface Plan {
   summary: string;
   exists?: string[];
   changes?: string[];
+  /** What the record must say if a step stops part-way. */
+  failure_paths?: string[];
+  tests?: string[];
   out_of_scope?: string[];
   questions?: string[];
   /** The seat that researched it. */

@@ -887,6 +887,8 @@ describe("a request", () => {
               summary: "Wrap the lookup in a cache.",
               exists: ["A lookup", "A store"],
               changes: ["A cache"],
+              failure_paths: ["A stop mid-fill leaves no entry"],
+              tests: ["A second lookup is served from the cache"],
               out_of_scope: ["Eviction"],
               role: "Ada",
               at: "2026-09-21T10:00:00Z",
@@ -904,6 +906,10 @@ describe("a request", () => {
     );
     expect(within(plan).getByText("Out of scope")).toBeTruthy();
     expect(within(plan).getByText("Eviction")).toBeTruthy();
+    expect(within(plan).getByText("If a step stops part-way")).toBeTruthy();
+    expect(
+      within(plan).getByText("A second lookup is served from the cache"),
+    ).toBeTruthy();
     expect(within(plan).queryByRole("button")).toBeNull();
   });
   it("shows no plan for a request that has none", () => {

@@ -113,19 +113,31 @@ func otherWork(snap core.Snapshot, t core.Task) []core.Task {
 	return out
 }
 
+// A plan item is kept whole up to maxPlanItem, since a clipped step loses
+// the detail the implementer and the reviewers work from. The lists
+// together stay within maxPlanLists, so a runaway reply can't bloat the
+// task's record and every prompt that carries the plan.
+const (
+	maxPlanItems = 20
+	maxPlanItem  = 3000
+	maxPlanLists = 24000
+)
+
 // parsePlan reads the researcher's JSON answer, tolerating a fenced block or
 // surrounding prose, and bounds what it keeps. Where the researcher can ask
 // for design input, a reply that asks needs no plan yet: the researcher plans
 // once the input is back.
 func parsePlan(reply string, designs bool) (core.Plan, []string, string, error) {
 	var in struct {
-		Summary    string   `json:"summary"`
-		Exists     []string `json:"exists"`
-		Changes    []string `json:"changes"`
-		OutOfScope []string `json:"out_of_scope"`
-		Questions  []string `json:"questions"`
-		DependsOn  []string `json:"depends_on"`
-		Design     string   `json:"design"`
+		Summary      string   `json:"summary"`
+		Exists       []string `json:"exists"`
+		Changes      []string `json:"changes"`
+		FailurePaths []string `json:"failure_paths"`
+		Tests        []string `json:"tests"`
+		OutOfScope   []string `json:"out_of_scope"`
+		Questions    []string `json:"questions"`
+		DependsOn    []string `json:"depends_on"`
+		Design       string   `json:"design"`
 	}
 	if err := decodeReply(reply, &in); err != nil {
 		return core.Plan{}, nil, "", errors.New("the plan was not valid JSON")
@@ -137,12 +149,27 @@ func parsePlan(reply string, designs bool) (core.Plan, []string, string, error) 
 	if strings.TrimSpace(in.Summary) == "" && design == "" {
 		return core.Plan{}, nil, "", errors.New("the plan had no summary")
 	}
-	list := func(items []string) []string { return listed(items, 20) }
-	return core.Plan{
-		Summary:    text.Clip(strings.TrimSpace(in.Summary), 3000),
-		Exists:     list(in.Exists),
-		Changes:    list(in.Changes),
-		OutOfScope: list(in.OutOfScope),
-		Questions:  list(in.Questions),
-	}, list(in.DependsOn), design, nil
+	// What will change is kept first, so a plan over budget loses its least
+	// needed lists instead.
+	left := maxPlanLists
+	keep := func(items []string) []string {
+		var out []string
+		for _, item := range items {
+			if item = strings.TrimSpace(item); item == "" || len(out) == maxPlanItems || left <= 0 {
+				continue
+			}
+			item = text.Clip(item, min(maxPlanItem, left))
+			left -= len(item)
+			out = append(out, item)
+		}
+		return out
+	}
+	plan := core.Plan{Summary: text.Clip(strings.TrimSpace(in.Summary), 3000)}
+	plan.Changes = keep(in.Changes)
+	plan.FailurePaths = keep(in.FailurePaths)
+	plan.Tests = keep(in.Tests)
+	plan.Exists = keep(in.Exists)
+	plan.OutOfScope = keep(in.OutOfScope)
+	plan.Questions = listed(in.Questions, maxPlanItems)
+	return plan, listed(in.DependsOn, maxPlanItems), design, nil
 }

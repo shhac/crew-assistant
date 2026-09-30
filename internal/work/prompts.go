@@ -619,6 +619,8 @@ func planText(t core.Task) string {
 	}
 	section("What already exists", t.Plan.Exists)
 	section("What will change", t.Plan.Changes)
+	section("What the record must say if a step stops part-way", t.Plan.FailurePaths)
+	section("Tests", t.Plan.Tests)
 	section("Out of scope", t.Plan.OutOfScope)
 	return b.String()
 }
@@ -646,13 +648,14 @@ func replanText(t core.Task) string {
 // researcherPrompt asks the researcher to work out what a task needs before
 // anything is written: it reads, and changes nothing.
 func researcherPrompt(p core.Project, t core.Task, others []core.Task) string {
+	code := isCode(p, t)
 	var b strings.Builder
 	b.WriteString(briefText(p, t))
 	b.WriteString(designText(t))
 	switch {
-	case isCode(p, t) && len(t.Revisions) > 0:
+	case code && len(t.Revisions) > 0:
 		fmt.Fprintf(&b, "\nYou are in a clone of the repository, at draft %d of this task. %s\n", len(t.Revisions), repoInstructions)
-	case isCode(p, t):
+	case code:
 		b.WriteString("\nYou are in a clone of the repository, on the branch this task will be written on. " + repoInstructions + "\n")
 	case len(t.Revisions) > 0:
 		fmt.Fprintf(&b, "\nThe current directory holds draft %d of this task.\n", len(t.Revisions))
@@ -664,9 +667,16 @@ func researcherPrompt(p core.Project, t core.Task, others []core.Task) string {
 Plan this task before anything is written. Read what you need to, and change nothing. You may search the web for what the work in front of you can't tell you, such as a library's current behaviour; say in the plan which pages you relied on. Work out:
 - what already exists that the task can use or that it describes as missing, naming files and functions;
 - what will change, briefly;
-- what is out of scope, so the implementer does not drift;
+`)
+	if code {
+		b.WriteString(`- the failure paths: stopping during each step, a restart between two writes, concurrent callers, a partial failure, and what the record must say after each;
+- the tests that will show it works, including on those paths;
+`)
+	}
+	b.WriteString(`- what is out of scope, so the implementer does not drift;
 - what is unclear enough that the owner must answer before work starts. Ask only what you cannot reasonably decide; the implementer uses judgment for the rest;
 - which of the project's other unfinished tasks, below, this one cannot start before, because it builds on what they will change.
+If it needs more than about 10 changes or would touch more than about 30 files, it is too big to review well in one piece: ask the owner, in your questions, whether to split it, and say into what.
 `)
 	if len(others) > 0 {
 		b.WriteString("\nThe project's other unfinished tasks:\n")
@@ -681,7 +691,11 @@ Plan this task before anything is written. Read what you need to, and change not
 	if guide := designGuide(t, researcher, core.TaskResearching, "ask with the design reply below instead of a plan, and plan once the answer is back."); guide != "" {
 		b.WriteString("\n" + strings.TrimSpace(guide) + "\n")
 	}
-	const plan = `{"summary": "the plan in a few sentences", "exists": ["..."], "changes": ["..."], "out_of_scope": ["..."], "questions": ["only what the owner must answer"], "depends_on": ["ids of tasks above this one must wait for, each readable (such as CA-3) or canonical"]}`
+	changes := `"changes": ["..."], `
+	if code {
+		changes += `"failure_paths": ["..."], "tests": ["..."], `
+	}
+	plan := `{"summary": "the plan in a few sentences", "exists": ["..."], ` + changes + `"out_of_scope": ["..."], "questions": ["only what the owner must answer"], "depends_on": ["ids of tasks above this one must wait for, each readable (such as CA-3) or canonical"]}`
 	// The reply can ask for design input only while the hand-off is offered,
 	// so the contract a role follows never contradicts the guide above it.
 	if designsFor(t, researcher) && t.DesignsAt(core.TaskResearching) < core.DesignLimit {

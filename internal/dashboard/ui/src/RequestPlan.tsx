@@ -15,6 +15,8 @@ export function RequestPlan({ plan }: { plan: Plan }) {
   const parts = [
     { label: "What exists", items: plan.exists ?? [] },
     { label: "What will change", items: plan.changes ?? [] },
+    { label: "If a step stops part-way", items: plan.failure_paths ?? [] },
+    { label: "Tests", items: plan.tests ?? [] },
     { label: "Out of scope", items: plan.out_of_scope ?? [] },
   ].filter((p) => p.items.length > 0);
   const points = parts.reduce((n, p) => n + p.items.length, 0);

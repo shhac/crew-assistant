@@ -1,6 +1,7 @@
 package work
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -104,5 +105,83 @@ func TestTheImplementerAccountsForEveryFindingAndPlanItem(t *testing.T) {
 	passed.Verdicts = []core.Verdict{{Revision: 1, Role: "Reviewer", Outcome: core.VerdictPass, Summary: "Good."}}
 	if landing := writerPrompt(code, passed, catchUpText("main moved on", []string{"main.go"}), false); strings.Contains(landing, "Before you finish") || strings.Contains(landing, "done, or why not") {
 		t.Fatalf("a catch-up before landing should ask for no account: %s", landing)
+	}
+}
+
+// A plan's steps are kept whole, within a bound on the whole plan, and its
+// failure paths and tests reach everyone who works from it.
+func TestAPlanKeepsItsStepsWholeWithinABound(t *testing.T) {
+	long := strings.Repeat("a", 1500)
+	reply, _ := json.Marshal(map[string]any{
+		"summary":       "Add it.",
+		"changes":       []string{long, strings.Repeat("b", maxPlanItem+500)},
+		"failure_paths": []string{"Stopped after the first write: the record says the task is still writing."},
+		"tests":         []string{"A crash between the two writes leaves one record"},
+		"questions":     []string{strings.Repeat("q", 900)},
+	})
+	plan, _, _, err := parsePlan(string(reply), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Changes) != 2 || plan.Changes[0] != long || !strings.HasSuffix(plan.Changes[1], "…") || len(plan.Changes[1]) > maxPlanItem+len("…") {
+		t.Fatalf("changes %d: %d, %d chars", len(plan.Changes), len(plan.Changes[0]), len(plan.Changes[1]))
+	}
+	if len(plan.FailurePaths) != 1 || len(plan.Tests) != 1 || len([]rune(plan.Questions[0])) > 501 {
+		t.Fatalf("plan %+v", plan)
+	}
+	shown := planText(core.Task{Plan: &plan})
+	for _, want := range []string{"What will change:\n- " + long + "\n", "What the record must say if a step stops part-way:\n- Stopped after the first write", "Tests:\n- A crash between the two writes"} {
+		if !strings.Contains(shown, want) {
+			t.Fatalf("the plan as shown lacks %q: %s", want, shown)
+		}
+	}
+
+	// A runaway reply is bounded as a whole, keeping what will change first.
+	many := make([]string, 40)
+	for i := range many {
+		many[i] = strings.Repeat("c", maxPlanItem)
+	}
+	reply, _ = json.Marshal(map[string]any{"summary": "Big.", "changes": many, "failure_paths": many, "tests": many, "exists": many, "out_of_scope": many})
+	plan, _, _, _ = parsePlan(string(reply), false)
+	total := 0
+	for _, list := range [][]string{plan.Changes, plan.FailurePaths, plan.Tests, plan.Exists, plan.OutOfScope} {
+		for _, item := range list {
+			total += len(item)
+		}
+	}
+	if len(plan.Changes) == 0 || len(plan.Changes) > maxPlanItems || total > maxPlanLists+len("…") || len(plan.OutOfScope) != 0 {
+		t.Fatalf("a runaway plan kept %d changes and %d characters", len(plan.Changes), total)
+	}
+}
+
+// A plan stored before failure paths and tests were asked for reads as it did.
+func TestAnOlderPlanStillReads(t *testing.T) {
+	var plan core.Plan
+	if err := json.Unmarshal([]byte(`{"summary": "Add it.", "exists": ["main.go"], "changes": ["add feature.go"], "out_of_scope": ["the CLI"], "role": "Researcher", "at": "2026-09-01T00:00:00Z"}`), &plan); err != nil {
+		t.Fatal(err)
+	}
+	want := "\nThe plan Researcher worked out before this was written:\nAdd it.\nWhat already exists:\n- main.go\nWhat will change:\n- add feature.go\nOut of scope:\n- the CLI\n"
+	if got := planText(core.Task{Plan: &plan}); got != want {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// A code plan works out its failure paths and tests; any plan big enough to
+// review badly in one piece asks the owner whether to split it.
+func TestTheResearcherPlansFailurePathsAndTestsAndFlagsASplit(t *testing.T) {
+	code := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit}}
+	docs := core.Project{Brief: core.Brief{Goal: "Write notes"}}
+	task := core.Task{Objective: "Add Feature"}
+	split := "If it needs more than about 10 changes or would touch more than about 30 files, it is too big to review well in one piece: ask the owner, in your questions, whether to split it, and say into what."
+	paths := "- the failure paths: stopping during each step, a restart between two writes, concurrent callers, a partial failure, and what the record must say after each;\n- the tests that will show it works, including on those paths;"
+	schema := `"changes": ["..."], "failure_paths": ["..."], "tests": ["..."], "out_of_scope"`
+	c, d := researcherPrompt(code, task, nil), researcherPrompt(docs, task, nil)
+	for _, want := range []string{split, paths, schema} {
+		if !strings.Contains(c, want) {
+			t.Fatalf("a code plan's prompt lacks %q: %s", want, c)
+		}
+	}
+	if !strings.Contains(d, split) || strings.Contains(d, "failure_paths") || strings.Contains(d, "the failure paths") {
+		t.Fatalf("a document's plan asks only for the split: %s", d)
 	}
 }

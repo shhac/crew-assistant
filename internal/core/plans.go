@@ -10,15 +10,18 @@ import (
 )
 
 // Plan is what a researcher worked out about a task before anything was
-// written: what already exists, what will change, what stays out, and what
-// is unclear. What the task waits for is kept on the task itself.
+// written: what already exists, what will change, what the record must say
+// when a step stops part-way, how it will be tested, what stays out, and
+// what is unclear. What the task waits for is kept on the task itself.
 type Plan struct {
-	Summary    string   `json:"summary"`
-	Exists     []string `json:"exists,omitempty"`
-	Changes    []string `json:"changes,omitempty"`
-	OutOfScope []string `json:"out_of_scope,omitempty"`
-	Questions  []string `json:"questions,omitempty"`
-	Role       string   `json:"role"`
+	Summary      string   `json:"summary"`
+	Exists       []string `json:"exists,omitempty"`
+	Changes      []string `json:"changes,omitempty"`
+	FailurePaths []string `json:"failure_paths,omitempty"`
+	Tests        []string `json:"tests,omitempty"`
+	OutOfScope   []string `json:"out_of_scope,omitempty"`
+	Questions    []string `json:"questions,omitempty"`
+	Role         string   `json:"role"`
 	// Answered marks a plan whose questions the owner answered: the
 	// researcher plans again with the answer rather than going on with it.
 	Answered bool      `json:"answered,omitempty"`
