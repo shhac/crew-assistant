@@ -161,7 +161,13 @@ func landingFailure(t *core.Task, why string) {
 		return
 	}
 	t.LandingFailures = append(t.LandingFailures, text.Clip(why, 400))
-	t.LandDecision = nil
+	dropLandingApproval(t)
+}
+
+func dropLandingApproval(t *core.Task) {
+	if pmApproved(*t) {
+		t.LandDecision = nil
+	}
 }
 
 func times(n int) string {

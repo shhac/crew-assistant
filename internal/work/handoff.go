@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -107,6 +108,13 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 	}
 	t.Failures, t.RetryAt = 0, time.Time{}
 	t.Status, t.Detail = core.TaskReviewing, ""
+	if c := h.DraftCatchUp; c != nil {
+		t.Base, t.From = c.Base, c.From
+		if len(c.Conflicts) > 0 {
+			return fmt.Sprintf("%s resolved the conflicts in %s with what landed (%s): version %d of %s", h.Writer, strings.Join(c.Conflicts, ", "), c.What, r.N, t.Objective)
+		}
+		return fmt.Sprintf("%s finished version %d of %s, including what landed: %s", h.Writer, r.N, t.Objective, c.What)
+	}
 	return fmt.Sprintf("%s finished version %d of %s", h.Writer, r.N, t.Objective)
 }
 

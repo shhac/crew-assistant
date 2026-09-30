@@ -26,7 +26,7 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 	if held, err := lp.holdForUsage(ctx, t, writer); held || err != nil {
 		return err
 	}
-	t, caughtUp, err := lp.takeInLanded(ctx, t, m)
+	t, caughtUp, integration, err := lp.takeInLanded(ctx, t, m)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
@@ -66,7 +66,7 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 	if err != nil {
 		return lp.roleFailed(ctx, t, writer.Name, err)
 	}
-	return lp.recordDraft(ctx, p, t, m, writer.Name, result, seen)
+	return lp.recordDraft(ctx, p, t, m, writer.Name, result, seen, integration)
 }
 
 // prepareWorkspace starts the task's workspace on its first round, then puts
@@ -93,7 +93,7 @@ func (lp *Loop) prepareWorkspace(ctx context.Context, t core.Task, m medium) (co
 // review, or, answering a pull request, the team's word that nothing needed
 // to change, or its hand-off to the designer for design input. seen is how
 // much of the owner's direction its prompt carried.
-func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m medium, writer string, result roles.Result, seen int) error {
+func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m medium, writer string, result roles.Result, seen int, integration *core.DraftCatchUp) error {
 	reply, learned := splitBlock(result.Text, "learned")
 	reply, block := splitBlock(reply, "wake")
 	reply, unmet := splitBlock(reply, "owner-step")
@@ -145,12 +145,20 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 		return err
 	}
 	if err != nil {
+		if errors.Is(err, gitrepo.ErrConflictMarkers) {
+			_, logErr := lp.updateOpen(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
+				return fmt.Sprintf("%s left %s", writer, err), nil
+			})
+			if logErr != nil {
+				return logErr
+			}
+		}
 		return lp.roleFailed(ctx, t, writer, fmt.Errorf("the work could not be recorded: %w", err))
 	}
 	// The draft counts only once the project's records hold it; the handoff
 	// carries the round's whole outcome until then.
 	revision.Summary = text.Clip(reply, 2000)
-	h := core.Handoff{Revision: revision, Writer: writer, Session: result.Session, Seen: seen, Reply: reply, Request: applied, WakeErrors: wakeErrors, Unreachable: parseOwnerSteps(unmet, n, t.Criteria, t.OwnersAlready())}
+	h := core.Handoff{DraftCatchUp: integration, Revision: revision, Writer: writer, Session: result.Session, Seen: seen, Reply: reply, Request: applied, WakeErrors: wakeErrors, Unreachable: parseOwnerSteps(unmet, n, t.Criteria, t.OwnersAlready())}
 	if ok {
 		r.Learnings = nil
 		h.Seat = &r

@@ -10,6 +10,9 @@ import (
 	"strings"
 )
 
+// ErrConflictMarkers refuses snapshots with unresolved integrations.
+var ErrConflictMarkers = errors.New("conflict markers")
+
 // Begin starts a task: the clone catches up with the owner's branch from, or
 // their current branch when from is empty, and a task branch is created from
 // its tip. It returns the base commit and the branch it came from.
@@ -114,7 +117,7 @@ func (r Repo) Snapshot(ctx context.Context, base, previous, message string) (str
 			}
 		}
 		if len(left) > 0 {
-			return "", nil, fmt.Errorf("conflict markers are still in %s", strings.Join(slices.Compact(left), ", "))
+			return "", nil, fmt.Errorf("%w in %s", ErrConflictMarkers, strings.Join(slices.Compact(left), ", "))
 		}
 	}
 	// A merge is recorded even when it changes no files: the task must then

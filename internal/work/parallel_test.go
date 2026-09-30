@@ -38,34 +38,6 @@ type parallelRunner struct {
 // workspace is writable.
 type stageRunner struct{ parallelRunner }
 
-func TestLandedBesideUsesOverlapUnlessOverallLimitIsOne(t *testing.T) {
-	for _, cap := range []int{0, 1, 2} {
-		t.Run(fmt.Sprint(cap), func(t *testing.T) {
-			a, p := parallelApp(t, &parallelRunner{}, cap)
-			ctx := context.Background()
-			first, sibling := queue(t, a, p, "A"), queue(t, a, p, "B")
-			var err error
-			first, err = a.Core.UpdateTask(ctx, first.ID, func(t *core.Task, _ *core.Project) (string, error) {
-				t.Status, t.StartedAt, t.Beside = core.TaskWriting, time.Now().Add(-time.Minute), []string{sibling.ID}
-				return "", nil
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := a.Core.UpdateTask(ctx, sibling.ID, func(t *core.Task, _ *core.Project) (string, error) {
-				t.Status = core.TaskDelivered
-				return "", nil
-			}); err != nil {
-				t.Fatal(err)
-			}
-			got, found, err := a.landedBeside(ctx, first)
-			if err != nil || found != (cap != 1) || found && got.ID != sibling.ID {
-				t.Fatalf("sibling %s, found %v: %v", got.ID, found, err)
-			}
-		})
-	}
-}
-
 func (r *stageRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
 	if strings.HasPrefix(turnSeat(spec), "QA") {
 		spec.Write = false
@@ -1197,9 +1169,9 @@ func TestAMessageWaitsForItsSeatToBeFree(t *testing.T) {
 }
 
 // Changes land one at a time, each catching up first. When two tasks built
-// side by side conflict, the conflict comes to the owner, with letting the
-// implementer resolve it recommended: nothing is forced or resolved unasked.
-func TestAConflictBetweenTasksBuiltSideBySideComesToTheOwner(t *testing.T) {
+// side by side conflict, the implementer resolves it and the resolved draft
+// goes through fresh checks and approval.
+func TestAConflictBetweenTasksBuiltSideBySideGoesToTheImplementer(t *testing.T) {
 	source := ownerRepo(t)
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass, pass, pass, pass, pass}}}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
@@ -1225,15 +1197,6 @@ func TestAConflictBetweenTasksBuiltSideBySideComesToTheOwner(t *testing.T) {
 	}
 	second = taskByID(t, a, second.ID)
 	d := openDecision(t, a, second)
-	if !strings.Contains(d.Title, "“Add A”") || d.Recommendation != choiceResolve || d.Choices[0] != choiceResolve || len(second.Revisions) != 1 {
-		t.Fatalf("the conflict should come to the owner, unresolved: %+v / %+v", d, second)
-	}
-	if _, err := a.Core.ChooseDecision(ctx, d.ID, choiceResolve); err != nil {
-		t.Fatal(err)
-	}
-	settle(t, a)
-	second = taskByID(t, a, second.ID)
-	d = openDecision(t, a, second)
 	if !d.Approves() || len(second.Revisions) != 2 || second.Base != first.Revisions[0].Ref {
 		t.Fatalf("the implementer should resolve it and ask again: %+v / %+v", d, second)
 	}
@@ -1243,8 +1206,12 @@ func TestAConflictBetweenTasksBuiltSideBySideComesToTheOwner(t *testing.T) {
 			resolving++
 		}
 	}
+	if !activityHas(t, a, "Add B conflicts with what landed: “Add A” landed on branch paul/add-a; the implementer is resolving it") ||
+		!activityHas(t, a, "Implementer resolved the conflicts in feature.go with what landed (“Add A” landed on branch paul/add-a): version 2 of Add B") {
+		t.Fatal("conflict and resolution must be recorded from the catch-up")
+	}
 	if resolving != 1 {
-		t.Fatalf("the implementer should be given the conflict once it was the owner's choice: %d rounds", resolving)
+		t.Fatalf("the implementer should be given the conflict directly: %d rounds", resolving)
 	}
 }
 

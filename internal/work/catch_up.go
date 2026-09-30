@@ -11,10 +11,10 @@ import (
 // takeInLanded merges what landed since into the workspace, so the
 // implementer works on top of it: cleanly if it can be, otherwise with the
 // conflicts left for it to resolve. It says what happened, for the prompt.
-func (lp *Loop) takeInLanded(ctx context.Context, t core.Task, m medium) (core.Task, string, error) {
+func (lp *Loop) takeInLanded(ctx context.Context, t core.Task, m medium) (core.Task, string, *core.DraftCatchUp, error) {
 	c, l, err := lag(ctx, m, t)
 	if err != nil || l == nil {
-		return t, "", err
+		return t, "", nil, err
 	}
 	moved, commit, err := c.cleanMerge(ctx, t, *l)
 	var conflicts []string
@@ -26,13 +26,10 @@ func (lp *Loop) takeInLanded(ctx context.Context, t core.Task, m medium) (core.T
 		err = c.resetTo(ctx, t, commit)
 	}
 	if err != nil {
-		return t, "", fmt.Errorf("catching up: %s: %w", l.What, err)
+		return t, "", nil, fmt.Errorf("catching up: %s: %w", l.What, err)
 	}
-	t, err = lp.updateOpen(ctx, t.ID, func(task *core.Task, _ *core.Project) (string, error) {
-		task.Base, task.From = moved.Base, moved.From
-		return "", nil
-	})
-	return t, catchUpText(l.What, conflicts), err
+	t.Base, t.From = moved.Base, moved.From
+	return t, catchUpText(l.What, conflicts), &core.DraftCatchUp{Base: moved.Base, From: moved.From, What: l.What, Conflicts: conflicts}, nil
 }
 
 // maxCatchUps bounds how often landing goes back to catch up with a target
@@ -71,65 +68,12 @@ func (lp *Loop) catchUpRound(ctx context.Context, t core.Task, c catcher, l line
 	if commit != "" {
 		return lp.recordCatchUp(ctx, moved, c, commit, l)
 	}
-	// A conflict with work another task of the project landed while this
-	// one was built beside it comes to the owner, never forced or resolved
-	// unasked; letting the implementer resolve it is what they are
-	// recommended.
-	if sibling, ok, err := lp.landedBeside(ctx, t); err != nil || ok {
-		if err != nil {
-			return err
-		}
-		if _, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-			landingFailure(t, "Catching up conflicted: "+l.What)
-			t.ResumeStatus, t.Detail = core.TaskWriting, "Catching up: "+l.What
-			return "", nil
-		}); err != nil {
-			return err
-		}
-		_, err = lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionFailure, core.DecisionInput{
-			Title:          fmt.Sprintf("“%s” conflicts with “%s”, which landed while both were under way", t.Objective, sibling.Objective),
-			Context:        fmt.Sprintf("Catching up with %s conflicted. Nothing was forced or resolved.", l.What),
-			Recommendation: choiceResolve,
-			Choices:        []string{choiceResolve, choiceStop},
-		})
-		return err
-	}
-	// Any other conflict is the implementer's to resolve, in a round of its
-	// own.
 	_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		landingFailure(t, "Catching up conflicted: "+l.What)
+		dropLandingApproval(t)
 		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", "Catching up: "+l.What
-		return t.Objective + " is catching up: " + l.What, nil
+		return t.Objective + " conflicts with what landed: " + l.What + "; the implementer is resolving it", nil
 	})
 	return err
-}
-
-// landedBeside is the task of the same project built beside t, under way at
-// the same time as it, that landed last while t was under way, when the
-// project works on several tasks at once. One started only once t waited,
-// or finished before t started, was built after or before it, not beside
-// it, and its conflict is the implementer's as ever; so is every conflict
-// while the project works on one task at a time.
-func (lp *Loop) landedBeside(ctx context.Context, t core.Task) (core.Task, bool, error) {
-	snap, err := lp.Core.Snapshot(ctx)
-	if err != nil {
-		return core.Task{}, false, err
-	}
-	p, ok := findProject(snap, t.ProjectID)
-	if !ok || p.Playbook == nil || p.Playbook.MaxActive == 1 || t.StartedAt.IsZero() {
-		return core.Task{}, false, nil
-	}
-	var sibling core.Task
-	found := false
-	for _, o := range snap.Tasks {
-		if o.ProjectID != t.ProjectID || o.ID == t.ID || (o.Status != core.TaskLanded && o.Status != core.TaskDelivered) || !o.UpdatedAt.After(t.StartedAt) || !t.BuiltBeside(o) {
-			continue
-		}
-		if !found || o.UpdatedAt.After(sibling.UpdatedAt) {
-			sibling, found = o, true
-		}
-	}
-	return sibling, found, nil
 }
 
 // recordCatchUp records a clean merge as a new revision without the

@@ -149,7 +149,7 @@ func TestCatchingUpAfterARewriteKeepsOnlyTheTasksOwnChange(t *testing.T) {
 	if err != nil || len(conflicts) != 1 || conflicts[0] != "a.go" {
 		t.Fatalf("conflicts %v %v", conflicts, err)
 	}
-	if _, _, err = r.Snapshot(ctx, tip, change, "unresolved"); err == nil || !strings.Contains(err.Error(), "conflict markers") {
+	if _, _, err = r.Snapshot(ctx, tip, change, "unresolved"); !errors.Is(err, ErrConflictMarkers) {
 		t.Fatalf("an unresolved replay was recorded: %v", err)
 	}
 	write(t, filepath.Join(r.Workspace(), "a.go"), "package main // both\n")

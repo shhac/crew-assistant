@@ -3,6 +3,7 @@
 package gitrepo
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,7 +42,7 @@ func TestCatchingUpMergesLandedWorkAndRefusesUnresolvedConflicts(t *testing.T) {
 	if err != nil || len(conflicts) != 1 || conflicts[0] != "main.go" {
 		t.Fatalf("conflicts %v err %v", conflicts, err)
 	}
-	if _, _, err = r.Snapshot(ctx, landed, b1, "b caught up"); err == nil || !strings.Contains(err.Error(), "conflict markers") {
+	if _, _, err = r.Snapshot(ctx, landed, b1, "b caught up"); !errors.Is(err, ErrConflictMarkers) {
 		t.Fatalf("recorded unresolved conflicts: %v", err)
 	}
 	// A failed round is reset; the next one merges again and resolves.

@@ -347,45 +347,30 @@ func TestAnUnreadablePMLeavesTheLandingToTheOwner(t *testing.T) {
 }
 
 // Each time main conflicts with the change the PM approved, it goes back to
-// the implementer; the second time, the owner decides.
-func TestRepeatedLandingConflictsComeToTheOwner(t *testing.T) {
-	w := newPMPush(t, core.ApprovePM, "", passes(12)...)
+// the implementer for fresh checks and a new PM decision, without counting
+// the conflict as a failed landing.
+func TestRepeatedLandingConflictsStayWithTheTeam(t *testing.T) {
+	w := newPMPush(t, core.ApprovePM, "", passes(16)...)
 	conflicts := 0
 	w.runner.onPMLand = func() {
+		if conflicts == 2 {
+			return
+		}
 		conflicts++
-		w.commitOnMain(t, "feature.go", fmt.Sprintf("package main\n\n// The owner's own feature, take %d\nfunc Feature() {}\n", conflicts))
+		w.commitOnMain(t, "feature.go", fmt.Sprintf("package main\n\n// owner take %d\nfunc Feature() {}\n", conflicts))
 	}
-	ctx := context.Background()
-	task, _ := w.a.Core.QueueTask(ctx, w.p.ID, core.TaskInput{Objective: "Add A"})
+	task, _ := w.a.Core.QueueTask(context.Background(), w.p.ID, core.TaskInput{Objective: "Add A"})
 	task = w.task(t, task.ID)
-	d := openDecision(t, w.a, task)
-	if w.asked() != 2 || d.Kind != core.DecisionDelivery || !strings.Contains(d.Title, "failed to land twice") || !strings.Contains(d.Context, "Catching up conflicted") {
-		t.Fatalf("repeated conflicts did not come to the owner: asked %d, %+v", w.asked(), d)
-	}
-	if len(task.LandingFailures) != 2 {
-		t.Fatalf("failures %v", task.LandingFailures)
-	}
-	// The PM approved it twice, and it never landed: the activity says so.
-	if !activityHas(t, w.a, "The PM approved Add A to land") || activityHas(t, w.a, "The PM landed") {
-		t.Fatal("the activity says the PM landed a change that went back to the implementer")
-	}
-	// Each conflict went to the implementer to resolve.
-	resolved := 0
-	for _, spec := range w.runner.seen {
-		if strings.Contains(spec.Prompt, "conflict markers you must resolve: feature.go") {
-			resolved++
+	for _, entry := range []string{
+		"Add A conflicts with what landed: main moved on since this request started",
+		"Implementer resolved the conflicts in feature.go with what landed (main moved on since this request started",
+	} {
+		if !activityHas(t, w.a, entry) {
+			t.Fatalf("missing catch-up activity: %s", entry)
 		}
 	}
-	if resolved != 2 {
-		t.Fatalf("the implementer resolved %d conflicts", resolved)
-	}
-	// The owner lands the resolved change; main keeps their work under it.
-	w.runner.onPMLand = nil
-	if _, err := w.a.Core.ChooseDecision(ctx, d.ID, choiceApprove); err != nil {
-		t.Fatal(err)
-	}
-	if task = w.task(t, task.ID); task.Status != core.TaskLanded || len(task.LandingFailures) != 0 || w.asked() != 2 {
-		t.Fatalf("the owner's approval did not land it: %s %s", task.Status, task.Detail)
+	if task.Status != core.TaskLanded || len(task.LandingFailures) != 0 || w.asked() != 3 {
+		t.Fatalf("conflicts should be resolved and approved afresh: %+v, asked %d", task, w.asked())
 	}
 }
 
@@ -452,5 +437,20 @@ func TestARestartAfterThePMDecidedNeverLandsTwice(t *testing.T) {
 	}
 	if w.branchLeft(t, task) {
 		t.Fatal("the branch was left after the restart found the change landed")
+	}
+}
+
+func TestPMLandingStillBoundsRepeatedTargetMovement(t *testing.T) {
+	w := newPMPush(t, core.ApprovePM, "", passes(24)...)
+	n := 0
+	w.runner.onPMLand = func() {
+		n++
+		w.commitOnMain(t, "feature.go", fmt.Sprintf("package main\n// take %d\nfunc Feature() {}\n", n))
+	}
+	task, _ := w.a.Core.QueueTask(context.Background(), w.p.ID, core.TaskInput{Objective: "Add A"})
+	task = w.task(t, task.ID)
+	d := openDecision(t, w.a, task)
+	if !strings.Contains(d.Title, "keeps having to catch up") || len(task.LandingFailures) != 0 || task.CatchUps != maxCatchUps+1 {
+		t.Fatalf("unexpected movement limit: %+v / %+v", task, d)
 	}
 }

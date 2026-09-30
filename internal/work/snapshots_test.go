@@ -740,3 +740,29 @@ func snapshotOf(t *testing.T, a *Loop) core.Snapshot {
 	}
 	return snap
 }
+
+func TestRestartRecordsResolvedDraftBaseTogether(t *testing.T) {
+	a, p, task, _, _ := handoffAt(t)
+	_, err := a.Core.UpdateTask(context.Background(), task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+		task.Handoff.DraftCatchUp = &core.DraftCatchUp{Base: "new-base", From: "main", What: "main moved on since this request started (it is now at abc1234)", Conflicts: []string{"feature.go"}}
+		return "", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a = restart(t, a)
+	a = restart(t, a)
+	_, task = a.testMedium(t, p.ID, task.ID)
+	if len(task.Revisions) != 1 || task.Base != "new-base" || task.From != "main" {
+		t.Fatalf("handoff lost its base or repeated the draft: %+v", task)
+	}
+	resolutions := 0
+	for _, entry := range snapshotOf(t, a).Activity {
+		if strings.Contains(entry.Summary, "resolved the conflicts in feature.go with what landed (main moved on since this request started (it is now at abc1234))") {
+			resolutions++
+		}
+	}
+	if resolutions != 1 {
+		t.Fatalf("got %d resolution records after restarting twice, want 1", resolutions)
+	}
+}

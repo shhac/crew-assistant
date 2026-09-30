@@ -4,6 +4,7 @@ package work
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -124,6 +125,9 @@ func TestARevisionRoundStartsFromACleanMergeOfWhatLanded(t *testing.T) {
 	if err := exec.Command("git", "-C", clone, "merge-base", "--is-ancestor", roundTwoHead, second.Ref).Run(); err != nil {
 		t.Fatalf("draft 2 was not built on the merge %s", roundTwoHead)
 	}
+	if !activityHas(t, a, "Implementer finished version 2 of Add Feature, including what landed: main moved on since this request started (it is now at "+landed[:7]+")") {
+		t.Fatal("clean integration missing from draft activity")
+	}
 	if !implementerTold(runner, "main moved on", "merged into this branch for you without conflicts") {
 		t.Fatal("the implementer was not told what was merged in")
 	}
@@ -199,4 +203,154 @@ func TestAConflictWithARewrittenMainReachesTheImplementer(t *testing.T) {
 	if strings.Contains(gitOut(clone, "log", "--format=%s", last.Ref), "a commit the owner will drop") {
 		t.Fatal("the dropped commit came back into the task's history")
 	}
+}
+
+func TestUnrecordedReplayKeepsTheOldBase(t *testing.T) {
+	source := ownerRepo(t)
+	ownerCommits(t, source, "dropped.go", "package main\n", "dropped")
+	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: passes(12)}}
+	a, p := pushProjectApp(t, runner, source)
+	task := queue(t, a, p, "Add Feature")
+	settle(t, a)
+	task = taskByID(t, a, task.ID)
+	oldBase := task.Base
+	ownerGit(t, source, "reset", "-q", "--hard", "HEAD~1")
+	newBase := ownerCommits(t, source, "feature.go", "package main\nfunc Feature() {}\n", "replacement")
+	m, task := a.testMedium(t, p.ID, task.ID)
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		prepared, err := a.prepareWorkspace(ctx, task, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		moved, _, integration, err := a.takeInLanded(ctx, prepared, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if moved.Base != newBase || integration == nil || len(integration.Conflicts) == 0 {
+			t.Fatalf("missing replay: %+v", integration)
+		}
+		if taskByID(t, a, task.ID).Base != oldBase {
+			t.Fatal("base advanced without a draft")
+		}
+		if _, err := os.Stat(filepath.Join(m.workspace(task), "dropped.go")); !os.IsNotExist(err) {
+			t.Fatal("dropped work returned")
+		}
+	}
+	writer, _ := task.Role("Implementer")
+	a.runner = failingCatchUpRunner{runner}
+	if err := a.write(ctx, p, task, m, writer); err != nil {
+		t.Fatal(err)
+	}
+	task = taskByID(t, a, task.ID)
+	if task.Base != oldBase || len(task.Revisions) != 1 || task.Failures != 1 {
+		t.Fatalf("failed turn advanced the record: %+v", task)
+	}
+	a.runner = runner
+	if err := a.write(ctx, p, task, m, writer); err != nil {
+		t.Fatal(err)
+	}
+	task = taskByID(t, a, task.ID)
+	if task.Base != newBase || len(task.Revisions) != 2 {
+		t.Fatalf("resolved draft not recorded: %+v", task)
+	}
+	clone := filepath.Join(p.ScratchDirectory, "clone")
+	if strings.Contains(gitOut(clone, "log", "--format=%s", task.Revisions[1].Ref), "dropped") {
+		t.Fatal("failed turn revived dropped history")
+	}
+
+}
+
+func TestLeftoverConflictMarkersRetryWithNamedDecision(t *testing.T) {
+	source := ownerRepo(t)
+	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: passes(12)}}
+	a, p := pushProjectApp(t, runner, source)
+	task := queue(t, a, p, "Add Feature")
+	settle(t, a)
+	task = taskByID(t, a, task.ID)
+	ownerCommits(t, source, "feature.go", "package main\nfunc Feature() {}\n", "owner feature")
+	runner.onEdit = func(string, int) bool { return false }
+	ctx := context.Background()
+	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i <= roleRetries; i++ {
+		settle(t, a)
+		task = taskByID(t, a, task.ID)
+		if len(task.Revisions) != 1 {
+			t.Fatal("recorded unresolved draft")
+		}
+		if i < roleRetries {
+			_, err := a.Core.UpdateTask(ctx, task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+				task.RetryAt = task.RetryAt.AddDate(-1, 0, 0)
+				return "", nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	d := openDecision(t, a, task)
+	if !strings.Contains(d.Title, "couldn't resolve its conflict") || !strings.Contains(d.Context, "feature.go") || task.ResumeStatus != core.TaskWriting {
+		t.Fatalf("unnamed conflict: %+v / %+v", d, task)
+	}
+	refusals := 0
+	for _, entry := range snapshotOf(t, a).Activity {
+		if strings.Contains(entry.Summary, "left conflict markers in feature.go") {
+			refusals++
+			if strings.Contains(entry.Summary, "trying again") {
+				t.Fatalf("refusal promises a retry even when exhausted: %s", entry.Summary)
+			}
+		}
+	}
+	if refusals != roleRetries+1 {
+		t.Fatalf("got %d refusal entries, want %d", refusals, roleRetries+1)
+	}
+	if _, err := a.Core.ChooseDecision(ctx, d.ID, choiceTryAgain); err != nil {
+		t.Fatal(err)
+	}
+	step(t, a)
+	if taskByID(t, a, task.ID).Status != core.TaskWriting {
+		t.Fatal("retry did not resume writing")
+	}
+}
+
+func TestApprovedCleanCatchUpLandsWithoutAnotherDecision(t *testing.T) {
+	source := ownerRepo(t)
+	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: passes(12)}}
+	a, p := pushProjectApp(t, runner, source)
+	task := queue(t, a, p, "Add Feature")
+	settle(t, a)
+	task = taskByID(t, a, task.ID)
+	ctx := context.Background()
+	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove); err != nil {
+		t.Fatal(err)
+	}
+	ownerCommits(t, source, "owner.go", "package main\n", "owner work")
+	settle(t, a)
+	task = taskByID(t, a, task.ID)
+	if task.Status != core.TaskLanded || runner.edits != 1 {
+		t.Fatalf("clean catch-up required more work: %+v", task)
+	}
+	if !activityHas(t, a, "caught up cleanly") || !activityHas(t, a, "Add Feature landed") {
+		t.Fatal("catch-up or landing missing from activity")
+	}
+	snap, err := a.Core.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range snap.Decisions {
+		if d.TaskID == task.ID && d.Status == core.DecisionOpen {
+			t.Fatalf("unexpected owner decision: %+v", d)
+		}
+	}
+}
+
+type failingCatchUpRunner struct{ roles.Runner }
+
+func (r failingCatchUpRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
+	if strings.Contains(spec.Prompt, "conflict markers you must resolve") {
+		return roles.Result{}, errors.New("synthetic failed resolving turn")
+	}
+	return r.Runner.Run(ctx, spec)
 }

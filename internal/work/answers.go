@@ -9,6 +9,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 	"github.com/shhac/crew-assistant/internal/roles"
 	"github.com/shhac/crew-assistant/internal/text"
 )
@@ -45,8 +46,12 @@ func (lp *Loop) roleFailed(ctx context.Context, t core.Task, role string, cause 
 	}); err != nil {
 		return err
 	}
+	title := fmt.Sprintf("%s couldn't work on “%s”", role, t.Objective)
+	if errors.Is(cause, gitrepo.ErrConflictMarkers) {
+		title = fmt.Sprintf("“%s” couldn't resolve its conflict with what landed", t.Objective)
+	}
 	_, err = lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionFailure, core.DecisionInput{
-		Title:          fmt.Sprintf("%s couldn't work on “%s”", role, t.Objective),
+		Title:          title,
 		Context:        text.Clip(cause.Error(), 600),
 		Recommendation: choiceTryAgain + " once the cause is fixed",
 		Choices:        []string{choiceTryAgain, choiceStop},

@@ -28,8 +28,9 @@ type Handoff struct {
 	// Unreachable are the requirements the implementer said it can't meet
 	// from its sandbox in this turn.
 	Unreachable []Unreachable `json:"unreachable,omitempty"`
-	// CatchUp is set for a clean merge with landed work the daemon made
-	// itself, with no implementer.
+	// DraftCatchUp is the landed work the implementer included in its draft.
+	DraftCatchUp *DraftCatchUp `json:"draft_catch_up,omitempty"`
+	// CatchUp is a clean merge recorded by the daemon without an implementer.
 	CatchUp *CatchUp `json:"catch_up,omitempty"`
 }
 
@@ -44,4 +45,12 @@ type CatchUp struct {
 	Name   string `json:"name"`
 	What   string `json:"what"`
 	Detail string `json:"detail"`
+}
+
+// DraftCatchUp advances the base only with a safely recorded draft.
+type DraftCatchUp struct {
+	Base      string   `json:"base,omitempty"`
+	From      string   `json:"from,omitempty"`
+	What      string   `json:"what"`
+	Conflicts []string `json:"conflicts,omitempty"`
 }
