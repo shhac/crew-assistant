@@ -51,6 +51,10 @@ func working(kind string) bool {
 	return kind != RoleResearcher && kind != RoleDesigner && kind != RolePM
 }
 
+// IsWorking reports whether a kind of role is one a seat holds at most one
+// of: implementer, reviewer or QA.
+func IsWorking(kind string) bool { return working(kind) }
+
 // Holds reports whether the seat holds a kind of role.
 func (r Role) Holds(kind string) bool { return slices.Contains(r.Kinds, kind) }
 

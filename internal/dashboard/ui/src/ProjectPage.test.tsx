@@ -2154,9 +2154,6 @@ describe("the project's tabs", () => {
     const ada = within(seat("Implementer")).getByRole("link", { name: "Ada" });
     expect(ada.getAttribute("href")).toBe("#/team/m1");
     expect(ada.querySelector("img")?.getAttribute("width")).toBe("20");
-    expect(seat("Implementer").querySelector(".seat-who")?.textContent).toBe(
-      "",
-    );
     expect(
       within(
         within(seat("Implementer")).getByRole("list", {
@@ -2193,36 +2190,101 @@ describe("the project's tabs", () => {
         .getByRole("list", { name: "Roles" })
         .querySelectorAll<HTMLLIElement>(":scope > li"),
     ].find((li) => li.querySelector(".seat-role")?.textContent === name)!;
-  it("lists who fills each role, offering only members of the right kind", () => {
+  const options = (select: HTMLElement) =>
+    within(select)
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+  const added = async (kind: string, member: string) => {
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/team/seats",
+        method: "POST",
+        body: { kind, member },
+      },
+    ]);
+  };
+  const removed = async (seat: string, kind: string) => {
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: `/api/projects/p1/team/seats/${encodeURIComponent(seat)}?kind=${kind}`,
+        method: "DELETE",
+        body: undefined,
+      },
+    ]);
+  };
+  it("lists everyone in each role, and adds only members who hold it", async () => {
     show(staffed(), { members: crew }, { tab: "team" });
-    expect(
-      within(seat("Implementer")).getByLabelText("Assign Implementer"),
-    ).toHaveProperty("value", "m1");
-    const reviewer = within(seat("Reviewer")).getByLabelText("Assign Reviewer");
-    expect(
-      within(reviewer)
-        .getAllByRole("option")
-        .map((o) => o.textContent),
-    ).toEqual(["Template default", "Rune"]);
     expect(
       within(seat("Reviewer")).getByText("Template default · Codex"),
     ).toBeTruthy();
     expect(
-      within(seat("Reviewer")).queryByRole("button", {
-        name: "Unassign Reviewer",
-      }),
-    ).toBeNull();
-  });
-  const seatWrite = async (kind: string, member: string) => {
-    await waitFor(() => expect(refresh).toHaveBeenCalled());
-    expect(writes()).toEqual([
-      {
-        path: `/api/projects/p1/team/${kind}`,
-        method: "PUT",
-        body: { member },
-      },
+      options(within(seat("Reviewer")).getByLabelText("Add to Reviewer")),
+    ).toEqual(["+ Add someone…", "Template default", "Rune"]);
+    expect(
+      options(within(seat("Implementer")).getByLabelText("Add to Implementer")),
+    ).toEqual([
+      "+ Add someone…",
+      "Template default",
+      "Ada Lovelace (another seat)",
     ]);
-  };
+    fireEvent.change(
+      within(seat("Reviewer")).getByLabelText("Add to Reviewer"),
+      {
+        target: { value: "m2" },
+      },
+    );
+    await added("reviewer", "m2");
+  });
+  it("adds the template's seat, and removes someone from one role", async () => {
+    show(staffed(), { members: crew }, { tab: "team" });
+    fireEvent.change(within(seat("QA")).getByLabelText("Add to QA"), {
+      target: { value: "template" },
+    });
+    await added("qa", "");
+    cleanup();
+    calls = [];
+    refresh.mockClear();
+    show(staffed(), { members: crew }, { tab: "team" });
+    fireEvent.click(
+      within(seat("QA")).getByRole("button", { name: "Remove QA from QA" }),
+    );
+    await removed("QA", "qa");
+  });
+  it("keeps the last implementer and reviewer, and removes one once there is another", async () => {
+    show(staffed(), { members: crew }, { tab: "team" });
+    const remove = (role: string, name: string) =>
+      within(seat(role)).getByRole("button", {
+        name: `Remove ${name} from ${role}`,
+      });
+    expect(remove("Implementer", "Ada")).toHaveProperty("disabled", true);
+    expect(remove("Reviewer", "Reviewer")).toHaveProperty("disabled", true);
+    expect(remove("QA", "QA")).toHaveProperty("disabled", false);
+    cleanup();
+    const [ada, reviewer, qa] = staffed().playbook!.roles;
+    show(
+      project({
+        playbook: {
+          ...codeTeam(),
+          roles: [ada, { ...ada, name: "Ada #2" }, reviewer, qa],
+        },
+      }),
+      { members: crew },
+      { tab: "team" },
+    );
+    expect(
+      within(
+        within(seat("Implementer")).getByRole("list", {
+          name: "Implementer seats",
+        }),
+      )
+        .getAllByRole("link")
+        .map((a) => a.textContent),
+    ).toEqual(["Ada", "Ada #2"]);
+    fireEvent.click(remove("Implementer", "Ada #2"));
+    await removed("Ada #2", "implementer");
+  });
   describe("a code team's researcher", () => {
     const researchers = [
       member("m1", "Ada Lovelace", "implementer", "researcher"),
@@ -2243,10 +2305,6 @@ describe("the project's tabs", () => {
       engine: "claude",
     };
     const [, reviewer, qa] = codeTeam().roles;
-    const chooser = (p: Project) => {
-      show(p, { members: researchers }, { tab: "team" });
-      return within(seat("Researcher")).getByLabelText("Assign Researcher");
-    };
     it("shows a seat that holds several roles in each of them", () => {
       show(seats(ada, reviewer, qa), { members: researchers }, { tab: "team" });
       for (const role of ["Researcher", "Implementer"]) {
@@ -2258,31 +2316,45 @@ describe("the project's tabs", () => {
         ).toBeTruthy();
       }
     });
-    it("offers the template's researcher, no research, or a member who researches", async () => {
-      const who = chooser(seats(ada, reviewer, qa));
-      expect(who).toHaveProperty("value", "m1");
-      expect(
-        within(who)
-          .getAllByRole("option")
-          .map((o) => o.textContent),
-      ).toEqual(["Template default", "No research", "Ada Lovelace", "Pia"]);
-      fireEvent.change(who, { target: { value: "m4" } });
-      await seatWrite("researcher", "m4");
+    it("adds the template's researcher or a member who researches", async () => {
+      show(seats(ada, reviewer, qa), { members: researchers }, { tab: "team" });
+      const add = within(seat("Researcher")).getByLabelText(
+        "Add to Researcher",
+      );
+      expect(options(add)).toEqual([
+        "+ Add someone…",
+        "Template default",
+        "Ada Lovelace (another seat)",
+        "Pia",
+      ]);
+      fireEvent.change(add, { target: { value: "m4" } });
+      await added("researcher", "m4");
     });
     it("shows a team without research that way, and can bring the template's back", async () => {
-      const who = chooser(seats(codeTeam().roles[0], reviewer, qa));
-      expect(who).toHaveProperty("value", "none");
-      expect(seat("Researcher").querySelector(".seat-who")?.textContent).toBe(
-        "No research",
+      show(
+        seats(codeTeam().roles[0], reviewer, qa),
+        { members: researchers },
+        { tab: "team" },
       );
-      fireEvent.change(who, { target: { value: "" } });
-      await seatWrite("researcher", "");
+      expect(within(seat("Researcher")).getByText("No research")).toBeTruthy();
+      fireEvent.change(
+        within(seat("Researcher")).getByLabelText("Add to Researcher"),
+        { target: { value: "template" } },
+      );
+      await added("researcher", "");
     });
-    it("leaves research out of a team that has the template's researcher", async () => {
-      const who = chooser(seats(researcher, codeTeam().roles[0], reviewer, qa));
-      expect(who).toHaveProperty("value", "");
-      fireEvent.change(who, { target: { value: "none" } });
-      await seatWrite("researcher", "none");
+    it("leaves research out by removing everyone in it", async () => {
+      show(
+        seats(researcher, codeTeam().roles[0], reviewer, qa),
+        { members: researchers },
+        { tab: "team" },
+      );
+      fireEvent.click(
+        within(seat("Researcher")).getByRole("button", {
+          name: "Remove Researcher from Researcher",
+        }),
+      );
+      await removed("Researcher", "researcher");
     });
   });
   describe("a team's PM", () => {
@@ -2297,20 +2369,24 @@ describe("the project's tabs", () => {
       engine: "claude",
       member: "m4",
     };
-    it("chooses a PM from the members who hold it", async () => {
+    it("adds a PM from the members who hold it, and only one", async () => {
       show(project(), { members: crewWithPM }, { tab: "team" });
-      expect(seat("PM").querySelector(".seat-who")?.textContent).toBe("No PM");
-      const who = within(seat("PM")).getByLabelText("Assign PM");
-      expect(who).toHaveProperty("value", "");
-      expect(
-        within(who)
-          .getAllByRole("option")
-          .map((o) => o.textContent),
-      ).toEqual(["No PM", "Ada Lovelace", "Pia"]);
-      fireEvent.change(who, { target: { value: "m4" } });
-      await seatWrite("pm", "m4");
+      expect(within(seat("PM")).getByText("No PM")).toBeTruthy();
+      const add = within(seat("PM")).getByLabelText("Add to PM");
+      expect(options(add)).toEqual(["+ Add someone…", "Ada Lovelace", "Pia"]);
+      fireEvent.change(add, { target: { value: "m4" } });
+      await added("pm", "m4");
+      cleanup();
+      show(
+        project({
+          playbook: { ...codeTeam(), roles: [...codeTeam().roles, pia] },
+        }),
+        { members: crewWithPM },
+        { tab: "team" },
+      );
+      expect(within(seat("PM")).queryByLabelText("Add to PM")).toBeNull();
     });
-    it("unassigns the PM, for writing too", async () => {
+    it("removes the PM, for writing too", async () => {
       show(
         project({
           playbook: { ...writingTeam, roles: [...writingTeam.roles, pia] },
@@ -2322,9 +2398,9 @@ describe("the project's tabs", () => {
         within(seat("PM")).getByRole("link", { name: "Pia" }),
       ).toBeTruthy();
       fireEvent.click(
-        within(seat("PM")).getByRole("button", { name: "Unassign PM" }),
+        within(seat("PM")).getByRole("button", { name: "Remove Pia from PM" }),
       );
-      await seatWrite("pm", "");
+      await removed("Pia", "pm");
     });
     it("keeps the PM and the researcher when the team is saved again", async () => {
       show(
@@ -2345,7 +2421,7 @@ describe("the project's tabs", () => {
     });
     it("offers no one while no member holds it", () => {
       show(project(), { members: crew }, { tab: "team" });
-      expect(within(seat("PM")).getByText("No one to assign")).toBeTruthy();
+      expect(within(seat("PM")).queryByLabelText("Add to PM")).toBeNull();
     });
   });
   describe("a team's designer", () => {
@@ -2360,21 +2436,15 @@ describe("the project's tabs", () => {
       engine: "claude",
       member: "m5",
     };
-    it("seats a designer from the members who hold it, on a code team", async () => {
+    it("adds a designer from the members who hold it, on a code team", async () => {
       show(project(), { members: withDesigners }, { tab: "team" });
-      expect(seat("Designer").querySelector(".seat-who")?.textContent).toBe(
-        "No designer",
-      );
-      const who = within(seat("Designer")).getByLabelText("Assign Designer");
-      expect(
-        within(who)
-          .getAllByRole("option")
-          .map((o) => o.textContent),
-      ).toEqual(["No designer", "Ada Lovelace", "Dee"]);
-      fireEvent.change(who, { target: { value: "m5" } });
-      await seatWrite("designer", "m5");
+      expect(within(seat("Designer")).getByText("No designer")).toBeTruthy();
+      const add = within(seat("Designer")).getByLabelText("Add to Designer");
+      expect(options(add)).toEqual(["+ Add someone…", "Ada Lovelace", "Dee"]);
+      fireEvent.change(add, { target: { value: "m5" } });
+      await added("designer", "m5");
     });
-    it("unassigns the designer, for writing too", async () => {
+    it("removes the designer, for writing too", async () => {
       show(
         project({
           playbook: { ...writingTeam, roles: [...writingTeam.roles, dee] },
@@ -2382,15 +2452,12 @@ describe("the project's tabs", () => {
         { members: withDesigners },
         { tab: "team" },
       );
-      expect(
-        within(seat("Designer")).getByRole("link", { name: "Dee" }),
-      ).toBeTruthy();
       fireEvent.click(
         within(seat("Designer")).getByRole("button", {
-          name: "Unassign Designer",
+          name: "Remove Dee from Designer",
         }),
       );
-      await seatWrite("designer", "");
+      await removed("Dee", "designer");
     });
     it("keeps the designer when the team is saved again", async () => {
       show(
@@ -2407,37 +2474,6 @@ describe("the project's tabs", () => {
       expect(writes()[0].body).toMatchObject({ designer_member: "m5" });
     });
   });
-  it("assigns a member to one role, sending nothing about the others", async () => {
-    show(staffed(), { members: crew }, { tab: "team" });
-    fireEvent.change(
-      within(seat("Reviewer")).getByLabelText("Assign Reviewer"),
-      { target: { value: "m2" } },
-    );
-    await waitFor(() => expect(refresh).toHaveBeenCalled());
-    expect(writes()).toEqual([
-      {
-        path: "/api/projects/p1/team/reviewer",
-        method: "PUT",
-        body: { member: "m2" },
-      },
-    ]);
-  });
-  it("unassigns a member, giving the role back to the template", async () => {
-    show(staffed(), { members: crew }, { tab: "team" });
-    fireEvent.click(
-      within(seat("Implementer")).getByRole("button", {
-        name: "Unassign Implementer",
-      }),
-    );
-    await waitFor(() => expect(refresh).toHaveBeenCalled());
-    expect(writes()).toEqual([
-      {
-        path: "/api/projects/p1/team/implementer",
-        method: "PUT",
-        body: { member: "" },
-      },
-    ]);
-  });
   it("keeps showing a member whose kinds changed since they were given the role", async () => {
     const changed = [
       member("m1", "Ada Lovelace", "reviewer"),
@@ -2449,14 +2485,9 @@ describe("the project's tabs", () => {
     expect(
       within(implementer).getByText(/Kept here; no longer holds this role/),
     ).toBeTruthy();
-    const who = within(implementer).getByLabelText("Assign Implementer");
-    expect(who).toHaveProperty("value", "m1");
     expect(
-      within(who).getByRole("option", { name: "Ada Lovelace" }),
-    ).toHaveProperty("disabled", true);
-    expect(
-      within(implementer).getByRole("button", { name: "Unassign Implementer" }),
-    ).toBeTruthy();
+      options(within(implementer).getByLabelText("Add to Implementer")),
+    ).toEqual(["+ Add someone…", "Template default"]);
     cleanup();
     show(staffed(), { members: changed }, { tab: "config" });
     fireEvent.click(
@@ -2465,82 +2496,13 @@ describe("the project's tabs", () => {
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(writes()[0].body).toMatchObject({ implementer_member: "m1" });
   });
-  it("offers to unassign a member who has left, and never shows them as filling the role", () => {
+  it("shows a member who has left as no longer on the team, without their page", () => {
     show(staffed(), { members: crew.slice(1) }, { tab: "team" });
     const implementer = seat("Implementer");
-    expect(
-      within(implementer).getByText("Template default · Claude"),
-    ).toBeTruthy();
     expect(within(implementer).queryByRole("link")).toBeNull();
-    expect(within(implementer).getByText("No one to assign")).toBeTruthy();
     expect(
-      within(implementer).getByRole("button", { name: "Unassign Implementer" }),
+      within(implementer).getByText(/No longer on your team/),
     ).toBeTruthy();
-  });
-  it("sets how many seats a role has, removing one only while another holds its roles", async () => {
-    show(staffed(), { members: crew }, { tab: "team" });
-    const count = (role: string) =>
-      within(seat(role)).getByRole("group", { name: `How many ${role} seats` });
-    expect(count("Implementer").textContent).toContain("1 seat");
-    expect(
-      within(count("Implementer")).getByRole("button", {
-        name: "One fewer Implementer seat",
-      }),
-    ).toHaveProperty("disabled", true);
-    fireEvent.click(
-      within(count("Implementer")).getByRole("button", {
-        name: "One more Implementer seat",
-      }),
-    );
-    await waitFor(() => expect(refresh).toHaveBeenCalled());
-    expect(writes()).toEqual([
-      {
-        path: "/api/projects/p1/team/seats",
-        method: "POST",
-        body: { seat: "Ada" },
-      },
-    ]);
-    cleanup();
-    const [ada, reviewer, qa] = staffed().playbook!.roles;
-    show(
-      project({
-        playbook: {
-          ...codeTeam(),
-          roles: [ada, { ...ada, name: "Ada #2" }, reviewer, qa],
-        },
-      }),
-      { members: crew },
-      { tab: "team" },
-    );
-    expect(count("Implementer").textContent).toContain("2 seats");
-    expect(
-      within(
-        within(seat("Implementer")).getByRole("list", {
-          name: "Implementer seats",
-        }),
-      )
-        .getAllByRole("link")
-        .map((a) => a.textContent),
-    ).toEqual(["Ada", "Ada #2"]);
-    fireEvent.click(
-      within(count("Implementer")).getByRole("button", {
-        name: "One fewer Implementer seat",
-      }),
-    );
-    await waitFor(() =>
-      expect(writes().at(-1)).toMatchObject({
-        path: "/api/projects/p1/team/seats/Ada%20%232",
-        method: "DELETE",
-      }),
-    );
-    expect(
-      within(count("Reviewer")).getByRole("button", {
-        name: "One fewer Reviewer seat",
-      }),
-    ).toHaveProperty("disabled", true);
-    expect(
-      within(seat("PM")).queryByRole("group", { name: "How many PM seats" }),
-    ).toBeNull();
   });
   it("shows one role at a time when asked", () => {
     show(staffed(), { members: crew }, { tab: "team" });

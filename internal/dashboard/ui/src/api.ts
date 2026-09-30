@@ -1078,6 +1078,27 @@ export function addSeat(projectID: string, seat: string) {
     body: JSON.stringify({ seat }),
   });
 }
+/**
+ * Adds someone to a role: a member, or the template's seat when member is
+ * empty. A member already in the role gains another seat.
+ */
+export function addToRole(projectID: string, kind: MemberKind, member: string) {
+  return api<Project>(`${projectPath(projectID)}/team/seats`, {
+    method: "POST",
+    body: JSON.stringify({ kind, member }),
+  });
+}
+/** Takes a seat out of one role; it keeps any other role it holds. */
+export function removeFromRole(
+  projectID: string,
+  seat: string,
+  kind: MemberKind,
+) {
+  return api<Project>(
+    `${projectPath(projectID)}/team/seats/${encodeURIComponent(seat)}?kind=${encodeURIComponent(kind)}`,
+    { method: "DELETE" },
+  );
+}
 /** Takes the named seat off the team. */
 export function removeSeat(projectID: string, seat: string) {
   return api<Project>(

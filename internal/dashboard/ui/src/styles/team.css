@@ -174,7 +174,9 @@
 }
 
 .role-group {
-  padding: 10px 12px;
+  grid-template-columns: 120px minmax(0, 1fr);
+  align-items: start;
+  padding: 12px;
   cursor: default;
 }
 
@@ -182,34 +184,56 @@
   background: none;
 }
 
-/* A role's seats sit under it, across the row. */
-.role-group > .seat-copies {
-  grid-column: 1 / -1;
+.role-group > .seat-role {
+  padding-top: 5px;
+}
+
+.role-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.seat-copies {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   margin: 0;
-  padding: 0 0 0 132px;
+  padding: 0;
   list-style: none;
 }
 
+/* Name and what the seat is on to the left, removing it to the right. */
 .seat-copy {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 12px;
-}
-
-.seat-count {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  white-space: nowrap;
+  gap: 0 8px;
+  min-height: 32px;
 }
 
-.seat-count .btn {
+.seat-copy > .seat-copy-name,
+.seat-copy > .seat-copy-note {
+  grid-column: 1;
+}
+
+.seat-copy > .seat-remove {
+  grid-column: 2;
+  grid-row: 1 / span 2;
   min-width: 28px;
-  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.role-empty {
+  margin: 5px 0 0;
+}
+
+.role-add {
+  width: 220px;
+  max-width: 100%;
+  align-self: flex-start;
 }
 
 .role-filter {
@@ -225,9 +249,6 @@
 @media (max-width: 700px) {
   .role-group {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .role-group > .seat-copies {
-    padding-left: 0;
   }
   .seat-actions {
     flex-wrap: wrap;
@@ -278,4 +299,35 @@
   margin-top: 6px;
   color: var(--block);
   font-size: 12px;
+}
+
+/* Filtering and sorting the team's members */
+.member-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.member-controls .role-filter {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+}
+
+.member-sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--soft);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.member-sort .field {
+  width: auto;
+  min-height: 32px;
+  padding-top: 4px;
+  padding-bottom: 4px;
 }

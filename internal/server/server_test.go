@@ -267,6 +267,33 @@ func TestTheOwnerAddsSeatsAndSetsHowMuchRunsAtOnce(t *testing.T) {
 	}
 }
 
+// The owner adds someone to a role and takes them out of it again; a seat
+// that holds another role keeps it.
+func TestTheOwnerAddsAndRemovesPeopleByRole(t *testing.T) {
+	s, call := ownerServer(t)
+	p, err := s.CreateProject(context.Background(), core.ProjectInput{Title: "Notes", Template: "draft", Brief: core.BriefInput{Goal: "Notes"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	added := call("POST", "/api/projects/"+p.ID+"/team/seats", `{"kind":"reviewer","member":""}`)
+	if added.Code != 200 || !strings.Contains(added.Body.String(), `"name":"Reviewer #2"`) {
+		t.Fatal(added.Code, added.Body.String())
+	}
+	if pm := call("POST", "/api/projects/"+p.ID+"/team/seats", `{"kind":"pm","member":""}`); pm.Code == 200 {
+		t.Fatal("no template fills the PM role, so someone must be chosen")
+	}
+	removed := call("DELETE", "/api/projects/"+p.ID+"/team/seats/Reviewer%20%232?kind=reviewer", "")
+	if removed.Code != 200 || strings.Contains(removed.Body.String(), "Reviewer #2") {
+		t.Fatal(removed.Code, removed.Body.String())
+	}
+	if wrong := call("DELETE", "/api/projects/"+p.ID+"/team/seats/Writer?kind=reviewer", ""); wrong.Code == 200 {
+		t.Fatal("the writer was taken out of a role it doesn't hold")
+	}
+	if last := call("DELETE", "/api/projects/"+p.ID+"/team/seats/Reviewer?kind=reviewer", ""); last.Code == 200 {
+		t.Fatal("the team's only reviewer was removed")
+	}
+}
+
 func TestErrorsReachTheOwnerWithoutTheirInternalLabels(t *testing.T) {
 	for err, want := range map[error]string{
 		fmt.Errorf("this request has already finished: %w", core.ErrConflict): "This request has already finished",

@@ -357,6 +357,100 @@ func giveSeat(playbook *core.Playbook, kind, memberID string, snap core.Snapshot
 	return nil
 }
 
+// AddToRole gives a project's team one more seat for a kind of role, filled
+// by the member, or by the template's seat when memberID is empty; see
+// addToRole. Requests under way keep the team they started with.
+func (lp *Loop) AddToRole(ctx context.Context, projectID, kind, memberID string) (core.Project, error) {
+	p, err := lp.editPlaybook(ctx, projectID, "", func(snap *core.Snapshot, _ *core.Project, pb *core.Playbook) error {
+		return addToRole(pb, kind, memberID, *snap)
+	})
+	if err == nil {
+		lp.Nudge()
+	}
+	return p, err
+}
+
+// addToRole is the change AddToRole makes. A member already in the role
+// gains a seat alike, so two of their steps can run at once. One on the
+// team in another role takes this one in the same seat, as one person,
+// unless that seat already implements, reviews or runs QA, which a seat
+// does one of; then they get a seat of their own, still one person. A new
+// member gets a seat after the role's last. A team keeps one PM.
+func addToRole(pb *core.Playbook, kind, memberID string, snap core.Snapshot) error {
+	base, templated := pb.TemplateSeat(kind)
+	if !templated && !memberOnly(kind) {
+		return fmt.Errorf("a %s team has no %s", pb.Template, kind)
+	}
+	holding := func(r core.Role) bool { return r.Holds(kind) }
+	if kind == core.RolePM && slices.ContainsFunc(pb.Roles, holding) {
+		return errors.New("a team has one PM; remove the one it has first")
+	}
+	after := len(pb.Roles)
+	for i, r := range pb.Roles {
+		if holding(r) {
+			after = i + 1
+		}
+	}
+	if memberID == "" {
+		if !templated {
+			return fmt.Errorf("no template fills the %s role; choose a member", kind)
+		}
+		if k := slices.IndexFunc(pb.Roles, func(r core.Role) bool { return r.Member == "" && holding(r) && len(r.Kinds) == 1 }); k >= 0 {
+			_, err := pb.AddSeat(pb.Roles[k].Name)
+			return err
+		}
+		pb.Roles = slices.Insert(slices.Clone(pb.Roles), after, base)
+		return nil
+	}
+	m, err := memberFor(kind, memberID, snap)
+	if err != nil {
+		return err
+	}
+	if k := slices.IndexFunc(pb.Roles, func(r core.Role) bool { return r.Member == m.ID && holding(r) }); k >= 0 {
+		_, err := pb.AddSeat(pb.Roles[k].Name)
+		return err
+	}
+	joinable := func(r core.Role) bool {
+		return r.Member == m.ID && (r.Working() == "" || !core.IsWorking(kind))
+	}
+	if k := slices.IndexFunc(pb.Roles, joinable); k >= 0 {
+		pb.Roles = slices.Clone(pb.Roles)
+		joinSeat(pb, k, m, kind)
+		return nil
+	}
+	seat := memberSeat(m, []string{kind}, base.Instructions)
+	seat.Name = pb.FreeName(-1, seat.Name)
+	pb.Roles = slices.Insert(slices.Clone(pb.Roles), after, seat)
+	pb.NameSeats()
+	return nil
+}
+
+// RemoveFromRole takes a kind of role from the named seat: the seat goes if
+// that was all it held, and otherwise keeps its other roles. The team must
+// still have an implementer and a reviewer.
+func (lp *Loop) RemoveFromRole(ctx context.Context, projectID, seat, kind string) (core.Project, error) {
+	return lp.changeSeats(ctx, projectID, func(pb *core.Playbook) error {
+		return removeFromRole(pb, seat, kind)
+	})
+}
+
+func removeFromRole(pb *core.Playbook, seat, kind string) error {
+	k := slices.IndexFunc(pb.Roles, func(r core.Role) bool { return strings.EqualFold(strings.TrimSpace(r.Name), strings.TrimSpace(seat)) })
+	if k < 0 {
+		return fmt.Errorf("the team has no seat named %q: %w", seat, core.ErrNotFound)
+	}
+	if !pb.Roles[k].Holds(kind) {
+		return fmt.Errorf("%s isn't a %s on this team", pb.Roles[k].Name, kind)
+	}
+	pb.Roles = slices.Clone(pb.Roles)
+	if len(pb.Roles[k].Kinds) == 1 {
+		pb.Roles = slices.Delete(pb.Roles, k, k+1)
+		return nil
+	}
+	pb.Rekind(k, slices.DeleteFunc(slices.Clone(pb.Roles[k].Kinds), func(held string) bool { return held == kind }))
+	return nil
+}
+
 // AddSeat adds another seat filled like the named one: Claudius gains
 // Claudius #2, then Claudius #3. Each seat takes one step at a time, so a
 // project runs as many steps of a kind at once as it has free seats for

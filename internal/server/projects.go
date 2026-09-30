@@ -76,16 +76,31 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		reply(w, 200, v, err)
 	})
 	mux.HandleFunc("POST /api/projects/{id}/team/seats", func(w http.ResponseWriter, r *http.Request) {
+		// A seat to copy, or someone to add to a role: a member, or the
+		// template's seat when member is empty.
 		var in struct {
-			Seat string `json:"seat"`
+			Seat   string `json:"seat"`
+			Kind   string `json:"kind"`
+			Member string `json:"member"`
 		}
 		if decode(w, r, &in) != nil {
+			return
+		}
+		if in.Kind != "" {
+			v, err := a.Work.AddToRole(r.Context(), r.PathValue("id"), in.Kind, in.Member)
+			reply(w, 200, v, err)
 			return
 		}
 		v, err := a.Work.AddSeat(r.Context(), r.PathValue("id"), in.Seat)
 		reply(w, 200, v, err)
 	})
 	mux.HandleFunc("DELETE /api/projects/{id}/team/seats/{seat}", func(w http.ResponseWriter, r *http.Request) {
+		// With a kind, the seat leaves only that role and keeps its others.
+		if kind := r.URL.Query().Get("kind"); kind != "" {
+			v, err := a.Work.RemoveFromRole(r.Context(), r.PathValue("id"), r.PathValue("seat"), kind)
+			reply(w, 200, v, err)
+			return
+		}
 		v, err := a.Work.RemoveSeat(r.Context(), r.PathValue("id"), r.PathValue("seat"))
 		reply(w, 200, v, err)
 	})
