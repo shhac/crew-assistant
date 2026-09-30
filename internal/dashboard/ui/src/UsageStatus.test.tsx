@@ -70,6 +70,32 @@ describe("usage left in the sidebar", () => {
     ).toBeTruthy();
     expect(codex.className).not.toMatch(/tone-/);
   });
+  it("names an API provider resting for its rate limit, and until when", async () => {
+    usage = [
+      measured("codex", 42, "ok"),
+      {
+        engine: "openai-compatible",
+        provider: "openrouter",
+        label: "OpenRouter",
+        level: "unknown",
+        windows: [],
+        rate_limited_until: inAnHour,
+      },
+    ];
+    render(<UsageStatus />);
+    const limited = await screen.findByRole("listitem", {
+      name: /^OpenRouter:/,
+    });
+    expect(limited.getAttribute("aria-label")).toBe(
+      `OpenRouter: rate-limited until ${resetLabel(inAnHour)}`,
+    );
+    expect(
+      within(limited).getByText(`Rate-limited until ${resetLabel(inAnHour)}`),
+    ).toBeTruthy();
+    expect(limited.className).toMatch(/tone-block/);
+    expect(within(limited).queryByRole("meter")).toBeNull();
+    expect(row("Codex")).toBeTruthy();
+  });
   it("shows the credit an engine reports beside its usage", async () => {
     usage = [
       measured("codex", 42, "ok", {

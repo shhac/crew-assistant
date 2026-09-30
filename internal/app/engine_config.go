@@ -8,5 +8,5 @@ import (
 // EngineConfig is how the engine reaches a model: its CLI and login, or the
 // endpoint and the key it reads.
 func EngineConfig(h config.Harness) engine.Config {
-	return engine.Config{Provider: h.Provider(), Model: h.Model, Effort: h.Effort, MaxOutputTokens: h.MaxTokens}
+	return engine.Config{Provider: h.Provider(), APIProvider: h.APIProvider, APIKeyEnv: h.APIKeyEnv, Model: h.Model, Effort: h.Effort, MaxOutputTokens: h.MaxTokens}
 }

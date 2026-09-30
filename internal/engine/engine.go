@@ -18,7 +18,15 @@ import (
 // provider's credential source reads the key only when a request is made.
 type Config struct {
 	// Provider is the engine and how it is reached.
-	Provider    harness.Provider
+	Provider harness.Provider
+	// APIProvider is the id of the named API provider an API model is reached
+	// through; empty for a CLI. Two providers can share an address yet hold
+	// different accounts, so it is kept beside the address.
+	APIProvider string
+	// APIKeyEnv names the environment variable an API model's key is read
+	// from, never the key: editing it in place can move a provider to
+	// another account.
+	APIKeyEnv   string
 	Effort      string
 	WorkDirRoot string // Canonical daemon state directory; never a linked project.
 	// BeforeRequest reserves durable capacity before each potentially billable call.

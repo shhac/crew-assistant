@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	harness "github.com/shhac/lib-agent-harness"
@@ -23,7 +24,26 @@ type Engines struct {
 	Claude           CLIEngine  `json:"claude"`
 	Grok             CLIEngine  `json:"grok,omitzero"`
 	OpenAICompatible HTTPEngine `json:"openai-compatible"`
+	// Providers are further named OpenAI-compatible endpoints beside the
+	// one above, such as OpenRouter next to a model on this machine.
+	Providers []Provider `json:"providers,omitzero"`
 }
+
+// Provider is a named OpenAI-compatible endpoint. A model on the API names
+// the one it runs on by id; no id is the endpoint under
+// engines.openai-compatible.
+type Provider struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	HTTPEngine
+}
+
+// LegacyProvider is the id engines.openai-compatible has among the
+// providers.
+const LegacyProvider = "openai-compatible"
+
+// MaxProviders is the most named providers a config keeps.
+const MaxProviders = 16
 
 // CLIEngine is a native CLI and the login home it uses.
 type CLIEngine struct {
@@ -172,6 +192,38 @@ func (e Engines) Endpoint() (baseURL, apiKeyEnv string) {
 	return baseURL, e.OpenAICompatible.APIKeyEnv
 }
 
+// APIProviders are the endpoints a model on the API can run on:
+// engines.openai-compatible first, as LegacyProvider, then the named ones.
+// Each has its defaults filled in.
+func (e Engines) APIProviders() []Provider {
+	legacy := Provider{ID: LegacyProvider, HTTPEngine: e.OpenAICompatible}
+	legacy.BaseURL, legacy.APIKeyEnv = e.Endpoint()
+	return append([]Provider{legacy}, e.Providers...)
+}
+
+// APIProvider is the endpoint with this id; empty is
+// engines.openai-compatible.
+func (e Engines) APIProvider(id string) (Provider, bool) {
+	for _, p := range e.APIProviders() {
+		if p.ID == cmp.Or(id, LegacyProvider) {
+			return p, true
+		}
+	}
+	return Provider{}, false
+}
+
+// Label is how the owner sees a provider named: its name, or else its
+// address's host.
+func (p Provider) Label() string {
+	if p.Name != "" {
+		return p.Name
+	}
+	if u, err := url.Parse(p.BaseURL); err == nil && u.Hostname() != "" {
+		return u.Hostname()
+	}
+	return EngineLabel(string(harness.OpenAICompatible))
+}
+
 func percentOr(p *int) int {
 	if p == nil {
 		return DefaultUsageFloor
@@ -188,8 +240,11 @@ type Harness struct {
 	Effort    string
 	MaxTokens int
 	Bin, Home string
-	BaseURL   string
-	APIKeyEnv string
+	// APIProvider is the id of the endpoint an API model runs on; empty for
+	// a CLI.
+	APIProvider string
+	BaseURL     string
+	APIKeyEnv   string
 	// EffortParameter is where the endpoint reads an effort.
 	EffortParameter string
 }
@@ -229,6 +284,12 @@ func environmentCredential(name string) harness.CredentialSource {
 // Harness is model and effort on engine, reached through this config. It
 // may use as many tokens as the seated assistant's replies may.
 func (c Config) Harness(engine, model, effort string) Harness {
+	return c.HarnessOn(engine, "", model, effort)
+}
+
+// HarnessOn is Harness with an API model on the provider with this id;
+// empty is engines.openai-compatible. A CLI engine has no provider.
+func (c Config) HarnessOn(engine, provider, model, effort string) Harness {
 	h := Harness{Engine: engine, Model: model, Effort: effort, MaxTokens: defaultModel().MaxTokens}
 	if seated, ok := c.Seated(); ok {
 		h.MaxTokens = seated.Model.MaxTokens
@@ -237,14 +298,16 @@ func (c Config) Harness(engine, model, effort string) Harness {
 		h.Bin, h.Home = c.Engines.Binary(engine)
 		return h
 	}
-	h.BaseURL, h.APIKeyEnv = c.Engines.Endpoint()
-	h.EffortParameter = c.Engines.OpenAICompatible.EffortParameter
+	// Validation keeps a saved provider known; one that isn't reaches no
+	// endpoint rather than another one.
+	p, _ := c.Engines.APIProvider(provider)
+	h.APIProvider, h.BaseURL, h.APIKeyEnv, h.EffortParameter = cmp.Or(provider, LegacyProvider), p.BaseURL, p.APIKeyEnv, p.EffortParameter
 	return h
 }
 
 // ProfileHarness is an assistant profile's own model.
 func (c Config) ProfileHarness(p AssistantProfile) Harness {
-	h := c.Harness(p.Model.Engine, p.Model.Model, p.Model.Effort)
+	h := c.HarnessOn(p.Model.Engine, p.Model.Provider, p.Model.Model, p.Model.Effort)
 	h.MaxTokens = p.Model.MaxTokens
 	return h
 }
@@ -265,19 +328,62 @@ func (e Engines) validate() error {
 			return err
 		}
 	}
-	if e.OpenAICompatible.BaseURL != "" {
-		if err := validateEndpoint(e.OpenAICompatible.BaseURL); err != nil {
-			return fmt.Errorf("engines.openai-compatible.base_url: %w", err)
+	if err := e.OpenAICompatible.validate("engines.openai-compatible"); err != nil {
+		return err
+	}
+	if len(e.Providers) > MaxProviders {
+		return fmt.Errorf("at most %d engines.providers are supported", MaxProviders)
+	}
+	for i, p := range e.Providers {
+		prefix := fmt.Sprintf("engines.providers[%d]", i)
+		if !profileID.MatchString(p.ID) || p.ID == LegacyProvider {
+			return fmt.Errorf("%s.id must be 1–64 lower-case letters, digits or hyphens, other than %s", prefix, LegacyProvider)
+		}
+		if slices.ContainsFunc(e.Providers[:i], func(earlier Provider) bool { return earlier.ID == p.ID }) {
+			return fmt.Errorf("two engines.providers have the id %s", p.ID)
+		}
+		if strings.TrimSpace(p.Name) == "" || len(p.Name) > 80 {
+			return fmt.Errorf("%s.name must contain 1–80 characters", prefix)
+		}
+		if p.BaseURL == "" {
+			return fmt.Errorf("%s.base_url is required", prefix)
+		}
+		if err := p.validate(prefix); err != nil {
+			return err
 		}
 	}
-	if env := e.OpenAICompatible.APIKeyEnv; env != "" && !envName.MatchString(env) {
-		return errors.New("engines.openai-compatible.api_key_env must be an environment variable name")
+	return nil
+}
+
+// validateProvider checks that a model's provider is one of the endpoints,
+// and that only a model on the API names one.
+func (e Engines) validateProvider(engine, provider string) error {
+	if provider == "" {
+		return nil
 	}
-	switch harness.EffortParameter(e.OpenAICompatible.EffortParameter) {
+	if engine != string(harness.OpenAICompatible) {
+		return errors.New("provider is only for a model on another API")
+	}
+	if _, ok := e.APIProvider(provider); !ok {
+		return fmt.Errorf("provider %s is not one of engines.providers", provider)
+	}
+	return nil
+}
+
+func (h HTTPEngine) validate(prefix string) error {
+	if h.BaseURL != "" {
+		if err := validateEndpoint(h.BaseURL); err != nil {
+			return fmt.Errorf("%s.base_url: %w", prefix, err)
+		}
+	}
+	if env := h.APIKeyEnv; env != "" && !envName.MatchString(env) {
+		return fmt.Errorf("%s.api_key_env must be an environment variable name", prefix)
+	}
+	switch harness.EffortParameter(h.EffortParameter) {
 	case "", harness.EffortReasoningEffort, harness.EffortReasoningObject:
 		return nil
 	}
-	return fmt.Errorf("engines.openai-compatible.effort_parameter must be %s or %s", harness.EffortReasoningEffort, harness.EffortReasoningObject)
+	return fmt.Errorf("%s.effort_parameter must be %s or %s", prefix, harness.EffortReasoningEffort, harness.EffortReasoningObject)
 }
 
 func (cli *CLIEngine) validate(prefix string) error {

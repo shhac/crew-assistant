@@ -163,7 +163,7 @@ func (a *App) setupModel(ctx context.Context, cfg config.Config) engine.Config {
 	if len(cfg.Assistants) == 0 {
 		stand := config.DefaultProfile()
 		if chosen := cfg.Models.Suggestions; chosen.Engine != "" {
-			stand.Model.Engine, stand.Model.Model, stand.Model.Effort = chosen.Engine, chosen.Model, chosen.Effort
+			stand.Model.Engine, stand.Model.Provider, stand.Model.Model, stand.Model.Effort = chosen.Engine, chosen.Provider, chosen.Model, chosen.Effort
 		}
 		cfg.Assistants = []config.AssistantProfile{stand}
 	}

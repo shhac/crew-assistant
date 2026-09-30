@@ -110,7 +110,9 @@ func TestInvalidEngineAndEffortRejected(t *testing.T) {
 		func(c *Config) { c.Models.Suggestions = SmallModel{Engine: "openai-compatible"} },
 		func(c *Config) { c.Models.Suggestions = SmallModel{Engine: "codex"} },
 		func(c *Config) { c.Models.Suggestions = SmallModel{Model: "haiku"} },
-		func(c *Config) { c.Models.Suggestions = SmallModel{"claude", "haiku", "maximumish"} },
+		func(c *Config) {
+			c.Models.Suggestions = SmallModel{Engine: "claude", Model: "haiku", Effort: "maximumish"}
+		},
 	} {
 		c := Default()
 		mutate(&c)

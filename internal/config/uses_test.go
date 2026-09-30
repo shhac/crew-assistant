@@ -2,7 +2,10 @@ package config
 
 import (
 	"slices"
+	"strings"
 	"testing"
+
+	harness "github.com/shhac/lib-agent-harness"
 )
 
 // What each engine is offered for is what the harness says it can do, so an
@@ -28,6 +31,48 @@ func TestEnginesAreOfferedForWhatTheHarnessSupports(t *testing.T) {
 	}
 	if !slices.Equal(CLIEngineNames, []string{"codex", "claude", "grok"}) {
 		t.Fatalf("CLI engines %v", CLIEngineNames)
+	}
+}
+
+// Team roles use an API provider only once the harness claims a sandboxed
+// session with the daemon's tools for it; until then, the owner is told why.
+func TestRolesOnAnAPIProviderWaitForTheHarness(t *testing.T) {
+	ok, reason := RoleSupport("openai-compatible")
+	if ok || !strings.Contains(reason, "An API provider can't run team roles yet") {
+		t.Fatalf("API provider: %v %q", ok, reason)
+	}
+	if err := CheckRoleEngine("openai-compatible"); err == nil || !strings.Contains(err.Error(), "engine must be codex or claude") || !strings.Contains(err.Error(), reason) {
+		t.Fatalf("check %v", err)
+	}
+	if ok, reason := RoleSupport("claude"); !ok || reason != "" {
+		t.Fatalf("claude %v %q", ok, reason)
+	}
+	if err := CheckRoleEngine("gemini"); err == nil || err.Error() != "engine must be codex or claude" {
+		t.Fatalf("unknown engine %v", err)
+	}
+	real := roleSupport
+	t.Cleanup(func() { roleSupport = real })
+	roleSupport = func(e harness.Engine, op harness.Operation, f harness.Feature) harness.Capability {
+		if e == harness.OpenAICompatible && op == harness.Session && (f == harness.Sandbox || f == harness.Tools) {
+			return harness.Capability{Availability: harness.Composed}
+		}
+		return real(e, op, f)
+	}
+	if ok, reason := RoleSupport("openai-compatible"); !ok || reason != "" {
+		t.Fatalf("a harness that claims it: %v %q", ok, reason)
+	}
+	if !slices.Contains(EnginesFor(UseRoles), "openai-compatible") || CheckRoleEngine("openai-compatible") != nil {
+		t.Fatal("roles weren't offered the API once the harness claimed it")
+	}
+	// Tools alone aren't enough: every role works in a sandbox.
+	roleSupport = func(e harness.Engine, op harness.Operation, f harness.Feature) harness.Capability {
+		if e == harness.OpenAICompatible && f == harness.Tools {
+			return harness.Capability{Availability: harness.Composed}
+		}
+		return real(e, op, f)
+	}
+	if ok, _ := RoleSupport("openai-compatible"); ok {
+		t.Fatal("an API without a sandbox was offered to roles")
 	}
 }
 

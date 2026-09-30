@@ -6,7 +6,10 @@ import {
 } from "./api";
 
 /** What an engine may be used for, as its choice says. */
-export type EngineUse = Exclude<keyof EngineChoice, "engine" | "label">;
+export type EngineUse = Exclude<
+  keyof EngineChoice,
+  "engine" | "label" | "roles_reason"
+>;
 
 /**
  * The small model each CLI login uses for suggestions and loading lines
@@ -86,6 +89,30 @@ export const smallLogins = (choices: readonly EngineChoice[]) =>
     const model = smallModels[choice.engine];
     return choice.cli && model ? [{ ...choice, model }] : [];
   });
+
+/**
+ * The engines that can't run team roles for a reason the server gives, such
+ * as an API provider without a sandbox, to show beside the ones that can;
+ * one already among `offered`, such as a saved choice, isn't listed twice.
+ * Every role engine picker shows them, disabled, with the reason.
+ */
+export const unavailableForRoles = (
+  choices: readonly EngineChoice[],
+  offered: readonly { id: string }[] = [],
+) =>
+  choices.flatMap((choice) =>
+    !choice.roles &&
+    choice.roles_reason &&
+    !offered.some((option) => option.id === choice.engine)
+      ? [
+          {
+            id: choice.engine,
+            label: choice.label,
+            reason: choice.roles_reason,
+          },
+        ]
+      : [],
+  );
 
 /**
  * An engine's choices as select options, keeping one already chosen that

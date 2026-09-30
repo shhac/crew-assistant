@@ -42,6 +42,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 	})
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, a.Config()) })
 	mux.HandleFunc("GET /api/config/defaults", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, configDefaults()) })
+	mux.HandleFunc("GET /api/providers", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, providerChoices(a.Config())) })
 	mux.HandleFunc("PUT /api/config", func(w http.ResponseWriter, r *http.Request) {
 		var c config.Config
 		if decodeConfig(w, r, &c) != nil {

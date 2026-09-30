@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -124,6 +125,74 @@ func TestModelEndpointListsAnAPIsModels(t *testing.T) {
 	handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/models?profile=assistant&engine=unknown", nil))
 	if w.Code != 400 {
 		t.Fatal(w.Code)
+	}
+}
+
+// Each named provider lists its own endpoint's models, OpenRouter's from
+// its /api/v1/models, with the free ones marked; a provider that isn't
+// saved is refused.
+func TestModelEndpointListsEachProvidersModels(t *testing.T) {
+	requests := map[string]int{}
+	cfg := config.Default()
+	cfg.Engines.Providers = []config.Provider{
+		{ID: "openrouter", Name: "OpenRouter", HTTPEngine: config.HTTPEngine{BaseURL: "https://openrouter.ai/api/v1", APIKeyEnv: "OPENROUTER_API_KEY", EffortParameter: "reasoning.effort"}},
+		{ID: "local", Name: "Local model", HTTPEngine: config.HTTPEngine{BaseURL: "http://127.0.0.1:11434/v1"}},
+	}
+	a := app.New(nil, cfg, "", app.Options{})
+	// What the harness's discovery would GET, answered without a network.
+	handler := modelHandler(a, func(_ context.Context, p harness.Provider) ([]catalog.Model, error) {
+		endpoint, problem := p.API.Endpoint("models")
+		if problem != "" || p.API.Credentials == nil {
+			t.Fatal(problem, p.API)
+		}
+		requests[endpoint]++
+		return []catalog.Model{{ID: "deepseek/deepseek-r1:free", Name: "DeepSeek R1 (free)"}, {ID: "openai/gpt-5", Name: "GPT-5"}}, nil
+	})
+	get := func(query string) (*httptest.ResponseRecorder, modelCatalog) {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/models?profile=assistant&"+query, nil))
+		var result modelCatalog
+		_ = json.Unmarshal(w.Body.Bytes(), &result)
+		return w, result
+	}
+	w, result := get("engine=openai-compatible&provider=openrouter")
+	if w.Code != 200 || !result.Available || result.Provider != "openrouter" || len(result.Models) != 2 || requests["https://openrouter.ai/api/v1/models"] != 1 || len(requests) != 1 {
+		t.Fatal(w.Body.String(), requests)
+	}
+	if !result.Models[0].Free || result.Models[1].Free || !strings.Contains(w.Body.String(), `"id":"deepseek/deepseek-r1:free"`) || !strings.Contains(w.Body.String(), `"free":true`) {
+		t.Fatal(w.Body.String())
+	}
+	for _, query := range []string{"engine=openai-compatible&provider=gone", "engine=claude&provider=openrouter", "provider=openrouter"} {
+		if w, _ := get(query); w.Code != 400 {
+			t.Errorf("%s: %d %s", query, w.Code, w.Body.String())
+		}
+	}
+	if len(requests) != 1 || requests["https://openrouter.ai/api/v1/models"] != 1 {
+		t.Fatal("a refused provider reached an endpoint", requests)
+	}
+}
+
+// Every provider is listed separately, reached at its own address with its
+// own key, and no provider is engines.openai-compatible.
+func TestModelEndpointReachesTheChosenProvider(t *testing.T) {
+	cfg := config.Default()
+	cfg.Engines.OpenAICompatible = config.HTTPEngine{BaseURL: "https://api.openai.com/v1", APIKeyEnv: "OPENAI_API_KEY"}
+	cfg.Engines.Providers = []config.Provider{{ID: "local", Name: "Local model", HTTPEngine: config.HTTPEngine{BaseURL: "http://127.0.0.1:11434/v1"}}}
+	a := app.New(nil, cfg, "", app.Options{})
+	var reached []string
+	handler := modelHandler(a, func(_ context.Context, p harness.Provider) ([]catalog.Model, error) {
+		reached = append(reached, p.API.BaseURL)
+		return []catalog.Model{{ID: p.API.BaseURL}}, nil
+	})
+	for _, query := range []string{"engine=openai-compatible&provider=local", "engine=openai-compatible", "engine=openai-compatible&provider=openai-compatible"} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/models?profile=assistant&"+query, nil))
+		if w.Code != 200 {
+			t.Fatal(query, w.Body.String())
+		}
+	}
+	if !slices.Equal(reached, []string{"http://127.0.0.1:11434/v1", "https://api.openai.com/v1"}) {
+		t.Fatal("reached", reached)
 	}
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { choiceFor, choicesFor, useEngineChoices } from "./engines";
-import { ModelFields } from "./ModelFields";
+import { ModelFields, type ModelChoice } from "./ModelFields";
 import { PersonalityField, SuggestedLook } from "./ProfileFields";
 import type { Suggestion } from "./SuggestIdentity";
 import { ErrorNotice, useAction } from "./ui";
@@ -25,8 +25,9 @@ export function AssistantForm({
   onCancel: () => void;
 }) {
   const [name, setName] = useState(assistant?.name ?? "");
-  const [picked, setChoice] = useState({
+  const [picked, setChoice] = useState<ModelChoice>({
     engine: assistant?.model.engine ?? "",
+    provider: assistant?.model.provider ?? "",
     model: assistant?.model.model ?? "",
     effort: assistant?.model.effort ?? "",
   });
@@ -56,6 +57,8 @@ export function AssistantForm({
         personality: personality.trim(),
         model: {
           engine: choice.engine,
+          // Only a model on another API runs on a provider.
+          ...(api && choice.provider ? { provider: choice.provider } : {}),
           model: choice.model.trim(),
           effort: choice.effort.trim(),
           max_tokens: maxTokens,

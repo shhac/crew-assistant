@@ -35,7 +35,33 @@ func smallerBudget(ec engine.Config, window int) int {
 // recordWindow keeps the window a reply stated for the model that gave it.
 // A window not kept is learned again from the next reply.
 func (a *App) recordWindow(ctx context.Context, ec engine.Config, usage engine.Usage) {
-	_ = a.Core.RecordModelWindow(context.WithoutCancel(ctx), ec.Engine(), ec.Model, usage.ContextWindow)
+	_ = a.Core.RecordModelWindow(context.WithoutCancel(ctx), modelHome(ec), ec.Model, usage.ContextWindow)
+}
+
+// modelHome names where ec's model runs, for what is kept about it: its
+// engine, and on an API its route too, since two providers can serve
+// different models under the same id, even at one address.
+func modelHome(ec engine.Config) string {
+	if endpoint := modelEndpoint(ec); endpoint != "" {
+		return ec.Engine() + ":" + apiRoute(ec.APIProvider, endpoint, ec.APIKeyEnv)
+	}
+	return ec.Engine()
+}
+
+// apiRoute names how an API model is reached, and with whose account: the
+// named provider, its address and the variable its key is read from, never
+// the key. A provider edited in place to another address or key is another
+// route, with its own windows, sessions and rate limits.
+func apiRoute(provider, endpoint, keyEnv string) string {
+	return provider + "@" + endpoint + "#" + keyEnv
+}
+
+// modelEndpoint is the address an API model is reached at; empty for a CLI.
+func modelEndpoint(ec engine.Config) string {
+	if ec.Provider.Engine.Transport() != harness.APITransport {
+		return ""
+	}
+	return ec.Provider.API.BaseURL
 }
 
 // providerContextLimit reports a request the model refused as too long, as

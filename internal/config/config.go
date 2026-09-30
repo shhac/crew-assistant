@@ -3,6 +3,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -163,7 +164,12 @@ func (c Config) Validate() error {
 	if _, ok := c.Profile(c.Assistant.Seat); c.Assistant.Seat != "" && !ok {
 		return errors.New("assistant.seat must be the id of one of the assistants, or empty")
 	}
-	if err := c.Models.validate(); err != nil {
+	for _, p := range c.Assistants {
+		if err := c.Engines.validateProvider(p.Model.Engine, p.Model.Provider); err != nil {
+			return fmt.Errorf("%s's model: %w", p.Name, err)
+		}
+	}
+	if err := c.Models.validate(c.Engines); err != nil {
 		return err
 	}
 	if err := validateConnections(c.Connections); err != nil {

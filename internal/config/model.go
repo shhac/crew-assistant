@@ -10,7 +10,10 @@ import (
 // Model is an assistant profile's model choice; the engine it names is
 // reached as Engines says.
 type Model struct {
-	Engine    string `json:"engine"`
+	Engine string `json:"engine"`
+	// Provider is the id of the endpoint a model on the API runs on; empty
+	// is engines.openai-compatible.
+	Provider  string `json:"provider,omitzero"`
 	Model     string `json:"model"`
 	Effort    string `json:"effort"`
 	MaxTokens int    `json:"max_tokens"`
@@ -55,14 +58,17 @@ type Models struct {
 // context and no retries.
 type SmallModel struct {
 	Engine string `json:"engine"`
-	Model  string `json:"model"`
-	Effort string `json:"effort"`
+	// Provider is the id of the endpoint a model on the API runs on; empty
+	// is engines.openai-compatible.
+	Provider string `json:"provider,omitzero"`
+	Model    string `json:"model"`
+	Effort   string `json:"effort"`
 }
 
-func (m Models) validate() error {
+func (m Models) validate(engines Engines) error {
 	s := m.Suggestions
 	if s.Engine == "" {
-		if s.Model != "" || s.Effort != "" {
+		if s.Model != "" || s.Effort != "" || s.Provider != "" {
 			return errors.New("models.suggestions: choose an engine for the model, or leave all three empty for the small models")
 		}
 		return nil
@@ -75,6 +81,9 @@ func (m Models) validate() error {
 	}
 	if !slices.Contains(Efforts, s.Effort) {
 		return errors.New("models.suggestions.effort must be empty, none, minimal, low, medium, high, xhigh, max or ultra")
+	}
+	if err := engines.validateProvider(s.Engine, s.Provider); err != nil {
+		return fmt.Errorf("models.suggestions: %w", err)
 	}
 	return nil
 }
@@ -96,7 +105,7 @@ var approvedSmallModels = map[string]struct{ model, effort string }{
 // than a guessed engine.
 func (c Config) SmallModels() ([]Harness, error) {
 	if chosen := c.Models.Suggestions; chosen.Engine != "" {
-		m := c.Harness(chosen.Engine, chosen.Model, chosen.Effort)
+		m := c.HarnessOn(chosen.Engine, chosen.Provider, chosen.Model, chosen.Effort)
 		m.MaxTokens = 128
 		return []Harness{m}, nil
 	}

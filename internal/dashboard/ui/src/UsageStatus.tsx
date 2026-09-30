@@ -33,11 +33,20 @@ export function creditsLabel(credits?: EngineCredits) {
 
 /** What an engine's row says, only from what its CLI reported. */
 function describe(u: EngineUsage) {
-  const name = engineLabel(u.engine);
+  const name = u.label || engineLabel(u.engine);
   const credits = creditsLabel(u.credits);
   // Read first: the small models skip an engine resting for its rate limit
   // whether or not a figure could be read since.
   const limited = resetLabel(u.rate_limited_until);
+  // An API provider reports no usage; it is listed only while it rests.
+  if (u.provider)
+    return {
+      name,
+      tone: "tone-block",
+      summary: `rate-limited until ${limited}`,
+      shown: `Rate-limited until ${limited}`,
+      credits: "",
+    };
   if (u.missing || u.windows.length === 0)
     return {
       name,
@@ -134,7 +143,7 @@ export function UsageStatus() {
           const row = describe(u);
           return (
             <li
-              key={u.engine}
+              key={u.provider ? `${u.engine}/${u.provider}` : u.engine}
               className={`usage-row ${row.tone}`.trim()}
               aria-label={`${row.name}: ${row.summary}`}
             >

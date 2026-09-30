@@ -1,5 +1,10 @@
 import { expect, it } from "vitest";
-import { choicesFor, engineLabel, engineOptions } from "./engines";
+import {
+  choicesFor,
+  engineLabel,
+  engineOptions,
+  unavailableForRoles,
+} from "./engines";
 import { testChoices } from "./testEngines";
 
 it("labels an engine from its choice, or its id before they load", () => {
@@ -19,6 +24,21 @@ it("filters engines by what they may be used for", () => {
   expect(engines("cli")).toEqual(["codex", "claude", "grok"]);
   expect(engines("usage")).toEqual(["codex", "claude"]);
   expect(engines("compact")).toEqual(["codex"]);
+});
+
+it("lists the engines roles can't run on yet, with the server's reason", () => {
+  expect(unavailableForRoles(testChoices)).toEqual([]);
+  const reason =
+    "An API provider can't run team roles yet: it has no sandboxed workspace tools.";
+  expect(
+    unavailableForRoles(
+      testChoices.map((choice) =>
+        choice.engine === "openai-compatible"
+          ? { ...choice, roles_reason: reason }
+          : choice,
+      ),
+    ),
+  ).toEqual([{ id: "openai-compatible", label: "Another API", reason }]);
 });
 
 it("keeps a chosen engine that isn't offered for the use", () => {

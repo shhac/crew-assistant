@@ -105,8 +105,8 @@ func (s *smallModels) ask(ctx context.Context, models []config.Harness, prompt [
 			failure.attempts = append(failure.attempts, fmt.Errorf("%s can't write suggestions", m.Engine))
 			continue
 		}
-		if cause := s.restingCause(m.Engine); cause != nil {
-			failure.attempts = append(failure.attempts, fmt.Errorf("the %s CLI is skipped after a recent failure: %w", m.Engine, cause))
+		if cause := s.restingCause(restKey(m)); cause != nil {
+			failure.attempts = append(failure.attempts, fmt.Errorf("%s is skipped after a recent failure: %w", restName(m), cause))
 			continue
 		}
 		if s.outOfUsage != nil && s.outOfUsage(m) {
@@ -119,10 +119,10 @@ func (s *smallModels) ask(ctx context.Context, models []config.Harness, prompt [
 			return engine.Message{}, ctx.Err()
 		}
 		if err == nil {
-			s.setResting(m.Engine, restingEngine{})
+			s.setResting(restKey(m), restingEngine{})
 			return reply, nil
 		}
-		s.setResting(m.Engine, restingEngine{until: s.now().Add(s.rest), cause: err})
+		s.rested(m, err)
 		if s.recheck != nil {
 			s.recheck(m)
 		}
@@ -179,6 +179,33 @@ func (s *smallModels) verify(ctx context.Context, m config.Harness, reserve func
 		return ec, nil
 	}
 	return engine.Config{}, &notOfferedError{engine: m.Engine, model: m.Model}
+}
+
+// restKey is what a failure rests: a CLI engine, or one API route, so a free
+// model's rate limit on one provider or account leaves the others to try.
+func restKey(m config.Harness) string {
+	if m.APIProvider == "" {
+		return m.Engine
+	}
+	return m.Engine + "/" + apiRoute(m.APIProvider, m.BaseURL, m.APIKeyEnv)
+}
+
+// restName is how a skip names what rests.
+func restName(m config.Harness) string {
+	if m.APIProvider == "" {
+		return fmt.Sprintf("the %s CLI", m.Engine)
+	}
+	return fmt.Sprintf("the %s API provider", m.APIProvider)
+}
+
+// rested rests what m runs on after err: for the usual while, or as long as
+// a rate limit's Retry-After asks if that is longer.
+func (s *smallModels) rested(m config.Harness, err error) {
+	rest := s.rest
+	if facts, ok := harness.ErrorFacts(err); ok && facts.Cause == harness.CauseRateLimited {
+		rest = max(rest, facts.RetryAfter)
+	}
+	s.setResting(restKey(m), restingEngine{until: s.now().Add(rest), cause: err})
 }
 
 // restingCause is why the engine last failed while it is still resting, or nil

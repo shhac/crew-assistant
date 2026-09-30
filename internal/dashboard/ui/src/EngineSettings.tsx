@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import {
+  legacyProvider,
   section,
   withEngine,
+  type APIProviderSettings,
   type Config,
   type ConfigDefaults,
   type EffortParameter,
@@ -91,7 +93,173 @@ export function EngineSettings({
           Gateway and OpenRouter read reasoning.effort.
         </span>
       </label>
+      <APIProviders config={config} onChange={onChange} />
     </div>
+  );
+}
+
+/** A provider's id from its name: lower-case letters, digits and hyphens. */
+export function providerID(name: string) {
+  const id = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64)
+    .replace(/-+$/, "");
+  return id === legacyProvider ? `${id}-2` : id;
+}
+
+function providersOf(config: Config): APIProviderSettings[] {
+  const list = section(config.engines).providers;
+  return Array.isArray(list) ? (list as APIProviderSettings[]) : [];
+}
+
+/**
+ * Further named API providers beside the one above, such as OpenRouter next
+ * to a model on this machine. Each is an address, a key variable and where
+ * it reads reasoning effort; its id, which saved models name, follows its
+ * name until changed.
+ */
+function APIProviders({
+  config,
+  onChange,
+}: {
+  config: Config;
+  onChange: (value: Config) => void;
+}) {
+  const providers = providersOf(config);
+  const save = (next: APIProviderSettings[]) => {
+    const engines = { ...section(config.engines) };
+    if (next.length === 0) delete engines.providers;
+    else engines.providers = next;
+    onChange({ ...config, engines });
+  };
+  const change = (i: number, fields: Partial<APIProviderSettings>) =>
+    save(
+      providers.map((p, at) => {
+        if (at !== i) return p;
+        const next = { ...p, ...fields };
+        // Drop a blank effort parameter so the default applies.
+        if (!next.effort_parameter) delete next.effort_parameter;
+        return next;
+      }),
+    );
+  const rename = (i: number, name: string) => {
+    const p = providers[i];
+    const following = !p.id || p.id === providerID(p.name);
+    change(i, following ? { name, id: providerID(name) } : { name });
+  };
+  return (
+    <>
+      <h3>More API providers</h3>
+      <p className="hint">
+        Such as OpenRouter beside a model on this machine. Assistants and
+        suggestions can use a model on any of them.
+      </p>
+      {providers.map((p, i) => {
+        const key = `engines-providers-${i}`;
+        return (
+          <fieldset key={i} className="card form">
+            <legend className="sr-only">{p.name || "New API provider"}</legend>
+            <div className="panel-head">
+              <p>
+                <strong>{p.name || "New API provider"}</strong>
+              </p>
+              <button
+                type="button"
+                className="btn btn-quiet btn-sm btn-danger"
+                onClick={() => save(providers.filter((_, at) => at !== i))}
+                aria-label={`Remove API provider ${p.name || i + 1}`}
+              >
+                Remove
+              </button>
+            </div>
+            <label htmlFor={`${key}-name`}>
+              Name
+              <input
+                id={`${key}-name`}
+                value={p.name}
+                maxLength={80}
+                onChange={(e) => rename(i, e.target.value)}
+                autoComplete="off"
+              />
+            </label>
+            <label htmlFor={`${key}-id`}>
+              Id
+              <input
+                id={`${key}-id`}
+                value={p.id}
+                maxLength={64}
+                pattern="[a-z0-9][a-z0-9-]*"
+                onChange={(e) => change(i, { id: e.target.value })}
+                autoComplete="off"
+              />
+              <span className="hint">
+                What saved models name it by; changing it leaves them on a
+                provider that's gone.
+              </span>
+            </label>
+            <label htmlFor={`${key}-base_url`}>
+              API address
+              <input
+                type="url"
+                id={`${key}-base_url`}
+                value={p.base_url}
+                onChange={(e) => change(i, { base_url: e.target.value })}
+                placeholder="https://openrouter.ai/api/v1"
+              />
+            </label>
+            <label htmlFor={`${key}-api_key_env`}>
+              API key variable
+              <input
+                id={`${key}-api_key_env`}
+                value={p.api_key_env}
+                onChange={(e) => change(i, { api_key_env: e.target.value })}
+                pattern="[A-Za-z_][A-Za-z0-9_]*"
+                autoComplete="off"
+              />
+              <span className="hint">
+                The environment variable's name, never the key. Blank sends no
+                key, which only an API on this machine accepts.
+              </span>
+            </label>
+            <label htmlFor={`${key}-effort_parameter`}>
+              Reasoning effort is sent as
+              <select
+                id={`${key}-effort_parameter`}
+                value={
+                  p.effort_parameter === "reasoning.effort"
+                    ? "reasoning.effort"
+                    : ""
+                }
+                onChange={(e) =>
+                  change(i, {
+                    effort_parameter: e.target.value as EffortParameter,
+                  })
+                }
+              >
+                <option value="">reasoning_effort</option>
+                <option value="reasoning.effort">reasoning.effort</option>
+              </select>
+            </label>
+          </fieldset>
+        );
+      })}
+      <div className="actions">
+        <button
+          className="btn btn-sm"
+          type="button"
+          onClick={() =>
+            save([
+              ...providers,
+              { id: "", name: "", base_url: "", api_key_env: "" },
+            ])
+          }
+        >
+          Add an API provider
+        </button>
+      </div>
+    </>
   );
 }
 

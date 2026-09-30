@@ -15,21 +15,26 @@ export type ModelOption = {
   efforts_known?: boolean;
   is_default: boolean;
   context_window?: number;
+  /** The endpoint names it free; such models have tight rate limits. */
+  free?: boolean;
 };
 export type Catalog = {
   available: boolean;
   detail: string;
   engine: string;
+  /** The API provider listed, for a model on another API. */
+  provider?: string;
   models: ModelOption[];
   current: { model: string; effort: string };
   default: { model: string; effort: string };
 };
 
 /**
- * The models an engine offers, as the assistant's own settings find them.
+ * The models an engine offers, as the assistant's own settings find them;
+ * on another API, those of the provider named, or of the first with none.
  * With no engine (one whose models can't be listed) there is nothing to list.
  */
-export function useModelCatalog(engine: string) {
+export function useModelCatalog(engine: string, provider = "") {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -44,8 +49,9 @@ export function useModelCatalog(engine: string) {
     setLoading(true);
     setError("");
     setCatalog(null);
+    const on = provider ? `&provider=${encodeURIComponent(provider)}` : "";
     api<Catalog>(
-      `/api/models?profile=assistant&engine=${encodeURIComponent(engine)}`,
+      `/api/models?profile=assistant&engine=${encodeURIComponent(engine)}${on}`,
       {
         signal: controller.signal,
       },
@@ -66,7 +72,7 @@ export function useModelCatalog(engine: string) {
       active = false;
       controller.abort();
     };
-  }, [engine, revision]);
+  }, [engine, provider, revision]);
   const options =
     catalog?.available && catalog.engine === engine ? catalog.models : [];
   return {
@@ -80,14 +86,17 @@ export function useModelCatalog(engine: string) {
 
 /**
  * How a model is named in a list: with the concrete model an alias selects
- * today, and marked if recommended or the default.
+ * today, and marked if free, recommended or the default.
  */
 export function modelLabel(option: ModelOption, catalog: Catalog | null) {
   const concrete = option.resolved;
-  const name =
+  const named =
     concrete && concrete !== option.id && concrete !== option.name
       ? `${option.name} · ${concrete}`
       : option.name;
+  // OpenRouter's free variants often say so in their name already.
+  const name =
+    option.free && !/\bfree\b/i.test(named) ? `${named} (free)` : named;
   if (option.id === catalog?.default.model) return `${name} (recommended)`;
   if (option.is_default)
     return `${name} (${engineLabel(catalog?.engine ?? "")} default)`;

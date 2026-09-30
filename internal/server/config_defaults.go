@@ -36,11 +36,14 @@ type engineChoice struct {
 	CLI       bool   `json:"cli"`
 	Assistant bool   `json:"assistant"`
 	Roles     bool   `json:"roles"`
-	Small     bool   `json:"small"`
-	Compact   bool   `json:"compact"`
-	Usage     bool   `json:"usage"`
-	Models    bool   `json:"models"`
-	Efforts   bool   `json:"efforts"`
+	// RolesReason is why team roles can't run on it, for the owner to read
+	// beside the choice.
+	RolesReason string `json:"roles_reason,omitempty"`
+	Small       bool   `json:"small"`
+	Compact     bool   `json:"compact"`
+	Usage       bool   `json:"usage"`
+	Models      bool   `json:"models"`
+	Efforts     bool   `json:"efforts"`
 	// Browser is whether QA on it can use the browser the engine ships.
 	Browser bool `json:"browser"`
 }
@@ -49,13 +52,30 @@ func engineChoices() []engineChoice {
 	choices := []engineChoice{}
 	for _, e := range harness.Engines() {
 		name := string(e)
+		roles, rolesReason := config.RoleSupport(name)
 		choices = append(choices, engineChoice{
 			Engine: name, Label: config.EngineLabel(name), CLI: e.Transport() == harness.CLITransport,
-			Assistant: config.Supports(name, config.UseAssistant), Roles: config.Supports(name, config.UseRoles),
+			Assistant: config.Supports(name, config.UseAssistant), Roles: roles, RolesReason: rolesReason,
 			Small: config.Supports(name, config.UseSmall), Compact: config.Supports(name, config.UseCompact),
 			Usage: config.Supports(name, config.UseUsage), Models: config.Supports(name, config.UseModels),
 			Efforts: config.Supports(name, config.UseEfforts), Browser: config.Supports(name, config.UseBrowser),
 		})
+	}
+	return choices
+}
+
+// providerChoice is an API provider a model on another API can run on.
+type providerChoice struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// providerChoices are the saved API providers, engines.openai-compatible
+// first.
+func providerChoices(cfg config.Config) []providerChoice {
+	choices := []providerChoice{}
+	for _, p := range cfg.Engines.APIProviders() {
+		choices = append(choices, providerChoice{ID: p.ID, Label: p.Label()})
 	}
 	return choices
 }

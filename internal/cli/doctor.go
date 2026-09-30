@@ -47,8 +47,7 @@ func registerDoctor(root *cobra.Command, o *options) {
 		}
 		checks = append(checks, assistant...)
 		if _, ok := cfg.Engines.CLI(seated.Engine); !ok && seated.Engine != "" {
-			_, apiKeyEnv := cfg.Engines.Endpoint()
-			refs = append(refs, apiKeyEnv)
+			refs = append(refs, seated.APIKeyEnv)
 		}
 		checks = append(checks, roleSandboxChecks(cmd.Context(), cfg, o.statePath)...)
 		for _, ref := range refs {

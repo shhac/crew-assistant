@@ -1,6 +1,11 @@
 package config
 
-import harness "github.com/shhac/lib-agent-harness"
+import (
+	"fmt"
+	"strings"
+
+	harness "github.com/shhac/lib-agent-harness"
+)
 
 // Use is something the owner chooses an engine for.
 type Use string
@@ -37,8 +42,8 @@ func Supports(engine string, use Use) bool {
 	case UseAssistant:
 		return harness.Support(e, harness.Complete, harness.Tools).Usable()
 	case UseRoles:
-		// A role works in its own sandbox and reaches the daemon's tools.
-		return harness.Support(e, harness.Session, harness.Sandbox).Usable() && harness.Support(e, harness.Session, harness.Tools).Usable()
+		ok, _ := RoleSupport(engine)
+		return ok
 	case UseSmall:
 		return harness.Support(e, harness.Complete, harness.Available).Usable()
 	case UseCompact:
@@ -55,6 +60,44 @@ func Supports(engine string, use Use) bool {
 		return Supports(engine, UseRoles) && harness.Support(e, harness.Session, harness.Loopback).Usable()
 	}
 	return false
+}
+
+// roleSupport is what the harness claims a session on an engine offers; tests
+// replace it to stand for a harness that claims more.
+var roleSupport = harness.Support
+
+// RoleSupport says whether team roles can run on engine and, when they
+// can't, why in the owner's words. A role works in its own sandbox and
+// reaches the daemon's tools, so every role needs both, on a CLI or an API
+// provider alike, until the harness claims less is enough for a read-only
+// role.
+func RoleSupport(engine string) (ok bool, reason string) {
+	e := harness.Engine(engine)
+	for _, feature := range []harness.Feature{harness.Sandbox, harness.Tools} {
+		c := roleSupport(e, harness.Session, feature)
+		if c.Usable() {
+			continue
+		}
+		if e.Transport() == harness.APITransport {
+			return false, "An API provider can't run team roles yet: it has no sandboxed workspace tools."
+		}
+		return false, fmt.Sprintf("%s can't run team roles: %s.", EngineLabel(engine), c.Reason)
+	}
+	return true, ""
+}
+
+// CheckRoleEngine refuses an engine team roles can't run on, saying which
+// they can and, for a known engine, why not this one.
+func CheckRoleEngine(engine string) error {
+	ok, reason := RoleSupport(engine)
+	if ok {
+		return nil
+	}
+	err := fmt.Errorf("engine must be %s", strings.Join(EnginesFor(UseRoles), " or "))
+	if harness.Engine(engine).Transport() == "" {
+		return err
+	}
+	return fmt.Errorf("%w. %s", err, reason)
 }
 
 // EnginesFor lists the engines that can be chosen for use, in a stable

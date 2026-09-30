@@ -20,7 +20,13 @@ const (
 // History resumes there too. The rest is what the owner is shown about it.
 type ChatSession struct {
 	Engine string `json:"engine"`
-	Model  string `json:"model"`
+	// Provider is the id of the named API provider an API session was held
+	// with, Endpoint the address it was reached at and KeyEnv the variable
+	// its key was read from, never the key; all empty for a CLI.
+	Provider string `json:"provider,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
+	KeyEnv   string `json:"key_env,omitempty"`
+	Model    string `json:"model"`
 	// Ref is the harness's reference to resume the session by. It names
 	// folders on this machine and never leaves the daemon.
 	Ref       json.RawMessage `json:"ref,omitempty"`

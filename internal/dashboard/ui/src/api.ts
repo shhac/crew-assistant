@@ -121,6 +121,8 @@ export interface MemberInput {
 /** An assistant's model: any engine, the API one included. */
 export interface AssistantModel {
   engine: string;
+  /** The API provider a model on another API runs on; absent is the first. */
+  provider?: string;
   model: string;
   effort: string;
   max_tokens: number;
@@ -803,12 +805,30 @@ export type Config = Record<string, unknown> & {
   /**
    * Keyed by engine: any CLI engine (bin, home, usage_floor,
    * on_unknown_usage) and "openai-compatible" (base_url, api_key_env,
-   * effort_parameter).
+   * effort_parameter); "providers" holds the named API providers.
    */
   engines?: Record<string, unknown>;
 };
 /** Where an API reads reasoning effort; blank is top-level reasoning_effort. */
 export type EffortParameter = "" | "reasoning_effort" | "reasoning.effort";
+/** A named OpenAI-compatible endpoint beside the single API setting. */
+export interface APIProviderSettings {
+  id: string;
+  name: string;
+  base_url: string;
+  api_key_env: string;
+  effort_parameter?: EffortParameter;
+}
+/** The id the single API setting has among the providers. */
+export const legacyProvider = "openai-compatible";
+/** An API provider a model can run on, as the saved settings name it. */
+export interface ProviderChoice {
+  id: string;
+  label: string;
+}
+export function getProviders() {
+  return api<ProviderChoice[]>("/api/providers");
+}
 export class APIError extends Error {
   constructor(
     message: string,
@@ -905,6 +925,12 @@ export interface UsageWindow {
 /** What one engine's login reports it has left. */
 export interface EngineUsage {
   engine: string;
+  /**
+   * An API provider, listed only while it rests for its rate limit, and
+   * how it is named.
+   */
+  provider?: string;
+  label?: string;
   level: UsageLevel;
   windows: UsageWindow[];
   /** When a low or exhausted level eases, when the CLI said. */
@@ -948,6 +974,8 @@ export interface EngineChoice {
   cli: boolean;
   assistant: boolean;
   roles: boolean;
+  /** Why team roles can't run on it, when they can't. */
+  roles_reason?: string;
   /** Suggestions and loading lines. */
   small: boolean;
   /** An implementer's conversation on it can be compacted from outside. */

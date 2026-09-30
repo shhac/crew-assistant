@@ -255,6 +255,14 @@ func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Resul
 		}
 		return a.Core.SetChatModelStatus(ctx, turn.ID, "Earlier context summarized; continuing with saved progress.", time.Time{})
 	}
+	// The config is read once for the turn: a rate limit rests the provider
+	// the turn's requests went to, whatever Settings say by the time it ends.
+	result, err := a.runChatTurnOn(ctx, turn, ec)
+	return result, a.restRateLimited(cfg, ec, err)
+}
+
+// runChatTurnOn runs a chat turn on the model ec reaches.
+func (a *App) runChatTurnOn(ctx context.Context, turn core.ChatTurn, ec engine.Config) (engine.Result, error) {
 	// On a model session the CLI keeps the conversation and compacts it
 	// itself; the turn-by-turn way below sends everything each time.
 	if result, err := a.runSessionTurn(ctx, turn, ec); !errors.Is(err, errNoChatSession) {
@@ -302,7 +310,7 @@ func (a *App) assistantConfig(ctx context.Context, cfg config.Config) engine.Con
 		return a.Core.ReserveModelCall(ctx, a.Config().Limits.MaxModelCallsPerDay)
 	}
 	if snap, err := a.Core.Snapshot(ctx); err == nil {
-		ec.MaxContextBytes = contextBudget(snap.ModelWindow(ec.Engine(), ec.Model), ec.MaxOutputTokens)
+		ec.MaxContextBytes = contextBudget(snap.ModelWindow(modelHome(ec), ec.Model), ec.MaxOutputTokens)
 	}
 	return ec
 }

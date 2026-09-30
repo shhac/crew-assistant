@@ -1,7 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { FileSystemPicker } from "./FileSystemPicker";
 import { isCode } from "./landing";
-import { engineOptions, useEngineChoices } from "./engines";
+import {
+  engineOptions,
+  unavailableForRoles,
+  useEngineChoices,
+} from "./engines";
 import { teamChoice, teamWith } from "./members";
 import { projectKind } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
@@ -293,6 +297,9 @@ function EngineSlot({
   onChange: (value: string) => void;
 }) {
   const choices = useEngineChoices();
+  const offered = engineOptions(choices, "roles", value);
+  // The engines a role can't run on yet are shown, and why.
+  const unavailable = unavailableForRoles(choices, offered);
   return (
     <fieldset className="team-slot">
       <legend>{label}</legend>
@@ -303,14 +310,27 @@ function EngineSlot({
           className="field"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          aria-describedby={
+            unavailable.length ? `${id}-unavailable` : undefined
+          }
         >
-          {engineOptions(choices, "roles", value).map((engine) => (
+          {offered.map((engine) => (
             <option key={engine.id} value={engine.id}>
               {engine.label}
             </option>
           ))}
+          {unavailable.map((item) => (
+            <option key={item.id} value={item.id} disabled>
+              {item.label} (not for team roles yet)
+            </option>
+          ))}
         </select>
       </label>
+      {unavailable.length > 0 && (
+        <p className="hint" id={`${id}-unavailable`}>
+          {unavailable.map((item) => item.reason).join(" ")}
+        </p>
+      )}
     </fieldset>
   );
 }

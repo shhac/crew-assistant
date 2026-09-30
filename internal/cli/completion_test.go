@@ -42,6 +42,8 @@ func TestConfigKeysCoverTheFile(t *testing.T) {
 	// Grok reports no usage windows, so it has no floors to set.
 	c.Engines.Grok = config.CLIEngine{Bin: "x", Home: "/x"}
 	c.Engines.OpenAICompatible.EffortParameter = "reasoning.effort"
+	c.Engines.Providers = []config.Provider{{ID: "openrouter", Name: "OpenRouter"}}
+	c.Models.Suggestions.Provider = "openrouter"
 	raw, _ := json.Marshal(c)
 	var object map[string]any
 	_ = json.Unmarshal(raw, &object)

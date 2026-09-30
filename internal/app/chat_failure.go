@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -14,6 +15,10 @@ import (
 // into durable conversation metadata.
 func chatFailureReason(err error) string {
 	facts, classified := harness.ErrorFacts(err)
+	var limited *providerRateLimit
+	if errors.As(err, &limited) {
+		return fmt.Sprintf("%s is rate-limiting the model after bounded recovery. Free models have tight limits: wait until the time shown beside usage, or choose another model in Settings. Recorded actions were preserved; no automatic replay was attempted.", limited.provider)
+	}
 	if classified && facts.Code == harness.CodeKeychainUnavailable {
 		return "Your login keychain is locked, so the model's CLI wasn't started. Unlock it, then send again. Recorded actions were preserved; no automatic replay was attempted."
 	}

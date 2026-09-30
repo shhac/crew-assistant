@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,13 +14,24 @@ import (
 )
 
 type modelCatalog struct {
-	Profile   string          `json:"profile"`
-	Engine    string          `json:"engine"`
-	Available bool            `json:"available"`
-	Detail    string          `json:"detail"`
-	Models    []catalog.Model `json:"models"`
-	Current   modelSelection  `json:"current"`
-	Default   modelSelection  `json:"default"`
+	Profile string `json:"profile"`
+	Engine  string `json:"engine"`
+	// Provider is the API provider listed, for a model on another API.
+	Provider  string         `json:"provider,omitempty"`
+	Available bool           `json:"available"`
+	Detail    string         `json:"detail"`
+	Models    []listedModel  `json:"models"`
+	Current   modelSelection `json:"current"`
+	Default   modelSelection `json:"default"`
+}
+
+// listedModel is a model as the picker shows it, marked when it costs
+// nothing to use.
+type listedModel struct {
+	catalog.Model
+	// Free is a model the endpoint names as free, as OpenRouter's :free
+	// variants are; they come with tight rate limits.
+	Free bool `json:"free,omitempty"`
 }
 type modelSelection struct {
 	Model  string `json:"model"`
@@ -54,7 +66,7 @@ func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
 		// The cache is keyed by the CLI and login too, so changing either
 		// discovers again.
 		selected, defaults := cfg.AssistantHarness(), config.DefaultProfile().Model
-		result := modelCatalog{Profile: profile, Engine: selected.Engine, Models: []catalog.Model{}, Current: modelSelection{selected.Model, selected.Effort}, Default: modelSelection{defaults.Model, defaults.Effort}}
+		result := modelCatalog{Profile: profile, Engine: selected.Engine, Models: []listedModel{}, Current: modelSelection{selected.Model, selected.Effort}, Default: modelSelection{defaults.Model, defaults.Effort}}
 		if a.Demo {
 			result.Detail = "Model discovery is unavailable in the demo."
 			respond(w, 200, result)
@@ -67,6 +79,16 @@ func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
 			}
 			selected = cfg.Harness(preview, selected.Model, selected.Effort)
 			result.Engine = preview
+		}
+		if provider := r.URL.Query().Get("provider"); provider != "" {
+			if _, ok := cfg.Engines.APIProvider(provider); !ok || selected.Engine != string(harness.OpenAICompatible) {
+				fail(w, http.StatusBadRequest, "unknown API provider")
+				return
+			}
+			selected = cfg.HarnessOn(selected.Engine, provider, selected.Model, selected.Effort)
+		}
+		if selected.APIProvider != "" {
+			result.Provider = selected.APIProvider
 		}
 		if !config.Supports(selected.Engine, config.UseModels) {
 			result.Detail = "Use advanced settings for this provider's model. The saved selection is unchanged."
@@ -97,8 +119,8 @@ func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
 		mu.Unlock()
 		result.Available = entry.detail == ""
 		result.Detail = entry.detail
-		if entry.value != nil {
-			result.Models = entry.value
+		for _, m := range entry.value {
+			result.Models = append(result.Models, listedModel{Model: m, Free: strings.HasSuffix(m.ID, ":free")})
 		}
 		if result.Available {
 			result.Detail = "Models and reasoning options reported by your selected CLI installation."

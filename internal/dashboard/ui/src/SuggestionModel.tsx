@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { section, type Config, type EngineChoice } from "./api";
 import {
   choiceFor,
@@ -11,6 +12,7 @@ import {
   useModelCatalog,
   type ModelOption,
 } from "./modelCatalog";
+import { savedProvider, shownProvider, useProviders } from "./providers";
 
 const group = "suggestions";
 
@@ -29,22 +31,28 @@ export function SuggestionModel({
   const models = section(config.models);
   const chosen = section(models[group]);
   const value = (key: string) => String(chosen[key] ?? "");
-  const set = (next: Record<string, unknown>) =>
-    onChange({
-      ...config,
-      models: { ...models, [group]: { ...chosen, ...next } },
-    });
+  const set = (next: Record<string, unknown>) => {
+    const merged = { ...chosen, ...next };
+    // No provider is the single API setting, and a CLI has none.
+    if (!merged.provider) delete merged.provider;
+    onChange({ ...config, models: { ...models, [group]: merged } });
+  };
   const choices = useEngineChoices();
   const engine = value("engine");
   const choice = choiceFor(engine, choices);
   const listable = !!choice?.models;
   const api = choice?.cli === false;
+  const providers = useProviders(api);
+  const provider = api ? value("provider") : "";
   const { catalog, options, error, loading, refresh } = useModelCatalog(
     listable ? engine : "",
+    provider,
   );
+  const [typing, setTyping] = useState(false);
   // An API's model is typed in until its list offers some; a CLI keeps its
-  // list, which offers the saved model while it can't be read.
-  const typed = !listable || (api && options.length === 0);
+  // list, which offers the saved model while it can't be read. Any model can
+  // be typed in instead.
+  const typed = typing || !listable || (api && options.length === 0);
   const selected = options.find((option) => option.id === value("model"));
   const efforts = selected?.efforts || [];
   const pickEffort =
@@ -61,9 +69,15 @@ export function SuggestionModel({
         <select
           id={`${group}-engine`}
           value={engine}
-          onChange={(e) =>
-            set({ engine: e.target.value, model: "", effort: "" })
-          }
+          onChange={(e) => {
+            setTyping(false);
+            set({
+              engine: e.target.value,
+              provider: "",
+              model: "",
+              effort: "",
+            });
+          }}
         >
           <option value="">The small models (recommended)</option>
           {engineOptions(choices, "small", engine).map((option) => (
@@ -78,6 +92,31 @@ export function SuggestionModel({
             : smallModelsHint(smallLogins(choices))}
         </span>
       </label>
+      {api && providers.length > 1 && (
+        <label htmlFor={`${group}-provider`}>
+          Provider
+          <select
+            id={`${group}-provider`}
+            value={shownProvider(provider)}
+            onChange={(e) =>
+              set({ provider: savedProvider(e.target.value), model: "" })
+            }
+          >
+            {!providers.some((p) => p.id === shownProvider(provider)) && (
+              <option value={provider}>{provider} (saved)</option>
+            )}
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <span className="hint">
+            Where the model is reached; each provider's address and key are
+            under Engines.
+          </span>
+        </label>
+      )}
       {engine && typed && (
         <label htmlFor={`${group}-model`}>
           Model
@@ -89,8 +128,9 @@ export function SuggestionModel({
             onChange={(e) => set({ model: e.target.value.trim() })}
           />
           <span className="hint">
-            The model's id at the API address under Engines. Each call is kept
-            to a short reply and billed by the API.
+            {api
+              ? "The model's id at the API address under Engines. Each call is kept to a short reply and billed by the API."
+              : "The model's id, as its login names it."}
           </span>
         </label>
       )}
@@ -182,6 +222,25 @@ export function SuggestionModel({
             </p>
           )}
           <div className="actions">
+            {typing ? (
+              <button
+                className="btn btn-sm"
+                type="button"
+                onClick={() => setTyping(false)}
+              >
+                Choose from the list
+              </button>
+            ) : (
+              !typed && (
+                <button
+                  className="btn btn-sm"
+                  type="button"
+                  onClick={() => setTyping(true)}
+                >
+                  Enter a model id
+                </button>
+              )
+            )}
             <button
               className="btn btn-sm"
               type="button"

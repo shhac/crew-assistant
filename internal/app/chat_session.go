@@ -185,7 +185,10 @@ func (a *App) openChat(ctx context.Context, key string, record *core.ChatSession
 	}
 	a.closeChat()
 	var ref *session.Ref
-	if len(rec.Ref) > 0 {
+	// A conversation kept on one engine or endpoint is never carried on at
+	// another: an API's transcript would be sent to a provider it wasn't
+	// held with.
+	if len(rec.Ref) > 0 && sameModelHome(rec, spec.Config) {
 		var stored session.Ref
 		if json.Unmarshal(rec.Ref, &stored) == nil {
 			ref = &stored
@@ -203,7 +206,7 @@ func (a *App) openChat(ctx context.Context, key string, record *core.ChatSession
 	default:
 		rec = core.ChatSession{Opened: core.SessionFresh, StartedAt: time.Now().UTC()}
 	}
-	rec.Engine, rec.Model = spec.Config.Engine(), spec.Config.Model
+	rec.Engine, rec.Provider, rec.Endpoint, rec.KeyEnv, rec.Model = spec.Config.Engine(), spec.Config.APIProvider, modelEndpoint(spec.Config), spec.Config.APIKeyEnv, spec.Config.Model
 	live = &liveChat{model: model, key: key, used: time.Now(), unknown: model.Recovered().UnknownOutcomes}
 	a.sessions.mu.Lock()
 	a.sessions.live = live
@@ -216,7 +219,7 @@ func (a *App) openChat(ctx context.Context, key string, record *core.ChatSession
 // open is new and its engine can't compact its own history. Such a session
 // is only ever set aside, so what it is started from has to be current.
 func (a *App) foldBeforeNewSession(ctx context.Context, currentID string, ec engine.Config, key string, record *core.ChatSession) error {
-	resumable := record != nil && len(record.Ref) > 0 && record.Engine == ec.Engine()
+	resumable := record != nil && len(record.Ref) > 0 && sameModelHome(*record, ec)
 	if selfCompacting(ec) || resumable {
 		return nil
 	}
@@ -228,6 +231,12 @@ func (a *App) foldBeforeNewSession(ctx context.Context, currentID string, ec eng
 	}
 	_, err := a.summarizeChat(ctx, currentID, ec, sessionExchanges, 1)
 	return err
+}
+
+// sameModelHome says whether a saved session was held on the engine, and for
+// an API the route, that ec runs on, so it can be carried on there.
+func sameModelHome(rec core.ChatSession, ec engine.Config) bool {
+	return rec.Engine == ec.Engine() && apiRoute(rec.Provider, rec.Endpoint, rec.KeyEnv) == apiRoute(ec.APIProvider, modelEndpoint(ec), ec.APIKeyEnv)
 }
 
 // selfCompacting says whether ec's engine compacts a session's history
@@ -331,7 +340,7 @@ func (a *App) closeIdleChat(now time.Time) {
 // a different session.
 func chatKey(conversation string, ec engine.Config, instructions string) string {
 	sum := sha256.Sum256([]byte(instructions))
-	return strings.Join([]string{conversation, ec.Engine(), ec.Model, ec.Effort, hex.EncodeToString(sum[:8])}, "|")
+	return strings.Join([]string{conversation, modelHome(ec), ec.Model, ec.Effort, hex.EncodeToString(sum[:8])}, "|")
 }
 
 // sessionTool runs a tool the model called, with the same checks and the

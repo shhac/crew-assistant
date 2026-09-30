@@ -229,8 +229,8 @@ func (p Playbook) Validate() error {
 			return errors.New("each role needs a distinct name")
 		}
 		names[key] = true
-		if !config.Supports(r.Engine, config.UseRoles) {
-			return fmt.Errorf("role %s: engine must be %s", r.Name, strings.Join(config.EnginesFor(config.UseRoles), " or "))
+		if err := config.CheckRoleEngine(r.Engine); err != nil {
+			return fmt.Errorf("role %s: %w", r.Name, err)
 		}
 		if err := seatKinds(r); err != nil {
 			return err
