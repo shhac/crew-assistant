@@ -95,13 +95,70 @@
   font-size: 13px;
 }
 
-.landed-today {
+.done-today {
+  font-size: 13px;
+}
+
+.done-today-summary {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 4px 10px;
+  width: 100%;
   padding: 10px 16px;
-  font-size: 13px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.done-today-summary::after {
+  content: "›";
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform 0.12s ease;
+}
+
+.done-today-summary[aria-expanded="true"]::after {
+  transform: rotate(90deg);
+}
+
+.done-today-list {
+  border-top: 1px solid var(--line);
+}
+
+.done-today-row {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 16px;
+  color: var(--text);
+}
+
+.done-today-row:hover {
+  background: var(--panel);
+  text-decoration: none;
+}
+
+.done-today-title {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.done-today-title,
+.done-today-project {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.done-today-project {
+  flex: 0 1 auto;
+  max-width: 40%;
 }
 
 .past-decisions > summary {

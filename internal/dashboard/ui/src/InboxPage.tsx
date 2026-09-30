@@ -8,6 +8,7 @@ import {
   dateLabel,
   recordedTime,
   sinceLabel,
+  TaskRef,
   useAction,
 } from "./ui";
 import {
@@ -52,7 +53,9 @@ export function InboxPage({
   const inProgress = state.tasks
     .filter(underWay)
     .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
-  const landed = state.tasks.filter(landedToday);
+  const landed = state.tasks
+    .filter(landedToday)
+    .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
   const past = state.decisions
     .filter((d) => d.status === "resolved" || d.status === "dismissed")
     .reverse();
@@ -127,21 +130,7 @@ export function InboxPage({
           )}
         </section>
       )}
-      {landed.length > 0 && (
-        <p className="landed-today card">
-          <Pill tone="done" dot>
-            {landed.length} done today
-          </Pill>
-          <span className="landed-names">
-            {landed.map((t, i) => (
-              <span key={t.id}>
-                {i > 0 && " · "}
-                <a href={requestHref(t.project_id, t.id)}>{t.objective}</a>
-              </span>
-            ))}
-          </span>
-        </p>
-      )}
+      {landed.length > 0 && <LandedToday tasks={landed} project={project} />}
       {past.length > 0 && <PastDecisions decisions={past} state={state} />}
     </div>
   );
@@ -175,6 +164,68 @@ function ProgressRow({
         </span>
       </a>
     </li>
+  );
+}
+
+function projectCounts(tasks: Task[], title: (id: string) => string) {
+  const counts = new Map<string, number>();
+  for (const t of tasks) {
+    const name = title(t.project_id);
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1]);
+}
+
+/**
+ * Finished work is worth a glance, not a read: a count per project until the
+ * owner asks for the list.
+ */
+function LandedToday({
+  tasks,
+  project,
+}: {
+  tasks: Task[];
+  project: (id?: string) => Project | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const title = (id: string) => project(id)?.title ?? "Other";
+  const counts = projectCounts(tasks, title)
+    .map(([name, count]) => `${name} ${count}`)
+    .join(" · ");
+  return (
+    <section className="done-today card" aria-label="Done today">
+      <button
+        type="button"
+        className="done-today-summary"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <Pill tone="done" dot>
+          {tasks.length} done today
+        </Pill>
+        <span className="muted">{counts}</span>
+      </button>
+      {open && (
+        <ul className="rows done-today-list">
+          {tasks.map((t) => (
+            <li key={t.id}>
+              <a
+                className="done-today-row"
+                href={requestHref(t.project_id, t.id)}
+              >
+                <TaskRef task={t} />
+                <span className="done-today-title" title={t.objective}>
+                  {t.objective}
+                </span>
+                <span className="done-today-project muted small">
+                  {title(t.project_id)}
+                </span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
