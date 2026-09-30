@@ -2060,9 +2060,11 @@ describe("the project's tabs", () => {
     expect(within(team).queryByText("make check")).toBeNull();
     expect(within(team).queryByRole("button", { name: "Edit" })).toBeNull();
     expect(
-      within(within(team).getByRole("list", { name: "Roles" }))
-        .getAllByRole("listitem")
-        .map((li) => li.querySelector(".seat-role")?.textContent),
+      [
+        ...within(team)
+          .getByRole("list", { name: "Roles" })
+          .querySelectorAll<HTMLLIElement>(":scope > li"),
+      ].map((li) => li.querySelector(".seat-role")?.textContent),
     ).toEqual([
       "Researcher",
       "Designer",
@@ -2125,11 +2127,18 @@ describe("the project's tabs", () => {
     expect(ada.getAttribute("href")).toBe("#/team/m1");
     expect(ada.querySelector("img")?.getAttribute("width")).toBe("20");
     expect(seat("Implementer").querySelector(".seat-who")?.textContent).toBe(
-      "Ada",
+      "",
     );
+    expect(
+      within(
+        within(seat("Implementer")).getByRole("list", {
+          name: "Implementer seats",
+        }),
+      ).getByRole("link", { name: "Ada" }),
+    ).toBeTruthy();
     expect(within(team).queryByRole("link", { name: "Reviewer" })).toBeNull();
   });
-  it("lists each member on the team with every role they hold in it", () => {
+  it("shows every role a member's seat holds, in one list of roles", () => {
     const ada: Role = {
       name: "Ada",
       kinds: ["implementer", "researcher"],
@@ -2142,19 +2151,20 @@ describe("the project's tabs", () => {
       { members: crew },
       { tab: "team" },
     );
-    const roles = screen.getByRole("definition");
-    expect(roles.textContent).toBe("Researcher and implementer");
-    const list = roles.closest("dl")!;
-    expect(within(list).getByRole("link", { name: "Ada" })).toBeTruthy();
-    expect(within(list).queryByText("Reviewer")).toBeNull();
-    cleanup();
-    show(project(), { members: crew }, { tab: "team" });
+    expect(
+      within(seat("Implementer")).getByText(
+        "Researcher and implementer · Claude",
+      ),
+    ).toBeTruthy();
     expect(screen.queryByText("Members on this team")).toBeNull();
+    expect(screen.queryByRole("list", { name: "Seats" })).toBeNull();
   });
   const seat = (name: string) =>
-    within(screen.getByRole("list", { name: "Roles" }))
-      .getAllByRole("listitem")
-      .find((li) => li.querySelector(".seat-role")?.textContent === name)!;
+    [
+      ...screen
+        .getByRole("list", { name: "Roles" })
+        .querySelectorAll<HTMLLIElement>(":scope > li"),
+    ].find((li) => li.querySelector(".seat-role")?.textContent === name)!;
   it("lists who fills each role, offering only members of the right kind", () => {
     show(staffed(), { members: crew }, { tab: "team" });
     expect(
@@ -2216,7 +2226,7 @@ describe("the project's tabs", () => {
           within(seat(role)).getByRole("link", { name: "Ada" }),
         ).toBeTruthy();
         expect(
-          within(seat(role)).getByText("· Researcher and implementer · Claude"),
+          within(seat(role)).getByText("Researcher and implementer · Claude"),
         ).toBeTruthy();
       }
     });
@@ -2439,18 +2449,20 @@ describe("the project's tabs", () => {
       within(implementer).getByRole("button", { name: "Unassign Implementer" }),
     ).toBeTruthy();
   });
-  it("adds a seat filled like another, and removes one only while another holds its roles", async () => {
-    const seats = () =>
-      within(screen.getByRole("list", { name: "Seats" })).getAllByRole(
-        "listitem",
-      );
+  it("sets how many seats a role has, removing one only while another holds its roles", async () => {
     show(staffed(), { members: crew }, { tab: "team" });
+    const count = (role: string) =>
+      within(seat(role)).getByRole("group", { name: `How many ${role} seats` });
+    expect(count("Implementer").textContent).toContain("1 seat");
     expect(
-      seats().map((li) => li.querySelector(".seat-role")?.textContent),
-    ).toEqual(["Ada", "Reviewer", "QA"]);
-    expect(screen.queryByRole("button", { name: /^Remove / })).toBeNull();
+      within(count("Implementer")).getByRole("button", {
+        name: "One fewer Implementer seat",
+      }),
+    ).toHaveProperty("disabled", true);
     fireEvent.click(
-      screen.getByRole("button", { name: "Add a seat like Ada" }),
+      within(count("Implementer")).getByRole("button", {
+        name: "One more Implementer seat",
+      }),
     );
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(writes()).toEqual([
@@ -2472,8 +2484,21 @@ describe("the project's tabs", () => {
       { members: crew },
       { tab: "team" },
     );
-    expect(screen.getByRole("button", { name: "Remove Ada" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Remove Ada #2" }));
+    expect(count("Implementer").textContent).toContain("2 seats");
+    expect(
+      within(
+        within(seat("Implementer")).getByRole("list", {
+          name: "Implementer seats",
+        }),
+      )
+        .getAllByRole("link")
+        .map((a) => a.textContent),
+    ).toEqual(["Ada", "Ada #2"]);
+    fireEvent.click(
+      within(count("Implementer")).getByRole("button", {
+        name: "One fewer Implementer seat",
+      }),
+    );
     await waitFor(() =>
       expect(writes().at(-1)).toMatchObject({
         path: "/api/projects/p1/team/seats/Ada%20%232",
@@ -2481,8 +2506,25 @@ describe("the project's tabs", () => {
       }),
     );
     expect(
-      screen.queryByRole("button", { name: "Remove Reviewer" }),
+      within(count("Reviewer")).getByRole("button", {
+        name: "One fewer Reviewer seat",
+      }),
+    ).toHaveProperty("disabled", true);
+    expect(
+      within(seat("PM")).queryByRole("group", { name: "How many PM seats" }),
     ).toBeNull();
+  });
+  it("shows one role at a time when asked", () => {
+    show(staffed(), { members: crew }, { tab: "team" });
+    const show_ = screen.getByRole("group", { name: "Show" });
+    fireEvent.click(within(show_).getByRole("button", { name: "Reviewer" }));
+    expect(seat("Reviewer")).toBeTruthy();
+    expect(seat("Implementer")).toBeUndefined();
+    expect(
+      within(show_).getByRole("button", { name: "Reviewer" }),
+    ).toHaveProperty("ariaPressed", "true");
+    fireEvent.click(within(show_).getByRole("button", { name: "All roles" }));
+    expect(seat("Implementer")).toBeTruthy();
   });
   it("offers no QA for a writing team and asks the engine only of roles no member fills", async () => {
     show(

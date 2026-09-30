@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { href, memberHref, projectHref, requestHref } from "./router";
 import { isCode } from "./landing";
 import { engineLabel } from "./engines";
@@ -57,20 +58,18 @@ export function TeamTab({
   refresh: () => Promise<void>;
 }) {
   const playbook = project.playbook;
-  const members = state.members;
   return (
     <div className="tab-stack">
       <section className="tab-panel card" aria-label="Team">
         <h2>Team</h2>
         {playbook ? (
           <>
-            <Seats
+            <Roles
               project={project}
               playbook={playbook}
               state={state}
               refresh={refresh}
             />
-            <MemberRoles playbook={playbook} members={members} />
             {isCode(playbook) && (
               <QABrowser
                 project={project}
@@ -93,10 +92,12 @@ export function TeamTab({
 }
 
 /**
- * Each role on the team and who fills it. Members are added to and removed
- * from the owner's Team; here they are only given a role.
+ * Each role on the team: who fills it, and its seats. A seat works on one
+ * step at a time, so another seat for a role lets more of its work run at
+ * once: Claudius gains Claudius #2. Members are added to and removed from
+ * the owner's Team; here they are only given a role.
  */
-function Seats({
+function Roles({
   project,
   playbook,
   state,
@@ -107,139 +108,57 @@ function Seats({
   state: State;
   refresh: () => Promise<void>;
 }) {
-  const members = state.members;
   const code = isCode(playbook);
+  const kinds = seatKinds(code);
+  const [shown, setShown] = useState<MemberKind | "all">("all");
   const { busy, error, run } = useAction();
-  async function fill(kind: MemberKind, id: string) {
-    await run(async () => {
-      await setSeat(project.id, kind, id);
+  const act = (change: () => Promise<unknown>) =>
+    void run(async () => {
+      await change();
       await refresh();
     });
-  }
   return (
     <>
-      <ul className="seats rows" aria-label="Roles">
-        {seatKinds(code).map((kind) => (
-          <Seat
+      <p className="hint">
+        Each seat works on one step at a time, so more seats for a role let more
+        of its work run at once.
+      </p>
+      <div className="segmented role-filter" role="group" aria-label="Show">
+        {(["all", ...kinds] as const).map((kind) => (
+          <button
             key={kind}
-            kind={kind}
-            label={seatLabel(kind, code)}
-            playbook={playbook}
-            members={members}
-            busy={busy}
-            onFill={(id) => void fill(kind, id)}
-          />
+            type="button"
+            aria-pressed={shown === kind}
+            onClick={() => setShown(kind)}
+          >
+            {kind === "all" ? "All roles" : seatLabel(kind, code)}
+          </button>
         ))}
+      </div>
+      <ul className="seats rows" aria-label="Roles">
+        {kinds
+          .filter((kind) => shown === "all" || shown === kind)
+          .map((kind) => (
+            <RoleGroup
+              key={kind}
+              kind={kind}
+              label={seatLabel(kind, code)}
+              project={project}
+              playbook={playbook}
+              state={state}
+              busy={busy}
+              onFill={(id) => act(() => setSeat(project.id, kind, id))}
+              onAdd={(seat) => act(() => addSeat(project.id, seat))}
+              onRemove={(seat) => act(() => removeSeat(project.id, seat))}
+            />
+          ))}
       </ul>
-      <SeatCopies
-        project={project}
-        playbook={playbook}
-        state={state}
-        busy={busy}
-        onAdd={(seat) =>
-          void run(async () => {
-            await addSeat(project.id, seat);
-            await refresh();
-          })
-        }
-        onRemove={(seat) =>
-          void run(async () => {
-            await removeSeat(project.id, seat);
-            await refresh();
-          })
-        }
-      />
       <ErrorNotice error={error} />
       <p className="hint">
         Add or remove people on <a href={href({ page: "team" })}>your team</a>.
         Requests already under way keep the team they started with.
       </p>
     </>
-  );
-}
-
-/**
- * Every seat on the team. A seat works on one step at a time, so another
- * seat filled like one lets more of that work run at once: Claudius gains
- * Claudius #2. A seat can go while another holds the same roles.
- */
-function SeatCopies({
-  project,
-  playbook,
-  state,
-  busy,
-  onAdd,
-  onRemove,
-}: {
-  project: Project;
-  playbook: Playbook;
-  state: State;
-  busy: boolean;
-  onAdd: (seat: string) => void;
-  onRemove: (seat: string) => void;
-}) {
-  const members = state.members;
-  const tasks = projectTasks(project, state.tasks);
-  const lanes = boardColumns(project, tasks).flatMap((c) => c.lanes);
-  const where = (task: Task) =>
-    task.stage === "ready"
-      ? readyLabel(project)
-      : (lanes.find((l) => l.stage === task.stage)?.label ?? "");
-  const alike = (a: Role, b: Role) =>
-    a.kinds.length === b.kinds.length &&
-    a.kinds.every((kind) => b.kinds.includes(kind));
-  return (
-    <div className="section">
-      <p className="label">Seats</p>
-      <ul className="seats rows" aria-label="Seats">
-        {playbook.roles.map((role) => {
-          const on = seatTask(role, tasks, state);
-          return (
-            <li key={role.name} className="seat">
-              <span className="seat-role">
-                <RoleName role={role} members={members} />
-              </span>
-              <span className="seat-who muted small">
-                {seatSummary(role)}
-                {on && (
-                  <>
-                    {" · "}
-                    <a href={requestHref(project.id, on.id)}>
-                      On {on.ref || on.objective}
-                      {where(on) && ` · ${where(on)}`}
-                    </a>
-                  </>
-                )}
-              </span>
-              <span className="seat-actions">
-                <button
-                  type="button"
-                  className="btn btn-quiet btn-sm"
-                  disabled={busy}
-                  onClick={() => onAdd(role.name)}
-                >
-                  Add a seat like {role.name}
-                </button>
-                {playbook.roles.some((o) => o !== role && alike(o, role)) && (
-                  <button
-                    type="button"
-                    className="btn btn-quiet btn-sm"
-                    disabled={busy}
-                    onClick={() => onRemove(role.name)}
-                  >
-                    Remove {role.name}
-                  </button>
-                )}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
-      <p className="hint">
-        Each seat works on one step at a time. Seats filled from one member
-        check a draft as one.
-      </p>
-    </div>
   );
 }
 
@@ -261,26 +180,39 @@ function seatTask(role: Role, tasks: Task[], state: State) {
   );
 }
 
+/** Seats filled alike: holding the same roles. */
+const alike = (a: Role, b: Role) =>
+  a.kinds.length === b.kinds.length &&
+  a.kinds.every((kind) => b.kinds.includes(kind));
+
 /**
- * One role: the member in it, the template's seat, or no one. Only research
- * can be left out of a team that has it, and no template has a designer or a
- * PM.
+ * One role: the member in it, the template's seat, or no one, with every
+ * seat that holds it. Only research can be left out of a team that has it,
+ * and no template has a designer or a PM. The PM keeps one to-do list, so
+ * it has one seat.
  */
-function Seat({
+function RoleGroup({
   kind,
   label,
+  project,
   playbook,
-  members,
+  state,
   busy,
   onFill,
+  onAdd,
+  onRemove,
 }: {
   kind: MemberKind;
   label: string;
+  project: Project;
   playbook: Playbook;
-  members: Member[];
+  state: State;
   busy: boolean;
   onFill: (id: string) => void;
+  onAdd: (seat: string) => void;
+  onRemove: (seat: string) => void;
 }) {
+  const members = state.members;
   const role = seatFor(playbook, kind);
   const filled = seatMember(playbook, kind, members);
   // Only a member who holds the kind can be given the role; one given it
@@ -291,26 +223,24 @@ function Seat({
   const optional = kind === "researcher";
   const empty = nobody[kind] ?? "Template default";
   const value = filled?.id ?? (optional && !role ? noResearch : "");
+  const seats = playbook.roles.filter((r) => r.kinds.includes(kind));
+  const last = seats.at(-1);
+  const removable = !!last && seats.some((o) => o !== last && alike(o, last));
   return (
-    <li className="seat">
+    <li className="seat role-group">
       <span className="seat-role">{label}</span>
       <span className="seat-who">
-        {filled && role ? (
-          <RoleName role={role} members={members} />
-        ) : role ? (
+        {!filled && role && (
           <span className="muted">
             Template default · {engineLabel(role.engine)}
           </span>
-        ) : (
-          <span className="muted">{optional ? "No research" : empty}</span>
         )}
-        {filled && role && role.kinds.length > 1 && (
-          <span className="muted small"> · {seatSummary(role)}</span>
+        {!role && (
+          <span className="muted">{optional ? "No research" : empty}</span>
         )}
         {kept && (
           <span className="muted small">
-            {" "}
-            · Kept here; no longer holds this role on your team
+            Kept here; no longer holds this role on your team
           </span>
         )}
       </span>
@@ -344,41 +274,97 @@ function Seat({
             Unassign {label}
           </button>
         )}
+        {last && kind !== "pm" && (
+          <span
+            className="seat-count"
+            role="group"
+            aria-label={`How many ${label} seats`}
+          >
+            <button
+              type="button"
+              className="btn btn-sm"
+              aria-label={`One fewer ${label} seat`}
+              disabled={busy || !removable}
+              onClick={() => onRemove(last.name)}
+            >
+              −
+            </button>
+            <span aria-live="polite">
+              {seats.length} {seats.length === 1 ? "seat" : "seats"}
+            </span>
+            <button
+              type="button"
+              className="btn btn-sm"
+              aria-label={`One more ${label} seat`}
+              disabled={busy}
+              onClick={() => onAdd(last.name)}
+            >
+              +
+            </button>
+          </span>
+        )}
       </span>
+      {seats.length > 0 && (
+        <SeatList label={label} seats={seats} project={project} state={state} />
+      )}
     </li>
   );
 }
 
-/** What each member on this team does here, which may be several roles. */
-function MemberRoles({
-  playbook,
-  members,
+/** A role's seats, each with the request it is on now and where. */
+function SeatList({
+  label,
+  seats,
+  project,
+  state,
 }: {
-  playbook: Playbook;
-  members: Member[];
+  label: string;
+  seats: Role[];
+  project: Project;
+  state: State;
 }) {
-  const filled = playbook.roles.filter((r) => memberOf(r, members));
-  if (!filled.length) return null;
+  const tasks = projectTasks(project, state.tasks);
+  const lanes = boardColumns(project, tasks).flatMap((c) => c.lanes);
+  const where = (task: Task) =>
+    task.stage === "ready"
+      ? readyLabel(project)
+      : (lanes.find((l) => l.stage === task.stage)?.label ?? "");
   return (
-    <div className="section">
-      <p className="label">Members on this team</p>
-      <dl className="facts" aria-label="Members on this team">
-        {filled.map((role) => (
-          <div key={role.name} className="fact-row">
-            <dt>
-              <RoleName role={role} members={members} />
-            </dt>
-            <dd>{kindsLabel(role.kinds)}</dd>
-          </div>
-        ))}
-      </dl>
-    </div>
+    <ul className="seat-copies" aria-label={`${label} seats`}>
+      {seats.map((role) => {
+        const on = seatTask(role, tasks, state);
+        return (
+          <li key={role.name} className="seat-copy">
+            <span className="seat-copy-name">
+              <RoleName role={role} members={state.members} />
+            </span>
+            <span className="seat-copy-note muted small">
+              {seatSummary(role)}
+              {on && (
+                <>
+                  {" · "}
+                  <a href={requestHref(project.id, on.id)}>
+                    On {on.ref || on.objective}
+                    {where(on) && ` · ${where(on)}`}
+                  </a>
+                </>
+              )}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
-/** "Researcher and implementer · Claude": every role a seat holds. */
+/**
+ * "Claude", or "Researcher and implementer · Claude" for a seat that holds
+ * more than the role it is listed under.
+ */
 function seatSummary(role: Role) {
-  return [kindsLabel(role.kinds), engineLabel(role.engine)].join(" · ");
+  return role.kinds.length > 1
+    ? [kindsLabel(role.kinds), engineLabel(role.engine)].join(" · ")
+    : engineLabel(role.engine);
 }
 
 /**

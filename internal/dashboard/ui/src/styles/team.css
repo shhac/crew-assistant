@@ -173,6 +173,67 @@
   gap: 8px;
 }
 
+.role-group {
+  padding: 10px 12px;
+  cursor: default;
+}
+
+.role-group:hover {
+  background: none;
+}
+
+/* A role's seats sit under it, across the row. */
+.role-group > .seat-copies {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0 0 132px;
+  list-style: none;
+}
+
+.seat-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.seat-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.seat-count .btn {
+  min-width: 28px;
+  justify-content: center;
+}
+
+.role-filter {
+  flex-wrap: wrap;
+  margin: 4px 0 8px;
+}
+
+.role-filter button {
+  flex: 0 1 auto;
+  padding: 0 12px;
+}
+
+@media (max-width: 700px) {
+  .role-group {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .role-group > .seat-copies {
+    padding-left: 0;
+  }
+  .seat-actions {
+    flex-wrap: wrap;
+  }
+}
+
 .team-slot {
   display: flex;
   flex-direction: column;

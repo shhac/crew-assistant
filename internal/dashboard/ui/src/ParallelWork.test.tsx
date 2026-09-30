@@ -273,11 +273,11 @@ describe("several requests under way at once", () => {
       },
     );
     const row = (name: string) =>
-      within(screen.getByRole("list", { name: "Seats" }))
-        .getAllByRole("listitem")
-        .find((li) => li.querySelector(".seat-role")?.textContent === name)!;
-    expect(row("Claudius").querySelector(".seat-who")?.textContent).toBe(
-      "Implementer · Claude",
+      [...document.querySelectorAll<HTMLLIElement>(".seat-copy")].find(
+        (li) => li.querySelector(".seat-copy-name")?.textContent === name,
+      )!;
+    expect(row("Claudius").querySelector(".seat-copy-note")?.textContent).toBe(
+      "Claude",
     );
     const on = within(row("Claudius #2")).getByRole("link", {
       name: "On CA-2 · Implementing",
