@@ -47,6 +47,10 @@ type roleTools struct {
 	// only: attach_file keeps files with it, reading any it names from
 	// workDir.
 	design, workDir string
+	// generated is where a Codex designer's generated images are found this
+	// turn, which attach_file may keep too; nil on an engine that can't
+	// generate images.
+	generated *generatedImages
 	// proposes lets the researcher or the PM of a code project propose how
 	// QA runs the app, for the owner to accept; run is the recipe in use.
 	proposes bool
@@ -68,6 +72,9 @@ func (lp *Loop) toolsFor(t core.Task, kind string, r core.Role) roleTools {
 	tools := roleTools{lp: lp, projectID: t.ProjectID, taskID: t.ID, status: t.Status, by: core.TeamLinker(r.Member, kind), name: seatName(r, kind), kind: kind, relations: relationsFor(kind)}
 	if open := t.OpenDesign(); kind == core.RoleDesigner && t.Status == core.TaskDesigning && open != nil {
 		tools.design = open.ID
+		if generatesImages(r) {
+			tools.generated = &generatedImages{home: lp.runtimeHome(r.Engine)}
+		}
 	}
 	return tools
 }
@@ -166,7 +173,7 @@ func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (
 		_, err := r.lp.Core.ProposeRunRecipe(ctx, r.projectID, r.name, recipe, in["why"])
 		return changed("Proposed. The owner decides whether QA uses it; nothing changes until they do.", err)
 	case "attach_file":
-		return r.attach(ctx, in["name"], in["content"], in["path"])
+		return r.attach(ctx, in["name"], in["content"], in["path"], in["generated"])
 	case "queue_task":
 		return r.queue(ctx, in["title"], in["requirements"], in["depends_on"])
 	default:
@@ -205,14 +212,32 @@ func (r roleTools) queue(ctx context.Context, title, requirements, dependsOn str
 }
 
 // attach keeps a file with the design input the designer is giving: text
-// it wrote out, or a file in its workspace, which is only ever read.
-func (r roleTools) attach(ctx context.Context, name, content, path string) (string, error) {
+// it wrote out, a file in its workspace, which is only ever read, or an
+// image it generated in this turn.
+func (r roleTools) attach(ctx context.Context, name, content, path, generated string) (string, error) {
 	var data []byte
-	switch hasContent, hasPath := content != "", strings.TrimSpace(path) != ""; {
-	case hasContent == hasPath:
+	given := 0
+	for _, s := range []string{content, strings.TrimSpace(path), strings.TrimSpace(generated)} {
+		if s != "" {
+			given++
+		}
+	}
+	switch {
+	case given != 1 && r.generated != nil:
+		return "", errors.New("give one of content, path or generated")
+	case given != 1:
 		return "", errors.New("give either content or path, not both")
-	case hasContent:
+	case content != "":
 		data = []byte(content)
+	case strings.TrimSpace(generated) != "":
+		var file string
+		var err error
+		if data, file, err = r.generated.read(generated); err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(name) == "" {
+			name = file
+		}
 	default:
 		var err error
 		if data, err = workspaceFile(r.workDir, path); err != nil {

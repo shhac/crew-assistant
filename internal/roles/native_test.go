@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,6 +26,8 @@ type fakeSession struct {
 	waitErr    error
 	// events are what its work turn reports.
 	events []session.Event
+	// confirmed is whether releasing it confirms it is gone.
+	confirmed bool
 }
 
 type fakeTurn struct {
@@ -71,7 +74,7 @@ func (s *fakeSession) Ref() session.Ref { return session.Ref{Engine: harness.Cod
 
 func (s *fakeSession) Release(context.Context) (session.Reclamation, error) {
 	s.calls = append(s.calls, "release")
-	return session.Reclamation{}, nil
+	return session.Reclamation{Confirmed: s.confirmed}, nil
 }
 
 func (s *fakeSession) Close() { s.calls = append(s.calls, "close") }
@@ -142,6 +145,58 @@ func TestAFreshSessionIsGivenItsFreshPrompt(t *testing.T) {
 			t.Fatalf("resumed %v: got %q", resumed, s.calls)
 		}
 	}
+}
+
+// A turn's tools hear which session it runs in before the turn starts, so
+// they can find what the session keeps while the turn is still running,
+// and once it is over whether the session was confirmed gone.
+func TestATurnHearsItsSessionBeforeItStartsAndWhetherItEnded(t *testing.T) {
+	for _, confirmed := range []bool{true, false} {
+		s := &fakeSession{confirmed: confirmed}
+		spec := codexRound
+		var heard []session.Ref
+		spec.Opened = func(ref session.Ref) {
+			heard = append(heard, ref)
+			s.calls = append(s.calls, "opened")
+		}
+		spec.Ended = func(confirmed bool) { s.calls = append(s.calls, fmt.Sprintf("ended, confirmed %v", confirmed)) }
+		if _, err := native(s, false).Run(context.Background(), spec); err != nil {
+			t.Fatal(err)
+		}
+		if len(heard) != 1 || heard[0].ID != "thread" {
+			t.Fatalf("heard %+v", heard)
+		}
+		want := []string{"opened", "turn: Revise the draft", "turn finished", "release", fmt.Sprintf("ended, confirmed %v", confirmed)}
+		if !slices.Equal(s.calls, want) {
+			t.Fatalf("got %q, want %q", s.calls, want)
+		}
+	}
+}
+
+// A turn given up on, such as one stopped, closes its session without
+// confirming it gone, and its tools hear so.
+func TestATurnGivenUpOnIsNotConfirmedEnded(t *testing.T) {
+	s := &fakeSession{confirmed: true}
+	n := Native{open: func(context.Context, session.Options, json.RawMessage) (conversation, bool, error) {
+		return failingStart{s}, false, nil
+	}}
+	spec := codexRound
+	spec.Opened = func(session.Ref) {}
+	var ended []bool
+	spec.Ended = func(confirmed bool) { ended = append(ended, confirmed) }
+	if _, err := n.Run(context.Background(), spec); err == nil {
+		t.Fatal("the turn did not fail")
+	}
+	if !slices.Equal(ended, []bool{false}) || !slices.Equal(s.calls, []string{"close"}) {
+		t.Fatalf("ended %v, calls %q", ended, s.calls)
+	}
+}
+
+// failingStart is a session whose turn can't start, as one stopped would.
+type failingStart struct{ *fakeSession }
+
+func (failingStart) StartTurn(context.Context, session.Input) (turn, error) {
+	return nil, context.Canceled
 }
 
 // What a stored conversation may be resumed under is the harness's to

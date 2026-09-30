@@ -199,7 +199,7 @@ func TestEveryRoleIsToldWhichDesignIsCurrent(t *testing.T) {
 		"researcher":    researcherPrompt(code, task, nil),
 		"code reviewer": checkerPrompt(code, task, rev, reviewer, code.Playbook),
 		"reviewer":      reviewerPrompt(docs, task, rev),
-		"designer":      designerPrompt(code, task, core.DesignRequest{From: "Writer", Step: core.TaskWriting, Question: "Spacing?"}),
+		"designer":      designerPrompt(code, task, core.DesignRequest{From: "Writer", Step: core.TaskWriting, Question: "Spacing?"}, false),
 	} {
 		current := strings.Index(prompt, "The current design, design 2, is the target")
 		superseded := strings.Index(prompt, "Superseded designs: not current and not the target")
@@ -216,7 +216,7 @@ func TestEveryRoleIsToldWhichDesignIsCurrent(t *testing.T) {
 	if !strings.Contains(qa, "Its current design is design 2 by Dee; any earlier design is superseded and not the target.") {
 		t.Fatalf("QA: %s", qa)
 	}
-	if designer := designerPrompt(code, task, core.DesignRequest{From: "Writer", Question: "Spacing?"}); !strings.Contains(designer, "The current design is design 2.") {
+	if designer := designerPrompt(code, task, core.DesignRequest{From: "Writer", Question: "Spacing?"}, false); !strings.Contains(designer, "The current design is design 2.") {
 		t.Fatalf("designer: %s", designer)
 	}
 	task.CurrentDesign = ""

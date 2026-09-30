@@ -256,7 +256,18 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 	// Research is the one step that looks outward; nothing its shell runs
 	// reaches the network either way.
 	spec.Web = kind == core.RoleResearcher
-	return spec, learned.cleanup, nil
+	cleanup = learned.cleanup
+	// A designer's generated images are found by the session they were made
+	// in, and go once the turn is over, attached or not; those of a session
+	// not confirmed gone stay until a restart reclaims it.
+	if g := tools.generated; g != nil {
+		spec.Opened, spec.Ended = g.opened, g.closed
+		cleanup = func() {
+			learned.cleanup()
+			g.remove()
+		}
+	}
+	return spec, cleanup, nil
 }
 
 // turnKind is the role a seat plays in this turn of t, which a seat holding
@@ -295,8 +306,13 @@ func (lp *Loop) withTools(spec *roles.Spec, tools roleTools) {
 func (lp *Loop) baseSpec(r core.Role, workDir, prompt string) roles.Spec {
 	spec := roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Instructions: r.Instructions, Prompt: prompt}
 	spec.Binary, spec.Home = lp.Config().Engines.Binary(r.Engine)
-	spec.RuntimeHome = filepath.Join(lp.Core.StateDirectory(), "roles", r.Engine)
+	spec.RuntimeHome = lp.runtimeHome(r.Engine)
 	return spec
+}
+
+// runtimeHome is the private home a role's Codex session runs in.
+func (lp *Loop) runtimeHome(engine string) string {
+	return filepath.Join(lp.Core.StateDirectory(), "roles", engine)
 }
 
 // takeDirection sends a task back to the implementer when the owner has told

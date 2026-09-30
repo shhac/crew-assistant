@@ -37,7 +37,10 @@ type scriptedRunner struct {
 	// unclear and nothing to wait for.
 	plans []string
 	// designs answer designer turns in order; after them, plain design input.
-	designs []string
+	// onDesigner runs in each designer turn before it answers, as its
+	// session would; an error it returns fails the turn.
+	designs    []string
+	onDesigner func(spec roles.Spec) error
 	// pm answers the PM's looks at the to-do list in order; after them, an
 	// answer that sends on what is in triage and changes nothing else.
 	pm []string
@@ -94,6 +97,11 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 		return roles.Result{Text: reply}, nil
 	}
 	if !spec.Write && strings.Contains(spec.Prompt, "asks for your design input") {
+		if r.onDesigner != nil {
+			if err := r.onDesigner(spec); err != nil {
+				return roles.Result{}, err
+			}
+		}
 		reply := plainDesign
 		if len(r.designs) > 0 {
 			reply, r.designs = r.designs[0], r.designs[1:]

@@ -59,6 +59,14 @@ type Spec struct {
 	Handler session.ToolHandler
 	// Observer hears how the turn goes while it runs, or nil.
 	Observer Observer
+	// Opened, when set, hears which session the turn runs in once it is
+	// open and before the turn starts, so its tools can find what the
+	// session keeps, such as the images Codex generates.
+	Opened func(session.Ref)
+	// Ended, when set, hears once the session Opened heard of is over,
+	// whether it was confirmed gone: one that wasn't may still be running,
+	// so what it keeps must stay until a restart reclaims it.
+	Ended func(confirmed bool)
 	// LaunchDir is where a turn with tools records its launch, so a daemon
 	// started after this one stopped can find a harness still running and
 	// end it; empty is a folder of the turn's own that nothing looks for.
@@ -167,6 +175,14 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	// Ended is told after the session is released or closed, and only of a
+	// session Opened was told of.
+	opened := false
+	defer func() {
+		if opened && spec.Ended != nil {
+			spec.Ended(confirmed)
+		}
+	}()
 	released := false
 	defer func() {
 		if !released {
@@ -177,6 +193,10 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 		if err := compact(ctx, s); err != nil {
 			return Result{}, err
 		}
+	}
+	if spec.Opened != nil {
+		spec.Opened(s.Ref())
+		opened = true
 	}
 	prompt := spec.Prompt
 	if !resumed && spec.FreshPrompt != "" {

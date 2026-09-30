@@ -74,6 +74,12 @@ func workspaceFile(dir, path string) ([]byte, error) {
 		}
 		path = rel
 	}
+	return readInside(dir, path, "the current directory")
+}
+
+// readInside reads a regular file of at most the attachment limit at path
+// inside dir, which where names for the role; no symlink or ".." leads out.
+func readInside(dir, path, where string) ([]byte, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, err
@@ -81,7 +87,7 @@ func workspaceFile(dir, path string) ([]byte, error) {
 	defer root.Close()
 	f, err := root.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("%s can't be read from the current directory: it is missing, or leads outside it", path)
+		return nil, fmt.Errorf("%s can't be read from %s: it is missing, or leads outside it", path, where)
 	}
 	defer f.Close()
 	info, err := f.Stat()

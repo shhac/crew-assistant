@@ -265,12 +265,13 @@ func (lp *Loop) launchRoot() string {
 // harness can prove it is the one it launched. It returns the claims whose
 // turns could not be confirmed ended, with why: their tasks, or for the PM's
 // look their project, are held rather than have the step run again beside
-// them.
-func (lp *Loop) reclaimTurns(ctx context.Context, snap core.Snapshot) map[string]string {
-	held := map[string]string{}
+// them. running is whether any launch, claimed or not, could not be
+// confirmed ended, so what such a turn may still be using must stay.
+func (lp *Loop) reclaimTurns(ctx context.Context, snap core.Snapshot) (held map[string]string, running bool) {
+	held = map[string]string{}
 	entries, err := os.ReadDir(lp.launchRoot())
 	if err != nil {
-		return held
+		return held, false
 	}
 	byDir := map[string]string{}
 	named := func(claims []core.Claim) {
@@ -296,6 +297,7 @@ func (lp *Loop) reclaimTurns(ctx context.Context, snap core.Snapshot) map[string
 			if token, ok := byDir[e.Name()]; ok {
 				held[token] = err.Error()
 			}
+			running = true
 			continue
 		}
 		if err != nil {
@@ -303,7 +305,7 @@ func (lp *Loop) reclaimTurns(ctx context.Context, snap core.Snapshot) map[string
 		}
 		os.RemoveAll(dir)
 	}
-	return held
+	return held, running
 }
 
 // heldTask reports a task one of whose turns may still be running.

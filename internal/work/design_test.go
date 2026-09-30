@@ -17,8 +17,14 @@ const askDesign = "I need a steer first.\n```design\nFormal or casual?\n```"
 // seatDesigner gives a project's team Dee, a member who only designs.
 func seatDesigner(t *testing.T, a *Loop, projectID string) core.Member {
 	t.Helper()
+	return seatDesignerOn(t, a, projectID, "claude")
+}
+
+// seatDesignerOn gives a project's team Dee, designing on engine.
+func seatDesignerOn(t *testing.T, a *Loop, projectID, engine string) core.Member {
+	t.Helper()
 	ctx := context.Background()
-	dee, err := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Dee", Kinds: []string{core.RoleDesigner}, Engine: "claude"})
+	dee, err := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Dee", Kinds: []string{core.RoleDesigner}, Engine: engine})
 	if err != nil {
 		t.Fatal(err)
 	}

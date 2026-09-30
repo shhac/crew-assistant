@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -115,13 +116,22 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 // Then handoffs are finished or undone, the steps it claimed are cleared on
 // to fresh attempts, so nothing a late turn reports is recorded, the copies
 // checks were given are deleted, and so is anything kept for tasks that
-// have settled. A step not finished is claimed again as usual.
+// have settled, as are images a designer generated and never attached. A
+// step not finished is claimed again as usual.
 func (lp *Loop) resume(ctx context.Context) error {
 	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
 		return err
 	}
-	held := lp.reclaimTurns(ctx, snap)
+	held, running := lp.reclaimTurns(ctx, snap)
+	// Generated images are kept only while the turn that made them runs, and
+	// only its tools, which stopped with the daemon, could attach them: any
+	// left were left by a turn that never finished. Which session made which
+	// is not known, so while any turn may still be running they all stay,
+	// until a restart confirms every turn ended.
+	if !running {
+		os.RemoveAll(lp.generatedRoot())
+	}
 	var errs []error
 	for _, t := range snap.Tasks {
 		if t.Handoff == nil || t.Finished() || heldTask(t, held) {

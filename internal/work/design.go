@@ -63,7 +63,7 @@ func (lp *Loop) design(ctx context.Context, p core.Project, t core.Task, m mediu
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
-	base := designerPrompt(p, t, *request) + learnedGuide(designer, true)
+	base := designerPrompt(p, t, *request, generatesImages(designer)) + learnedGuide(designer, true)
 	spec, cleanup, err := lp.roleSpec(t, designer, m.workspace(t), false, m, base)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
@@ -187,8 +187,9 @@ func escalationText(r core.DesignRequest, e escalation) string {
 }
 
 // designerPrompt asks the designer for design input on one question. It
-// reads, changes nothing and gains no other authority.
-func designerPrompt(p core.Project, t core.Task, r core.DesignRequest) string {
+// reads, changes nothing and gains no other authority. generates is whether
+// its engine can generate images.
+func designerPrompt(p core.Project, t core.Task, r core.DesignRequest, generates bool) string {
 	var b strings.Builder
 	b.WriteString(briefText(p, t))
 	b.WriteString(planText(t))
@@ -207,7 +208,13 @@ func designerPrompt(p core.Project, t core.Task, r core.DesignRequest) string {
 	b.WriteString(`
 Give design input only: read what you need, change nothing, and do not commit, deliver, land or approve anything. Answer the question so the one who asked can go on, and say what you would choose and why.
 While you work, attach_file keeps a mockup with your input: an SVG, HTML or Markdown sketch you write out as its content, or an image or other file already in the current directory, named by its path. Everyone who works on the task afterwards can open it.
-If answering well needs more than design input, such as a choice only the owner can make or work beyond this task, escalate instead: give the evidence, the alternatives, the consequences of each and your recommendation. The owner decides, and the task goes back to whoever asked.
+`)
+	if generates {
+		b.WriteString("When the task needs a raster image, such as an icon, an illustration or a mockup, you can make one with your image generation tool, then attach it with attach_file by giving the generated image's file name as generated, within the same limits. If image generation isn't available to you, say so in your input and sketch in SVG, HTML or Markdown instead.\n")
+	} else {
+		b.WriteString("Image generation isn't available to you here, so where the task needs an icon, an illustration or a mockup, sketch it in SVG, HTML or Markdown instead.\n")
+	}
+	b.WriteString(`If answering well needs more than design input, such as a choice only the owner can make or work beyond this task, escalate instead: give the evidence, the alternatives, the consequences of each and your recommendation. The owner decides, and the task goes back to whoever asked.
 `)
 	b.WriteString("\nSay which design is current after your answer: the one the implementer builds to and every checker judges against. \"this\" makes your input the current design; \"design N\" keeps or brings back an earlier design by its number; empty means your input is advice only, and the current design stays as it is. " + currentLine(t) + "\n")
 	b.WriteString(`

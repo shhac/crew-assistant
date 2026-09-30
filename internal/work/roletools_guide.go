@@ -53,6 +53,9 @@ func (r roleTools) guideTools() string {
 	guide += " add_note leaves a note on your task for the rest of the team and the owner, such as something whoever works on it next should know; it sits beside your reply and never replaces it."
 	if r.design != "" {
 		guide += fmt.Sprintf(" attach_file keeps a file with the design input you are giving, such as a mockup: at most %d files of up to %d MB each, and only %s.", core.MaxAttachmentsPerSet, core.MaxAttachmentBytes>>20, core.AttachmentKinds)
+		if r.generated != nil {
+			guide += " It can also keep an image you generated in this turn, named by its file name in generated, within the same limits."
+		}
 	}
 	return guide
 }
@@ -101,7 +104,12 @@ func (r roleTools) definitions() []session.ToolDefinition {
 		session.ToolDefinition{Name: "add_note", Description: "Leave a note on your own task for the rest of the team and the owner to read.", Schema: schema([]string{"text"})},
 	)
 	if r.design != "" {
-		defs = append(defs, session.ToolDefinition{Name: "attach_file", Description: "Attach a file, such as a mockup, to the design input you are giving; everyone who works on the task afterwards can open it. Give either content or path, not both. name is the file's name, with an extension saying its type (.svg, .html, .md, .txt, .json, .csv, .png, .jpg, .gif, .webp or .pdf), or empty to use the path's. content is the whole text of a text file you write out, such as an SVG or HTML mockup, or empty. path names a file already in the current directory, relative to it, or empty.", Schema: schema([]string{"name", "content", "path"})})
+		attach := session.ToolDefinition{Name: "attach_file", Description: "Attach a file, such as a mockup, to the design input you are giving; everyone who works on the task afterwards can open it. Give either content or path, not both. name is the file's name, with an extension saying its type (.svg, .html, .md, .txt, .json, .csv, .png, .jpg, .gif, .webp or .pdf), or empty to use the path's. content is the whole text of a text file you write out, such as an SVG or HTML mockup, or empty. path names a file already in the current directory, relative to it, or empty.", Schema: schema([]string{"name", "content", "path"})}
+		if r.generated != nil {
+			attach.Description = "Attach a file, such as a mockup, to the design input you are giving; everyone who works on the task afterwards can open it. Give one of content, path or generated. name is the file's name, with an extension saying its type (.svg, .html, .md, .txt, .json, .csv, .png, .jpg, .gif, .webp or .pdf), or empty to use the path's or the generated image's. content is the whole text of a text file you write out, such as an SVG or HTML mockup, or empty. path names a file already in the current directory, relative to it, or empty. generated is the file name of an image you generated in this turn with your image generation tool, or empty."
+			attach.Schema = schema([]string{"name", "content", "path", "generated"})
+		}
+		defs = append(defs, attach)
 	}
 	return defs
 }
