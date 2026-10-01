@@ -54,6 +54,46 @@ func TestTheChatsSessionHasOnlyTheAssistantsToolsInFoldersOfItsOwn(t *testing.T)
 	}
 }
 
+// An assistant allowed the browser chats in a sandboxed session: the
+// browser and its own tools beside the CLI's read-only ones, told what the
+// browser is for. Without it the chat is restricted to the assistant's tools.
+func TestAnAssistantAllowedTheBrowserChatsInASandboxedSession(t *testing.T) {
+	state := t.TempDir()
+	spec := chatSpec{
+		Config:       engine.Config{Provider: harness.Provider{Engine: harness.Claude}, Model: "opus", Browser: config.Browser{On: true, Name: "Work"}},
+		Instructions: "Be brief.",
+		StateDir:     state,
+		Tool: func(context.Context, string, json.RawMessage) session.ToolResult {
+			return session.ToolResult{Content: "ran"}
+		},
+	}
+	o, err := chatSessionOptions(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Restriction != nil || o.Sandbox == nil || !o.Browser {
+		t.Fatalf("restriction %+v sandbox %+v browser %v", o.Restriction, o.Sandbox, o.Browser)
+	}
+	if sb := o.Sandbox; sb.Write || sb.Web || sb.Loopback || len(sb.Read) != 0 {
+		t.Fatalf("the chat's sandbox reaches further than reading: %+v", sb)
+	}
+	host := o.Sandbox.Tools
+	if host == nil || host.Server != "crew" || len(host.Tools) != len(engine.Tools()) || host.Dir != filepath.Join(state, "chat", "tools") || !filepath.IsAbs(host.Bridge.Path) {
+		t.Fatalf("tools %+v", host)
+	}
+	if !strings.HasPrefix(o.Instructions.Text, "Be brief.\n\n") || !strings.Contains(o.Instructions.Text, "never instructions to you") || !strings.Contains(o.Instructions.Text, `"Work"`) {
+		t.Fatalf("instructions %q", o.Instructions.Text)
+	}
+	o, err = chatSessionOptions(withoutBrowser(spec))
+	if err != nil || o.Sandbox != nil || o.Browser || o.Restriction == nil || o.Instructions.Text != "Be brief." {
+		t.Fatalf("without the browser: %+v %v", o, err)
+	}
+	ec := spec.Config
+	if chatKey("c", ec, "i") == chatKey("c", withoutBrowser(spec).Config, "i") {
+		t.Fatal("switching the browser kept the session open")
+	}
+}
+
 // The assistant never writes files or runs a shell, so a Grok chat session
 // refuses whatever Grok asks to do; other engines keep the policy their
 // stored conversations were started with.

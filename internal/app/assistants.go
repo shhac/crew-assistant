@@ -14,6 +14,9 @@ type AssistantInput struct {
 	Name        string       `json:"name"`
 	Personality string       `json:"personality"`
 	Model       config.Model `json:"model"`
+	// Browser is whether the assistant may use the owner's browser; nil
+	// keeps what the profile had.
+	Browser *config.Browser `json:"browser,omitempty"`
 	// Avatar is a stand-in face for a new profile, such as a suggestion's
 	// sketch, with the look to draw; a drawn picture is changed only by
 	// drawing again.
@@ -102,4 +105,7 @@ func (in AssistantInput) applyTo(p *config.AssistantProfile) {
 	p.Name, p.Personality = strings.TrimSpace(in.Name), strings.TrimSpace(in.Personality)
 	p.Model = in.Model
 	p.Model.Model, p.Model.Effort = strings.TrimSpace(p.Model.Model), strings.TrimSpace(p.Model.Effort)
+	if in.Browser != nil {
+		p.Browser = config.Browser{On: in.Browser.On, Name: strings.TrimSpace(in.Browser.Name)}
+	}
 }

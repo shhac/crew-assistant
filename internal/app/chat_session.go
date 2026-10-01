@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -340,7 +341,7 @@ func (a *App) closeIdleChat(now time.Time) {
 // a different session.
 func chatKey(conversation string, ec engine.Config, instructions string) string {
 	sum := sha256.Sum256([]byte(instructions))
-	return strings.Join([]string{conversation, modelHome(ec), ec.Model, ec.Effort, hex.EncodeToString(sum[:8])}, "|")
+	return strings.Join([]string{conversation, modelHome(ec), ec.Model, ec.Effort, hex.EncodeToString(sum[:8]), strconv.FormatBool(ec.Browser.On), ec.Browser.Name}, "|")
 }
 
 // sessionTool runs a tool the model called, with the same checks and the

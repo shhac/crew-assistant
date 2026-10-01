@@ -231,7 +231,7 @@ func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Resul
 	}
 	eventIDs := map[string]string{}
 	ec := a.assistantConfig(ctx, cfg)
-	ec.AssistantName, ec.Personality, ec.MaxTurns = seated.Name, seated.Personality, cfg.Limits.MaxModelTurns
+	ec.AssistantName, ec.Personality, ec.Browser, ec.MaxTurns = seated.Name, seated.Personality, seated.Browser, cfg.Limits.MaxModelTurns
 	ec.OnTool = func(ctx context.Context, event engine.ToolEvent) error {
 		id := eventIDs[event.ID]
 		if event.Status == "running" {

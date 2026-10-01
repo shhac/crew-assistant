@@ -1469,6 +1469,7 @@ describe("the team", () => {
         effort: "",
         max_tokens: 2048,
       },
+      browser: { on: false, name: "" },
       avatar: suggestion.avatar,
     });
     // The suggestion is used up; the next new assistant starts afresh.
@@ -1549,6 +1550,7 @@ describe("the team", () => {
       name: "Milo",
       personality: "Brisk.",
       model: milo().model,
+      browser: { on: false, name: "" },
     });
     fireEvent.click(await screen.findByRole("button", { name: "Redraw" }));
     expect(screen.getByLabelText(/^Look/)).toHaveProperty(

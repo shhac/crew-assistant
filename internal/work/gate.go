@@ -2,7 +2,6 @@ package work
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"strings"
 	"sync"
@@ -273,7 +272,7 @@ func (lp *Loop) runRole(ctx context.Context, spec roles.Spec) (roles.Result, err
 		}
 	}
 	result, err := lp.runner.Run(ctx, spec)
-	if err == nil || !spec.Browser || !browserUnreachable(err) {
+	if err == nil || !spec.Browser || !roles.BrowserUnreachable(err) {
 		return result, err
 	}
 	// Chrome isn't connected, as when the owner is away: the turn goes on
@@ -285,10 +284,3 @@ func (lp *Loop) runRole(ctx context.Context, spec roles.Spec) (roles.Result, err
 
 // noBrowserNote takes back the browser a turn was told it had.
 const noBrowserNote = "The browser couldn't be reached this turn, so you have none, whatever was said above; do the work without it."
-
-// browserUnreachable reports a turn refused because the browser it was
-// given isn't connected.
-func browserUnreachable(err error) bool {
-	var capability *session.CapabilityError
-	return errors.As(err, &capability) && capability.Code == session.CapabilityBrowserToolsMissing
-}

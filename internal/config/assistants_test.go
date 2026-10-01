@@ -121,6 +121,8 @@ func TestAssistantProfilesAreValidatedTogether(t *testing.T) {
 		"no name":          func(c *Config) { second(c).Name = " " },
 		"long personality": func(c *Config) { second(c).Personality = strings.Repeat("x", 4001) },
 		"bad model":        func(c *Config) { second(c).Model.MaxTokens = 1 },
+		"browser on grok":  func(c *Config) { p := second(c); p.Model.Engine, p.Browser = "grok", Browser{On: true} },
+		"browser name":     func(c *Config) { second(c).Browser = Browser{On: true, Name: "Work\nHome"} },
 		"unknown seat":     func(c *Config) { c.Assistant.Seat = "nobody" },
 	} {
 		c := Default()

@@ -93,44 +93,17 @@ func (r RunRecipe) Describe() string {
 	return b.String()
 }
 
-// Browser is whether QA uses the browser its engine ships, and which of the
-// browsers connected to it. An empty name is the one the extension connects
-// by default. It is the owner's real browser, with its logins.
-type Browser struct {
-	On   bool   `json:"on,omitempty"`
-	Name string `json:"name,omitempty"`
-}
+// Browser is a member's browser setting, or a QA seat's for using the app.
+type Browser = config.Browser
 
-const maxBrowserName = 100
-
-// validate checks a browser setting on engine. forRole is whether the
+// validateBrowser checks a browser setting on engine. forRole is whether the
 // setting belongs where it is: any member may allow the browser, while a
 // seat's own setting is QA's, for using the app.
-func (b Browser) validate(engine string, forRole bool) error {
-	if len(b.Name) > maxBrowserName || strings.ContainsFunc(b.Name, unicode.IsControl) {
-		return fmt.Errorf("a browser name must be one line of at most %d characters", maxBrowserName)
-	}
-	if !b.On {
-		return nil
-	}
-	if !forRole {
+func validateBrowser(b Browser, engine string, forRole bool) error {
+	if b.On && !forRole {
 		return errors.New("a seat's browser setting is QA's; give the QA role or switch the browser off")
 	}
-	if !config.Supports(engine, config.UseBrowser) {
-		return fmt.Errorf("%s can't use the browser; choose %s, or switch the browser off first", config.EngineLabel(engine), engineLabels(config.EnginesFor(config.UseBrowser)))
-	}
-	return nil
-}
-
-func engineLabels(engines []string) string {
-	labels := make([]string, len(engines))
-	for i, e := range engines {
-		labels[i] = config.EngineLabel(e)
-	}
-	if len(labels) == 0 {
-		return "an engine that can"
-	}
-	return strings.Join(labels, " or ")
+	return b.Validate(engine)
 }
 
 // DecisionRunRecipe is a run recipe the researcher or the PM proposed for

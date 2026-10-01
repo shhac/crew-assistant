@@ -19,6 +19,9 @@ type AssistantProfile struct {
 	Personality string `json:"personality"`
 	Avatar      Avatar `json:"avatar"`
 	Model       Model  `json:"model"`
+	// Browser lets the assistant's chat use the owner's browser, as a
+	// sandboxed session rather than one limited to the assistant's tools.
+	Browser Browser `json:"browser,omitzero"`
 }
 
 // MaxAssistants is the most assistant profiles a config keeps.
@@ -82,6 +85,9 @@ func (p AssistantProfile) Validate() error {
 	}
 	if err := p.Model.Validate(); err != nil {
 		return fmt.Errorf("%s's model: %w", p.Name, err)
+	}
+	if err := p.Browser.Validate(p.Model.Engine); err != nil {
+		return fmt.Errorf("%s's browser: %w", p.Name, err)
 	}
 	return nil
 }

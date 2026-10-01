@@ -57,8 +57,9 @@ export interface Role {
   browser?: Browser;
 }
 /**
- * QA using the browser its engine ships: the owner's real Chrome, with its
- * logins. An empty name is the browser the extension connects by default.
+ * A member, QA or the assistant using the browser its engine ships: the
+ * owner's real Chrome, with its logins. An empty name is the browser the
+ * extension connects by default.
  */
 export interface Browser {
   on?: boolean;
@@ -133,11 +134,13 @@ export interface AssistantProfile extends Drawable {
   name: string;
   personality: string;
   model: AssistantModel;
+  browser?: Browser;
 }
 export interface AssistantInput {
   name: string;
   personality: string;
   model: AssistantModel;
+  browser?: Browser;
   /** A new assistant's stand-in face and the look to draw, from a suggestion. */
   avatar?: AvatarSpec;
 }

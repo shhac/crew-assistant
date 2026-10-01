@@ -4,7 +4,8 @@ import { ModelFields, type ModelChoice } from "./ModelFields";
 import { PersonalityField, SuggestedLook } from "./ProfileFields";
 import type { Suggestion } from "./SuggestIdentity";
 import { ErrorNotice, useAction } from "./ui";
-import { saveAssistant, type AssistantProfile } from "./api";
+import { BrowserFields, useBrowserOffered } from "./QABrowser";
+import { saveAssistant, type AssistantProfile, type Browser } from "./api";
 
 const defaultMaxTokens = 4096;
 
@@ -35,6 +36,7 @@ export function AssistantForm({
     assistant?.model.max_tokens || defaultMaxTokens,
   );
   const [personality, setPersonality] = useState(assistant?.personality ?? "");
+  const [browser, setBrowser] = useState<Browser>(assistant?.browser ?? {});
   useEffect(() => {
     if (!suggestion) return;
     setName(suggestion.name);
@@ -48,6 +50,8 @@ export function AssistantForm({
       picked.engine || (choicesFor(choices, "assistant")[0]?.engine ?? ""),
   };
   const api = choiceFor(choice.engine, choices)?.cli === false;
+  const browserOffered = useBrowserOffered(choice.engine);
+  const browserRefused = !!browser.on && !browserOffered;
   const { busy, error, run } = useAction();
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -63,6 +67,7 @@ export function AssistantForm({
           effort: choice.effort.trim(),
           max_tokens: maxTokens,
         },
+        browser: { on: !!browser.on, name: browser.name?.trim() ?? "" },
         ...(!assistant && suggestion ? { avatar: suggestion.avatar } : {}),
       });
       await onSaved(saved);
@@ -110,6 +115,13 @@ export function AssistantForm({
           </span>
         </label>
       )}
+      <BrowserFields
+        id="assistant"
+        engine={choice.engine}
+        value={browser}
+        onChange={setBrowser}
+        purpose="assistant"
+      />
       <PersonalityField
         id="assistant-personality"
         value={personality}
@@ -121,7 +133,7 @@ export function AssistantForm({
         <button
           className="btn btn-primary"
           type="submit"
-          disabled={busy || !name.trim() || !choice.engine}
+          disabled={busy || !name.trim() || !choice.engine || browserRefused}
         >
           {assistant ? "Save" : "Add assistant"}
         </button>

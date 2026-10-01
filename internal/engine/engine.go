@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/completion"
 )
@@ -43,7 +44,10 @@ type Config struct {
 	Model         string
 	AssistantName string
 	Personality   string
-	MaxTurns      int
+	// Browser is the owner's browser the assistant may use; only a chat held
+	// as a session is given it.
+	Browser  config.Browser
+	MaxTurns int
 	// MaxOutputTokens is the room a request leaves for its reply.
 	MaxOutputTokens int
 	MaxContextBytes int

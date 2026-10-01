@@ -18,13 +18,30 @@ export function useBrowserOffered(engine: string) {
 const engineBrowser: Record<string, string> = {
   claude: "On Claude, its browser tools act only inside Chrome.",
   codex:
-    "On Codex, it runs through the ChatGPT app's browser bridge, which is checked before each turn to be confined by that turn's sandbox.",
+    "On Codex, it runs through the ChatGPT app's browser bridge, which is checked before each session starts to be confined by its sandbox.",
+};
+
+/** What each holder of a browser setting is allowed it for. */
+const purposes = {
+  member: {
+    label: "Allow browser use",
+    hint: "Every turn this member takes can use it, whatever their roles, to look things up and read pages. Each turn is told it is only for controlling a browser, never to sign in, submit forms or act on an account, and to close its tabs.",
+  },
+  assistant: {
+    label: "Allow browser use",
+    hint: "The assistant can use it in your chat to look things up and read pages, and is told it is only for controlling a browser, never to sign in, submit forms or act on an account, and to close its tabs. While it is on, the chat can also read files on this machine, though never change them, and its shell reaches no network.",
+  },
+  qa: {
+    label: "QA uses the browser to try the app",
+    hint: "QA opens only the app, on this machine, in tabs of its own, and closes them when it is done.",
+  },
 };
 
 /**
  * A browser setting: off, or on with the name of a connected browser, empty
  * for the one the extension connects by default. A member's allows the
- * browser in every turn they take; QA's lets it try the app. It is offered
+ * browser in every turn they take; the assistant's, in the owner's chat;
+ * QA's lets it try the app. It is offered
  * only on an engine whose roles can use one; one left on elsewhere can only
  * be switched off.
  */
@@ -39,7 +56,7 @@ export function BrowserFields({
   engine: string;
   value: Browser;
   onChange: (b: Browser) => void;
-  purpose?: "member" | "qa";
+  purpose?: keyof typeof purposes;
 }) {
   const offered = useBrowserOffered(engine);
   if (!offered && !value.on) return null;
@@ -52,18 +69,11 @@ export function BrowserFields({
           checked={!!value.on}
           onChange={(e) => onChange({ ...value, on: e.target.checked })}
         />
-        <span>
-          {purpose === "member"
-            ? "Allow browser use"
-            : "QA uses the browser to try the app"}
-        </span>
+        <span>{purposes[purpose].label}</span>
       </label>
       {offered ? (
         <p className="hint">
-          <strong>{REAL_CHROME}</strong>{" "}
-          {purpose === "member"
-            ? "Every turn this member takes can use it, whatever their roles, to look things up and read pages. Each turn is told it is only for controlling a browser, never to sign in, submit forms or act on an account, and to close its tabs."
-            : "QA opens only the app, on this machine, in tabs of its own, and closes them when it is done."}{" "}
+          <strong>{REAL_CHROME}</strong> {purposes[purpose].hint}{" "}
           {engineBrowser[engine] ?? ""}
         </p>
       ) : (

@@ -41,6 +41,16 @@ func TestAssistantProfilesAreAddedChangedAndDeleted(t *testing.T) {
 	if err != nil || changed.Personality != "Exact." || changed.Model.Engine != "codex" || changed.Avatar.Image != saved.Avatar.Image || changed.Avatar.Look != "Short silver hair" {
 		t.Fatalf("%+v %v", changed, err)
 	}
+	browsing, err := a.SaveAssistant(ctx, iris.ID, AssistantInput{Name: "Iris", Personality: "Exact.", Model: changed.Model, Browser: &config.Browser{On: true, Name: " Work "}})
+	if err != nil || browsing.Browser != (config.Browser{On: true, Name: "Work"}) {
+		t.Fatalf("%+v %v", browsing.Browser, err)
+	}
+	if kept, err := a.SaveAssistant(ctx, iris.ID, AssistantInput{Name: "Iris", Personality: "Exact.", Model: changed.Model}); err != nil || !kept.Browser.On {
+		t.Fatalf("a save that didn't mention the browser changed it: %+v %v", kept.Browser, err)
+	}
+	if _, err := a.SaveAssistant(ctx, iris.ID, AssistantInput{Name: "Iris", Model: config.Model{Engine: "grok", Model: "grok-5", MaxTokens: 4096}}); err == nil || !strings.Contains(err.Error(), "browser") {
+		t.Fatalf("an assistant on an engine without the browser kept it: %v", err)
+	}
 	if _, err := a.SaveAssistant(ctx, "nobody", AssistantInput{Name: "X", Model: config.DefaultProfile().Model}); !errors.Is(err, core.ErrNotFound) {
 		t.Fatal(err)
 	}

@@ -261,7 +261,7 @@ func (p Playbook) Validate() error {
 		if err := seatKinds(r); err != nil {
 			return err
 		}
-		if err := r.Browser.validate(r.Engine, r.Holds(RoleQA)); err != nil {
+		if err := validateBrowser(r.Browser, r.Engine, r.Holds(RoleQA)); err != nil {
 			return fmt.Errorf("role %s: %w", r.Name, err)
 		}
 		switch {
