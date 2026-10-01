@@ -74,6 +74,26 @@ func (lp *Loop) dropHandoff(ctx context.Context, taskID, name string) error {
 	return err
 }
 
+// tookTurn records, in the change that records an implementer's turn, what
+// the turn leaves besides its draft: problems with its blocks, its thread,
+// the pull request's text and replies, and that the request it carried out
+// is done. A request made while it ran, even for the same thing, waits for
+// the next round, and a restart carries on from the last turn recorded.
+func tookTurn(t *core.Task, h core.Handoff) {
+	t.WakeErrors = h.WakeErrors
+	t.Failures, t.RetryAt = 0, time.Time{}
+	if t.WriterRequest == h.Request {
+		t.WriterNext = ""
+	}
+	if h.Seat != nil {
+		t.KeepThread(core.RoleImplementer, *h.Seat, h.Session)
+	}
+	if h.PR != nil {
+		t.Describe(*h.PR)
+	}
+	t.Post(h.Posts...)
+}
+
 // applyHandoff appends a handoff's revision and whatever else the turn that
 // made it changes on the task, and says what happened.
 func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
@@ -98,19 +118,8 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 	}
 	t.Revisions = append(t.Revisions, r)
 	t.AnswerDirection(h.Seen, r.N, h.Reply, r.At)
-	t.WakeErrors = h.WakeErrors
 	t.Unreachable = h.Unreachable
-	if h.PR != nil {
-		t.Describe(*h.PR)
-	}
-	t.Post(h.Posts...)
-	if t.WriterRequest == h.Request {
-		t.WriterNext = ""
-	}
-	if h.Seat != nil {
-		t.KeepThread(core.RoleImplementer, *h.Seat, h.Session)
-	}
-	t.Failures, t.RetryAt = 0, time.Time{}
+	tookTurn(t, h)
 	t.Status, t.Detail = core.TaskReviewing, ""
 	if c := h.DraftCatchUp; c != nil {
 		t.Base, t.From = c.Base, c.From

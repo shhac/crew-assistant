@@ -94,77 +94,49 @@ func (lp *Loop) prepareWorkspace(ctx context.Context, t core.Task, m medium) (co
 // to change, or its hand-off to the designer for design input. seen is how
 // much of the owner's direction its prompt carried.
 func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m medium, writer string, result roles.Result, seen int, integration *core.DraftCatchUp) error {
-	reply, learned := splitBlock(result.Text, "learned")
-	reply, block := splitBlock(reply, "wake")
-	reply, unmet := splitBlock(reply, "owner-step")
-	reply, answered := splitBlock(reply, "pr-reply")
-	reply, described := splitBlock(reply, "pr")
-	wakeErrors := lp.applyWakeBlock(ctx, p, t, block)
-	prText, problem := parsePRText(described)
+	r, ok := t.Role(writer)
+	in := parseWriterReply(result.Text, ok && designsFor(t, r))
+	wakeErrors := lp.applyWakeBlock(ctx, p, t, in.wake)
+	prText, problem := parsePRText(in.pr)
 	if problem != "" {
 		wakeErrors = append(wakeErrors, problem)
 	}
 	// Replies with a new draft wait for it to be pushed; without one, for
 	// the draft the pull request has.
-	posts, handTo, problems := parsePRReply(answered, writer, t.PROpen(), len(t.Revisions)+1)
+	n := len(t.Revisions) + 1
+	posts, handTo, problems := parsePRReply(in.prReply, writer, t.PROpen(), n)
 	wakeErrors = append(wakeErrors, problems...)
 	if handTo != nil {
 		if _, err := lp.Core.AskAboutPR(ctx, t.ID, writer, handTo.To, handTo.Question); err != nil {
 			wakeErrors = append(wakeErrors, "handing the pull request to "+handTo.To+": "+err.Error())
 		}
 	}
-	r, ok := t.Role(writer)
 	if ok {
-		lp.recordLearned(ctx, p, t, r, m, learned)
+		lp.recordLearned(ctx, p, t, r, m, in.learned)
 	}
-	var question string
-	if ok && designsFor(t, r) {
-		reply, question = splitBlock(reply, "design")
-	}
-	// The round carried out the request it started with; one made while it
-	// ran, even for the same thing, waits for the next round. Where its
-	// conversation got to is kept in the same change as what the round
-	// produced, so a restart carries on from the last round recorded.
-	applied := t.WriterRequest
-	took := func(t *core.Task) {
-		if t.WriterRequest == applied {
-			t.WriterNext = ""
-		}
-		if ok {
-			t.KeepThread(core.RoleImplementer, r, result.Session)
-		}
+	h := core.Handoff{DraftCatchUp: integration, Writer: writer, Session: result.Session, Seen: seen, Reply: in.reply, Request: t.WriterRequest, WakeErrors: wakeErrors, PR: prText, Posts: posts}
+	if ok {
+		r.Learnings = nil
+		h.Seat = &r
 	}
 	// Asking for design input ends the turn without a draft: whatever it
 	// changed is set aside when the workspace is next reset, and its session
 	// resumes with the answer.
-	if question != "" {
-		return lp.askDesign(ctx, t, writer, question, func(t *core.Task) {
+	if in.question != "" {
+		return lp.askDesign(ctx, t, writer, in.question, func(t *core.Task) {
 			t.WakeErrors = wakeErrors
-			took(t)
+			if t.WriterRequest == h.Request {
+				t.WriterNext = ""
+			}
+			if h.Seat != nil {
+				t.KeepThread(core.RoleImplementer, *h.Seat, h.Session)
+			}
 		})
 	}
-	n := len(t.Revisions) + 1
 	revision, err := m.snapshot(ctx, t, n)
 	if errors.Is(err, gitrepo.ErrNoChange) && proposed(t) {
 		_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-			t.WakeErrors, t.Failures, t.RetryAt = wakeErrors, 0, time.Time{}
-			took(t)
-			if prText != nil {
-				t.Describe(*prText)
-			}
-			// No new draft came: the replies go with the one the pull
-			// request has.
-			for i := range posts {
-				posts[i].Revision = len(t.Revisions)
-			}
-			t.Post(posts...)
-			t.AnswerDirection(seen, 0, "No change needed: "+reply, time.Now().UTC())
-			if t.DirectionPending > 0 {
-				t.ReviseWithDirection()
-				return fmt.Sprintf("%s: no change needed for the pull request; revising with your note", t.Objective), nil
-			}
-			t.Status, t.Detail = core.TaskLanding, "No change needed: "+text.Clip(reply, 300)
-			return fmt.Sprintf("%s: no change needed for the pull request's feedback", t.Objective), nil
+			return noChangeNeeded(t, h), nil
 		})
 		return err
 	}
@@ -181,11 +153,47 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	}
 	// The draft counts only once the project's records hold it; the handoff
 	// carries the round's whole outcome until then.
-	revision.Summary = text.Clip(reply, 2000)
-	h := core.Handoff{DraftCatchUp: integration, Revision: revision, Writer: writer, Session: result.Session, Seen: seen, Reply: reply, Request: applied, WakeErrors: wakeErrors, PR: prText, Posts: posts, Unreachable: parseOwnerSteps(unmet, n, t.Criteria, t.OwnersAlready())}
-	if ok {
-		r.Learnings = nil
-		h.Seat = &r
-	}
+	revision.Summary = text.Clip(in.reply, 2000)
+	h.Revision = revision
+	h.Unreachable = parseOwnerSteps(in.unmet, n, t.Criteria, t.OwnersAlready())
 	return lp.handOff(ctx, t, m, h)
+}
+
+// writerReply is an implementer's reply taken apart: its words, and the
+// blocks it may end with.
+type writerReply struct {
+	reply, learned, wake, unmet, prReply, pr, question string
+}
+
+// parseWriterReply takes an implementer's reply apart; designs is whether
+// it may ask the designer, with a design block.
+func parseWriterReply(text string, designs bool) writerReply {
+	var in writerReply
+	in.reply, in.learned = splitBlock(text, "learned")
+	in.reply, in.wake = splitBlock(in.reply, "wake")
+	in.reply, in.unmet = splitBlock(in.reply, "owner-step")
+	in.reply, in.prReply = splitBlock(in.reply, "pr-reply")
+	in.reply, in.pr = splitBlock(in.reply, "pr")
+	if designs {
+		in.reply, in.question = splitBlock(in.reply, "design")
+	}
+	return in
+}
+
+// noChangeNeeded records, within a change, an implementer's round on an
+// open pull request that changed nothing: its replies go with the draft the
+// pull request has, and the task lands again, or revises at once with any
+// direction the round didn't see.
+func noChangeNeeded(t *core.Task, h core.Handoff) string {
+	for i := range h.Posts {
+		h.Posts[i].Revision = len(t.Revisions)
+	}
+	tookTurn(t, h)
+	t.AnswerDirection(h.Seen, 0, "No change needed: "+h.Reply, time.Now().UTC())
+	if t.DirectionPending > 0 {
+		t.ReviseWithDirection()
+		return fmt.Sprintf("%s: no change needed for the pull request; revising with your note", t.Objective)
+	}
+	t.Status, t.Detail = core.TaskLanding, "No change needed: "+text.Clip(h.Reply, 300)
+	return fmt.Sprintf("%s: no change needed for the pull request's feedback", t.Objective)
 }
