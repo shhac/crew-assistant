@@ -30,7 +30,7 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 		if err != nil {
 			return lp.roleFailed(ctx, t, "The workspace", err)
 		}
-		return lp.landPR(ctx, t, gm)
+		return lp.landPR(ctx, p, t, gm)
 	}
 	r := t.Revisions[len(t.Revisions)-1]
 	if c, ok := m.(catcher); ok {
@@ -49,20 +49,7 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 	if l != nil {
 		return lp.catchUpRound(ctx, t, c, *l)
 	}
-	// The intent is recorded before anything moves where the change lands,
-	// and the delivery, once begun, goes to its end: a task stopped or a
-	// daemon restarted meanwhile is settled from where the change went,
-	// never left half done or landed unrecorded.
-	if _, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
-		if why := core.LandingHeld(p, *t); len(why) > 0 && t.Delivering == nil {
-			return "", errDeliveryBlocked
-		}
-		t.Delivering = &core.Delivering{Revision: r.N, At: time.Now().UTC()}
-		return "", nil
-	}); err != nil {
-		if errors.Is(err, errDeliveryBlocked) {
-			return nil
-		}
+	if held, err := lp.beginDelivering(ctx, t.ID, r); err != nil || len(held) > 0 {
 		return err
 	}
 	target, err := m.deliver(context.WithoutCancel(ctx), t, r)
@@ -80,6 +67,28 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 		return lp.landingFailed(ctx, t, r, err)
 	}
 	return lp.cleanUp(t, m, lp.recordLanded(ctx, t, r, target, ""))
+}
+
+// beginDelivering records that r is going out, in the change that checks
+// nothing holds it, and says what holds it instead when something does. The
+// intent is recorded before anything moves where the change lands, and the
+// delivery, once begun, goes to its end: a task stopped or a daemon
+// restarted meanwhile is settled from where the change went, never left half
+// done or landed unrecorded.
+func (lp *Loop) beginDelivering(ctx context.Context, taskID string, r core.Revision) ([]string, error) {
+	var held []string
+	_, err := lp.updateOpen(ctx, taskID, func(t *core.Task, p *core.Project) (string, error) {
+		if why := core.LandingHeld(p, *t); len(why) > 0 && t.Delivering == nil {
+			held = why
+			return "", errDeliveryBlocked
+		}
+		t.Delivering = &core.Delivering{Revision: r.N, At: time.Now().UTC()}
+		return "", nil
+	})
+	if errors.Is(err, errDeliveryBlocked) {
+		return held, nil
+	}
+	return nil, err
 }
 
 // proposed reports a task whose pull request is open: updates to it go out

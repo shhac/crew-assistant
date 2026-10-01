@@ -989,3 +989,23 @@ func TestAReplyGitHubKeepsRefusingIsGivenUp(t *testing.T) {
 		t.Fatalf("outbox %+v comments %v", task.Proposal.Outbox, s.gh.postsOf("comment"))
 	}
 }
+
+// A merge GitHub refuses, such as for branch protection, comes to the owner
+// rather than waiting on wakes that won't fire.
+func TestARefusedMergeComesToTheOwner(t *testing.T) {
+	s := newPRScenario(t, 2, opensUnasked, mergeBy(core.ApproveNone))
+	s.current(t)
+	run := s.a.github.Run
+	s.a.github.Run = func(ctx context.Context, args ...string) ([]byte, error) {
+		if strings.Join(args[:2], " ") == "pr merge" {
+			return nil, fmt.Errorf("base branch policy prohibits the merge")
+		}
+		return run(ctx, args...)
+	}
+	s.readyPR(t)
+	task := s.current(t)
+	d := openDecision(t, s.a, task)
+	if d.Kind != core.DecisionFailure || !strings.Contains(d.Context, "GitHub refused to merge pull request #7") || task.Delivering != nil {
+		t.Fatalf("decision %s %q, delivering %+v", d.Kind, d.Context, task.Delivering)
+	}
+}

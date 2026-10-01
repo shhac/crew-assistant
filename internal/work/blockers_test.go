@@ -222,7 +222,7 @@ func TestBlockerAddedAfterClaimStillStopsPullRequestMerge(t *testing.T) {
 	m := gitMedium{playbook: core.Playbook{Land: core.LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", Approve: core.ApproveNone}}}
 	// The stale task is the one held by a landing already claimed before the owner added the condition.
 	pr := github.PR{State: "OPEN", HeadRefOid: "abc", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN", ReviewDecision: "APPROVED"}
-	err = lp.reactTo(ctx, task, m, task.Revisions[0], core.Proposal{Pushed: "abc"}, pr)
+	err = lp.reactTo(ctx, p, task, m, task.Revisions[0], core.Proposal{Pushed: "abc"}, pr)
 	if err != nil {
 		t.Fatalf("blocked merge should wait quietly: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestSuccessfulMergeRequestReleasesDeliveryMarkAndKeepsBlockersEffective(t *
 	m := gitMedium{playbook: core.Playbook{Land: core.LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", Approve: core.ApproveNone}}}
 	prop := core.Proposal{Pushed: "abc"}
 	pr := github.PR{State: "OPEN", HeadRefOid: "abc", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN", ReviewDecision: "APPROVED"}
-	if err := lp.reactTo(ctx, task, m, task.Revisions[0], prop, pr); err != nil {
+	if err := lp.reactTo(ctx, p, task, m, task.Revisions[0], prop, pr); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ := lp.Core.Snapshot(ctx)
@@ -271,7 +271,7 @@ func TestSuccessfulMergeRequestReleasesDeliveryMarkAndKeepsBlockersEffective(t *
 		t.Fatalf("team still thinks it is delivering: %v", err)
 	}
 	// The stale queued-merge observation must not bypass the newly added condition.
-	if err := lp.reactTo(ctx, fresh, m, fresh.Revisions[0], prop, pr); err != nil {
+	if err := lp.reactTo(ctx, p, fresh, m, fresh.Revisions[0], prop, pr); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 1 {

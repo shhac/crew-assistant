@@ -23,7 +23,7 @@ import (
 // request is approved and green. Between those, the task waits on wakes.
 //
 // Each step either moves the task on (done) or lets landing continue.
-func (lp *Loop) landPR(ctx context.Context, t core.Task, m gitMedium) error {
+func (lp *Loop) landPR(ctx context.Context, p core.Project, t core.Task, m gitMedium) error {
 	if done, err := lp.wokenRound(ctx, t); done || err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func (lp *Loop) landPR(ctx context.Context, t core.Task, m gitMedium) error {
 	if err := lp.editProposal(ctx, t.ID, "", func(p *core.Proposal) { p.Observed, p.Described = prop.Observed, prop.Described }); err != nil {
 		return err
 	}
-	return lp.reactTo(ctx, t, m, r, prop, pr)
+	return lp.reactTo(ctx, p, t, m, r, prop, pr)
 }
 
 // checksGrace is how long after a push a pull request with no checks is
@@ -196,24 +196,25 @@ func (lp *Loop) openPR(ctx context.Context, t core.Task, m gitMedium, r core.Rev
 // reactTo does what the pull request's state calls for: record a merge, bring
 // a closed one to the owner, take in someone else's push, answer feedback,
 // catch up with a moved base, merge when ready, or wait.
-func (lp *Loop) reactTo(ctx context.Context, t core.Task, m gitMedium, r core.Revision, prop core.Proposal, pr github.PR) error {
+func (lp *Loop) reactTo(ctx context.Context, p core.Project, t core.Task, m gitMedium, r core.Revision, prop core.Proposal, pr github.PR) error {
 	land := m.playbook.Land
 	if prop.Observed == nil {
 		prop.Observed = observed(pr, prop, time.Now().UTC())
 	}
-	switch {
-	case pr.State == "MERGED":
+	if pr.State == "MERGED" {
 		landed := r
 		if pr.MergeCommit != nil && pr.MergeCommit.Oid != "" {
 			landed.Ref = pr.MergeCommit.Oid
 		}
 		return lp.recordLanded(ctx, t, landed, land.Target, fmt.Sprintf("pull request #%d", prop.Number))
-	case pr.State == "CLOSED":
+	}
+	if pr.State == "CLOSED" {
 		if err := lp.editProposal(ctx, t.ID, "", func(p *core.Proposal) { p.Number, p.URL = 0, "" }); err != nil {
 			return err
 		}
 		return lp.landingFailed(ctx, t, r, fmt.Errorf("pull request #%d was closed without merging; trying again opens a new one", pr.Number))
-	case pr.HeadRefOid != prop.Pushed, pr.Behind():
+	}
+	if pr.HeadRefOid != prop.Pushed || pr.Behind() {
 		if done, err := lp.catchUpIfBehind(ctx, t, m, r); done || err != nil {
 			return err
 		}
@@ -221,65 +222,44 @@ func (lp *Loop) reactTo(ctx context.Context, t core.Task, m gitMedium, r core.Re
 	if feedback := prFeedback(pr, prop, r); len(feedback) > 0 {
 		return lp.answerPR(ctx, t, r, pr, prop, feedback)
 	}
-	if prop.Observed.Ready {
-		held, err := lp.heldFromMerging(ctx, t)
-		if err != nil {
-			return err
-		}
-		if len(held) > 0 {
-			return lp.holdReadyPR(ctx, t, land.GitHub, pr, held)
-		}
+	if !prop.Observed.Ready {
+		return lp.awaitPR(ctx, t, land.GitHub, pr)
 	}
-	if prop.Observed.Ready && !mergeApproved(t, r) && land.MergeGate() != core.ApproveNone {
-		// Ready: whoever approves merging decides, as checks passing does,
-		// with the pull request still watched meanwhile.
+	return lp.mergeReady(ctx, p, t, land, r, prop, pr)
+}
+
+// mergeReady merges a pull request ready to land, unless something holds it
+// or whoever approves merging hasn't yet, who then decides, as checks
+// passing does, with the pull request still watched meanwhile.
+func (lp *Loop) mergeReady(ctx context.Context, p core.Project, t core.Task, land core.LandPolicy, r core.Revision, prop core.Proposal, pr github.PR) error {
+	if held := core.LandingHeld(&p, t); len(held) > 0 {
+		return lp.holdReadyPR(ctx, t, land.GitHub, pr, held)
+	}
+	if !mergeApproved(t, r) && land.MergeGate() != core.ApproveNone {
 		if err := lp.watchPR(ctx, t, land.GitHub, pr); err != nil {
 			return err
 		}
 		return lp.setStatus(ctx, t.ID, core.TaskDeciding, fmt.Sprintf("Pull request #%d is ready to merge", prop.Number))
 	}
-	if prop.Observed.Ready {
-		var held []string
-		if _, err := lp.updateOpen(ctx, t.ID, func(current *core.Task, p *core.Project) (string, error) {
-			if held = core.LandingHeld(p, *current); len(held) > 0 && current.Delivering == nil {
-				return "", errDeliveryBlocked
-			}
-			current.Delivering = &core.Delivering{Revision: r.N, At: time.Now().UTC()}
-			return "", nil
-		}); err != nil {
-			if errors.Is(err, errDeliveryBlocked) {
-				return lp.holdReadyPR(ctx, t, land.GitHub, pr, held)
-			}
-			return err
-		}
-		mergeErr := lp.github.Merge(ctx, land.GitHub, prop.Number, land.MergeMethod(), r.Ref)
-		// A successful request may only enqueue the merge. The next observation
-		// records MERGED; until then external conditions must still hold landing.
-		if err := lp.notDelivering(ctx, t.ID); err != nil {
-			return err
-		}
-		if mergeErr == nil {
-			return lp.setStatus(ctx, t.ID, core.TaskLanding, fmt.Sprintf("Merging pull request #%d", prop.Number))
-		}
-	}
-	return lp.awaitPR(ctx, t, land.GitHub, pr)
-}
-
-// heldFromMerging says what holds the task's ready pull request from
-// merging: its blockers and the project's landing pause.
-func (lp *Loop) heldFromMerging(ctx context.Context, t core.Task) ([]string, error) {
-	snap, err := lp.Core.Snapshot(ctx)
+	held, err := lp.beginDelivering(ctx, t.ID, r)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	p, ok := findProject(snap, t.ProjectID)
-	if !ok {
-		return nil, core.ErrNotFound
+	if len(held) > 0 {
+		return lp.holdReadyPR(ctx, t, land.GitHub, pr, held)
 	}
-	if fresh, ok := findTask(snap, t.ProjectID, t.ID); ok {
-		t = fresh
+	merged := lp.github.Merge(ctx, land.GitHub, prop.Number, land.MergeMethod(), r.Ref)
+	// A successful request may only enqueue the merge. The next observation
+	// records MERGED; until then external conditions must still hold landing.
+	if err := lp.notDelivering(ctx, t.ID); err != nil {
+		return err
 	}
-	return core.LandingHeld(&p, t), nil
+	if merged != nil {
+		// Branch protection, a merge method the repository refuses, or a
+		// head moved since it was checked: someone has to look.
+		return lp.landingFailed(ctx, t, r, fmt.Errorf("GitHub refused to merge pull request #%d: %w", prop.Number, merged))
+	}
+	return lp.setStatus(ctx, t.ID, core.TaskLanding, fmt.Sprintf("Merging pull request #%d", prop.Number))
 }
 
 // holdReadyPR waits on a ready pull request something holds from merging,
