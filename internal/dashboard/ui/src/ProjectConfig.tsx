@@ -4,7 +4,7 @@ import { RunRecipeSettings } from "./RunRecipe";
 import { LandingSettings } from "./ProjectLanding";
 import { TeamSettings } from "./TeamSettings";
 import { boardColumns, boardRows } from "./boardLanes";
-import { isCode, stageLimit, stageRole } from "./stages";
+import { isCode, stageLimit } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
 import {
   setParallel,
@@ -92,7 +92,7 @@ const mostAtOnce = 10;
 const limitStages = (project: Project) => [
   ...boardColumns(project, [])
     .flatMap((c) => c.lanes)
-    .filter((l) => l.stage !== "todo" && l.stage !== "triage"),
+    .filter((l) => l.stage !== "triage"),
   ...boardRows(project, []),
 ];
 
@@ -114,13 +114,17 @@ function TasksAtOnce({
   const shown = saved?.source === playbook ? saved.actual : playbook;
   const current = () =>
     Object.fromEntries(
-      stages.map((s) => [s.stage, String(shown.stage_limits?.[s.stage] || 0)]),
+      stages.map((s) => [
+        s.stage,
+        shown.stage_limits?.[s.stage]
+          ? String(shown.stage_limits[s.stage])
+          : "",
+      ]),
     );
   const [editing, setEditing] = useState(false);
   const [values, setValues] = useState<Record<string, string>>(current);
   const [value, setValue] = useState(String(playbook.max_active || 0));
   const { busy, error, run } = useAction();
-  const defaults = { ...playbook, stage_limits: {} };
   async function save(e: FormEvent) {
     e.preventDefault();
     await run(async () => {
@@ -159,29 +163,31 @@ function TasksAtOnce({
     </option>
   ));
   return (
-    <section className="tab-panel card" aria-label="Tasks at once">
+    <section className="tab-panel card" aria-label="Column capacity">
       {editing ? (
-        <form className="form" aria-label="Tasks at once" onSubmit={save}>
-          <h3>Tasks at once</h3>
+        <form className="form" aria-label="Column capacity" onSubmit={save}>
+          <h3>Column capacity</h3>
           <div className="form-row">
             {stages.map((s) => (
               <label key={s.stage} htmlFor={`config-stage-${s.stage}`}>
                 {s.label}
-                <select
+                <input
                   id={`config-stage-${s.stage}`}
                   className="field"
-                  value={values[s.stage] || "0"}
+                  type="number"
+                  min={1}
+                  max={1000}
+                  step={1}
+                  placeholder={
+                    stageLimit({ ...shown, stage_limits: {} }, s.stage)
+                      ? "10 (default)"
+                      : "No limit"
+                  }
+                  value={values[s.stage] || ""}
                   onChange={(e) =>
                     setValues({ ...values, [s.stage]: e.target.value })
                   }
-                >
-                  <option value="0">
-                    {stageLimit(defaults, s.stage)
-                      ? `One per seat (${stageLimit(defaults, s.stage)})`
-                      : "No limit"}
-                  </option>
-                  {options}
-                </select>
+                />
               </label>
             ))}
             <label htmlFor="config-max-active">
@@ -198,11 +204,10 @@ function TasksAtOnce({
             </label>
           </div>
           <p className="hint">
-            A request done with a stage waits in it until the next has room. To
-            do has no limit. Requests past an overall limit wait on the to-do
-            list. Requests waiting on you or outside checks don't count toward
-            seat-based stage limits or the overall limit, but keep counting
-            toward stage limits you set.
+            A finished request waits in its column until the next has room.
+            Everything in a column counts towards its capacity. Empty fields use
+            10 for working columns and no limit for To do, Ready or pull request
+            rows. Triage is never limited. The overall limit is optional.
           </p>
           <div className="actions">
             <button className="btn btn-primary" type="submit" disabled={busy}>
@@ -221,7 +226,7 @@ function TasksAtOnce({
       ) : (
         <>
           <div className="panel-head">
-            <h3>Tasks at once</h3>
+            <h3>Column capacity</h3>
             <button
               type="button"
               className="btn btn-sm"
@@ -245,7 +250,7 @@ function TasksAtOnce({
                       ? `Up to ${limit} at once (${
                           shown.stage_limits?.[s.stage]
                             ? "set by you"
-                            : `one per ${s.stage === "qa" ? s.label : stageRole[s.stage]} seat`
+                            : "default"
                         })`
                       : "No limit"}
                   </dd>
@@ -261,6 +266,11 @@ function TasksAtOnce({
               </dd>
             </div>
           </dl>
+          <p className="hint">
+            Triage is never limited. A finished request waits in its column
+            until the next has room; everything in a column counts towards its
+            capacity.
+          </p>
         </>
       )}
       <ErrorNotice error={error} />

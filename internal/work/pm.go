@@ -189,7 +189,7 @@ The order is yours to set directly. Never ask the owner to approve or confirm an
 	pmTasks(&b, snap, p)
 	if pmTriage(&b, snap, p) {
 		b.WriteString(`
-Tasks in triage are new work from the owner or the assistant, waiting for you before the team takes them. For each one: tidy its title and requirements with edit_task so the researcher starts from a clear ask, and link it with link_tasks where it depends on or relates to other work. Then send it on to the team, "to": "research", which puts it on the to-do list, where the order below may place it; or, only when you cannot shape it without the owner, keep it in triage and ask them, "to": "owner", with the question. A task left out stays in triage until you next look.
+Tasks in triage are new work from the owner or the assistant, waiting for you before the team takes them. For each one: tidy its title and requirements with edit_task so the researcher starts from a clear ask, and link it with link_tasks where it depends on or relates to other work. Then send it on to the team, "to": "research", which sends it towards the to-do list, where the order below may place it; or, only when you cannot shape it without the owner, keep it in triage and ask them, "to": "owner", with the question. If To do is full, a task sent on waits for room in Triage and its id is ignored in the order until it joins the queue. A task left out stays in triage until you next look.
 `)
 	}
 	if pmPRChoices(&b, snap, p) {
@@ -253,7 +253,7 @@ func pmTasks(b *strings.Builder, snap core.Snapshot, p core.Project) {
 func pmTriage(b *strings.Builder, snap core.Snapshot, p core.Project) bool {
 	found := false
 	for _, t := range snap.Tasks {
-		if t.ProjectID != p.ID || t.Status != core.TaskTriage {
+		if t.ProjectID != p.ID || t.Status != core.TaskTriage || t.SentOn {
 			continue
 		}
 		if !found {

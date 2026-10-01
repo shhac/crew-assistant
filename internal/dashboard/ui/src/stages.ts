@@ -271,21 +271,16 @@ export function stageLabel(stage: Stage, playbook?: Playbook) {
   return stage;
 }
 
-/** The role whose seats supply each working stage's default capacity. */
-export const stageRole: Partial<Record<Stage, string>> = {
-  researching: "researcher",
-  designing: "designer",
-  implementing: "implementer",
-  reviewing: "reviewer",
-  qa: "qa",
-};
-
-/** The stage's limit: the most requests under way it may hold at once. */
+/** Column capacity is independent of how many teammates can work. */
 export const stageLimit = (playbook: Playbook | undefined, stage: Stage) =>
-  playbook?.stage_limits?.[stage] ||
-  (stageRole[stage]
-    ? playbook?.roles.filter((r) => holds(r, stageRole[stage]!)).length || 0
-    : 0);
+  !playbook || stage === "triage"
+    ? 0
+    : playbook.stage_limits?.[stage] ||
+      (["researching", "designing", "implementing", "reviewing", "qa"].includes(
+        stage,
+      )
+        ? 10
+        : 0);
 
 /**
  * Who or what a ready step waits for, as "Waiting for Lucius (busy on
@@ -295,9 +290,7 @@ export function waitingWords(task: Task, wait: Wait, project?: Project) {
   switch (wait.kind) {
     case "stage": {
       const stage = stageLabel(wait.stage!, taskPlaybook(task, project));
-      return wait.from
-        ? `Done, waiting for room in ${stage}`
-        : `Waiting for room in ${stage} (${wait.count} of ${wait.limit})`;
+      return `Waiting for room in ${stage} (${wait.count} of ${wait.limit})`;
     }
     case "member": {
       const busy = wait.on

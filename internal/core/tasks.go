@@ -25,6 +25,8 @@ type Task struct {
 	Objective string   `json:"objective"`
 	Criteria  []string `json:"criteria"`
 	Status    string   `json:"status"`
+	// SentOn is a triaged task waiting for room in To do, never triaged again.
+	SentOn bool `json:"sent_on,omitempty"`
 	// Stage is where the task sits on its project's board, derived from the
 	// rest of the record; see stage.go.
 	Stage string `json:"stage,omitempty"`

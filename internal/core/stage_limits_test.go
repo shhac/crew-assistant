@@ -1,46 +1,46 @@
 package core
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 )
 
-func TestOutsideWaitsRespectLimitSource(t *testing.T) {
+func TestOwnerAndOutsideWaitsCountTowardsColumnCapacity(t *testing.T) {
 	for _, status := range []string{TaskWaiting, TaskAwaiting} {
-		for _, limits := range []map[string]int{nil, {StageReviewing: 1}} {
-			t.Run(status+"/"+mapLabel(limits), func(t *testing.T) {
+		for _, capacity := range []int{1, 10} {
+			t.Run(fmt.Sprintf("%s/capacity-%d", status, capacity), func(t *testing.T) {
 				s, _ := fixture(t)
+				var limits map[string]int
+				if capacity == 1 {
+					limits = map[string]int{StageReviewing: capacity}
+				}
 				p := staged(t, s, newProject(t, s), 0, limits)
-				tasks := queueAll(t, s, p, "A", "B")
-				claimed(t, s)
-				finish(t, s, tasks[0].ID, TaskReviewing)
-				claimed(t, s)
-				finish(t, s, tasks[0].ID, status)
-				finish(t, s, tasks[1].ID, TaskReviewing)
-				got := claimed(t, s)
-				if limits != nil {
-					if slices.Contains(got, "B: reviewing by Reviewer") {
-						t.Fatalf("outside wait stopped counting against explicit limit: %v", got)
-					}
-					if w := waiting(t, s, tasks[1].ID); w == nil || w.Kind != WaitStage || w.Stage != StageReviewing || w.Count != 1 {
-						t.Fatalf("explicit review limit did not hold B: %+v", w)
-					}
-					return
+				var names []string
+				for i := 0; i <= capacity; i++ {
+					names = append(names, fmt.Sprintf("Request %d", i))
 				}
-				if !slices.Contains(got, "B: reviewing by Reviewer") {
-					t.Fatalf("outside wait blocked a free reviewer: %v", got)
-				}
-				if b := onBoard(t, s, tasks[1].ID); b.Place != StageReviewing || b.Waiting != nil {
-					t.Fatalf("B did not enter Reviewing: %+v", b)
-				}
-				// Coming back to a now-full stage evicts neither task.
-				finish(t, s, tasks[0].ID, TaskReviewing)
+				tasks := queueAll(t, s, p, names...)
 				claimed(t, s)
-				for _, task := range tasks {
-					if got := onBoard(t, s, task.ID); got.Place != StageReviewing {
-						t.Fatalf("return evicted a task: %+v", got)
-					}
+				for _, task := range tasks[:capacity] {
+					finish(t, s, task.ID, TaskReviewing)
+					claimed(t, s)
+					finish(t, s, task.ID, status)
+					claimed(t, s)
+				}
+				last := tasks[capacity]
+				finish(t, s, last.ID, TaskReviewing)
+				claimed(t, s)
+				want := Wait{Kind: WaitStage, Stage: StageReviewing, From: StageImplementing, Count: capacity, Limit: capacity}
+				if w := waiting(t, s, last.ID); w == nil || *w != want {
+					t.Fatalf("full column: %+v, want %+v", w, want)
+				}
+				// Stopping an owner/outside wait frees room just like completed work.
+				finish(t, s, tasks[0].ID, TaskStopped)
+				claimed(t, s)
+				if got := onBoard(t, s, last.ID); got.Place != StageReviewing || got.Waiting != nil {
+					t.Fatalf("freed room: %+v", got)
 				}
 			})
 		}
@@ -87,13 +87,6 @@ func TestExplicitReadyLimitCountsOwnerApproval(t *testing.T) {
 	}
 }
 
-func mapLabel(limits map[string]int) string {
-	if limits == nil {
-		return "seat default"
-	}
-	return "explicit limit"
-}
-
 func TestBackwardHandoffsDisplayBeforeScheduling(t *testing.T) {
 	for _, c := range []struct{ from, status, want string }{
 		{StageReviewing, TaskResearching, StageResearching},
@@ -117,52 +110,46 @@ func TestBackwardHandoffsDisplayBeforeScheduling(t *testing.T) {
 	}
 }
 
-func TestStageDefaultsCountSeatsOfEachRole(t *testing.T) {
-	p := Templates["draft"]
-	p.Roles = slices.Clone(p.Roles)
-	for stage, kind := range stageRole {
-		p.Roles = append(p.Roles, Role{Name: stage, Kinds: []string{kind}, Member: "same"}, Role{Name: stage + " #2", Kinds: []string{kind}, Member: "same"})
-	}
-	for stage, kind := range stageRole {
-		want := len(rolesOf(p.Roles, kind))
-		if got := p.StageLimit(stage); got != want {
-			t.Errorf("%s: %d, want %d", stage, got, want)
-		}
-		for _, n := range []int{1, 10} {
-			p.StageLimits = map[string]int{stage: n}
-			if p.StageLimit(stage) != n {
-				t.Errorf("%s override %d ignored", stage, n)
+func TestColumnDefaultsAreIndependentOfSeats(t *testing.T) {
+	for _, roles := range [][]Role{nil, Templates["draft"].Roles, append(slices.Clone(Templates["draft"].Roles), Templates["draft"].Roles...)} {
+		p := Playbook{Roles: roles}
+		for _, stage := range []string{StageResearching, StageDesigning, StageImplementing, StageReviewing, StageQA} {
+			if got := p.StageLimit(stage); got != 10 {
+				t.Fatalf("%s: %d", stage, got)
 			}
 		}
-		p.StageLimits = nil
+		for _, stage := range []string{StageTodo, StageTriage, StageReady, StagePROpening, StagePROpen, "unknown"} {
+			if p.StageLimit(stage) != 0 {
+				t.Fatalf("%s limited", stage)
+			}
+		}
 	}
-	for _, stage := range []string{StageReady, StageTodo, "unknown"} {
+	p := Templates["draft"]
+	p.StageLimits = map[string]int{StageTodo: 500, StageQA: 4}
+	if err := p.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if p.StageLimit(StageTodo) != 500 || p.StageLimit(StageQA) != 4 || p.StageLimit(StageReady) != 0 {
+		t.Fatal("overrides")
+	}
+	for _, stage := range []string{StagePROpening, StagePROpen, StageReady} {
+		p.StageLimits = map[string]int{stage: 4}
+		if p.StageLimit(stage) != 4 {
+			t.Fatalf("%s explicit capacity ignored", stage)
+		}
+		p.StageLimits[stage] = 0
 		if p.StageLimit(stage) != 0 {
-			t.Errorf("roleless stage %s limited", stage)
+			t.Fatalf("%s zero capacity limited", stage)
 		}
 	}
-	if (Playbook{}).StageLimit(StageQA) != 0 {
-		t.Fatal("unstaffed QA limited")
-	}
-	for n := 0; n <= 10; n++ {
-		valid := Templates["draft"]
-		valid.MaxActive = n
-		if err := valid.Validate(); err != nil {
-			t.Fatal(err)
-		}
-		if valid.ActiveCap() != n {
-			t.Fatalf("overall limit %d ignored", n)
-		}
-	}
-	invalid := Templates["draft"]
-	invalid.MaxActive = 11
-	if err := invalid.Validate(); err == nil || !strings.Contains(err.Error(), "0 for no overall limit") {
+	p.MaxActive = 11
+	if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "0 for no overall limit") {
 		t.Fatalf("validation: %v", err)
 	}
 }
 
-func TestStoppingQAFreesItsDefaultPlaceAfterRestart(t *testing.T) {
-	s, tasks := bottleneck(t, nil)
+func TestStoppingQAFreesItsLimitedPlaceAfterRestart(t *testing.T) {
+	s, tasks := bottleneck(t, map[string]int{StageImplementing: 1, StageReviewing: 1, StageQA: 1})
 	claimed(t, s)
 	if b := onBoard(t, s, tasks[1].ID); b.Place != StageReviewing || b.Waiting == nil || b.Waiting.Stage != StageQA {
 		t.Fatalf("passed review should wait for QA: %+v", b)
@@ -184,74 +171,42 @@ func TestStoppingQAFreesItsDefaultPlaceAfterRestart(t *testing.T) {
 	}
 }
 
-// Three writers and two QA seats can hold five tasks together with no
-// overall cap. A passed review waiting for QA still holds Reviewing.
-func TestSeatDefaultsAllowFiveTasksAcrossStages(t *testing.T) {
+// Columns buffer finished work independently of available teammates.
+func TestFreeImplementersFillColumnsBehindASlowReviewer(t *testing.T) {
 	s, _ := fixture(t)
-	p := staged(t, s, newProject(t, s), 0, nil,
+	p := staged(t, s, newProject(t, s), 0, map[string]int{StageReviewing: 2},
 		Role{Name: "Writer #2", Kinds: []string{RoleImplementer}, Engine: "claude"},
-		Role{Name: "Writer #3", Kinds: []string{RoleImplementer}, Engine: "claude"},
-		Role{Name: "QA", Kinds: []string{RoleQA}, Member: "qa", Engine: "codex"},
-		Role{Name: "QA #2", Kinds: []string{RoleQA}, Member: "qa", Engine: "codex"})
-	tasks := queueAll(t, s, p, "A", "B", "C", "D", "E", "F", "G")
+		Role{Name: "Writer #3", Kinds: []string{RoleImplementer}, Engine: "claude"})
+	var names []string
+	for i := 0; i < 16; i++ {
+		names = append(names, string(rune('A'+i)))
+	}
+	tasks := queueAll(t, s, p, names...)
 	if got := claimed(t, s); len(got) != 3 {
 		t.Fatalf("writers: %v", got)
 	}
-	if w := waiting(t, s, tasks[3].ID); w == nil || *w != (Wait{Kind: WaitStage, Stage: StageImplementing, Count: 3, Limit: 3}) {
-		t.Fatalf("fourth: %+v", w)
+	finish(t, s, tasks[0].ID, TaskReviewing)
+	claimed(t, s)
+	finish(t, s, tasks[1].ID, TaskReviewing)
+	got := claimed(t, s)
+	if !slices.Contains(got, "E: writing by Writer #2") {
+		t.Fatalf("free writer did not start: %v", got)
 	}
-	for _, task := range tasks[:3] {
-		finish(t, s, task.ID, TaskReviewing)
+	if b := onBoard(t, s, tasks[1].ID); b.Place != StageReviewing || b.Waiting == nil || b.Waiting.Kind != WaitMember {
+		t.Fatalf("buffered review: %+v", b)
+	}
+	// Finish each new implementation; Reviewing stays full, Implementing
+	// fills to ten while each free writer keeps taking work.
+	for i := 2; i < 12; i++ {
+		finish(t, s, tasks[i].ID, TaskReviewing)
 		claimed(t, s)
-		if got := onBoard(t, s, task.ID); got.Place != StageReviewing {
-			t.Fatalf("task did not reach Reviewing through scheduling: %+v", got)
-		}
-		judge(t, s, task.ID, "Reviewer", VerdictPass)
-		claimed(t, s)
 	}
-	claims := 0
-	for _, task := range tasks {
-		claims += len(onBoard(t, s, task.ID).Claims)
+	want := Wait{Kind: WaitStage, Stage: StageReviewing, From: StageImplementing, Count: 2, Limit: 2}
+	if w := waiting(t, s, tasks[2].ID); w == nil || *w != want {
+		t.Fatalf("finished draft: %+v", w)
 	}
-	if claims != 5 {
-		t.Fatalf("two QA plus three new writers: %d claims", claims)
-	}
-	// C holds its finished review until QA has room.
-	if c := onBoard(t, s, tasks[2].ID); c.Place != StageReviewing || c.Stage != StageReviewing || c.Waiting == nil || c.Waiting.Stage != StageQA {
-		t.Fatalf("held C: %+v", c)
-	}
-	for _, task := range tasks[:5] {
-		got := onBoard(t, s, task.ID)
-		if !got.Active() || got.Waiting != nil && got.Waiting.Kind == WaitProjectCap {
-			t.Fatalf("not active without cap: %+v", got)
-		}
-	}
-	// Removing a seat evicts no task, and the pinned claims stay intact.
-	book := *p.Playbook
-	book.Roles = slices.DeleteFunc(slices.Clone(book.Roles), func(r Role) bool { return r.Name == "QA #2" })
-	if _, err := s.SetPlaybook(testContext, p.ID, book); err != nil {
-		t.Fatal(err)
-	}
-	claimed(t, s)
-	for _, task := range tasks[:2] {
-		if got := onBoard(t, s, task.ID); got.Place != StageQA || len(got.Claims) != 1 {
-			t.Fatalf("evicted QA: %+v", got)
-		}
-	}
-	finish(t, s, tasks[0].ID, TaskStopped)
-	claimed(t, s)
-	if c := onBoard(t, s, tasks[2].ID); c.Waiting == nil || c.Waiting.Count != 1 || c.Waiting.Limit != 1 {
-		t.Fatalf("still full: %+v", c.Waiting)
-	}
-	finish(t, s, tasks[1].ID, TaskStopped)
-	claimed(t, s)
-	if c := onBoard(t, s, tasks[2].ID); c.Place != StageQA || len(c.Claims) != 1 {
-		t.Fatalf("QA seat not freed: %+v", c)
-	}
-	for _, task := range tasks[:2] {
-		if got := onBoard(t, s, task.ID); got.Place != "" || len(got.Claims) != 0 {
-			t.Fatalf("stopped holds place or seat: %+v", got)
-		}
+	if w := waiting(t, s, tasks[12].ID); w == nil || *w != (Wait{Kind: WaitStage, Stage: StageImplementing, Count: 10, Limit: 10}) {
+		t.Fatalf("eleventh implementation: %+v", w)
 	}
 }
 
@@ -376,14 +331,14 @@ func TestAHeldTaskEntersAsSoonAsRoomFrees(t *testing.T) {
 	}
 }
 
-// Explicit limits above the defaults allow several held tasks per stage.
-func TestExplicitLimitsReplaceSeatDefaults(t *testing.T) {
+// Several tasks may wait in a column even while its teammate is busy.
+func TestLargeCapacitiesBufferWorkIndependentlyOfSeats(t *testing.T) {
 	s, tasks := bottleneck(t, map[string]int{StageImplementing: 10, StageReviewing: 10, StageQA: 10})
 	if got := claimed(t, s); !slices.Equal(got, []string{"C: reviewing by Reviewer", "D: writing by Writer"}) {
 		t.Fatalf("with explicit limits: %v", got)
 	}
 	snap, _ := s.Snapshot(testContext)
-	for i, stage := range []string{StageQA, StageReviewing, StageReviewing, StageImplementing} {
+	for i, stage := range []string{StageQA, StageQA, StageReviewing, StageImplementing} {
 		got, _ := snap.FindTask(tasks[i].ID)
 		if got.Stage != stage {
 			t.Errorf("%s shows in %s, want %s", got.Objective, got.Stage, stage)
@@ -394,8 +349,8 @@ func TestExplicitLimitsReplaceSeatDefaults(t *testing.T) {
 	}
 }
 
-// A task moves on only when a person is free, the next stage has room and
-// the project's cap allows: none of them overrides another.
+// Starting work needs a free person, room and an available overall slot.
+// Moving finished work into a column needs only room.
 func TestStageLimitsCombineWithPeopleAndTheCap(t *testing.T) {
 	writer2 := Role{Name: "Writer #2", Kinds: []string{RoleImplementer}, Engine: "claude"}
 	for name, c := range map[string]struct {
@@ -424,8 +379,7 @@ func TestStageLimitsCombineWithPeopleAndTheCap(t *testing.T) {
 			}
 		})
 	}
-	// Room in review, but the reviewer is busy: a finished draft waits in
-	// implementing for them, taking no room in review until they take it.
+	// Room in review admits a finished draft even while the reviewer is busy.
 	s, _ := fixture(t)
 	p := staged(t, s, newProject(t, s), 3, map[string]int{StageReviewing: 2}, writer2)
 	tasks := queueAll(t, s, p, "A", "B")
@@ -435,8 +389,8 @@ func TestStageLimitsCombineWithPeopleAndTheCap(t *testing.T) {
 	if got := claimed(t, s); !slices.Equal(got, []string{"A: reviewing by Reviewer", "A: reviewing by QA"}) {
 		t.Fatalf("with A and B written: %v", got)
 	}
-	if b := onBoard(t, s, tasks[1].ID); b.Stage != StageImplementing || b.Place != StageImplementing || b.Waiting == nil || b.Waiting.Kind != WaitMember || b.Waiting.Seat != "Reviewer" {
-		t.Fatalf("B should wait in implementing for the reviewer: %s %s %+v", b.Stage, b.Place, b.Waiting)
+	if b := onBoard(t, s, tasks[1].ID); b.Stage != StageReviewing || b.Place != StageReviewing || b.Waiting == nil || b.Waiting.Kind != WaitMember || b.Waiting.Seat != "Reviewer" {
+		t.Fatalf("B should wait in reviewing for the reviewer: %s %s %+v", b.Stage, b.Place, b.Waiting)
 	}
 	judge(t, s, tasks[0].ID, "Reviewer", VerdictPass)
 	if got := claimed(t, s); !slices.Equal(got, []string{"B: reviewing by Reviewer"}) {
@@ -534,8 +488,7 @@ func TestStageHoldsSurviveARestart(t *testing.T) {
 	}
 }
 
-// Limits apply to the working stages only, each from 1 to the most a
-// project may have under way.
+// Working columns and To do accept bounded owner-set capacities.
 func TestStageLimitsAreForWorkingStages(t *testing.T) {
 	playbook := Templates["draft"]
 	playbook.StageLimits = map[string]int{StageImplementing: 2, StageReady: 1, StageQA: 0}
@@ -543,12 +496,11 @@ func TestStageLimitsAreForWorkingStages(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, limits := range map[string]map[string]int{
-		"To do":        {StageTodo: 1},
 		"triage":       {StageTriage: 1},
 		"done":         {StageDone: 1},
 		"unknown":      {"testing": 1},
 		"negative":     {StageQA: -1},
-		"past the cap": {StageQA: maxActiveLimit + 1},
+		"past the cap": {StageQA: maxCapacity + 1},
 	} {
 		playbook.StageLimits = limits
 		if playbook.Validate() == nil {

@@ -62,11 +62,11 @@ func TestStageLimitsAreSetAndKeptAcrossATeamChange(t *testing.T) {
 	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", Check: "make check"}); err != nil {
 		t.Fatal(err)
 	}
-	p, err = a.SetStageLimits(ctx, p.ID, map[string]int{core.StageQA: 1, core.StageReviewing: 2, core.StageImplementing: 0})
+	p, err = a.SetStageLimits(ctx, p.ID, map[string]int{core.StageQA: 4, core.StageReviewing: 2, core.StageTodo: 500, core.StageImplementing: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int{core.StageQA: 1, core.StageReviewing: 2}
+	want := map[string]int{core.StageQA: 4, core.StageReviewing: 2, core.StageTodo: 500}
 	if !maps.Equal(p.Playbook.StageLimits, want) {
 		t.Fatalf("limits %v, want %v", p.Playbook.StageLimits, want)
 	}
@@ -76,8 +76,8 @@ func TestStageLimitsAreSetAndKeptAcrossATeamChange(t *testing.T) {
 	if !maps.Equal(p.Playbook.StageLimits, want) {
 		t.Fatalf("a team change lost the limits: %v", p.Playbook.StageLimits)
 	}
-	if _, err := a.SetStageLimits(ctx, p.ID, map[string]int{core.StageTodo: 1}); err == nil {
-		t.Fatal("To do was given a limit")
+	if _, err := a.SetStageLimits(ctx, p.ID, map[string]int{core.StageTriage: 1}); err == nil {
+		t.Fatal("Triage was given a limit")
 	}
 	if p, err = a.SetStageLimits(ctx, p.ID, nil); err != nil || p.Playbook.StageLimits != nil {
 		t.Fatalf("clearing the limits: %v %v", p.Playbook.StageLimits, err)

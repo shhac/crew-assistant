@@ -254,3 +254,79 @@ func TestTheOwnersAnswerToThePMBringsItBack(t *testing.T) {
 		t.Fatalf("project %+v", project)
 	}
 }
+
+func TestFullTodoKeepsThePMsQueuedReorder(t *testing.T) {
+	for _, mode := range []string{"canonical", "readable", OrderedByOwner, OrderedByAssistant} {
+		t.Run(mode, func(t *testing.T) {
+			s, _ := fixture(t)
+			p := pmProject(t, s)
+			a, b := ask(t, s, p.ID, "a"), ask(t, s, p.ID, "b")
+			book := *p.Playbook
+			book.StageLimits = map[string]int{StageTodo: 2}
+			if _, err := s.SetPlaybook(testContext, p.ID, book); err != nil {
+				t.Fatal(err)
+			}
+			held, err := s.QueueTask(testContext, p.ID, TaskInput{Objective: "held"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			order := []string{held.ID, b.ID, a.ID}
+			if mode == "readable" {
+				order = []string{held.Ref, b.Ref, a.Ref}
+			}
+			stale := mode == OrderedByOwner || mode == OrderedByAssistant
+			if stale {
+				if _, err := s.OrderTasks(testContext, p.ID, []string{a.ID, b.ID}, mode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			changed, err := s.ApplyPM(testContext, p.ID, PMAnswer{
+				Triage: []TriageRelease{{Task: held.ID, To: TriageToResearch}},
+				Order:  order, Note: "b unblocks a",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"b", "a"}
+			if stale {
+				want = []string{"a", "b"}
+			}
+			got, project := queuedOrder(t, s, p.ID)
+			if !slices.Equal(got, want) || !stale && project.OrderedBy != OrderedByPM {
+				t.Fatalf("order %v by %s, want %v", got, project.OrderedBy, want)
+			}
+			if got := taskNow(t, s, held.ID); got.Status != TaskTriage || !got.SentOn || got.Waiting == nil || got.Waiting.Count != 2 || got.Waiting.Limit != 2 {
+				t.Fatalf("held: %+v", got)
+			}
+			heldLine := "Sent “held” on; waits for room in To do"
+			if !strings.Contains(changed, heldLine) {
+				t.Fatalf("summary %q", changed)
+			}
+			snap, _ := s.Snapshot(testContext)
+			if !slices.ContainsFunc(snap.Activity, func(e Activity) bool {
+				return e.Kind == "task.ordered" && strings.Contains(e.Summary, heldLine) &&
+					(stale || strings.Contains(e.Summary, "Changed the order to "+b.Ref+", "+a.Ref+" (was "+a.Ref+", "+b.Ref+")"))
+			}) {
+				t.Fatalf("activity: %+v", snap.Activity)
+			}
+		})
+	}
+}
+
+func TestPMOrderIgnoresOnlyThisProjectsSentOnTriage(t *testing.T) {
+	s, _ := fixture(t)
+	p := pmProject(t, s)
+	a, b := ask(t, s, p.ID, "a"), ask(t, s, p.ID, "b")
+	waiting, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "not sent on"})
+	other := pmProject(t, s)
+	foreign, _ := s.QueueTask(testContext, other.ID, TaskInput{Objective: "foreign"})
+	snap, _ := s.Snapshot(testContext)
+	task(&snap, foreign.ID).SentOn = true
+	task(&snap, a.ID).SentOn = true // A stale flag on a queued task must not remove it.
+	for _, extra := range []string{waiting.ID, foreign.ID, "unknown", a.ID} {
+		order := []string{b.ID, a.ID, extra}
+		if got := pmOrder(&snap, &p, order); got != nil {
+			t.Fatalf("invalid order accepted: %v", got)
+		}
+	}
+}

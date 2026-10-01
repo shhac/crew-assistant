@@ -2,7 +2,7 @@ import { projectHref, requestHref } from "./router";
 import { landingPausedLine, pmLandingLine } from "./landing";
 import {
   capLine,
-  underWay,
+  finished,
   latestFirst,
   projectTasks,
   requestStep,
@@ -39,11 +39,9 @@ export function Board({
   const holds = (stage: Stage) =>
     tasks.filter(
       (t) =>
-        ((underWay(t) && t.status !== "awaiting") ||
-          ((project.playbook?.stage_limits?.[stage] ?? 0) > 0 &&
-            !["queued", "triage", "delivered", "landed", "stopped"].includes(
-              t.status,
-            ))) &&
+        !finished(t) &&
+        t.status !== "triage" &&
+        (stage === "todo" ? t.status === "queued" : t.status !== "queued") &&
         (t.status === "reviewing" || t.status === "deciding"
           ? t.place || t.stage
           : t.stage) === stage,
@@ -53,7 +51,11 @@ export function Board({
     return (
       <LaneTitle
         label={label}
-        count={limit ? `${holds(stage)} of ${limit}` : String(count)}
+        count={
+          limit
+            ? `${holds(stage)} of ${limit}`
+            : String(stage === "triage" ? count : holds(stage))
+        }
       />
     );
   };
@@ -69,8 +71,13 @@ export function Board({
       )}
       {rows.map(({ stage, label }) => {
         const list = at(stage);
-        // With a limit, a row always shows its count against it, even empty.
-        if (!list.length && !stageLimit(project.playbook, stage)) return null;
+        // Empty rows stay hidden unless the owner set their capacity.
+        if (
+          !list.length &&
+          !holds(stage) &&
+          !(project.playbook?.stage_limits?.[stage] ?? 0)
+        )
+          return null;
         return (
           <section key={stage} className="board-ready" aria-label={label}>
             {title(stage, label, list.length)}
@@ -80,7 +87,8 @@ export function Board({
       })}
       {tasks.length > 0 && cap && (
         <p className="board-cap muted small">
-          {cap} · <a href={projectHref(project.id, "config")}>Tasks at once</a>
+          {cap} ·{" "}
+          <a href={projectHref(project.id, "config")}>Column capacity</a>
         </p>
       )}
       {tasks.length === 0 ? (

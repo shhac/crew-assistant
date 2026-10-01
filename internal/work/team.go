@@ -491,10 +491,9 @@ func (lp *Loop) SetParallel(ctx context.Context, projectID string, maxActive int
 	})
 }
 
-// SetStageLimits sets the most tasks each working stage of a project's
-// board may hold at once, keyed by stage; missing or 0 uses the role seat
-// count (Ready has no default limit). A finished stage holds its task until
-// the next has room.
+// SetStageLimits sets column capacities: missing or 0 uses 10 for research
+// through QA and no limit for To do, Ready or pull request rows. Triage is
+// never limited. A finished task stays in its column until the next has room.
 func (lp *Loop) SetStageLimits(ctx context.Context, projectID string, limits map[string]int) (core.Project, error) {
 	return lp.changeSeats(ctx, projectID, func(playbook *core.Playbook) error {
 		playbook.StageLimits = nil

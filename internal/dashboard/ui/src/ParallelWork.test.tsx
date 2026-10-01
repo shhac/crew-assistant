@@ -227,7 +227,7 @@ describe("several requests under way at once", () => {
       "Waiting for this project's cap (3 of 3 active)",
     );
     expect(document.querySelector(".board-cap")?.textContent).toBe(
-      "3 of 3 under way · Tasks at once",
+      "3 of 3 under way · Column capacity",
     );
   });
 
@@ -305,17 +305,17 @@ describe("several requests under way at once", () => {
     });
     // Unset, there is no overall cap.
     expect(document.querySelector(".board-cap")?.textContent).toBe(
-      "1 under way · Tasks at once",
+      "1 under way · Column capacity",
     );
   });
 });
 
 describe("the project's cap on requests under way", () => {
-  const card = () => screen.getByRole("region", { name: "Tasks at once" });
-  it("shows seat defaults and the optional overall cap", () => {
+  const card = () => screen.getByRole("region", { name: "Column capacity" });
+  it("shows column defaults and the optional overall cap", () => {
     show(project(team()), {}, { tab: "config" });
-    expect(card().querySelector("dd")?.textContent).toBe(
-      "Up to 2 at once (one per implementer seat)",
+    expect(card().textContent).toContain(
+      "ImplementingUp to 10 at once (default)",
     );
     cleanup();
     show(project(team({ max_active: 3 })), {}, { tab: "config" });
@@ -440,8 +440,8 @@ describe("limits on how much each stage holds", () => {
     show(project(team()), {
       tasks: [writing(3, "Claudius", { place: "reviewing" })],
     });
-    expect(count("Implementing")).toBe("1 of 2");
-    expect(count("Reviewing")).toBe("0 of 1");
+    expect(count("Implementing")).toBe("1 of 10");
+    expect(count("Reviewing")).toBe("0 of 10");
     expect(
       within(screen.getByRole("listitem", { name: "Implementing" })).getByText(
         "Request 3",
@@ -468,7 +468,7 @@ describe("limits on how much each stage holds", () => {
     expect(screen.getByText("Request 5")).toBeTruthy();
     cleanup();
     show(project(team()), state);
-    expect(count("Reviewing")).toBe("0 of 1");
+    expect(count("Reviewing")).toBe("1 of 10");
     expect(screen.getByText("Request 2")).toBeTruthy();
   });
 
@@ -485,8 +485,8 @@ describe("limits on how much each stage holds", () => {
     ).toBe("1 of 2");
     cleanup();
     show(project(team()), bottleneck());
-    expect(count("QA")).toBe("1 of 1");
-    expect(count("Reviewing")).toBe("1 of 1");
+    expect(count("QA")).toBe("1 of 10");
+    expect(count("Reviewing")).toBe("1 of 10");
     cleanup();
     show(
       project(
@@ -494,7 +494,7 @@ describe("limits on how much each stage holds", () => {
       ),
       bottleneck(),
     );
-    expect(count("Implementing")).toBe("1 of 3");
+    expect(count("Implementing")).toBe("1 of 10");
   });
 
   it("counts Ready whenever a request holds it, wherever its card shows", () => {
@@ -513,7 +513,7 @@ describe("limits on how much each stage holds", () => {
         .getByRole("region", { name: "Ready to land" })
         .querySelector(".count")?.textContent,
     ).toBe("1 of 2");
-    // Empty, it still shows its limit; with none, it shows only when used.
+    // An explicit capacity shows even empty; the default shows only when held.
     cleanup();
     const writingOnly = { tasks: [writing(1, "Claudius")] };
     show(project(team({ stage_limits: limits })), writingOnly);
@@ -525,12 +525,23 @@ describe("limits on how much each stage holds", () => {
     cleanup();
     show(project(team()), writingOnly);
     expect(screen.queryByRole("region", { name: "Ready to land" })).toBeNull();
+    cleanup();
+    show(project(team()), {
+      tasks: [
+        task(6, { ...draft, status: "deciding", stage: "qa", place: "ready" }),
+      ],
+    });
+    expect(
+      screen
+        .getByRole("region", { name: "Ready to land" })
+        .querySelector(".count")?.textContent,
+    ).toBe("1");
   });
 
   it("keeps a held request in the stage it finished, saying where it waits", () => {
     show(project(team({ stage_limits: limits })), bottleneck());
     expect(lane("Reviewing").map((a) => a.textContent)).toEqual(["Request 2"]);
-    expect(step("Request 2")).toBe("Done, waiting for room in QA");
+    expect(step("Request 2")).toBe("Waiting for room in QA (1 of 1)");
     // A request not yet started names the stage as its project's board does.
     expect(step("Request 4")).toBe("Waiting for room in Implementing (1 of 1)");
     cleanup();
@@ -539,15 +550,15 @@ describe("limits on how much each stage holds", () => {
     });
     const view = screen.getByRole("complementary", { name: "Request 2" });
     expect(view.querySelector(".request-status")?.textContent).toBe(
-      "Done, waiting for room in QA",
+      "Waiting for room in QA (1 of 1)",
     );
   });
 
-  const card = () => screen.getByRole("region", { name: "Tasks at once" });
-  it("shows seat defaults and explicit limits in Config", () => {
+  const card = () => screen.getByRole("region", { name: "Column capacity" });
+  it("shows column defaults and explicit limits in Config", () => {
     show(project(team()), {}, { tab: "config" });
     expect(card().textContent).toContain("No limit beyond the stages");
-    expect(card().textContent).toContain("QAUp to 1 at once (one per QA seat)");
+    expect(card().textContent).toContain("QAUp to 10 at once (default)");
     cleanup();
     show(
       project(team({ stage_limits: { qa: 1, ready: 2 } })),
@@ -560,12 +571,82 @@ describe("limits on how much each stage holds", () => {
       (r) => r.textContent,
     );
     expect(rows).toEqual([
-      "ImplementingUp to 2 at once (one per implementer seat)",
+      "To doNo limit",
+      "ImplementingUp to 10 at once (default)",
       "QAUp to 1 at once (set by you)",
-      "ReviewingUp to 1 at once (one per reviewer seat)",
+      "ReviewingUp to 10 at once (default)",
       "Ready to landUp to 2 at once (set by you)",
       "In allNo limit beyond the stages",
     ]);
+  });
+
+  it("keeps pull request rows configurable alongside column capacities", async () => {
+    const pb = team({
+      land: { ...team().land, pull_requests: true },
+      stage_limits: { pr_open: 4 },
+    });
+    show(project(pb), {}, { tab: "config" });
+    expect(card().textContent).toContain("PR to openNo limit");
+    expect(card().textContent).toContain("PR openUp to 4 at once (set by you)");
+    expect(card().textContent).toContain("Ready to landNo limit");
+    fireEvent.click(within(card()).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(card()).getByLabelText("To do"), {
+      target: { value: "500" },
+    });
+    fireEvent.change(within(card()).getByLabelText("PR to open"), {
+      target: { value: "12" },
+    });
+    fireEvent.click(within(card()).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()[0].body).toEqual({
+      stage_limits: { todo: 500, pr_opening: 12, pr_open: 4 },
+    });
+    cleanup();
+    show(project(pb), {
+      tasks: [
+        task(1, { status: "awaiting", stage: "pr_open", place: "pr_open" }),
+      ],
+    });
+    expect(
+      screen.getByRole("region", { name: "PR open" }).querySelector(".count")
+        ?.textContent,
+    ).toBe("1 of 4");
+    expect(screen.queryByRole("region", { name: "Ready to land" })).toBeNull();
+  });
+
+  it("saves independent To do and QA capacities", async () => {
+    show(project(team()), {}, { tab: "config" });
+    fireEvent.click(within(card()).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(card()).getByLabelText("To do"), {
+      target: { value: "500" },
+    });
+    fireEvent.change(within(card()).getByLabelText("QA"), {
+      target: { value: "4" },
+    });
+    fireEvent.click(within(card()).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/stage-limits",
+        method: "PUT",
+        body: { stage_limits: { todo: 500, qa: 4 } },
+      },
+    ]);
+  });
+
+  it("counts three tasks against ten, and To do against its optional capacity", () => {
+    const tasks = [
+      writing(1, "Claudius"),
+      writing(2, "Claudius #2"),
+      writing(3, "Claudius"),
+      task(4, {}),
+    ];
+    show(project(team()), { tasks });
+    expect(count("Implementing")).toBe("3 of 10");
+    expect(count("To do")).toBe("1");
+    cleanup();
+    show(project(team({ stage_limits: { todo: 500 } })), { tasks });
+    expect(count("To do")).toBe("1 of 500");
   });
 
   it("sets a stage's limit, or takes it away", async () => {
@@ -574,9 +655,9 @@ describe("limits on how much each stage holds", () => {
     const field = (name: string) =>
       within(card()).getByLabelText(name) as HTMLSelectElement;
     expect(field("QA").value).toBe("1");
-    expect(field("Reviewing").value).toBe("0");
+    expect(field("Reviewing").value).toBe("");
     fireEvent.change(field("Reviewing"), { target: { value: "2" } });
-    fireEvent.change(field("QA"), { target: { value: "0" } });
+    fireEvent.change(field("QA"), { target: { value: "" } });
     fireEvent.click(within(card()).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(refresh).toHaveBeenCalled());
     expect(writes()).toEqual([

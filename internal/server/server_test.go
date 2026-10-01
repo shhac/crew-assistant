@@ -253,7 +253,11 @@ func TestTheOwnerAddsSeatsAndSetsHowMuchRunsAtOnce(t *testing.T) {
 	if limits.Code != 200 || !strings.Contains(limits.Body.String(), `"stage_limits":{"implementing":2}`) {
 		t.Fatal(limits.Code, limits.Body.String())
 	}
-	for _, body := range []string{`{"stage_limits":{"todo":1}}`, `{"stage_limits":{"qa":-1}}`, `{"stage_limits":{"testing":1}}`} {
+	todo := call("PUT", "/api/projects/"+p.ID+"/stage-limits", `{"stage_limits":{"todo":500,"qa":4}}`)
+	if todo.Code != 200 || !strings.Contains(todo.Body.String(), `"todo":500`) || !strings.Contains(todo.Body.String(), `"qa":4`) {
+		t.Fatal(todo.Code, todo.Body.String())
+	}
+	for _, body := range []string{`{"stage_limits":{"triage":1}}`, `{"stage_limits":{"qa":1001}}`, `{"stage_limits":{"qa":-1}}`, `{"stage_limits":{"testing":1}}`} {
 		if bad := call("PUT", "/api/projects/"+p.ID+"/stage-limits", body); bad.Code != 400 {
 			t.Fatal(body, bad.Code, bad.Body.String())
 		}

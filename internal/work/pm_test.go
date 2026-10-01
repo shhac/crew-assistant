@@ -331,7 +331,7 @@ func TestThePMIsToldWhatWaitsInTriage(t *testing.T) {
 		{ID: "c", Ref: "S-3", ProjectID: "p", Status: core.TaskTriage, Objective: "Shortcuts", Criteria: []string{"Works with a keyboard"}},
 	}}
 	prompt := pmPrompt(snap, p)
-	for _, want := range []string{"In triage, oldest first:\n- S-3 (c): Shortcuts", "requirement: Works with a keyboard", "Tasks in triage are new work", `"triage": [`} {
+	for _, want := range []string{"In triage, oldest first:\n- S-3 (c): Shortcuts", "requirement: Works with a keyboard", "Tasks in triage are new work", "a task sent on waits for room in Triage", `"triage": [`} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("the PM isn't told %q", want)
 		}
@@ -401,5 +401,33 @@ func TestThePMTurnReordersAfterTheOwner(t *testing.T) {
 		if d.Kind == core.DecisionPMQuestion && d.Status == core.DecisionOpen {
 			t.Fatal("reordering asked the owner")
 		}
+	}
+}
+
+func TestNoPMDoesNotLoopOnSentOnTasksWhenTodoIsFull(t *testing.T) {
+	runner := &scriptedRunner{}
+	a, p, _, _ := pmTeam(t, runner)
+	ctx := context.Background()
+	if _, err := a.SetStageLimits(ctx, p.ID, map[string]int{core.StageTodo: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SetSeat(ctx, p.ID, core.RolePM, ""); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	_, changed, err := a.managePM(ctx, snap, false)
+	if err != nil || !changed {
+		t.Fatalf("release: %v %v", changed, err)
+	}
+	snap, _ = a.Core.Snapshot(ctx)
+	if snap.HasTriage(p.ID) {
+		t.Fatal("sent-on task offered for triage again")
+	}
+	_, changed, err = a.managePM(ctx, snap, false)
+	if err != nil || changed {
+		t.Fatalf("repeated no-PM release: %v %v", changed, err)
+	}
+	if len(runner.seen) != 0 {
+		t.Fatal("missing PM started a turn")
 	}
 }

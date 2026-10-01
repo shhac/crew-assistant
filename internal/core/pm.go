@@ -49,7 +49,8 @@ const (
 // What each task waits for is checked like any other dependency: the same
 // project, and never a loop. The order applies only to exactly the queued
 // tasks. A newer owner or assistant order is preserved if it changed during
-// the look. Tasks leave triage first, so the order may place those sent on.
+// the look. Triage decisions apply first; tasks sent on but held for To do
+// room are ignored in the proposed order until they enter the queue.
 // It reports what it changed.
 func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (string, error) {
 	var triaged, changed []string
@@ -136,13 +137,20 @@ func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (s
 // triage, and a question for the owner must say something.
 func triage(v *Snapshot, p *Project, r TriageRelease, now time.Time) string {
 	t := task(v, strings.TrimSpace(r.Task))
-	if t == nil || t.ProjectID != p.ID || t.Status != TaskTriage {
+	if t == nil || t.ProjectID != p.ID || t.Status != TaskTriage || t.SentOn {
 		return ""
 	}
 	switch strings.TrimSpace(r.To) {
 	case TriageToResearch:
-		release(v, t, now)
-		recordTask(v, now, t, "task.triaged", "Sent on to the team: "+t.Objective)
+		sendOn(v, t, holdings(v), now)
+		line := "Sent on to the team: "
+		if t.SentOn {
+			line = "Sent on; waits for room in To do: "
+		}
+		recordTask(v, now, t, "task.triaged", line+t.Objective)
+		if t.SentOn {
+			return "Sent “" + t.Objective + "” on; waits for room in To do"
+		}
 		return "Sent “" + t.Objective + "” on to the team"
 	case TriageToOwner:
 		question := text.Clip(strings.TrimSpace(r.Question), 2000)
@@ -172,11 +180,52 @@ func release(v *Snapshot, t *Task, now time.Time) {
 	if d := decision(v, t.DecisionID); d != nil && d.Status == DecisionOpen {
 		dismiss(v, d, now, "No longer needed: the task went on to the team")
 	}
+	t.SentOn, t.Waiting = false, nil
+	t.Detail = ""
 	t.Status, t.DecisionID, t.UpdatedAt = TaskQueued, "", now
 	derive(v, t)
 }
 
-// ReleaseTriage sends every task in a project's triage on to its to-do
+// sendOn records the triage decision even when To do is full. All callers
+// check room and change the task within the same store update.
+func sendOn(v *Snapshot, t *Task, stages held, now time.Time) {
+	if d := decision(v, t.DecisionID); d != nil && d.Status == DecisionOpen {
+		dismiss(v, d, now, "No longer needed: the task was sent on to the team")
+	}
+	t.DecisionID = ""
+	if wait := stages.room(v, t.ProjectID, StageTriage, StageTodo); wait != nil {
+		if !t.SentOn {
+			t.SentOn, t.UpdatedAt = true, now
+			t.Detail = "Sent on; waits for room in To do"
+		}
+		t.Waiting = wait
+		return
+	}
+	release(v, t, now)
+	stages[t.ProjectID][StageTodo]++
+}
+
+// pullTriage takes sent-on tasks oldest first after queued work starts.
+func pullTriage(v *Snapshot, p *Project, stages held, waits map[string]*Wait, now time.Time) {
+	var tasks []*Task
+	for i := range v.Tasks {
+		t := &v.Tasks[i]
+		if t.ProjectID == p.ID && t.Status == TaskTriage && t.SentOn {
+			tasks = append(tasks, t)
+		}
+	}
+	slices.SortStableFunc(tasks, func(a, b *Task) int { return a.CreatedAt.Compare(b.CreatedAt) })
+	for _, t := range tasks {
+		if p.Paused {
+			waits[t.ID] = stages.room(v, p.ID, StageTriage, StageTodo)
+			continue
+		}
+		sendOn(v, t, stages, now)
+		waits[t.ID] = t.Waiting
+	}
+}
+
+// ReleaseTriage sends every task in a project's triage towards its to-do
 // list, when there is no PM to shape them or its PM could not look, so
 // nothing waits on a missing role. It says why in one line.
 func (s *Service) ReleaseTriage(ctx context.Context, projectID, why string) error {
@@ -185,28 +234,45 @@ func (s *Service) ReleaseTriage(ctx context.Context, projectID, why string) erro
 			return ErrNotFound
 		}
 		now := s.now().UTC()
-		released := 0
+		released, waiting := 0, 0
+		stages := holdings(v)
+		var tasks []*Task
 		for i := range v.Tasks {
-			if t := &v.Tasks[i]; t.ProjectID == projectID && t.Status == TaskTriage {
-				release(v, t, now)
+			if t := &v.Tasks[i]; t.ProjectID == projectID && t.Status == TaskTriage && !t.SentOn {
+				tasks = append(tasks, t)
+			}
+		}
+		slices.SortStableFunc(tasks, func(a, b *Task) int { return a.CreatedAt.Compare(b.CreatedAt) })
+		for _, t := range tasks {
+			sendOn(v, t, stages, now)
+			if t.SentOn {
+				waiting++
+			} else {
 				released++
 			}
 		}
-		if released > 0 {
+		if waiting > 0 {
+			record(v, now, projectID, "task.triaged", fmt.Sprintf("Sent on without triage (%d; %d waiting for room in To do): %s", released+waiting, waiting, why))
+		} else if released > 0 {
 			record(v, now, projectID, "task.triaged", fmt.Sprintf("Sent on to the team without triage (%d): %s", released, why))
 		}
 		return nil
 	})
 }
 
-// HasTriage says whether any of a project's tasks wait in triage.
+// HasTriage says whether any task still needs triage, excluding sent-on work.
 func (v Snapshot) HasTriage(projectID string) bool {
-	return slices.ContainsFunc(v.Tasks, func(t Task) bool { return t.ProjectID == projectID && t.Status == TaskTriage })
+	return slices.ContainsFunc(v.Tasks, func(t Task) bool { return t.ProjectID == projectID && t.Status == TaskTriage && !t.SentOn })
 }
 
 // pmOrder is the order the PM may set, or nil to leave it. It must name
-// exactly the queued tasks and change something.
+// exactly the queued tasks and change something, after ignoring this
+// project's sent-on triage tasks that still wait for room in To do.
 func pmOrder(v *Snapshot, p *Project, order []string) []string {
+	order = slices.DeleteFunc(slices.Clone(order), func(id string) bool {
+		t := task(v, id)
+		return t != nil && t.ProjectID == p.ID && t.Status == TaskTriage && t.SentOn
+	})
 	current := queuedOf(v, p.ID)
 	if !sameTasks(order, current) || slices.Equal(order, current) {
 		return nil

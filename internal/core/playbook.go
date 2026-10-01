@@ -130,39 +130,27 @@ type Playbook struct {
 	// MaxActive is how many of the project's tasks may be under way at once;
 	// 0 means no overall limit. See ActiveCap.
 	MaxActive int `json:"max_active,omitempty"`
-	// StageLimits is the most tasks each working stage of the board may
-	// hold at once, keyed by stage; missing or 0 uses the role seat count, and
-	// To do and triage never have one. See StageLimit.
+	// StageLimits is the most tasks each column of the board may
+	// hold at once, keyed by stage; missing or 0 uses 10 for working columns
+	// and no limit for To do, Ready or the pull request stages. Triage is never limited.
+	// See StageLimit.
 	StageLimits map[string]int `json:"stage_limits,omitempty"`
 }
 
 // limitStages are the stages of the board a project can limit, in board
-// order: each working stage, up to landing.
+// order: each working stage, up to landing. To do has its own optional capacity.
 var limitStages = []string{StageResearching, StageDesigning, StageImplementing, StageReviewing, StageQA, StagePROpening, StagePROpen, StageReady}
-
-// stageRole maps each stage to the role providing its default capacity.
-var stageRole = map[string]string{
-	StageResearching: RoleResearcher, StageDesigning: RoleDesigner,
-	StageImplementing: RoleImplementer, StageReviewing: RoleReviewer, StageQA: RoleQA,
-}
-
-// HasStageLimits reports whether any stage has an effective limit.
-func (p Playbook) HasStageLimits() bool {
-	for _, stage := range limitStages {
-		if p.StageLimit(stage) > 0 {
-			return true
-		}
-	}
-	return false
-}
 
 // StageLimit is the most tasks the stage may hold at once, or 0 for no limit.
 func (p Playbook) StageLimit(stage string) int {
+	if stage == StageTriage {
+		return 0
+	}
 	if limit := p.StageLimits[stage]; limit > 0 {
 		return limit
 	}
-	if kind := stageRole[stage]; kind != "" {
-		return len(rolesOf(p.Roles, kind))
+	if slices.Contains(limitStages, stage) && stage != StagePROpening && stage != StagePROpen && stage != StageReady {
+		return defaultCapacity
 	}
 	return 0
 }
@@ -280,17 +268,20 @@ func (p Playbook) Validate() error {
 		return fmt.Errorf("max_active must be between 1 and %d, or 0 for no overall limit", maxActiveLimit)
 	}
 	for stage, limit := range p.StageLimits {
-		if !slices.Contains(limitStages, stage) {
-			return fmt.Errorf("stage_limits: %q is not a stage that can have a limit; use one of %s", stage, strings.Join(limitStages, ", "))
+		if stage != StageTodo && !slices.Contains(limitStages, stage) {
+			return fmt.Errorf("stage_limits: %q is not a stage that can have a limit; use one of %s", stage, strings.Join(append([]string{StageTodo}, limitStages...), ", "))
 		}
-		if limit < 0 || limit > maxActiveLimit {
-			return fmt.Errorf("stage_limits: %s must be between 1 and %d, or 0 for the role seat count (no limit for the pull request stages and Ready)", stage, maxActiveLimit)
+		if limit < 0 || limit > maxCapacity {
+			return fmt.Errorf("stage_limits: %s must be between 1 and %d, or 0 for the default (10; no limit for To do, PR rows or Ready)", stage, maxCapacity)
 		}
 	}
 	return nil
 }
 
-// maxActiveLimit bounds owner-set overall and stage limits.
+const defaultCapacity = 10
+const maxCapacity = 1000
+
+// maxActiveLimit bounds the owner-set overall limit.
 const maxActiveLimit = 10
 
 // seatKinds checks what one seat holds: known kinds, each once, and at most

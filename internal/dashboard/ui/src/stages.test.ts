@@ -431,6 +431,38 @@ describe("the board", () => {
       requestStep(task({ status: "waiting", waiting }), decision("delivery")),
     ).toBe("Waiting for your approval");
   });
+  it("names the full column and capacity with or without a previous stage", () => {
+    for (const from of [undefined, "reviewing"] as const) {
+      expect(
+        requestStep(
+          task({
+            status: "reviewing",
+            waiting: {
+              kind: "stage",
+              stage: "qa",
+              from,
+              count: 10,
+              limit: 10,
+            },
+          }),
+        ),
+      ).toBe("Waiting for room in QA (10 of 10)");
+    }
+    expect(
+      requestStep(
+        task({
+          status: "triage",
+          waiting: {
+            kind: "stage",
+            stage: "todo",
+            from: "triage",
+            count: 2,
+            limit: 2,
+          },
+        }),
+      ),
+    ).toBe("Waiting for room in To do (2 of 2)");
+  });
   it("says which stage a request waits for room in, as its board names it", () => {
     const full = (stage: Stage, from?: Stage) => ({
       kind: "stage" as const,
@@ -447,7 +479,7 @@ describe("the board", () => {
           waiting: full("qa", "reviewing"),
         }),
       ),
-    ).toBe("Done, waiting for room in QA");
+    ).toBe("Waiting for room in QA (2 of 2)");
     expect(
       requestStep(
         task({
@@ -457,7 +489,7 @@ describe("the board", () => {
           waiting: full("reviewing", "implementing"),
         }),
       ),
-    ).toBe("Round 2 · Done, waiting for room in Reviewing");
+    ).toBe("Round 2 · Waiting for room in Reviewing (2 of 2)");
     expect(
       requestStep(
         task({
@@ -466,7 +498,7 @@ describe("the board", () => {
           waiting: full("ready", "qa"),
         }),
       ),
-    ).toBe("Done, waiting for room in Ready to land");
+    ).toBe("Waiting for room in Ready to land (2 of 2)");
     // A request not yet started takes its project's names for the stages.
     expect(
       requestStep(
@@ -613,7 +645,7 @@ describe("several requests under way", () => {
 });
 
 describe("stage defaults", () => {
-  it("counts seats for each role, including seats from one member", () => {
+  it("uses ten independently of seats, and honours explicit capacities", () => {
     const roles = [
       "researcher",
       "designer",
@@ -636,7 +668,7 @@ describe("stage defaults", () => {
       "reviewing",
       "qa",
     ] as const) {
-      expect(stageLimit(pb, stage)).toBe(2);
+      expect(stageLimit(pb, stage)).toBe(10);
       expect(stageLimit({ ...pb, stage_limits: { [stage]: 1 } }, stage)).toBe(
         1,
       );
@@ -644,12 +676,25 @@ describe("stage defaults", () => {
         5,
       );
       expect(stageLimit({ ...pb, stage_limits: { [stage]: 0 } }, stage)).toBe(
-        2,
+        10,
       );
     }
     expect(stageLimit(pb, "ready")).toBe(0);
-    expect(stageLimit({ ...pb, roles: [] }, "qa")).toBe(0);
+    expect(stageLimit({ ...pb, roles: [] }, "qa")).toBe(10);
     expect(stageLimit(undefined, "implementing")).toBe(0);
+    expect(stageLimit(pb, "todo")).toBe(0);
+    for (const stage of ["pr_opening", "pr_open", "ready"] as const) {
+      expect(stageLimit(pb, stage)).toBe(0);
+      expect(stageLimit({ ...pb, stage_limits: { [stage]: 4 } }, stage)).toBe(
+        4,
+      );
+    }
+    expect(stageLimit({ ...pb, stage_limits: { todo: 500 } }, "todo")).toBe(
+      500,
+    );
+    expect(stageLimit({ ...pb, stage_limits: { triage: 2 } }, "triage")).toBe(
+      0,
+    );
   });
 });
 

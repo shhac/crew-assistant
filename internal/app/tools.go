@@ -120,7 +120,7 @@ var toolActions = map[string]toolAction{
 	"set_parallel": with(func(a *App, ctx context.Context, in engine.SetParallelArgs) (any, error) {
 		n, err := strconv.Atoi(strings.TrimSpace(in.MaxActive))
 		if err != nil {
-			return nil, errors.New("max_active must be a number: 1 or more, or 0 for no overall limit")
+			return nil, errors.New("max_active must be a number: 1 to 10, or 0 for no overall limit; each column has its own capacity; research through QA default to 10, and To do, PR rows and Ready have no default limit")
 		}
 		return a.Work.SetParallel(ctx, in.ProjectID, n)
 	}),

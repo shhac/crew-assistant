@@ -2,17 +2,14 @@ package core
 
 import "slices"
 
-// Stage limits make a bottleneck push back up the pipeline. Each task holds
-// a place in one working stage of its project's board, and enters the next
-// only when that stage is below its limit. Until then it waits where it is,
-// done with the stage it holds and still counted in it, so a full QA holds
-// finished reviews, a full review holds finished drafts, and a full
-// implementing stage starts nothing more from To do. A move back to an
-// earlier stage never waits. Only Schedule moves a task's place, and only
-// for a task under way: one waiting on the owner, or on something outside
-// the team, stays where it is until it is under way again. It counts against
-// explicit limits, but not seat-derived capacity. Returning tasks are not evicted
-// if the stage is then full.
+// Column capacities make a bottleneck push back up the pipeline. A task
+// enters its next column when there is room, independently of whether a
+// teammate can start its step. Until then it stays in the column it finished.
+// Every task holding a column counts, including owner and outside waits.
+// A full column pulls nothing from the preceding one; To do may also be
+// limited, but triage never is. A move back never waits, and lowering a
+// capacity never evicts tasks. Schedule moves working tasks forward; owner
+// and outside waits retain their place until they are under way again.
 
 // placeStage is the working stage t has reached, towards stage limits, or ""
 // for a task on the to-do list, in triage or finished. It is the board's
@@ -74,7 +71,7 @@ type held map[string]map[string]int
 // holdings brings each task's place up to date where that needs no room:
 // a task's first look, a move back, or leaving the working stages. It
 // counts tasks per project for the moves that need room. Owner and outside
-// waits retain Place and count only against explicit stage limits.
+// waits retain Place and count towards capacity.
 func holdings(v *Snapshot) held {
 	counts := held{}
 	for _, p := range v.Projects {
@@ -88,10 +85,12 @@ func holdings(v *Snapshot) held {
 		if stage == "" || t.Place == "" || !later(stage, t.Place) || (t.Status == TaskAwaiting && t.UsesPRs()) {
 			t.Place = stage
 		}
-		p := project(v, t.ProjectID)
-		explicit := p != nil && p.Playbook != nil && p.Playbook.StageLimits[t.Place] > 0
-		if (t.Active() || explicit) && t.Place != "" && counts[t.ProjectID] != nil {
-			counts[t.ProjectID][t.Place]++
+		if counts[t.ProjectID] != nil {
+			if t.Status == TaskQueued {
+				counts[t.ProjectID][StageTodo]++
+			} else if t.Place != "" {
+				counts[t.ProjectID][t.Place]++
+			}
 		}
 	}
 	return counts

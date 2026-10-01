@@ -189,7 +189,8 @@ type Wait struct {
 // holds the task alone, and a project lands one task at a time. A task
 // enters a stage of the board only while the stage is below its limit; see
 // stage_limits.go. A task whose next step is ready and can't start records
-// what it waits for.
+// what it waits for. Sent-on triage tasks fill room freed in To do in this
+// same atomic update.
 func (s *Service) Schedule(ctx context.Context, admit Admit) ([]Scheduled, error) {
 	var out []Scheduled
 	err := s.store.update(ctx, func(v *Snapshot) error {
@@ -222,17 +223,16 @@ func (s *Service) Schedule(ctx context.Context, admit Admit) ([]Scheduled, error
 				waits[t.ID] = full
 				continue
 			}
+			if next != "" {
+				stages.move(t, next)
+			}
 			claimed, wait := offer(v, t, busy, admit, now)
 			out = append(out, claimed...)
 			waits[t.ID] = wait
-			// It enters only once someone takes it up there, so a stage
-			// is never held for a person who is busy elsewhere.
-			if next != "" && len(t.Claims) > 0 {
-				stages.move(t, next)
-			}
 		}
 		for _, p := range queueOrder(v) {
 			out = append(out, startQueued(v, p, busy, admit, stages, waits, now)...)
+			pullTriage(v, p, stages, waits, now)
 		}
 		for i := range v.Tasks {
 			v.Tasks[i].Waiting = waits[v.Tasks[i].ID]
@@ -541,6 +541,7 @@ func startQueued(v *Snapshot, p *Project, busy map[string]Wait, admit Admit, sta
 				break
 			}
 		}
+		stages[p.ID][StageTodo]--
 		startTask(v, p, t, now)
 		stages.move(t, stage)
 		active++

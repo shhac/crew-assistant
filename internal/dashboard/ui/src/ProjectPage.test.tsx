@@ -2090,7 +2090,7 @@ describe("Config groups", () => {
       "Project identity",
     ]);
     const cards = [
-      ["Tasks at once", "Team settings"],
+      ["Column capacity", "Team settings"],
       ["Landing"],
       ["Folders", "Workspace", "Running the app"],
       ["Name", "Request IDs"],
@@ -2118,7 +2118,7 @@ describe("Config groups", () => {
       ]);
       const groups = within(container).getAllByRole("heading", { level: 2 });
       expect(headings(groups[0].parentElement!, 3)).toEqual(
-        playbook ? ["Tasks at once", "Team settings"] : ["Team settings"],
+        playbook ? ["Column capacity", "Team settings"] : ["Team settings"],
       );
       expect(headings(groups[1].parentElement!, 3)).toEqual(["Folders"]);
       expect(headings(groups[2].parentElement!, 3)).toEqual([
@@ -2131,12 +2131,12 @@ describe("Config groups", () => {
     },
   );
 
-  it("keeps an unsaved Tasks at once edit across a project refresh", () => {
+  it("keeps an unsaved Column capacity edit across a project refresh", () => {
     const p = project();
     const { rerender } = render(
       <ConfigTab project={p} members={[]} refresh={refresh} />,
     );
-    const card = screen.getByRole("region", { name: "Tasks at once" });
+    const card = screen.getByRole("region", { name: "Column capacity" });
     fireEvent.click(within(card).getByRole("button", { name: "Edit" }));
     fireEvent.change(within(card).getByLabelText("In all"), {
       target: { value: "4" },
@@ -2148,10 +2148,10 @@ describe("Config groups", () => {
         refresh={refresh}
       />,
     );
-    const form = screen.getByRole("form", { name: "Tasks at once" });
+    const form = screen.getByRole("form", { name: "Column capacity" });
     expect(within(form).getByLabelText("In all")).toHaveProperty("value", "4");
     expect(within(form).getByRole("heading", { level: 3 }).textContent).toBe(
-      "Tasks at once",
+      "Column capacity",
     );
     expect(writes()).toEqual([]);
   });
