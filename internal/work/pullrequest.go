@@ -385,12 +385,22 @@ func (lp *Loop) saveProposal(ctx context.Context, taskID string, prop core.Propo
 // takes its own replies for feedback.
 const ownPost = "<!-- crew-assistant -->"
 
+// saysNothing is feedback with nothing in it to answer: the team's own
+// posts, and a review with no words of its own. An approval asks for
+// nothing, and a comment-only review is only the wrapper of its line
+// comments, which arrive in their threads; GitHub makes one for every
+// thread reply, the team's own included.
+func saysNothing(f github.Feedback) bool {
+	empty := strings.TrimSpace(f.Body) == ""
+	return strings.Contains(f.Body, ownPost) || ((f.Kind == "review (approved)" || f.Kind == "review (commented)") && empty)
+}
+
 // untrusted is feedback since the team last looked from people the
 // repository's owner didn't let in: shown, never acted on.
 func untrusted(pr github.PR, prop core.Proposal) []github.Feedback {
 	var out []github.Feedback
 	for _, f := range pr.FeedbackSince(prop.Seen) {
-		if !f.Trusted() && !strings.Contains(f.Body, ownPost) {
+		if !f.Trusted() && !saysNothing(f) {
 			out = append(out, f)
 		}
 	}
@@ -400,11 +410,11 @@ func untrusted(pr github.PR, prop core.Proposal) []github.Feedback {
 // prFeedback is what arrived since the team last looked: reviews, comments
 // and review-thread comments that ask for something, from the repository's
 // owner, members and collaborators, and checks that failed on the latest
-// revision. An approval asks for nothing.
+// revision.
 func prFeedback(pr github.PR, prop core.Proposal, r core.Revision) []core.Verdict {
 	var out []core.Verdict
 	for _, f := range pr.FeedbackSince(prop.Seen) {
-		if !f.Trusted() || strings.Contains(f.Body, ownPost) || (f.Kind == "review (approved)" && strings.TrimSpace(f.Body) == "") {
+		if !f.Trusted() || saysNothing(f) {
 			continue
 		}
 		out = append(out, core.Verdict{

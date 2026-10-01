@@ -872,3 +872,39 @@ func TestTheOwnerKeepsATaskOnItsPullRequestWhenTheyAreTurnedOff(t *testing.T) {
 		t.Fatalf("keeping changed the task: %s %+v", task.Status, task.Proposal)
 	}
 }
+
+// Replying in a thread makes GitHub add an empty comment-only review from
+// the same account; neither it nor the reply is feedback, so the team's own
+// answer never starts another round.
+func TestTheTeamsOwnThreadReplyStartsNoRound(t *testing.T) {
+	s := newPRScenario(t, 2)
+	s.open(t)
+	s.runner.onEdit = func(_ string, n int) bool { return n == 1 }
+	s.runner.ending = func(n int) string {
+		if n == 1 {
+			return ""
+		}
+		return "\n```pr-reply\n{\"replies\": [{\"thread\": \"T1\", \"body\": \"Yes, on purpose.\"}]}\n```"
+	}
+	at := time.Now()
+	s.gh.set(func() { s.gh.threads = []map[string]any{thread("T1", "Is this on purpose?", at)} })
+	if err := s.a.checkWakes(s.ctx, at.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	s.current(t)
+	// What GitHub then shows: the reply in the thread, under the owner's
+	// login, and an empty review wrapping it.
+	replied := at.Add(2 * time.Minute)
+	s.gh.set(func() {
+		nodes := s.gh.threads[0]["comments"].(map[string]any)["nodes"].([]map[string]any)
+		s.gh.threads[0]["comments"] = map[string]any{"nodes": append(nodes, map[string]any{"author": map[string]string{"login": "owner"}, "authorAssociation": "OWNER", "body": "Yes, on purpose.\n\n— Implementer, for crew-assistant\n" + ownPost, "createdAt": replied.Format(time.RFC3339)})}
+		s.gh.reviews = append(s.gh.reviews, github.Review{Author: github.Author{Login: "owner"}, Association: "OWNER", State: "COMMENTED", SubmittedAt: replied})
+	})
+	if err := s.a.checkWakes(s.ctx, replied.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	task := s.current(t)
+	if s.runner.edits != 2 || len(s.gh.postsOf("reply")) != 1 || task.Status != core.TaskAwaiting {
+		t.Fatalf("its own reply started another round: edits %d replies %d status %s", s.runner.edits, len(s.gh.postsOf("reply")), task.Status)
+	}
+}
