@@ -434,9 +434,13 @@ func TestTheRecipeAndQAsBrowserAreProjectSettings(t *testing.T) {
 	if p, err = a.SetRunRecipe(ctx, p.ID, nil); err != nil || p.Playbook.Run != nil {
 		t.Fatalf("taking the recipe away: %+v %v", p.Playbook.Run, err)
 	}
-	// The template's QA is on Codex, which has no browser to turn on.
-	if _, err = a.SetSeatBrowser(ctx, p.ID, core.Browser{On: true}); err == nil {
-		t.Fatal("Codex QA was given the browser")
+	// The template's QA is on Codex, whose sandboxed sessions admit the
+	// browser too.
+	if p, err = a.SetSeatBrowser(ctx, p.ID, core.Browser{On: true}); err != nil {
+		t.Fatalf("Codex QA wasn't given the browser: %v", err)
+	}
+	if _, err = a.SetSeatBrowser(ctx, p.ID, core.Browser{}); err != nil {
+		t.Fatal(err)
 	}
 	m, err := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Quinn", Kinds: []string{core.RoleQA, core.RoleResearcher}, Engine: "claude", Browser: core.Browser{On: true, Name: "Home"}})
 	if err != nil {

@@ -34,8 +34,8 @@ func TestTheOwnerSetsHowQARunsTheApp(t *testing.T) {
 		t.Fatal("the recipe was not taken away", w.Code, w.Body.String())
 	}
 	browser := "/api/projects/" + p.ID + "/team/qa/browser"
-	if w := call("PUT", browser, `{"on":true}`); w.Code != 400 || !strings.Contains(w.Body.String(), "Claude") {
-		t.Fatal("Codex QA was given the browser", w.Code, w.Body.String())
+	if w := call("PUT", browser, `{"on":true}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"browser":{"on":true}`) {
+		t.Fatal("Codex QA, whose sandboxed sessions admit the browser, wasn't given it", w.Code, w.Body.String())
 	}
 	quinn, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Quinn", Kinds: []string{core.RoleQA}, Engine: "claude"})
 	if w := call("PUT", "/api/projects/"+p.ID+"/team/qa", `{"member":"`+quinn.ID+`"}`); w.Code != 200 {
@@ -44,8 +44,8 @@ func TestTheOwnerSetsHowQARunsTheApp(t *testing.T) {
 	if w := call("PUT", browser, `{"on":true,"name":"Work"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"browser":{"on":true,"name":"Work"}`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if w := call("PUT", "/api/members/"+quinn.ID, `{"name":"Quinn","kinds":["qa"],"engine":"codex","browser":{"on":true}}`); w.Code != 400 {
-		t.Fatal("a Codex member was given the browser", w.Code, w.Body.String())
+	if w := call("PUT", "/api/members/"+quinn.ID, `{"name":"Quinn","kinds":["qa"],"engine":"codex","browser":{"on":true}}`); w.Code != 200 {
+		t.Fatal("a Codex member wasn't given the browser", w.Code, w.Body.String())
 	}
 	var defaults struct {
 		Choices []struct {
@@ -58,7 +58,7 @@ func TestTheOwnerSetsHowQARunsTheApp(t *testing.T) {
 	for _, c := range defaults.Choices {
 		offered[c.Engine] = c.Browser
 	}
-	if !offered["claude"] || offered["codex"] || len(offered) == 0 {
+	if !offered["claude"] || !offered["codex"] {
 		t.Fatalf("browser choices %v", offered)
 	}
 }
