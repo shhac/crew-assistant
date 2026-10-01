@@ -133,7 +133,7 @@ func newPRScenario(t *testing.T, reviews int) *prScenario {
 	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = a.SetLanding(ctx, p.ID, core.LandPolicy{Via: core.LandPullRequest, Target: "main", GitHub: "o/r", Method: "squash"}); err != nil {
+	if _, err = a.SetLanding(ctx, p.ID, core.LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", Merge: "squash"}); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ := a.Core.Snapshot(ctx)
@@ -283,7 +283,7 @@ func TestTheImplementerAsksForItsOwnWakesInItsReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	task, err = a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		t.Playbook = &core.Playbook{Land: core.LandPolicy{Via: core.LandPullRequest, GitHub: "o/r", Target: "main"}}
+		t.Playbook = &core.Playbook{Land: core.LandPolicy{PullRequests: true, GitHub: "o/r", Target: "main"}}
 		t.Proposal = &core.Proposal{Branch: "paul/x", Number: 7}
 		return "", nil
 	})

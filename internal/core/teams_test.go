@@ -143,14 +143,19 @@ func TestLandingPoliciesSayOnlyWhatTheWayNeeds(t *testing.T) {
 		{LandPolicy{Via: LandPush, Target: "main", Method: "squash"}, false},
 		{LandPolicy{Via: LandPush}, false},
 		{LandPolicy{Via: LandPush, Target: "main..x"}, false},
-		{LandPolicy{Via: LandPullRequest, Target: "main", GitHub: "shhac/crew-assistant", Method: "squash"}, true},
-		{LandPolicy{Via: LandPullRequest, Target: "main", GitHub: "not a repo"}, false},
+		{LandPolicy{PullRequests: true, Target: "main", GitHub: "shhac/crew-assistant", Merge: "squash"}, true},
+		{LandPolicy{PullRequests: true, Target: "main", GitHub: "not a repo"}, false},
+		{LandPolicy{PullRequests: true, Target: "main", GitHub: "shhac/crew-assistant", Merge: "fast-forward"}, false},
+		// Via is the way without pull requests, kept while they are on.
+		{LandPolicy{PullRequests: true, Via: LandPush, Target: "main", GitHub: "shhac/crew-assistant"}, true},
+		{LandPolicy{Via: LandPullRequest, Target: "main", GitHub: "shhac/crew-assistant"}, false},
+		{LandPolicy{Via: LandPush, Target: "main", GitHub: "shhac/crew-assistant"}, false},
 		{LandPolicy{Via: LandBranch, Target: "main"}, false},
 		{LandPolicy{Via: "carrier-pigeon"}, false},
 		{LandPolicy{Approve: "sometimes"}, false},
 		// Only a push can leave landing to the PM.
 		{LandPolicy{Via: LandPush, Target: "main", Approve: ApprovePM}, true},
-		{LandPolicy{Via: LandPullRequest, Target: "main", GitHub: "shhac/crew-assistant", Approve: ApprovePM}, false},
+		{LandPolicy{PullRequests: true, Target: "main", GitHub: "shhac/crew-assistant", Approve: ApprovePM}, false},
 		{LandPolicy{Via: LandBranch, Approve: ApprovePM}, false},
 		{LandPolicy{Approve: ApprovePM}, false},
 	} {

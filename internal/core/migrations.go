@@ -15,7 +15,34 @@ import (
 // migrations upgrade a state document from the schema of its key to the
 // next. Each works on the document as JSON, since the types it was written
 // with are gone, and changes only what its version changed.
-var migrations = map[int]func(doc map[string]any) error{}
+var migrations = map[int]func(doc map[string]any) error{
+	2: pullRequestsToggle,
+}
+
+// pullRequestsToggle turns each landing policy that landed by pull request,
+// the project's and every task's own copy, into one with pull requests on.
+// Without them it would land on a new branch, which moves nothing.
+func pullRequestsToggle(doc map[string]any) error {
+	snapshot, _ := doc["snapshot"].(map[string]any)
+	for _, list := range []string{"projects", "tasks"} {
+		items, _ := snapshot[list].([]any)
+		for _, item := range items {
+			entity, _ := item.(map[string]any)
+			playbook, _ := entity["playbook"].(map[string]any)
+			land, _ := playbook["land"].(map[string]any)
+			if land == nil || land["via"] != "pull-request" {
+				continue
+			}
+			delete(land, "via")
+			land["pull_requests"] = true
+			if method, ok := land["method"]; ok {
+				land["merge"] = method
+				delete(land, "method")
+			}
+		}
+	}
+	return nil
+}
 
 // upgrade brings state written by an earlier schema up to this build's,
 // once, keeping a copy of the database as it was beside it; state from a

@@ -10,15 +10,19 @@ import (
 // agents, plus the few fields the loop needs to do it.
 type LandPolicy struct {
 	Means string `json:"means,omitempty"`
-	// Via is LandBranch (a new local branch), LandPush (a fast-forward push
-	// onto Target) or LandPullRequest (a GitHub pull request into Target).
+	// Via is how a change lands without pull requests: LandBranch (a new
+	// local branch) or LandPush (a fast-forward push onto Target).
 	Via    string `json:"via,omitempty"`
 	Target string `json:"target,omitempty"`
-	// Method is fast-forward for a push, or squash, merge or rebase for a
-	// pull request.
+	// Method is how a push lands: fast-forward.
 	Method string `json:"method,omitempty"`
-	// GitHub is the owner/name repository a pull request is opened on.
+	// PullRequests lands each change through a GitHub pull request into
+	// Target instead, whatever Via says.
+	PullRequests bool `json:"pull_requests,omitempty"`
+	// GitHub is the owner/name repository pull requests are opened on.
 	GitHub string `json:"github,omitempty"`
+	// Merge is how a pull request merges: squash, merge or rebase.
+	Merge string `json:"merge,omitempty"`
 	// Approve is ApproveBefore (the owner approves before landing, or before a
 	// pull request opens), ApproveNone, or ApprovePM (the team's PM decides
 	// whether a signed-off change lands; push only).
@@ -26,8 +30,10 @@ type LandPolicy struct {
 }
 
 const (
-	LandBranch      = "branch"
-	LandPush        = "push"
+	LandBranch = "branch"
+	LandPush   = "push"
+	// LandPullRequest is the way of a policy with PullRequests on; it is
+	// never a Via.
 	LandPullRequest = "pull-request"
 	ApproveBefore   = "before"
 	ApproveNone     = "none"
@@ -38,9 +44,13 @@ const (
 	ApprovePM = "pm"
 )
 
-// Way is how a change lands, defaulting to a new branch.
+// Way is how a change lands: through a pull request when they are on, else
+// as Via says, defaulting to a new branch.
 func (l LandPolicy) Way() string {
-	if l.Via == "" {
+	switch {
+	case l.PullRequests:
+		return LandPullRequest
+	case l.Via == "":
 		return LandBranch
 	}
 	return l.Via
@@ -48,10 +58,10 @@ func (l LandPolicy) Way() string {
 
 // MergeMethod is how a pull request merges, squash unless set.
 func (l LandPolicy) MergeMethod() string {
-	if l.Method == "" {
+	if l.Merge == "" {
 		return "squash"
 	}
-	return l.Method
+	return l.Merge
 }
 
 // AsksFirst reports whether someone, the owner or the PM, approves before a
@@ -73,10 +83,24 @@ func (l LandPolicy) validate() error {
 	if l.Approve == ApprovePM && l.Way() != LandPush {
 		return errors.New("the PM can decide only for changes that land by push: a pull request is merged as GitHub's reviews say, and a new branch lands nothing")
 	}
-	switch l.Way() {
-	case LandBranch:
-		if l.Target != "" || l.Method != "" || l.GitHub != "" {
-			return errors.New("landing on a new branch takes no target, method or github repository")
+	if l.PullRequests {
+		if !branchName(l.Target) {
+			return errors.New("pull requests need the branch they merge into, such as main")
+		}
+		if !githubRepo.MatchString(l.GitHub) {
+			return errors.New("pull requests need the GitHub repository as owner/name")
+		}
+		if l.Merge != "" && l.Merge != "squash" && l.Merge != "merge" && l.Merge != "rebase" {
+			return errors.New("a pull request merges by squash, merge or rebase")
+		}
+	} else if l.GitHub != "" || l.Merge != "" {
+		return errors.New("a GitHub repository and merge method are only for pull requests")
+	}
+	switch l.Via {
+	case "", LandBranch:
+		// With pull requests on, Target is theirs.
+		if l.Method != "" || (l.Target != "" && !l.PullRequests) {
+			return errors.New("landing on a new branch takes no target or method")
 		}
 	case LandPush:
 		if !branchName(l.Target) {
@@ -85,18 +109,8 @@ func (l LandPolicy) validate() error {
 		if l.Method != "" && l.Method != "fast-forward" {
 			return errors.New("a push only lands by fast-forward")
 		}
-	case LandPullRequest:
-		if !branchName(l.Target) {
-			return errors.New("a pull request needs the branch it merges into, such as main")
-		}
-		if !githubRepo.MatchString(l.GitHub) {
-			return errors.New("a pull request needs the GitHub repository as owner/name")
-		}
-		if l.Method != "" && l.Method != "squash" && l.Method != "merge" && l.Method != "rebase" {
-			return errors.New("a pull request merges by squash, merge or rebase")
-		}
 	default:
-		return errors.New("landing is via branch, push or pull-request")
+		return errors.New("landing is via branch or push, with or without pull requests")
 	}
 	return nil
 }

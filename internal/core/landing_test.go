@@ -17,7 +17,7 @@ func TestLandingApprovalDefaultsToTheOwnerAndThePMDecidesOnlyForAPush(t *testing
 		{LandPolicy{Via: LandPush, Target: "main", Approve: ApproveBefore}, true, false},
 		{LandPolicy{Via: LandPush, Target: "main", Approve: ApproveNone}, false, false},
 		{LandPolicy{Via: LandPush, Target: "main", Approve: ApprovePM}, true, true},
-		{LandPolicy{Via: LandPullRequest, Target: "main", Approve: ApprovePM}, true, false},
+		{LandPolicy{PullRequests: true, Target: "main", Approve: ApprovePM}, true, false},
 		{LandPolicy{Approve: ApprovePM}, true, false},
 	} {
 		if tc.land.AsksFirst() != tc.asks || tc.land.ByPM() != tc.pmDecid {

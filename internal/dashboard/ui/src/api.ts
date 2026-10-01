@@ -206,10 +206,16 @@ export function withEngine(
 }
 export interface LandPolicy {
   means?: string;
-  via?: "branch" | "push" | "pull-request" | (string & {});
+  /** How a change lands without pull requests. */
+  via?: "branch" | "push" | (string & {});
   target?: string;
+  /** fast-forward, for a push. */
   method?: string;
+  /** Lands each change through a GitHub pull request into target instead. */
+  pull_requests?: boolean;
   github?: string;
+  /** squash, merge or rebase, for a pull request. */
+  merge?: string;
   /** pm lets the team's PM decide what lands; push only. */
   approve?: "before" | "none" | "pm" | (string & {});
 }
@@ -228,7 +234,9 @@ export interface LandingInput {
   via: string;
   target: string;
   method: string;
+  pull_requests: boolean;
   github: string;
+  merge: string;
   approve: string;
 }
 export interface Project {

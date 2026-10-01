@@ -295,7 +295,7 @@ func TestPullRequestAndBranchProjectsCannotLeaveLandingToThePM(t *testing.T) {
 	w := newPMPush(t, "", "")
 	ctx := context.Background()
 	for _, land := range []core.LandPolicy{
-		{Via: core.LandPullRequest, Target: "main", GitHub: "owner/service", Approve: core.ApprovePM},
+		{PullRequests: true, Target: "main", GitHub: "owner/service", Approve: core.ApprovePM},
 		{Via: core.LandBranch, Approve: core.ApprovePM},
 	} {
 		if _, err := w.a.SetLanding(ctx, w.p.ID, land); err == nil || !strings.Contains(err.Error(), "only for changes that land by push") {

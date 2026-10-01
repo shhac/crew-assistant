@@ -91,7 +91,7 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 	crewRepo := filepath.Join(dir, "projects", "crew-assistant")
 	docsRepo := filepath.Join(dir, "projects", "docs-site")
 	fastForward := core.LandPolicy{Via: core.LandPush, Target: "main", Method: "fast-forward", Approve: core.ApproveBefore, Means: "the next release includes it"}
-	pullRequest := core.LandPolicy{Via: core.LandPullRequest, Target: "main", Method: "squash", GitHub: "example/docs-site", Approve: core.ApproveBefore}
+	pullRequest := core.LandPolicy{PullRequests: true, Target: "main", Merge: "squash", GitHub: "example/docs-site", Approve: core.ApproveBefore}
 	crew := core.Project{ID: "demo-crew", Title: "crew-assistant", Status: "active", Directories: []string{crewRepo}, Playbook: codePlaybook(crewRepo, fastForward, crewTeam), UpdatedAt: ago(4 * time.Minute), OrderedBy: core.OrderedByPM, OrderedAt: ago(26 * time.Minute),
 		Brief: core.Brief{Version: 3, Goal: "Make crew-assistant a software factory that can build and improve itself.", Criteria: []string{"Features land on main without losing work", "Tests never touch real services"}, UpdatedAt: ago(72 * time.Hour)}}
 	docs := core.Project{ID: "demo-docs", Title: "docs-site", Status: "active", Directories: []string{docsRepo}, Playbook: codePlaybook(docsRepo, pullRequest, codeTeam), UpdatedAt: ago(22 * time.Minute),

@@ -889,7 +889,7 @@ describe("a request", () => {
     show(
       project({
         playbook: codeTeam({
-          via: "pull-request",
+          pull_requests: true,
           target: "main",
           github: "o/r",
         }),
@@ -2882,11 +2882,46 @@ describe("the project's tabs", () => {
           via: "push",
           target: "main",
           method: "fast-forward",
+          pull_requests: false,
           github: "",
+          merge: "",
           approve: "before",
         },
       },
     ]);
+  });
+  it("turns pull requests on for a code team, keeping its way without them", async () => {
+    show(
+      project({ playbook: codeTeam({ via: "push", target: "main" }) }),
+      {},
+      { tab: "config" },
+    );
+    const landing = screen.getByRole("region", { name: "Landing" });
+    fireEvent.click(within(landing).getByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Use pull requests" }),
+    );
+    expect(
+      screen.getByLabelText("Without pull requests, lands as"),
+    ).toHaveProperty("value", "push");
+    fireEvent.change(screen.getByLabelText("GitHub repository"), {
+      target: { value: " shhac/crew-qa-demo " },
+    });
+    fireEvent.change(screen.getByLabelText("Merge by"), {
+      target: { value: "rebase" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()[0].body).toEqual({
+      means: "",
+      via: "push",
+      target: "main",
+      method: "fast-forward",
+      pull_requests: true,
+      github: "shhac/crew-qa-demo",
+      merge: "rebase",
+      approve: "before",
+    });
   });
   it("offers the PM the decision to land only for a push", async () => {
     const withPM = codeTeam();
@@ -2905,12 +2940,15 @@ describe("the project's tabs", () => {
     fireEvent.change(approve(), { target: { value: "pm" } });
     expect(screen.getByText(/the PM lands or holds it/)).toBeTruthy();
     // A pull request or a branch never leaves it to the PM, and says why.
-    fireEvent.change(screen.getByLabelText("Lands as"), {
-      target: { value: "pull-request" },
-    });
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Use pull requests" }),
+    );
     expect(options()).toEqual(["before", "none"]);
     expect(approve().value).toBe("before");
     expect(screen.getByText(/GitHub's reviews decide/)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Use pull requests" }),
+    );
     fireEvent.change(screen.getByLabelText("Lands as"), {
       target: { value: "branch" },
     });

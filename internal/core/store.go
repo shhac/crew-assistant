@@ -17,10 +17,11 @@ import (
 // other processes. Each mutation atomically records entities and audit events.
 // stateSchema is the version of the state model this build reads and writes.
 // Version 2 is the project-teams model; version 1 (unversioned) was the worker
-// model it replaced. State from an earlier version is upgraded on open, see
+// model it replaced. Version 3 makes pull requests a landing toggle rather
+// than a way. State from an earlier version is upgraded on open, see
 // migrations.go; state from a later one is refused, so an older build never
 // reads, or writes back, a model it doesn't know.
-const stateSchema = 2
+const stateSchema = 3
 
 // ErrStateSchema means the state file was written for a model this build
 // can't read.

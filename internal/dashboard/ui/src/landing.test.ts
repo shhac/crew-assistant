@@ -8,6 +8,7 @@ import {
   pmLandingLine,
   reversibility,
   wayFor,
+  wayOf,
   whatHappens,
 } from "./landing";
 import type { Playbook, Task } from "./api";
@@ -44,11 +45,11 @@ describe("landing", () => {
     expect(landsBy(writing)).toBe("Stays on its page");
     expect(landsBy(code())).toBe("Fast-forward main");
     expect(
-      landsBy(code({ via: "pull-request", target: "main", method: "merge" })),
+      landsBy(code({ pull_requests: true, target: "main", merge: "merge" })),
     ).toBe("Pull request · merge");
     expect(landsBy(code({}))).toBe("New local branch");
     expect(approveLabel(code())).toBe("Land on main");
-    expect(approveLabel(code({ via: "pull-request", target: "main" }))).toBe(
+    expect(approveLabel(code({ pull_requests: true, target: "main" }))).toBe(
       "Open pull request",
     );
     expect(approveLabel(code({}))).toBe("Create branch");
@@ -57,14 +58,14 @@ describe("landing", () => {
       "Approve and copy",
     );
     expect(reversibility({ via: "push" })).toBe("Undoable with effort");
-    expect(reversibility({ via: "pull-request" })).toBe(
+    expect(reversibility({ pull_requests: true })).toBe(
       "Permanent once merged",
     );
     expect(reversibility({})).toBe("Undoable");
     expect(whatHappens(code())[0]).toContain("main moves forward");
     expect(
       whatHappens(
-        code({ via: "pull-request", target: "main", github: "o/r" }),
+        code({ pull_requests: true, target: "main", github: "o/r" }),
       )[0],
     ).toBe("A pull request opens on o/r into main.");
     expect(whatHappens({ ...writing, deliver_to: "/out" })).toEqual([
@@ -76,17 +77,17 @@ describe("landing", () => {
     ]);
     expect(
       whatHappens(
-        code({ via: "pull-request", target: "main", github: "o/r" }),
+        code({ pull_requests: true, target: "main", github: "o/r" }),
       )[2],
     ).toBe("It merges by squash once GitHub says it's approved and green.");
     // A way this dashboard doesn't know lands as a new branch.
     expect(landsBy(code({ via: "carrier-pigeon" }))).toBe("New local branch");
     expect(reversibility({ via: "carrier-pigeon" })).toBe("Undoable");
     expect(wayFor("carrier-pigeon")).toBeUndefined();
-    expect(wayFor("push")?.method("squash")).toBe("fast-forward");
-    expect(wayFor("pull-request")?.method("rebase")).toBe("rebase");
-    expect(wayFor("branch")?.method("squash")).toBe("");
-    expect(mergeMethod({ method: "merge" })).toBe("merge");
+    expect(wayOf({ via: "push", pull_requests: true })).toBe("pull-request");
+    expect(wayOf({ via: "push" })).toBe("push");
+    expect(wayOf(undefined)).toBe("branch");
+    expect(mergeMethod({ merge: "merge" })).toBe("merge");
     expect(mergeMethod(undefined)).toBe("squash");
   });
 
@@ -105,7 +106,7 @@ describe("landing", () => {
     );
     // A policy the server would refuse never reads as the PM's.
     expect(
-      approvalText({ via: "pull-request", target: "main", approve: "pm" }),
+      approvalText({ pull_requests: true, target: "main", approve: "pm" }),
     ).toBe("You approve each change");
     const byPM = whatHappens(
       code({ via: "push", target: "main", approve: "pm" }),

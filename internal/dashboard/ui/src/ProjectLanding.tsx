@@ -6,6 +6,7 @@ import {
   pmCanDecide,
   reversibility,
   wayFor,
+  wayOf,
   whatHappens,
 } from "./landing";
 import { ErrorNotice, useAction } from "./ui";
@@ -36,7 +37,7 @@ export function LandingSettings({
         />
       </section>
     );
-  const via = land?.via || "branch";
+  const via = wayOf(land);
   return (
     <section className="tab-panel card" aria-label="Landing">
       <div className="panel-head">
@@ -110,18 +111,18 @@ function LandingEditor({
 }) {
   const land = project.playbook?.land;
   const [via, setVia] = useState(land?.via || "branch");
+  const [pullRequests, setPullRequests] = useState(!!land?.pull_requests);
   const [github, setGithub] = useState(land?.github ?? "");
-  const [method, setMethod] = useState(
-    land?.via === "pull-request" ? mergeMethod(land) : "squash",
-  );
+  const [merge, setMerge] = useState(mergeMethod(land));
   const [target, setTarget] = useState(land?.target || "main");
   const [chosenApprove, setApprove] = useState(land?.approve || "before");
+  const way = pullRequests ? "pull-request" : via;
   // Only a push can leave landing to the PM; any other way asks the owner.
   const approve =
-    chosenApprove === "pm" && !pmCanDecide(via) ? "before" : chosenApprove;
+    chosenApprove === "pm" && !pmCanDecide(way) ? "before" : chosenApprove;
   const hasPM = !!project.playbook?.roles.some((r) => r.kinds.includes("pm"));
-  const approveHint = !pmCanDecide(via)
-    ? via === "pull-request"
+  const approveHint = !pmCanDecide(way)
+    ? pullRequests
       ? "The PM can't decide here: GitHub's reviews decide when a pull request merges."
       : "The PM can't decide here: a new branch lands nothing."
     : approve !== "pm"
@@ -137,9 +138,11 @@ function LandingEditor({
       await setLanding(project.id, {
         means: means.trim(),
         via,
-        target: via === "branch" ? "" : target.trim(),
-        method: wayFor(via)?.method(method) ?? "",
-        github: via === "pull-request" ? github.trim() : "",
+        target: way === "branch" ? "" : target.trim(),
+        method: via === "push" ? "fast-forward" : "",
+        pull_requests: pullRequests,
+        github: pullRequests ? github.trim() : "",
+        merge: pullRequests ? merge : "",
         approve,
       });
       await refresh();
@@ -149,23 +152,31 @@ function LandingEditor({
   return (
     <form className="form" aria-label="Landing" onSubmit={save}>
       <h3>Landing</h3>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={pullRequests}
+          onChange={(e) => setPullRequests(e.target.checked)}
+        />
+        <span>Use pull requests</span>
+      </label>
       <div className="form-row">
         <label htmlFor="land-via">
-          Lands as
+          {pullRequests ? "Without pull requests, lands as" : "Lands as"}
           <select
             id="land-via"
             className="field"
             value={via}
             onChange={(e) => setVia(e.target.value)}
           >
-            {Object.entries(landingWays).map(([id, way]) => (
+            {(["branch", "push"] as const).map((id) => (
               <option key={id} value={id}>
-                {way.label}
+                {landingWays[id].label}
               </option>
             ))}
           </select>
         </label>
-        {via === "pull-request" && (
+        {pullRequests && (
           <label htmlFor="land-github">
             GitHub repository
             <input
@@ -178,14 +189,14 @@ function LandingEditor({
             />
           </label>
         )}
-        {via === "pull-request" && (
+        {pullRequests && (
           <label htmlFor="land-method">
             Merge by
             <select
               id="land-method"
               className="field"
-              value={method}
-              onChange={(e) => setMethod(e.target.value)}
+              value={merge}
+              onChange={(e) => setMerge(e.target.value)}
             >
               <option value="squash">Squash</option>
               <option value="merge">Merge commit</option>
@@ -193,9 +204,9 @@ function LandingEditor({
             </select>
           </label>
         )}
-        {via !== "branch" && (
+        {way !== "branch" && (
           <label htmlFor="land-target">
-            {via === "pull-request" ? "Into branch" : "Branch"}
+            {pullRequests ? "Into branch" : "Branch"}
             <input
               id="land-target"
               className="field"
@@ -215,7 +226,7 @@ function LandingEditor({
           >
             <option value="before">Ask me first</option>
             <option value="none">Land once the checks pass</option>
-            {pmCanDecide(via) && <option value="pm">The PM decides</option>}
+            {pmCanDecide(way) && <option value="pm">The PM decides</option>}
           </select>
           {approveHint && <span className="hint">{approveHint}</span>}
         </label>

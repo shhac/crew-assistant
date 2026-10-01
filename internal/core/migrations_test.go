@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,7 +33,8 @@ func TestStateFromAnEarlierSchemaIsUpgradedOnceAndBackedUp(t *testing.T) {
 		return nil
 	}}
 	path := filepath.Join(t.TempDir(), "state.db")
-	writeRawState(t, path, `{"schema":1,"snapshot":{"projects":[],"tasks":[],"model_calls":{"big":12345678901234567}},"events":{},"model_calls":{}}`)
+	earlier := stateSchema - 1
+	writeRawState(t, path, fmt.Sprintf(`{"schema":%d,"snapshot":{"projects":[],"tasks":[]},"events":{},"model_calls":{}}`, earlier))
 	s, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +48,7 @@ func TestStateFromAnEarlierSchemaIsUpgradedOnceAndBackedUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Close()
-	backups, _ := filepath.Glob(path + ".schema-1.*.bak")
+	backups, _ := filepath.Glob(fmt.Sprintf("%s.schema-%d.*.bak", path, earlier))
 	if runs != 1 || len(backups) != 1 {
 		t.Fatalf("ran %d times, backups %v", runs, backups)
 	}
@@ -56,7 +58,7 @@ func TestStateFromAnEarlierSchemaIsUpgradedOnceAndBackedUp(t *testing.T) {
 	}
 	defer db.Close()
 	var payload string
-	if err = db.QueryRow("SELECT payload FROM state").Scan(&payload); err != nil || !strings.Contains(payload, `"schema":1`) {
+	if err = db.QueryRow("SELECT payload FROM state").Scan(&payload); err != nil || !strings.Contains(payload, fmt.Sprintf(`"schema":%d`, earlier)) {
 		t.Fatalf("backup %q %v", payload, err)
 	}
 }
@@ -83,5 +85,30 @@ func TestUpgradeStateKeepsNumbersExact(t *testing.T) {
 	}
 	if _, err = upgradeState([]byte(`{"schema":0}`), 0, 2, map[int]func(map[string]any) error{1: nil}); !errors.Is(err, ErrStateSchema) {
 		t.Fatalf("a missing step was skipped: %v", err)
+	}
+}
+
+func TestALandingPolicyByPullRequestBecomesOneWithPullRequestsOn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	pr := `{"means":"merged","via":"pull-request","target":"main","method":"rebase","github":"o/r","approve":"before"}`
+	writeRawState(t, path, `{"schema":2,"snapshot":{"projects":[{"id":"p1","playbook":{"template":"code","medium":"git","roles":[],"deliver":"owner","land":`+pr+`}},{"id":"p2","playbook":{"land":{"via":"push","target":"main","method":"fast-forward"}}}],"tasks":[{"id":"t1","project_id":"p1","status":"awaiting","playbook":{"land":`+pr+`}}]},"events":{},"model_calls":{}}`)
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	snap, err := s.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := LandPolicy{Means: "merged", Target: "main", PullRequests: true, GitHub: "o/r", Merge: "rebase", Approve: "before"}
+	if got := snap.Projects[0].Playbook.Land; got != want || got.Way() != LandPullRequest || got.validate() != nil {
+		t.Fatalf("project %+v %v", got, got.validate())
+	}
+	if got := snap.Tasks[0].Playbook.Land; got != want {
+		t.Fatalf("task %+v", got)
+	}
+	if got := snap.Projects[1].Playbook.Land; got != (LandPolicy{Via: LandPush, Target: "main", Method: "fast-forward"}) {
+		t.Fatalf("a push policy changed: %+v", got)
 	}
 }

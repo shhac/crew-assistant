@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { DecisionCard } from "./DecisionCard";
 import { Drafts } from "./Drafts";
-import { pmLandingLine } from "./landing";
+import { pmLandingLine, wayOf } from "./landing";
 import { MemberPanel } from "./MemberPanel";
 import { RequestAttachments } from "./RequestAttachments";
 import { RequestEdits, RequestNotes } from "./RequestNotes";
@@ -268,7 +268,7 @@ function RequestActions({
   const landsLater =
     (task.status === "delivered" &&
       isCode(project.playbook) &&
-      (land?.via === "push" || land?.via === "pull-request")) ||
+      wayOf(land) !== "branch") ||
     // A signed-off change waiting on the PM can be landed by the owner.
     !!task.pm_deciding;
   if (finished(task) && !landsLater) return null;

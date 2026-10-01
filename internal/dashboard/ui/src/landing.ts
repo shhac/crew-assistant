@@ -4,7 +4,11 @@ import type { LandPolicy, Playbook, Task } from "./api";
 export const isCode = (playbook?: Playbook) => playbook?.medium === "git";
 
 /** How a pull request merges, when the owner hasn't said. */
-export const mergeMethod = (land?: LandPolicy) => land?.method || "squash";
+export const mergeMethod = (land?: LandPolicy) => land?.merge || "squash";
+
+/** The way a policy lands: through pull requests when they're on. */
+export const wayOf = (land?: LandPolicy) =>
+  land?.pull_requests ? "pull-request" : land?.via || "branch";
 
 export interface LandingWay {
   /** The way itself, as the landing settings name it. */
@@ -13,8 +17,6 @@ export interface LandingWay {
   reversibility: string;
   approve: (land: LandPolicy) => string;
   happens: (land: LandPolicy, playbook: Playbook) => string[];
-  /** The merge method saved for this way, from the one the owner chose. */
-  method: (chosen: string) => string;
 }
 
 export const landingWays: Record<string, LandingWay> = {
@@ -27,7 +29,6 @@ export const landingWays: Record<string, LandingWay> = {
       `A new branch starting ${playbook.branch_prefix ?? "crew/"} is created in your repository.`,
       "Nothing is pushed.",
     ],
-    method: () => "",
   },
   push: {
     label: "Fast-forward a branch",
@@ -38,7 +39,6 @@ export const landingWays: Record<string, LandingWay> = {
       `${land.target} moves forward to include this change. Nothing already on it is replaced.`,
       `If ${land.target} is checked out, your checkout updates too; if it has uncommitted changes, landing stops and asks you first.`,
     ],
-    method: () => "fast-forward",
   },
   "pull-request": {
     label: "A pull request on GitHub",
@@ -50,7 +50,6 @@ export const landingWays: Record<string, LandingWay> = {
       "The team answers its reviews and fixes failing checks.",
       `It merges by ${mergeMethod(land)} once GitHub says it's approved and green.`,
     ],
-    method: (chosen) => chosen,
   },
 };
 
@@ -60,7 +59,7 @@ export const wayFor = (via?: string): LandingWay | undefined =>
 
 /** How a policy lands; one with no way it knows lands as a new branch. */
 const landingWay = (land?: LandPolicy) =>
-  wayFor(land?.via) ?? landingWays.branch;
+  wayFor(wayOf(land)) ?? landingWays.branch;
 
 /** How a project's approved work leaves it, in a few words. */
 export function landsBy(playbook?: Playbook): string {
@@ -109,7 +108,7 @@ export const pmCanDecide = (via?: string) => via === "push";
 
 /** Whether the project's PM decides what lands. */
 export const pmDecides = (land?: LandPolicy) =>
-  land?.approve === "pm" && pmCanDecide(land.via);
+  land?.approve === "pm" && pmCanDecide(wayOf(land));
 
 /** Who approves a change before it lands, in words. */
 export function approvalText(land?: LandPolicy): string {
