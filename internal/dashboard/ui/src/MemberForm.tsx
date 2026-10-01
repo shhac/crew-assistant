@@ -49,10 +49,10 @@ export function MemberForm({
   const [description, setDescription] = useState(member?.description ?? "");
   const [personality, setPersonality] = useState(member?.personality ?? "");
   const [browser, setBrowser] = useState<Browser>(member?.browser ?? {});
-  const qa = kinds.includes("qa");
-  // The browser is QA's, and only an engine with one can have it on.
+  // Any member may be allowed the browser, on an engine whose roles can use
+  // one.
   const browserOffered = useBrowserOffered(choice.engine);
-  const browserOn = qa && !!browser.on;
+  const browserOn = !!browser.on;
   const browserProblem = browserOn && !browserOffered;
   useEffect(() => {
     if (!suggestion) return;
@@ -127,14 +127,13 @@ export function MemberForm({
         saved={member}
         onChange={setChoice}
       />
-      {qa && (
-        <BrowserFields
-          id="member"
-          engine={choice.engine}
-          value={browser}
-          onChange={setBrowser}
-        />
-      )}
+      <BrowserFields
+        id="member"
+        engine={choice.engine}
+        value={browser}
+        onChange={setBrowser}
+        purpose="member"
+      />
       <PersonalityField
         id="member-personality"
         value={personality}

@@ -7,29 +7,39 @@ import { setQABrowser, type Browser, type Playbook, type Project } from "./api";
 /** What the owner is told before QA gets their browser. */
 export const REAL_CHROME = "This is your real Chrome, with its logins.";
 
-/** Whether QA on an engine can use the browser it ships. */
+/** Whether a role on an engine can use the browser it ships. */
 export function useBrowserOffered(engine: string) {
   return choicesFor(useEngineChoices(), "browser").some(
     (c) => c.engine === engine,
   );
 }
 
+/** How each engine's browser reaches Chrome, said where it is allowed. */
+const engineBrowser: Record<string, string> = {
+  claude: "On Claude, its browser tools act only inside Chrome.",
+  codex:
+    "On Codex, it runs through the ChatGPT app's browser bridge, which is checked before each turn to be confined by that turn's sandbox.",
+};
+
 /**
- * QA's browser setting: off, or on with the name of a connected browser,
- * empty for the one the extension connects by default. It is offered only
- * on an engine that has a browser; one left on elsewhere can only be
- * switched off.
+ * A browser setting: off, or on with the name of a connected browser, empty
+ * for the one the extension connects by default. A member's allows the
+ * browser in every turn they take; QA's lets it try the app. It is offered
+ * only on an engine whose roles can use one; one left on elsewhere can only
+ * be switched off.
  */
 export function BrowserFields({
   id,
   engine,
   value,
   onChange,
+  purpose = "qa",
 }: {
   id: string;
   engine: string;
   value: Browser;
   onChange: (b: Browser) => void;
+  purpose?: "member" | "qa";
 }) {
   const offered = useBrowserOffered(engine);
   if (!offered && !value.on) return null;
@@ -42,17 +52,23 @@ export function BrowserFields({
           checked={!!value.on}
           onChange={(e) => onChange({ ...value, on: e.target.checked })}
         />
-        <span>QA uses the browser to try the app</span>
+        <span>
+          {purpose === "member"
+            ? "Allow browser use"
+            : "QA uses the browser to try the app"}
+        </span>
       </label>
       {offered ? (
         <p className="hint">
-          <strong>{REAL_CHROME}</strong> QA opens only the app, on this machine,
-          in tabs of its own, and closes them when it is done.
+          <strong>{REAL_CHROME}</strong>{" "}
+          {purpose === "member"
+            ? "Every turn this member takes can use it, whatever their roles, to look things up and read pages. Each turn is told it is only for controlling a browser, never to sign in, submit forms or act on an account, and to close its tabs."
+            : "QA opens only the app, on this machine, in tabs of its own, and closes them when it is done."}{" "}
+          {engineBrowser[engine] ?? ""}
         </p>
       ) : (
         <p className="member-kinds-problem">
-          QA on {engineLabel(engine)} can't use the browser. Switch it off to
-          save.
+          {engineLabel(engine)} can't use the browser. Switch it off to save.
         </p>
       )}
       {value.on && offered && (
