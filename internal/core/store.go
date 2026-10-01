@@ -17,11 +17,14 @@ import (
 // other processes. Each mutation atomically records entities and audit events.
 // stateSchema is the version of the state model this build reads and writes.
 // Version 2 is the project-teams model; version 1 (unversioned) was the worker
-// model it replaced.
+// model it replaced. State from an earlier version is upgraded on open, see
+// migrations.go; state from a later one is refused, so an older build never
+// reads, or writes back, a model it doesn't know.
 const stateSchema = 2
 
-// ErrStateSchema means the state file was written for a different model.
-var ErrStateSchema = errors.New("state file was written by an incompatible version; convert it before starting")
+// ErrStateSchema means the state file was written for a model this build
+// can't read.
+var ErrStateSchema = errors.New("state was written by an incompatible crew-assistant")
 
 type Store struct {
 	db             *sql.DB
@@ -30,9 +33,8 @@ type Store struct {
 	temporaryState bool
 }
 type diskState struct {
-	// Schema names the state model that wrote this document. There is no reader
-	// for another model: state from before a clean break is converted once,
-	// outside the daemon, rather than silently reinterpreted.
+	// Schema names the state model that wrote this document. Only the current
+	// model is ever read: an earlier one is upgraded first, on open.
 	Schema            int             `json:"schema"`
 	ChatCheckpoint    ChatCheckpoint  `json:"chat_checkpoint,omitempty"`
 	ChatSession       *ChatSession    `json:"chat_session,omitempty"`
@@ -105,6 +107,10 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{db: db, stateDirectory: stateDirectory, temporaryState: temporaryState}
+	if err = s.upgrade(context.Background(), path); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err = s.update(context.Background(), func(v *Snapshot) error {
 		for i := range v.Projects {
 			if err := s.prepareProject(&v.Projects[i]); err != nil {
