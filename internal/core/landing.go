@@ -40,6 +40,20 @@ func (d LandDecision) How() string {
 	return "as one commit"
 }
 
+// normalized is the decision as it is kept: a hold names no way to land,
+// and a landing names squash unless it keeps the task's commits.
+func (d LandDecision) normalized() (LandDecision, error) {
+	switch {
+	case !d.Land:
+		d.Method = ""
+	case d.Method == "":
+		d.Method = LandSquash
+	case d.Method != LandSquash && d.Method != LandKeepCommits:
+		return d, fmt.Errorf("a change lands by %s or %s", LandSquash, LandKeepCommits)
+	}
+	return d, nil
+}
+
 // activityPMLanding records the PM approving or holding a change, with why.
 const activityPMLanding = "task.pm_landing"
 
@@ -126,13 +140,10 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 		if err := hold.validTaskDecision(); err != nil {
 			return Task{}, err
 		}
-		d.Method = ""
 	}
-	if d.Land && d.Method == "" {
-		d.Method = LandSquash
-	}
-	if d.Land && d.Method != LandSquash && d.Method != LandKeepCommits {
-		return Task{}, fmt.Errorf("a change lands by %s or %s", LandSquash, LandKeepCommits)
+	d, err := d.normalized()
+	if err != nil {
+		return Task{}, err
 	}
 	return s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		p := project(v, t.ProjectID)
@@ -150,11 +161,12 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 		}
 		now := s.now().UTC()
 		d.By, d.At, d.Reason = LandByPM, now, strings.TrimSpace(d.Reason)
-		t.LandDecision = &d
-		t.UpdatedAt = now
+		// A pull request merges as its project says, not as the PM chose.
 		if t.UsesPRs() {
 			d.Method = ""
 		}
+		t.LandDecision = &d
+		t.UpdatedAt = now
 		if !d.Land {
 			recordTask(v, now, t, activityPMLanding, fmt.Sprintf("The PM held %s: %s", t.Objective, d.Reason))
 			openTaskDecision(v, t, DecisionDelivery, hold, now)
@@ -164,20 +176,21 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 		if why := signedOff(v, *t); len(why) > 0 {
 			return fmt.Errorf("it is not signed off: %s: %w", strings.Join(why, "; "), ErrConflict)
 		}
-		approvedBefore := t.Approved
-		t.Approved = d.Revision
 		t.Status, t.DecisionID, t.ResumeStatus, t.Detail = TaskLanding, "", "", "Landing"
 		// Only approved so far: catching up, QA on the merged result and the
 		// push are still to come, and "landed" is said once they succeed.
-		approved := fmt.Sprintf("The PM approved %s to land %s: %s", t.Objective, d.How(), d.Reason)
+		var approved string
 		switch {
 		case t.PROpen():
 			// Merging is approved apart from the opening it already had.
-			t.Approved = approvedBefore
 			t.Proposal.MergeApproved = d.Revision
 			approved = fmt.Sprintf("The PM approved merging pull request #%d for %s: %s", t.Proposal.Number, t.Objective, d.Reason)
 		case t.UsesPRs():
+			t.Approved = d.Revision
 			approved = fmt.Sprintf("The PM approved opening a pull request for %s: %s", t.Objective, d.Reason)
+		default:
+			t.Approved = d.Revision
+			approved = fmt.Sprintf("The PM approved %s to land %s: %s", t.Objective, d.How(), d.Reason)
 		}
 		recordTask(v, now, t, activityPMLanding, approved)
 		derive(v, t)
