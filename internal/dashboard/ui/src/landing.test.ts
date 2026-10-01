@@ -65,7 +65,12 @@ describe("landing", () => {
     expect(whatHappens(code())[0]).toContain("main moves forward");
     expect(
       whatHappens(
-        code({ pull_requests: true, target: "main", github: "o/r" }),
+        code({
+          pull_requests: true,
+          target: "main",
+          github: "o/r",
+          open: "owner",
+        }),
       )[0],
     ).toBe("A pull request opens on o/r into main.");
     expect(whatHappens({ ...writing, deliver_to: "/out" })).toEqual([
@@ -77,7 +82,12 @@ describe("landing", () => {
     ]);
     expect(
       whatHappens(
-        code({ pull_requests: true, target: "main", github: "o/r" }),
+        code({
+          pull_requests: true,
+          target: "main",
+          github: "o/r",
+          open: "owner",
+        }),
       )[2],
     ).toBe("It merges by squash once GitHub says it's approved and green.");
     // A way this dashboard doesn't know lands as a new branch.
@@ -105,9 +115,18 @@ describe("landing", () => {
       "The PM decides, once it's signed off",
     );
     // A policy the server would refuse never reads as the PM's.
+    // With pull requests the PM decides which open, unless told otherwise.
+    expect(approvalText({ pull_requests: true, target: "main" })).toBe(
+      "The PM decides whether its pull request opens, once it's signed off",
+    );
     expect(
-      approvalText({ pull_requests: true, target: "main", approve: "pm" }),
-    ).toBe("You approve each change");
+      approvalText({ pull_requests: true, target: "main", open: "owner" }),
+    ).toBe("You approve each pull request before it opens");
+    expect(
+      whatHappens(
+        code({ pull_requests: true, target: "main", github: "o/r" }),
+      )[0],
+    ).toContain("the PM opens its pull request or holds it");
     const byPM = whatHappens(
       code({ via: "push", target: "main", approve: "pm" }),
     );

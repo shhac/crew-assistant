@@ -90,6 +90,13 @@ export function whatHappens(playbook?: Playbook): string[] {
     playbook.land ?? {},
     playbook,
   );
+  if (playbook.land?.pull_requests)
+    return pmDecides(playbook.land)
+      ? [
+          "Once the reviewers and QA pass it, nothing waits on you and what it depends on has landed, the PM opens its pull request or holds it, and says why.",
+          ...steps,
+        ]
+      : steps;
   return pmDecides(playbook.land)
     ? [
         "Once the reviewers and QA pass it, nothing waits on you and what it depends on has landed, the PM lands it or holds it, and says why.",
@@ -106,12 +113,27 @@ export function whatHappens(playbook?: Playbook): string[] {
  */
 export const pmCanDecide = (via?: string) => via === "push";
 
-/** Whether the project's PM decides what lands. */
-export const pmDecides = (land?: LandPolicy) =>
-  land?.approve === "pm" && pmCanDecide(wayOf(land));
+/** Who decides that a pull request opens, the PM unless set. */
+export const openGate = (land?: LandPolicy) => land?.open || "pm";
 
-/** Who approves a change before it lands, in words. */
+/**
+ * Whether the project's PM decides what goes out: what lands by push, or
+ * which pull requests open.
+ */
+export const pmDecides = (land?: LandPolicy) =>
+  land?.pull_requests
+    ? openGate(land) === "pm"
+    : land?.approve === "pm" && pmCanDecide(wayOf(land));
+
+const openWords: Record<string, string> = {
+  pm: "The PM decides whether its pull request opens, once it's signed off",
+  owner: "You approve each pull request before it opens",
+  implementer: "Its pull request opens once the checks pass",
+};
+
+/** Who approves a change before it goes out, in words. */
 export function approvalText(land?: LandPolicy): string {
+  if (land?.pull_requests) return openWords[openGate(land)] ?? openWords.owner;
   if (pmDecides(land)) return "The PM decides, once it's signed off";
   return land?.approve === "none"
     ? "It lands once the checks pass"
@@ -123,6 +145,8 @@ export function pmLandingLine(task: Task): string {
   const decided = task.land_decision;
   if (!decided || decided.by !== "pm") return "";
   if (!decided.land) return `Held by the PM: ${decided.reason}`;
+  if (task.playbook?.land?.pull_requests)
+    return `The PM opened its pull request: ${decided.reason}`;
   const how =
     decided.method === "fast-forward" ? "keeping its commits" : "as one commit";
   return task.status === "landed"

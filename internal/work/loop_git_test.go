@@ -76,11 +76,13 @@ type codeRunner struct {
 	// onEdit, when set, runs in the implementer's workspace first; returning
 	// false skips the usual change, so the round changes nothing else.
 	onEdit func(dir string, n int) bool
+	// ending, when set, ends the implementer's nth reply, as a block would.
+	ending func(n int) string
 }
 
 func (r *codeRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
 	if strings.Contains(spec.Prompt, "Plan this task before anything is written") || strings.Contains(spec.Prompt, "asks for your design input") ||
-		strings.Contains(spec.Prompt, "You keep the to-do list") || strings.Contains(spec.Prompt, "Decide whether this change lands") ||
+		strings.Contains(spec.Prompt, "You keep the to-do list") || strings.Contains(spec.Prompt, "Decide whether this change lands") || strings.Contains(spec.Prompt, "Decide whether this change opens") ||
 		strings.Contains(spec.Prompt, "Decide where this task goes next") {
 		return r.scriptedRunner.Run(ctx, spec)
 	}
@@ -91,14 +93,18 @@ func (r *codeRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, er
 		r.seen = append(r.seen, spec)
 		n := r.edits
 		r.mu.Unlock()
+		ending := ""
+		if r.ending != nil {
+			ending = r.ending(n)
+		}
 		if r.onEdit != nil && !r.onEdit(spec.WorkDir, n) {
-			return roles.Result{Text: "Nothing needed changing.", Session: []byte(`{"engine":"claude","id":"impl"}`)}, nil
+			return roles.Result{Text: "Nothing needed changing." + ending, Session: []byte(`{"engine":"claude","id":"impl"}`)}, nil
 		}
 		body := "package main\n\n// Feature, attempt " + string(rune('0'+n)) + "\nfunc Feature() {}\n"
 		if err := os.WriteFile(filepath.Join(spec.WorkDir, "feature.go"), []byte(body), 0600); err != nil {
 			return roles.Result{}, err
 		}
-		return roles.Result{Text: "Added Feature.", Session: []byte(`{"engine":"claude","id":"impl"}`)}, nil
+		return roles.Result{Text: "Added Feature." + ending, Session: []byte(`{"engine":"claude","id":"impl"}`)}, nil
 	}
 	if r.onCheck != nil {
 		r.onCheck()

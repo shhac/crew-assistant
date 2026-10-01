@@ -2,6 +2,8 @@ package work
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,9 +27,12 @@ func (lp *Loop) landPR(ctx context.Context, t core.Task, m gitMedium) error {
 		return err
 	}
 	r := t.Revisions[len(t.Revisions)-1]
-	prop := core.Proposal{Branch: m.branchName(t)}
+	prop := core.Proposal{}
 	if t.Proposal != nil {
 		prop = *t.Proposal
+	}
+	if prop.Branch == "" {
+		prop.Branch = m.branchName(t)
 	}
 	if prop.Pushed != r.Ref {
 		done, err := lp.publish(ctx, t, m, r, &prop)
@@ -39,6 +44,13 @@ func (lp *Loop) landPR(ctx context.Context, t core.Task, m gitMedium) error {
 		if done, err := lp.openPR(ctx, t, m, r, &prop); done || err != nil {
 			return err
 		}
+	}
+	if text := prText(t); prop.Described != described(text) {
+		// The implementer rewrote the pull request's text with a later draft.
+		if err := lp.github.Edit(ctx, m.playbook.Land.GitHub, prop.Number, text.Title, description(text)); err != nil {
+			return lp.landingFailed(ctx, t, r, err)
+		}
+		prop.Described = described(text)
 	}
 	pr, err := lp.github.View(ctx, m.playbook.Land.GitHub, prop.Number)
 	if err != nil {
@@ -162,11 +174,12 @@ func (lp *Loop) openPR(ctx context.Context, t core.Task, m gitMedium, r core.Rev
 	if err != nil {
 		return true, lp.landingFailed(ctx, t, r, err)
 	}
+	pr := prText(t)
 	if !found {
-		body := text.Clip(r.Summary, 3000) + "\n\nOpened by crew-assistant for its owner, who approved it. Its team answers reviews and CI here."
-		if n, url, err = lp.github.Open(ctx, land.GitHub, land.Target, prop.Branch, t.Objective, body); err != nil {
+		if n, url, err = lp.github.Open(ctx, land.GitHub, land.Target, prop.Branch, pr.Title, description(pr)); err != nil {
 			return true, lp.landingFailed(ctx, t, r, err)
 		}
+		prop.Described = described(pr)
 	}
 	prop.Number, prop.URL = n, url
 	return false, lp.saveProposal(ctx, t.ID, *prop, "Opened pull request #"+fmt.Sprint(n))
@@ -225,6 +238,36 @@ func (lp *Loop) reactTo(ctx context.Context, t core.Task, m gitMedium, r core.Re
 		}
 	}
 	return lp.awaitPR(ctx, t, land.GitHub, pr)
+}
+
+// prFooter ends every pull request description the loop writes.
+const prFooter = "Opened by crew-assistant for its owner. Its team answers reviews and CI here."
+
+// prText is the pull request's title and description: the implementer's,
+// or the request and its latest draft's summary where it wrote none.
+func prText(t core.Task) core.PRText {
+	var out core.PRText
+	if t.Proposal != nil {
+		out = core.PRText{Title: t.Proposal.Title, Body: t.Proposal.Body}
+	}
+	if out.Title == "" {
+		out.Title = text.Clip(t.Objective, 120)
+	}
+	if out.Body == "" && len(t.Revisions) > 0 {
+		out.Body = text.Clip(t.Revisions[len(t.Revisions)-1].Summary, 3000)
+	}
+	return out
+}
+
+// described fingerprints the text GitHub was given, so a rewrite is noticed.
+func described(pr core.PRText) string {
+	sum := sha256.Sum256([]byte(pr.Title + "\x00" + pr.Body))
+	return hex.EncodeToString(sum[:8])
+}
+
+// description is what GitHub is given as the pull request's description.
+func description(pr core.PRText) string {
+	return strings.TrimSpace(pr.Body) + "\n\n" + prFooter
 }
 
 func (lp *Loop) saveProposal(ctx context.Context, taskID string, prop core.Proposal, activity string) error {

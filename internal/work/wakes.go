@@ -331,7 +331,8 @@ func (lp *Loop) wakePrompt(ctx context.Context, t core.Task, woken []core.Wake) 
 	if len(t.WakeErrors) > 0 {
 		b.WriteString("\nYour last wake block had problems: " + strings.Join(t.WakeErrors, "; ") + ".\n")
 	}
-	if t.Playbook != nil && t.Playbook.Land.Way() == core.LandPullRequest {
+	if t.UsesPRs() {
+		b.WriteString("\nThis change goes out as a GitHub pull request. End your reply with a pr block giving its title, under 72 characters, and its description, for a reviewer: what changed, why, and how it was checked. Give it again whenever a draft changes what it should say; an open pull request is updated to match.\n```pr\n{\"title\": \"...\", \"body\": \"...\"}\n```\n")
 		b.WriteString("\nIf something outside this change matters later, you can end your reply with a wake block and be woken in a later round, with your own note:\n```wake\n{\"wake_me_when\": [{\"on\": \"pr_checks\", \"target\": \"this\", \"match\": \"\", \"prompt\": \"what to do then\", \"timeout\": \"2h\"}], \"cancel\": []}\n```\non can be pr_checks or pr_review (target this), branch (a branch name), time (RFC 3339 or a duration) or task (a task id). Cancel handles you no longer need.\n")
 	}
 	return b.String(), nil

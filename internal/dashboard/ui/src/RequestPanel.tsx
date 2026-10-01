@@ -285,7 +285,9 @@ function RequestActions({
             })
           }
         >
-          Land on {land?.target}
+          {task.playbook?.land?.pull_requests
+            ? "Open the pull request"
+            : `Land on ${land?.target}`}
         </button>
       )}
       {teamChanged && (

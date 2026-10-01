@@ -43,14 +43,23 @@ func (d LandDecision) How() string {
 // activityPMLanding records the PM approving or holding a change, with why.
 const activityPMLanding = "task.pm_landing"
 
+// PMGates reports whether the team's PM decides whether t's change goes out:
+// lands by push, or opens its pull request. The project's current policy
+// says so, so the owner taking the decision back applies to work already
+// under way, for a task that goes out the same way.
+func PMGates(p Project, t Task) bool {
+	if p.Playbook == nil || t.Playbook == nil || !p.Playbook.Land.ByPM() || p.Playbook.Land.Way() != t.Playbook.Land.Way() || t.PROpen() {
+		return false
+	}
+	_, ok := p.PMSeat()
+	return ok
+}
+
 // pmDeciding reports a task whose signed-off change waits only on the PM's
 // decision to land, which the owner may take ahead of it.
 func pmDeciding(v *Snapshot, t Task) bool {
 	p := project(v, t.ProjectID)
-	if t.Status != TaskDeciding || p == nil || p.Playbook == nil || !p.Playbook.Land.ByPM() || t.Playbook == nil || t.Playbook.Land.Way() != LandPush {
-		return false
-	}
-	if _, ok := p.PMSeat(); !ok {
+	if t.Status != TaskDeciding || p == nil || !PMGates(*p, t) {
 		return false
 	}
 	return len(signedOff(v, t)) == 0
@@ -128,8 +137,8 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 		if t.Status != TaskDeciding || len(t.Revisions) == 0 || t.Revisions[len(t.Revisions)-1].N != d.Revision {
 			return fmt.Errorf("the task moved on while the PM decided: %w", ErrConflict)
 		}
-		if p.Playbook == nil || !p.Playbook.Land.ByPM() || t.Playbook == nil || t.Playbook.Land.Way() != LandPush {
-			return fmt.Errorf("the PM no longer decides what lands in this project: %w", ErrConflict)
+		if !PMGates(*p, *t) {
+			return fmt.Errorf("the PM no longer decides what goes out in this project: %w", ErrConflict)
 		}
 		if why := BlockerReasons(*t); len(why) > 0 {
 			return fmt.Errorf("%s: %w", strings.Join(why, "; "), ErrConflict)
@@ -138,6 +147,9 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 		d.By, d.At, d.Reason = LandByPM, now, strings.TrimSpace(d.Reason)
 		t.LandDecision = &d
 		t.UpdatedAt = now
+		if t.UsesPRs() {
+			d.Method = ""
+		}
 		if !d.Land {
 			recordTask(v, now, t, activityPMLanding, fmt.Sprintf("The PM held %s: %s", t.Objective, d.Reason))
 			openTaskDecision(v, t, DecisionDelivery, hold, now)
@@ -151,7 +163,11 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 		t.Status, t.DecisionID, t.ResumeStatus, t.Detail = TaskLanding, "", "", "Landing"
 		// Only approved so far: catching up, QA on the merged result and the
 		// push are still to come, and "landed" is said once they succeed.
-		recordTask(v, now, t, activityPMLanding, fmt.Sprintf("The PM approved %s to land %s: %s", t.Objective, d.How(), d.Reason))
+		approved := fmt.Sprintf("The PM approved %s to land %s: %s", t.Objective, d.How(), d.Reason)
+		if t.UsesPRs() {
+			approved = fmt.Sprintf("The PM approved opening a pull request for %s: %s", t.Objective, d.Reason)
+		}
+		recordTask(v, now, t, activityPMLanding, approved)
 		derive(v, t)
 		return nil
 	})

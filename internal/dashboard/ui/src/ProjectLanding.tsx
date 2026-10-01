@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import {
   approvalText,
   landingWays,
+  openGate,
   mergeMethod,
   pmCanDecide,
   reversibility,
@@ -114,6 +115,7 @@ function LandingEditor({
   const [pullRequests, setPullRequests] = useState(!!land?.pull_requests);
   const [github, setGithub] = useState(land?.github ?? "");
   const [merge, setMerge] = useState(mergeMethod(land));
+  const [open, setOpen] = useState(openGate(land));
   const [target, setTarget] = useState(land?.target || "main");
   const [chosenApprove, setApprove] = useState(land?.approve || "before");
   const way = pullRequests ? "pull-request" : via;
@@ -122,9 +124,7 @@ function LandingEditor({
     chosenApprove === "pm" && !pmCanDecide(way) ? "before" : chosenApprove;
   const hasPM = !!project.playbook?.roles.some((r) => r.kinds.includes("pm"));
   const approveHint = !pmCanDecide(way)
-    ? pullRequests
-      ? "The PM can't decide here: GitHub's reviews decide when a pull request merges."
-      : "The PM can't decide here: a new branch lands nothing."
+    ? "The PM can't decide here: a new branch lands nothing."
     : approve !== "pm"
       ? ""
       : hasPM
@@ -143,6 +143,7 @@ function LandingEditor({
         pull_requests: pullRequests,
         github: pullRequests ? github.trim() : "",
         merge: pullRequests ? merge : "",
+        open: pullRequests ? open : "",
         approve,
       });
       await refresh();
@@ -216,20 +217,46 @@ function LandingEditor({
             />
           </label>
         )}
-        <label htmlFor="land-approve">
-          Before it lands
-          <select
-            id="land-approve"
-            className="field"
-            value={approve}
-            onChange={(e) => setApprove(e.target.value)}
-          >
-            <option value="before">Ask me first</option>
-            <option value="none">Land once the checks pass</option>
-            {pmCanDecide(way) && <option value="pm">The PM decides</option>}
-          </select>
-          {approveHint && <span className="hint">{approveHint}</span>}
-        </label>
+        {pullRequests && (
+          <label htmlFor="land-open">
+            Opening a pull request
+            <select
+              id="land-open"
+              className="field"
+              value={open}
+              onChange={(e) => setOpen(e.target.value)}
+            >
+              <option value="pm">The PM decides</option>
+              <option value="owner">Ask me first</option>
+              <option value="implementer">The implementer decides</option>
+            </select>
+            <span className="hint">
+              {open === "pm"
+                ? hasPM
+                  ? "Once the reviewers and QA pass a change, the PM opens its pull request or holds it and says why. You can still open it yourself."
+                  : "The team has no PM yet, so you're asked until it has one."
+                : open === "owner"
+                  ? "You see the title and description the implementer wrote before it opens."
+                  : "A change opens its pull request as soon as the reviewers and QA pass it."}
+            </span>
+          </label>
+        )}
+        {!pullRequests && (
+          <label htmlFor="land-approve">
+            Before it lands
+            <select
+              id="land-approve"
+              className="field"
+              value={approve}
+              onChange={(e) => setApprove(e.target.value)}
+            >
+              <option value="before">Ask me first</option>
+              <option value="none">Land once the checks pass</option>
+              {pmCanDecide(way) && <option value="pm">The PM decides</option>}
+            </select>
+            {approveHint && <span className="hint">{approveHint}</span>}
+          </label>
+        )}
       </div>
       <label htmlFor="land-means">
         What landing means here

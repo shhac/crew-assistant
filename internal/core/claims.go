@@ -470,7 +470,7 @@ func offer(v *Snapshot, t *Task, busy map[string]Wait, admit Admit, now time.Tim
 		}
 	case TaskDeciding:
 		p := project(v, t.ProjectID)
-		if p != nil && p.Playbook != nil && p.Playbook.Land.ByPM() && t.Playbook != nil && t.Playbook.Land.Way() == LandPush && holdsLanding(*t) {
+		if p != nil && PMGates(*p, *t) && holdsLanding(*t) {
 			return nil, &Wait{Kind: "blocker", On: strings.Join(BlockerReasons(*t), "; ")}
 		}
 	case TaskLanding:

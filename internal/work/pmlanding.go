@@ -18,16 +18,9 @@ import (
 const maxPMLandingFailures = 2
 
 // pmDecides reports whether the team's PM, not the owner, decides whether
-// the task's change lands: the project's current policy says so, the task
-// lands by push, and the team has a PM. The policy is read from the project,
-// not the task's pinned copy, so the owner taking the decision back applies
-// to work already under way.
+// the task's change goes out: lands by push, or opens its pull request.
 func pmDecides(p core.Project, t core.Task) bool {
-	if p.Playbook == nil || !p.Playbook.Land.ByPM() || taskPlaybook(p, t).Land.Way() != core.LandPush {
-		return false
-	}
-	_, ok := p.PMSeat()
-	return ok
+	return core.PMGates(p, t)
 }
 
 // asksFirst reports whether the owner or the PM approves the task's change
@@ -185,13 +178,22 @@ func times(n int) string {
 // rest of the project's unfinished work.
 func pmLandingPrompt(snap core.Snapshot, p core.Project, t core.Task, r core.Revision) string {
 	var b strings.Builder
-	target := taskPlaybook(p, t).Land.Target
+	land := taskPlaybook(p, t).Land
+	target := land.Target
 	fmt.Fprintf(&b, "You are the PM for the project %s. Goal: %s\n", p.Title, p.Brief.Goal)
-	fmt.Fprintf(&b, `
+	if land.PullRequests {
+		fmt.Fprintf(&b, `
+Decide whether this change opens as a pull request on %s into %s now, or is held. Every reviewer and QA passed it and nothing waits on the owner. Opening it pushes the change's branch to GitHub and opens the pull request for others to review; the team then answers its reviews and checks, and merging comes later. Hold it when it should wait, for example until another change lands first. Only decide: do not change anything, and do not direct the team.
+`, land.GitHub, target)
+		pr := prText(t)
+		fmt.Fprintf(&b, "\nIt would open as “%s”:\n%s\n", pr.Title, text.Clip(pr.Body, 1500))
+	} else {
+		fmt.Fprintf(&b, `
 Decide whether this change lands on %s now, or is held. Every reviewer and QA passed it and nothing waits on the owner. Landing catches it up with %s, has QA check the merged result and moves %s forward; nothing is ever forced. Hold it when it should wait, for example until another change lands first. Only decide: do not change anything, and do not direct the team.
 
 If it lands, choose how. "squash" lands it as one commit worded from the request, leaving the team's %d drafts and catch-up merges behind; it suits most changes. "fast-forward" moves %s onto the task's own commits as they are; choose it only when those commits are each worth keeping in the history. Either way the task's branch is cleaned up after.
 `, target, target, target, r.N, target)
+	}
 	fmt.Fprintf(&b, "\nThe change: %s (%s)\n", text.Clip(t.Objective, 300), t.Label())
 	for _, c := range t.Criteria {
 		fmt.Fprintf(&b, "- criterion: %s\n", text.Clip(c, 300))
@@ -218,6 +220,12 @@ If it lands, choose how. "squash" lands it as one commit worded from the request
 		}
 	}
 	b.WriteString(pmToldText(snap, p))
+	if land.PullRequests {
+		b.WriteString(`
+Reply with only this JSON object:
+{"land": true to open it or false to hold it, "reason": "one short line the owner reads on the task"}`)
+		return b.String()
+	}
 	b.WriteString(`
 Reply with only this JSON object:
 {"land": true or false, "how": "squash" or "fast-forward" when it lands, "reason": "one short line the owner reads on the task"}`)

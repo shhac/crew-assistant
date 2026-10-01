@@ -21,7 +21,10 @@ var migrations = map[int]func(doc map[string]any) error{
 
 // pullRequestsToggle turns each landing policy that landed by pull request,
 // the project's and every task's own copy, into one with pull requests on.
-// Without them it would land on a new branch, which moves nothing.
+// Without them it would land on a new branch, which moves nothing. Approval
+// was the owner's, before the pull request opened, and it merged once ready;
+// so it still opens on the owner's approval, or without one where none was
+// asked, and merges once ready.
 func pullRequestsToggle(doc map[string]any) error {
 	snapshot, _ := doc["snapshot"].(map[string]any)
 	for _, list := range []string{"projects", "tasks"} {
@@ -39,6 +42,11 @@ func pullRequestsToggle(doc map[string]any) error {
 				land["merge"] = method
 				delete(land, "method")
 			}
+			land["open"] = OpenOwner
+			if land["approve"] == ApproveNone {
+				land["open"] = OpenImplementer
+			}
+			land["approve"] = ApproveNone
 		}
 	}
 	return nil

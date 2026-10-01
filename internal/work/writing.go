@@ -2,8 +2,10 @@ package work
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -97,7 +99,12 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	reply, learned := splitBlock(result.Text, "learned")
 	reply, block := splitBlock(reply, "wake")
 	reply, unmet := splitBlock(reply, "owner-step")
+	reply, described := splitBlock(reply, "pr")
 	wakeErrors := lp.applyWakeBlock(ctx, p, t, block)
+	prText, problem := parsePRText(described)
+	if problem != "" {
+		wakeErrors = append(wakeErrors, problem)
+	}
 	r, ok := t.Role(writer)
 	if ok {
 		lp.recordLearned(ctx, p, t, r, m, learned)
@@ -134,6 +141,9 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 		_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.WakeErrors, t.Failures, t.RetryAt = wakeErrors, 0, time.Time{}
 			took(t)
+			if prText != nil {
+				t.Describe(*prText)
+			}
 			t.AnswerDirection(seen, 0, "No change needed: "+reply, time.Now().UTC())
 			if t.DirectionPending > 0 {
 				t.ReviseWithDirection()
@@ -158,10 +168,30 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	// The draft counts only once the project's records hold it; the handoff
 	// carries the round's whole outcome until then.
 	revision.Summary = text.Clip(reply, 2000)
-	h := core.Handoff{DraftCatchUp: integration, Revision: revision, Writer: writer, Session: result.Session, Seen: seen, Reply: reply, Request: applied, WakeErrors: wakeErrors, Unreachable: parseOwnerSteps(unmet, n, t.Criteria, t.OwnersAlready())}
+	h := core.Handoff{DraftCatchUp: integration, Revision: revision, Writer: writer, Session: result.Session, Seen: seen, Reply: reply, Request: applied, WakeErrors: wakeErrors, PR: prText, Unreachable: parseOwnerSteps(unmet, n, t.Criteria, t.OwnersAlready())}
 	if ok {
 		r.Learnings = nil
 		h.Seat = &r
 	}
 	return lp.handOff(ctx, t, m, h)
+}
+
+// parsePRText reads the implementer's ```pr block: the title and description
+// its pull request opens with, or is rewritten to. A problem with it is told
+// to the implementer in its next round, as a wake block's is.
+func parsePRText(block string) (*core.PRText, string) {
+	if block == "" {
+		return nil, ""
+	}
+	var in core.PRText
+	if err := json.Unmarshal([]byte(block), &in); err != nil {
+		return nil, "the pr block was not valid JSON: " + err.Error()
+	}
+	in.Title = strings.Join(strings.Fields(in.Title), " ")
+	in.Body = strings.TrimSpace(in.Body)
+	if in.Title == "" || in.Body == "" {
+		return nil, `the pr block needs a "title" and a "body"`
+	}
+	in.Title, in.Body = text.Clip(in.Title, 120), text.Clip(in.Body, 6000)
+	return &in, ""
 }

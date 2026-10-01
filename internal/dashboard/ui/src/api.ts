@@ -216,6 +216,8 @@ export interface LandPolicy {
   github?: string;
   /** squash, merge or rebase, for a pull request. */
   merge?: string;
+  /** Who decides that a pull request opens: pm (the default), owner or implementer. */
+  open?: "pm" | "owner" | "implementer" | (string & {});
   /** pm lets the team's PM decide what lands; push only. */
   approve?: "before" | "none" | "pm" | (string & {});
 }
@@ -237,6 +239,7 @@ export interface LandingInput {
   pull_requests: boolean;
   github: string;
   merge: string;
+  open: string;
   approve: string;
 }
 export interface Project {

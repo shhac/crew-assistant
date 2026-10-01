@@ -23,6 +23,9 @@ type LandPolicy struct {
 	GitHub string `json:"github,omitempty"`
 	// Merge is how a pull request merges: squash, merge or rebase.
 	Merge string `json:"merge,omitempty"`
+	// Open is who decides that a change's pull request opens: OpenPM (the
+	// default), OpenOwner or OpenImplementer.
+	Open string `json:"open,omitempty"`
 	// Approve is ApproveBefore (the owner approves before landing, or before a
 	// pull request opens), ApproveNone, or ApprovePM (the team's PM decides
 	// whether a signed-off change lands; push only).
@@ -42,6 +45,12 @@ const (
 	// target and nowhere else, offers it: a pull request is governed by
 	// GitHub's reviews, and a branch moves nothing.
 	ApprovePM = "pm"
+	// OpenPM has the team's PM decide whether a pull request opens,
+	// OpenOwner the owner, and OpenImplementer leaves it to the implementer,
+	// whose passed draft opens one.
+	OpenPM          = "pm"
+	OpenOwner       = "owner"
+	OpenImplementer = "implementer"
 )
 
 // Way is how a change lands: through a pull request when they are on, else
@@ -64,12 +73,31 @@ func (l LandPolicy) MergeMethod() string {
 	return l.Merge
 }
 
-// AsksFirst reports whether someone, the owner or the PM, approves before a
-// change lands.
-func (l LandPolicy) AsksFirst() bool { return l.Approve != ApproveNone }
+// OpenGate is who decides that a pull request opens, the PM unless set.
+func (l LandPolicy) OpenGate() string {
+	if l.Open == "" {
+		return OpenPM
+	}
+	return l.Open
+}
 
-// ByPM reports whether the team's PM decides whether a change lands.
-func (l LandPolicy) ByPM() bool { return l.Approve == ApprovePM && l.Way() == LandPush }
+// AsksFirst reports whether someone, the owner or the PM, approves before a
+// change goes out: lands, or opens its pull request.
+func (l LandPolicy) AsksFirst() bool {
+	if l.PullRequests {
+		return l.OpenGate() != OpenImplementer
+	}
+	return l.Approve != ApproveNone
+}
+
+// ByPM reports whether the team's PM decides whether a change goes out: a
+// push lands, or a pull request opens.
+func (l LandPolicy) ByPM() bool {
+	if l.PullRequests {
+		return l.OpenGate() == OpenPM
+	}
+	return l.Approve == ApprovePM && l.Way() == LandPush
+}
 
 var githubRepo = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
 
@@ -93,8 +121,11 @@ func (l LandPolicy) validate() error {
 		if l.Merge != "" && l.Merge != "squash" && l.Merge != "merge" && l.Merge != "rebase" {
 			return errors.New("a pull request merges by squash, merge or rebase")
 		}
-	} else if l.GitHub != "" || l.Merge != "" {
-		return errors.New("a GitHub repository and merge method are only for pull requests")
+		if l.Open != "" && l.Open != OpenPM && l.Open != OpenOwner && l.Open != OpenImplementer {
+			return errors.New("who opens a pull request is pm, owner or implementer")
+		}
+	} else if l.GitHub != "" || l.Merge != "" || l.Open != "" {
+		return errors.New("a GitHub repository, merge method and who opens are only for pull requests")
 	}
 	switch l.Via {
 	case "", LandBranch:

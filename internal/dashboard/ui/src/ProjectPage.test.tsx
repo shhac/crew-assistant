@@ -2885,6 +2885,7 @@ describe("the project's tabs", () => {
           pull_requests: false,
           github: "",
           merge: "",
+          open: "",
           approve: "before",
         },
       },
@@ -2920,6 +2921,7 @@ describe("the project's tabs", () => {
       pull_requests: true,
       github: "shhac/crew-qa-demo",
       merge: "rebase",
+      open: "pm",
       approve: "before",
     });
   });
@@ -2939,16 +2941,27 @@ describe("the project's tabs", () => {
     expect(options()).toEqual(["before", "none", "pm"]);
     fireEvent.change(approve(), { target: { value: "pm" } });
     expect(screen.getByText(/the PM lands or holds it/)).toBeTruthy();
-    // A pull request or a branch never leaves it to the PM, and says why.
+    // With pull requests, who opens them is asked instead; the PM by default.
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Use pull requests" }),
     );
-    expect(options()).toEqual(["before", "none"]);
-    expect(approve().value).toBe("before");
-    expect(screen.getByText(/GitHub's reviews decide/)).toBeTruthy();
+    expect(screen.queryByLabelText(/^Before it lands/)).toBeNull();
+    const opening = screen.getByLabelText(
+      /^Opening a pull request/,
+    ) as HTMLSelectElement;
+    expect([...opening.options].map((o) => o.value)).toEqual([
+      "pm",
+      "owner",
+      "implementer",
+    ]);
+    expect(opening.value).toBe("pm");
+    expect(
+      screen.getByText(/the PM opens its pull request or holds it/),
+    ).toBeTruthy();
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Use pull requests" }),
     );
+    // A branch never leaves it to the PM, and says why.
     fireEvent.change(screen.getByLabelText("Lands as"), {
       target: { value: "branch" },
     });

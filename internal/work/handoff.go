@@ -100,6 +100,9 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 	t.AnswerDirection(h.Seen, r.N, h.Reply, r.At)
 	t.WakeErrors = h.WakeErrors
 	t.Unreachable = h.Unreachable
+	if h.PR != nil {
+		t.Describe(*h.PR)
+	}
 	if t.WriterRequest == h.Request {
 		t.WriterNext = ""
 	}

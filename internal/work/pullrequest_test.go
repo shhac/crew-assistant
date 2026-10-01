@@ -42,6 +42,8 @@ type fakeGitHub struct {
 	// the comments, replies, resolves and edits the loop made.
 	threads []map[string]any
 	posts   [][]string
+	// created is how the pull request was opened.
+	created []string
 }
 
 func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
@@ -68,6 +70,7 @@ func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
 		}
 		f.opened++
 		f.closed = false
+		f.created = args
 		f.head = args[slices.Index(args, "--head")+1]
 		return []byte("https://github.com/o/r/pull/7\n"), nil
 	case "pr merge":
@@ -122,7 +125,19 @@ type prScenario struct {
 	id     string
 }
 
-func newPRScenario(t *testing.T, reviews int) *prScenario {
+// prSetup changes the team or landing policy a scenario starts with.
+type prSetup func(t *testing.T, a *Loop, team *TeamChoice, land *core.LandPolicy)
+
+// withPM seats Pim as the team's PM.
+func withPM(t *testing.T, a *Loop, team *TeamChoice, _ *core.LandPolicy) {
+	pim, err := a.Core.SaveMember(context.Background(), "", core.MemberInput{Name: "Pim", Kinds: []string{core.RolePM}, Engine: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	team.PM = pim.ID
+}
+
+func newPRScenario(t *testing.T, reviews int, setups ...prSetup) *prScenario {
 	t.Helper()
 	source := ownerRepo(t)
 	remote := t.TempDir()
@@ -143,10 +158,15 @@ func newPRScenario(t *testing.T, reviews int) *prScenario {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}); err != nil {
+	team := TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}
+	land := core.LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", Merge: "squash", Open: core.OpenOwner}
+	for _, setup := range setups {
+		setup(t, a, &team, &land)
+	}
+	if _, err = a.SetTeam(ctx, p.ID, team); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = a.SetLanding(ctx, p.ID, core.LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", Merge: "squash"}); err != nil {
+	if _, err = a.SetLanding(ctx, p.ID, land); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ := a.Core.Snapshot(ctx)
@@ -497,5 +517,80 @@ func TestNoChecksRightAfterAPushAreChecksStillToStart(t *testing.T) {
 	}
 	if o := observed(pr, prop, pushed.Add(checksGrace+time.Second)); o.Checks != "NONE" || !o.Ready {
 		t.Fatalf("after the grace: %+v", o)
+	}
+}
+
+// prBlock is an implementer's ending giving its pull request's text.
+func prBlock(title, body string) string {
+	return fmt.Sprintf("\n```pr\n{\"title\": %q, \"body\": %q}\n```", title, body)
+}
+
+func argAfter(args []string, flag string) string {
+	if i := slices.Index(args, flag); i >= 0 && i+1 < len(args) {
+		return args[i+1]
+	}
+	return ""
+}
+
+// By default the PM decides whether a pull request opens, and it opens with
+// the title and description the implementer wrote with its draft.
+func TestThePMDecidesWhetherAPullRequestOpensWithTheImplementersText(t *testing.T) {
+	s := newPRScenario(t, 2, withPM, func(_ *testing.T, _ *Loop, _ *TeamChoice, land *core.LandPolicy) { land.Open = "" })
+	s.runner.ending = func(int) string { return prBlock("Add Feature", "Adds Feature so callers can use it.") }
+	task := s.current(t)
+	if task.Status != core.TaskAwaiting || !task.PROpen() || task.Stage != core.StagePROpen {
+		t.Fatalf("the pull request did not open: %s %s %s", task.Status, task.Stage, task.Detail)
+	}
+	s.gh.mu.Lock()
+	created := s.gh.created
+	s.gh.mu.Unlock()
+	if argAfter(created, "--title") != "Add Feature" || !strings.Contains(argAfter(created, "--body"), "Adds Feature so callers can use it.") || !strings.Contains(argAfter(created, "--body"), prFooter) {
+		t.Fatalf("opened with %v", created)
+	}
+	if !activityHas(t, s.a, "The PM approved opening a pull request") {
+		t.Fatal("the PM's decision is not in the activity")
+	}
+	snap, _ := s.a.Core.Snapshot(s.ctx)
+	if slices.ContainsFunc(snap.Decisions, func(d core.Decision) bool { return d.TaskID == s.id }) {
+		t.Fatal("the owner was asked although the PM decides")
+	}
+}
+
+// Left to the implementer, a passed draft opens its pull request unasked.
+func TestAPullRequestLeftToTheImplementerOpensUnasked(t *testing.T) {
+	s := newPRScenario(t, 2, func(_ *testing.T, _ *Loop, _ *TeamChoice, land *core.LandPolicy) { land.Open = core.OpenImplementer })
+	task := s.current(t)
+	if task.Status != core.TaskAwaiting || !task.PROpen() {
+		t.Fatalf("the pull request did not open: %s %s", task.Status, task.Detail)
+	}
+	s.gh.mu.Lock()
+	created := s.gh.created
+	s.gh.mu.Unlock()
+	// Without a pr block it opens as the request, described by the draft.
+	if argAfter(created, "--title") != "Add A" || !strings.Contains(argAfter(created, "--body"), "Added Feature.") {
+		t.Fatalf("opened with %v", created)
+	}
+}
+
+// A later draft that rewrites the description updates the open pull request.
+func TestARewrittenDescriptionUpdatesTheOpenPullRequest(t *testing.T) {
+	s := newPRScenario(t, 4)
+	s.runner.ending = func(n int) string {
+		if n == 1 {
+			return prBlock("Add Feature", "First words.")
+		}
+		return prBlock("Add Feature, handling nil", "Better words.")
+	}
+	s.open(t)
+	s.review(t, "Handle the nil case.", time.Now())
+	s.current(t)
+	s.gh.mu.Lock()
+	defer s.gh.mu.Unlock()
+	if argAfter(s.gh.created, "--title") != "Add Feature" {
+		t.Fatalf("opened with %v", s.gh.created)
+	}
+	edited := slices.IndexFunc(s.gh.posts, func(args []string) bool { return args[0] == "pr" && args[1] == "edit" })
+	if edited < 0 || argAfter(s.gh.posts[edited], "--title") != "Add Feature, handling nil" || !strings.Contains(argAfter(s.gh.posts[edited], "--body"), "Better words.") {
+		t.Fatalf("posts %v", s.gh.posts)
 	}
 }

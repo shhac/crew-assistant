@@ -101,7 +101,7 @@ func TestALandingPolicyByPullRequestBecomesOneWithPullRequestsOn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := LandPolicy{Means: "merged", Target: "main", PullRequests: true, GitHub: "o/r", Merge: "rebase", Approve: "before"}
+	want := LandPolicy{Means: "merged", Target: "main", PullRequests: true, GitHub: "o/r", Merge: "rebase", Open: OpenOwner, Approve: ApproveNone}
 	if got := snap.Projects[0].Playbook.Land; got != want || got.Way() != LandPullRequest || got.validate() != nil {
 		t.Fatalf("project %+v %v", got, got.validate())
 	}

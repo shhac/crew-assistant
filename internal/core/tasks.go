@@ -245,6 +245,11 @@ type Proposal struct {
 	// ChecksFor the commit whose failing checks were.
 	Seen      time.Time `json:"seen,omitzero"`
 	ChecksFor string    `json:"checks_for,omitempty"`
+	// Title and Body are the pull request's, as the implementer wrote them
+	// with its latest draft, and Described what GitHub was last given.
+	Title     string `json:"title,omitempty"`
+	Body      string `json:"body,omitempty"`
+	Described string `json:"described,omitempty"`
 	// PushedAt is when Pushed went up, so checks that haven't started yet
 	// aren't taken for none at all.
 	PushedAt time.Time `json:"pushed_at,omitzero"`
@@ -272,6 +277,20 @@ type Observed struct {
 	// the team never acts on.
 	Ignored int       `json:"ignored,omitempty"`
 	At      time.Time `json:"at"`
+}
+
+// PRText is a pull request's title and description.
+type PRText struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+// Describe keeps the pull request text the implementer wrote with a draft.
+func (t *Task) Describe(text PRText) {
+	if t.Proposal == nil {
+		t.Proposal = &Proposal{}
+	}
+	t.Proposal.Title, t.Proposal.Body = text.Title, text.Body
 }
 
 // PROpen reports a task with a pull request open for it.

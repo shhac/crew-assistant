@@ -7,7 +7,10 @@ import (
 	"testing"
 )
 
-func TestLandingApprovalDefaultsToTheOwnerAndThePMDecidesOnlyForAPush(t *testing.T) {
+// Without pull requests the owner approves unless told otherwise, and the
+// PM decides only for a push; with them, the PM decides whether a pull
+// request opens unless the owner or the implementer is to.
+func TestWhoApprovesAChangeGoingOut(t *testing.T) {
 	for _, tc := range []struct {
 		land          LandPolicy
 		asks, pmDecid bool
@@ -17,8 +20,10 @@ func TestLandingApprovalDefaultsToTheOwnerAndThePMDecidesOnlyForAPush(t *testing
 		{LandPolicy{Via: LandPush, Target: "main", Approve: ApproveBefore}, true, false},
 		{LandPolicy{Via: LandPush, Target: "main", Approve: ApproveNone}, false, false},
 		{LandPolicy{Via: LandPush, Target: "main", Approve: ApprovePM}, true, true},
-		{LandPolicy{PullRequests: true, Target: "main", Approve: ApprovePM}, true, false},
 		{LandPolicy{Approve: ApprovePM}, true, false},
+		{LandPolicy{PullRequests: true, Target: "main"}, true, true},
+		{LandPolicy{PullRequests: true, Target: "main", Open: OpenOwner}, true, false},
+		{LandPolicy{PullRequests: true, Target: "main", Open: OpenImplementer}, false, false},
 	} {
 		if tc.land.AsksFirst() != tc.asks || tc.land.ByPM() != tc.pmDecid {
 			t.Errorf("%+v: asks %v, by PM %v", tc.land, tc.land.AsksFirst(), tc.land.ByPM())
