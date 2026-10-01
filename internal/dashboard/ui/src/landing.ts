@@ -90,20 +90,17 @@ export function whatHappens(playbook?: Playbook): string[] {
     playbook.land ?? {},
     playbook,
   );
+  if (!pmDecides(playbook.land)) return steps;
   if (playbook.land?.pull_requests)
-    return pmDecides(playbook.land)
-      ? [
-          "Once the reviewers and QA pass it, nothing waits on you and what it depends on has landed, the PM opens its pull request or holds it, and says why.",
-          ...steps,
-        ]
-      : steps;
-  return pmDecides(playbook.land)
-    ? [
-        "Once the reviewers and QA pass it, nothing waits on you and what it depends on has landed, the PM lands it or holds it, and says why.",
-        ...steps,
-        "The PM chooses whether it lands as one commit or keeps the team's own commits, and the task's branch is cleaned up after.",
-      ]
-    : steps;
+    return [
+      "Once the reviewers and QA pass it, nothing waits on you and what it depends on has landed, the PM opens its pull request or holds it, and says why.",
+      ...steps,
+    ];
+  return [
+    "Once the reviewers and QA pass it, nothing waits on you and what it depends on has landed, the PM lands it or holds it, and says why.",
+    ...steps,
+    "The PM chooses whether it lands as one commit or keeps the team's own commits, and the task's branch is cleaned up after.",
+  ];
 }
 
 /**
