@@ -182,7 +182,7 @@ func (s *Service) SaveMember(ctx context.Context, id string, in MemberInput) (Me
 		m.Name, m.Kinds, m.Engine = strings.TrimSpace(in.Name), in.kinds(), in.Engine
 		m.Model, m.Effort, m.Instructions = strings.TrimSpace(in.Model), strings.TrimSpace(in.Effort), strings.TrimSpace(in.Instructions)
 		m.Description, m.Personality = strings.TrimSpace(in.Description), strings.TrimSpace(in.Personality)
-		m.Browser = Browser{On: in.Browser.On, Name: strings.TrimSpace(in.Browser.Name)}
+		m.Browser = in.Browser.Trimmed()
 		// A drawn picture is changed only by drawing again; a new member
 		// keeps the look it is to be drawn with.
 		if in.Avatar != nil {

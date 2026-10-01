@@ -17,6 +17,12 @@ type Browser struct {
 
 const maxBrowserName = 100
 
+// Trimmed is the setting as it is kept: the browser's name without the
+// spaces around it.
+func (b Browser) Trimmed() Browser {
+	return Browser{On: b.On, Name: strings.TrimSpace(b.Name)}
+}
+
 // Validate checks a browser setting for a session on engine.
 func (b Browser) Validate(engine string) error {
 	if len(b.Name) > maxBrowserName || strings.ContainsFunc(b.Name, unicode.IsControl) {

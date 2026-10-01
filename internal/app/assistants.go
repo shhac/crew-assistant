@@ -106,6 +106,6 @@ func (in AssistantInput) applyTo(p *config.AssistantProfile) {
 	p.Model = in.Model
 	p.Model.Model, p.Model.Effort = strings.TrimSpace(p.Model.Model), strings.TrimSpace(p.Model.Effort)
 	if in.Browser != nil {
-		p.Browser = config.Browser{On: in.Browser.On, Name: strings.TrimSpace(in.Browser.Name)}
+		p.Browser = in.Browser.Trimmed()
 	}
 }

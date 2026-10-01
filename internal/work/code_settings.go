@@ -80,7 +80,7 @@ func (lp *Loop) SetSeatBrowser(ctx context.Context, projectID string, browser co
 		if k < 0 {
 			return errors.New("this team has no QA")
 		}
-		playbook.Roles[k].Browser = core.Browser{On: browser.On, Name: strings.TrimSpace(browser.Name)}
+		playbook.Roles[k].Browser = browser.Trimmed()
 		return nil
 	})
 }
