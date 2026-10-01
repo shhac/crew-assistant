@@ -11,6 +11,26 @@ import (
 // registerProjectWork serves the owner's direct controls over a project: its
 // brief, its team, and how its work is run and landed.
 func registerProjectWork(mux *http.ServeMux, a *app.App) {
+	mux.HandleFunc("PUT /api/projects/{id}/linear", func(w http.ResponseWriter, r *http.Request) {
+		var in core.LinearLink
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Core.SetProjectLinear(r.Context(), r.PathValue("id"), &in)
+		reply(w, 200, v, err)
+	})
+	mux.HandleFunc("DELETE /api/projects/{id}/linear", func(w http.ResponseWriter, r *http.Request) {
+		v, err := a.Core.ClearProjectLinear(r.Context(), r.PathValue("id"))
+		reply(w, 200, v, err)
+	})
+	mux.HandleFunc("GET /api/connections/{id}/linear/{kind}", func(w http.ResponseWriter, r *http.Request) {
+		resource := r.URL.Query().Get("team")
+		if r.PathValue("kind") == "project-teams" {
+			resource = r.URL.Query().Get("project")
+		}
+		v, err := a.LinearOptions(r.Context(), r.PathValue("id"), r.URL.Query().Get("profile"), r.PathValue("kind"), resource)
+		reply(w, 200, v, err)
+	})
 	mux.HandleFunc("PUT /api/projects/{id}/paused", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Paused bool `json:"paused"`

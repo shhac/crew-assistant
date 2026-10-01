@@ -177,6 +177,11 @@ describe("activity folding and paging", () => {
 });
 
 describe("activity presentation", () => {
+  it("shows Linear arrivals as owner-visible task steps", () => {
+    expect(activityLabel("task.picked-up")).toBe("Asked");
+    expect(matchesFilter("task.picked-up", "steps")).toBe(true);
+    expect(isRoutineActivity("task.picked-up")).toBe(true);
+  });
   it("describes recorded kinds without leaking internal identifiers", () => {
     expect(activityLabel("memory.created")).toBe("Memory");
     expect(activityLabel("decision.opened")).toBe("Asked you");

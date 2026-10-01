@@ -155,6 +155,8 @@ Projects live in crew-assistant's local state. Linear, Notion, Slack and other c
 
 **Legacy Linear API:** set `linear.import_assignments` to `true` as well as explicit `linear.team_ids` and `linear.api_key_env` to enable assignment discovery. Omitted import flags stay off on upgrade, including older configurations. New setups should use the `lin` connection; configuring one supersedes legacy API discovery. Imported issues become projects without a brief or team; nothing starts until you ask for it.
 
+**Project Linear pick-up:** in a project's Config tab, optionally choose a Linear team or project through your existing `lin` connection, then status and assignee rules. Matching issues become tasks on the five-minute sweep; each task shows its source issue and keeps a bounded description snapshot for the team. Unlinking stops pick-up and keeps imported tasks. Nothing is written to Linear.
+
 ## Diagnostics
 
 `crew-assistant serve` writes structured NDJSON errors to stderr through `lib-agent-output`, including failing stage, project, engine and diagnostic code. Prompts, tool output, credentials and provider stderr are never copied into these logs. Capture them with `2>crew-assistant-errors.ndjson`.

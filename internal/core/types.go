@@ -56,6 +56,12 @@ type Project struct {
 	ScratchDirectory  string        `json:"scratch_directory"`
 	SourceID          string        `json:"source_id,omitempty"`
 	SourceDescription string        `json:"source_description,omitempty"`
+	// Linear is optional intake through the owner's configured CLI account.
+	Linear *LinearLink `json:"linear,omitempty"`
+	// LinearVersion invalidates pending reads, including after unlink/relink.
+	LinearVersion int `json:"linear_version,omitempty"`
+	// LinearImported keeps globally unique issue IDs, independently of account aliases.
+	LinearImported []string `json:"linear_imported,omitempty"`
 	// Landed is the project's most recently delivered code change. Other work
 	// in the project catches up with it before it is delivered.
 	Landed *Landing `json:"landed,omitempty"`

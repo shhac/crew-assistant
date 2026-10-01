@@ -141,7 +141,10 @@ func (a *App) SyncLinear(ctx context.Context) error {
 		return nil
 	}
 	cfg := a.Config()
-	cliErr := a.syncCLIConnections(ctx)
+	if err := a.refuseWhileStopping(); err != nil {
+		return err
+	}
+	cliErr := errors.Join(a.syncCLIConnections(ctx), a.syncProjectLinear(ctx))
 	if !cfg.LegacyLinearImportEnabled() {
 		return cliErr
 	}

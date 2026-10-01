@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { LinearSources } from "./ProjectLinear";
 import { requestHref } from "./router";
 import { pmLandingLine } from "./landing";
 import { atWork, memberOf, workingSeats } from "./members";
@@ -113,6 +114,7 @@ export function BoardCard({
             </p>
           ))}
       {activity}
+      <LinearSources links={task.linear} compact />
       {pm && <p className="board-card-meta muted small">{pm}</p>}
       {(open > 0 || blocks > 0) && (
         <p className="board-card-meta muted small">

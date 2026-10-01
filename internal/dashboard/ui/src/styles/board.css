@@ -138,6 +138,12 @@
   inset: 0;
 }
 
+/* Source links, like reorder controls, must be above the full-card link. */
+.board-card-source-link {
+  position: relative;
+  z-index: 1;
+}
+
 .board-card-link:hover {
   text-decoration: none;
 }

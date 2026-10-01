@@ -7,6 +7,7 @@ import { RequestAttachments } from "./RequestAttachments";
 import { RequestEdits, RequestNotes } from "./RequestNotes";
 import { RequestDesign, RequestPlan, RequestResearch } from "./RequestPlan";
 import { RequestRelations } from "./RequestRelations";
+import { LinearSources } from "./ProjectLinear";
 import { TaskActivity } from "./TaskActivity";
 import { TeamFlow } from "./TeamThread";
 import {
@@ -225,6 +226,7 @@ export function RequestPanel({
             members={state.members}
             refresh={refresh}
           />
+          <LinearSources links={task.linear} />
         </div>
       )}
       {task && seat && (

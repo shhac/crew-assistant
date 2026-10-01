@@ -129,6 +129,8 @@ type Task struct {
 	LinkedBy map[string]LinkMark `json:"linked_by,omitempty"`
 	// Blockers keep external conditions and their clearing history.
 	Blockers []Blocker `json:"blockers,omitempty"`
+	// Linear keeps source issues and their original context for the offline team.
+	Linear []LinearRef `json:"linear,omitempty"`
 	// SplitFrom is the task this one was split off from by that task's
 	// researcher, which a later plan for it matches rather than queues again;
 	// see plans.go.
@@ -482,28 +484,45 @@ func (s *Service) QueueTaskAs(ctx context.Context, projectID string, in TaskInpu
 		if p == nil {
 			return ErrNotFound
 		}
-		if p.Playbook == nil {
-			return errors.New("choose how this project's work gets done before asking for it")
-		}
-		if !required(p.Brief.Goal) {
-			return errors.New("give the project a brief before asking for work")
-		}
-		deps, err := dependencies(v, out, in.DependsOn)
-		if err != nil {
-			return err
-		}
-		out.DependsOn = deps
-		markAll(&out, deps, by, now)
-		numberTask(p, &out)
-		if _, pm := p.PMSeat(); pm && overrules(by) {
-			out.Status, out.Stage = TaskTriage, StageTriage
-		}
-		v.Tasks = append(v.Tasks, out)
-		p.listChanged()
-		recordTask(v, now, &out, "task."+out.Status, out.Objective)
-		return nil
+		return queueTask(v, p, &out, in.DependsOn, by, "")
 	})
 	return out, err
+}
+
+// TaskQueueReady checks readiness before any external reads.
+func TaskQueueReady(p Project) error {
+	if p.Playbook == nil {
+		return errors.New("choose how this project's work gets done before asking for it")
+	}
+	if !required(p.Brief.Goal) {
+		return errors.New("give the project a brief before asking for work")
+	}
+	return nil
+}
+
+// queueTask shares the in-transaction transition for requested and imported work.
+func queueTask(v *Snapshot, p *Project, out *Task, ids []string, by, activity string) error {
+	now := out.CreatedAt
+	if err := TaskQueueReady(*p); err != nil {
+		return err
+	}
+	deps, err := dependencies(v, *out, ids)
+	if err != nil {
+		return err
+	}
+	out.DependsOn = deps
+	markAll(out, deps, by, now)
+	numberTask(p, out)
+	if _, pm := p.PMSeat(); pm && overrules(by) {
+		out.Status, out.Stage = TaskTriage, StageTriage
+	}
+	v.Tasks = append(v.Tasks, *out)
+	p.listChanged()
+	if activity == "" {
+		activity = "task." + out.Status
+	}
+	recordTask(v, now, out, activity, out.Objective)
+	return nil
 }
 
 // OrderTasks sets the order a project's queued tasks start in. ids must be

@@ -3,6 +3,7 @@ import { Folders } from "./ProjectFolders";
 import { RunRecipeSettings } from "./RunRecipe";
 import { LandingSettings } from "./ProjectLanding";
 import { TeamSettings } from "./TeamSettings";
+import { ProjectLinear } from "./ProjectLinear";
 import { boardColumns, boardRows } from "./boardLanes";
 import { isCode, stageLimit } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
@@ -47,6 +48,7 @@ export function ConfigTab({
           />
         )}
         <TeamSettings project={project} members={members} refresh={refresh} />
+        <ProjectLinear project={project} refresh={refresh} />
       </section>
       {code && (
         <section className="config-group">

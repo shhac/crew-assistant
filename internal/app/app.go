@@ -217,6 +217,11 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 		s.Turns = a.Work.Turns()
 	}
 	integrations, ignoreLive := configuredIntegrations(cfg)
+	for _, p := range s.Projects {
+		if p.Linear != nil && p.Linear.Rules.PickUp {
+			integrations = append(integrations, core.Integration{ID: "linear-project:" + p.ID, Name: p.Title + " Linear pick-up", ProjectID: p.ID, Status: "configured"})
+		}
+	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	s.Integrations = withLiveStatuses(integrations, a.statuses, ignoreLive)

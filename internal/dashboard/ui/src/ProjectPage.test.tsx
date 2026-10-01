@@ -2143,7 +2143,7 @@ describe("Config groups", () => {
       "Project identity",
     ]);
     const cards = [
-      ["Column capacity", "Team settings"],
+      ["Column capacity", "Team settings", "Linear"],
       ["Landing"],
       ["Folders", "Workspace", "Running the app"],
       ["Name", "Request IDs"],
@@ -2171,7 +2171,9 @@ describe("Config groups", () => {
       ]);
       const groups = within(container).getAllByRole("heading", { level: 2 });
       expect(headings(groups[0].parentElement!, 3)).toEqual(
-        playbook ? ["Column capacity", "Team settings"] : ["Team settings"],
+        playbook
+          ? ["Column capacity", "Team settings", "Linear"]
+          : ["Team settings", "Linear"],
       );
       expect(headings(groups[1].parentElement!, 3)).toEqual(["Folders"]);
       expect(headings(groups[2].parentElement!, 3)).toEqual([

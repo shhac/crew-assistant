@@ -245,6 +245,34 @@ export interface LandingInput {
   open: string;
   approve: string;
 }
+export interface LinearLink {
+  connection_id: string;
+  profile: string;
+  kind: "team" | "project";
+  id: string;
+  name: string;
+  rules: {
+    pick_up: boolean;
+    states: string[];
+    assignee: "any" | "unassigned" | "me" | "users";
+    users: { id: string; name: string }[];
+  };
+  version?: number;
+  cursor?: string;
+  last_error?: string;
+}
+export interface LinearRef {
+  description?: string;
+  kind: "issue";
+  connection_id: string;
+  profile: string;
+  id: string;
+  identifier: string;
+  title: string;
+  url: string;
+  by: string;
+  at: string;
+}
 export interface Project {
   paused?: boolean;
   /** Landing held, as for a code freeze, while other work goes on. */
@@ -260,6 +288,8 @@ export interface Project {
   scratch_directory?: string;
   source_id?: string;
   source_description?: string;
+  /** Optional per-project intake through the configured Linear CLI account. */
+  linear?: LinearLink;
   /** Who last set the to-do order. */
   ordered_by?: "owner" | "assistant" | "pm" | (string & {});
   ordered_at?: string;
@@ -574,6 +604,8 @@ export interface Blocker {
 }
 export interface Task {
   blockers?: Blocker[];
+  /** Original source issues and their context for the offline team. */
+  linear?: LinearRef[];
   id: string;
   project_id: string;
   /** The task's readable ID, such as CA-12; empty before it has one. */

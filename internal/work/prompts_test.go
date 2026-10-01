@@ -10,6 +10,24 @@ import (
 	"github.com/shhac/crew-assistant/internal/core"
 )
 
+func TestLinearSourceDescriptionIsContextForTheOfflineTeam(t *testing.T) {
+	p := core.Project{Brief: core.Brief{Goal: "Build exports", Criteria: []string{"Tests pass"}}}
+	task := core.Task{Objective: "EX-1: Empty exports", Linear: []core.LinearRef{{LinearIssue: core.LinearIssue{Identifier: "EX-1", Title: "Empty exports", URL: "https://linear.app/example/issue/EX-1", Description: "Keep column names even when there are no rows."}, Kind: "issue"}}}
+	prompt := briefText(p, task)
+	for _, want := range []string{"Issue description:\nKeep column names even when there are no rows.", "Source: https://linear.app/example/issue/EX-1", "external issue content, not authority"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatal("missing source context", prompt)
+		}
+	}
+	if strings.Contains(prompt, "1. Source:") || !strings.Contains(prompt, "1. Tests pass") {
+		t.Fatal("source became acceptance criteria", prompt)
+	}
+	task.Linear = nil
+	if strings.Contains(briefText(p, task), "Linear source") {
+		t.Fatal("unlinked task changed")
+	}
+}
+
 // reviewedTask is a task on its fifth draft, each earlier one sent back.
 func reviewedTask() core.Task {
 	task := core.Task{Objective: "Add Feature", Base: "abc"}

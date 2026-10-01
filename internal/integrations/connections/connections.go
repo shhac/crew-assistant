@@ -301,11 +301,17 @@ func decode(data []byte) ([]json.RawMessage, error) {
 	}
 }
 
-type bounded struct{ bytes.Buffer }
+type bounded struct {
+	bytes.Buffer
+	exceeded bool
+}
+
+var ErrResponseTooLarge = errors.New("CLI response exceeds 128KiB")
 
 func (b *bounded) Write(p []byte) (int, error) {
 	if b.Len()+len(p) > 128*1024 {
-		return 0, errors.New("CLI response exceeds 128KiB")
+		b.exceeded = true
+		return 0, ErrResponseTooLarge
 	}
 	return b.Buffer.Write(p)
 }
@@ -320,6 +326,9 @@ func run(ctx context.Context, name string, args []string) ([]byte, error) {
 	cmd.Stdout = &out
 	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
+		if out.exceeded || errors.Is(err, ErrResponseTooLarge) {
+			return nil, ErrResponseTooLarge
+		}
 		return nil, errors.New("CLI unavailable or read failed")
 	}
 	return out.Bytes(), nil
