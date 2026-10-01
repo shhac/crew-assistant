@@ -48,7 +48,7 @@ export const landingWays: Record<string, LandingWay> = {
     happens: (land) => [
       `A pull request opens on ${land.github} into ${land.target}.`,
       "The team answers its reviews and fixes failing checks.",
-      `It merges by ${mergeMethod(land)} once GitHub says it's approved and green.`,
+      `Once it's approved where review is asked for, green and every thread is resolved, ${mergeWords[mergeGate(land)] ?? mergeWords.pm}, by ${mergeMethod(land)}.`,
     ],
   },
 };
@@ -116,6 +116,15 @@ export const pmCanDecide = (via?: string) => via === "push";
 /** Who decides that a pull request opens, the PM unless set. */
 export const openGate = (land?: LandPolicy) => land?.open || "pm";
 
+/** Who approves a ready pull request merging, the PM unless set. */
+export const mergeGate = (land?: LandPolicy) => land?.approve || "pm";
+
+const mergeWords: Record<string, string> = {
+  pm: "the PM decides whether it merges once it's ready",
+  before: "you approve each merge once it's ready",
+  none: "it merges as soon as it's ready",
+};
+
 /**
  * Whether the project's PM decides what goes out: what lands by push, or
  * which pull requests open.
@@ -133,7 +142,8 @@ const openWords: Record<string, string> = {
 
 /** Who approves a change before it goes out, in words. */
 export function approvalText(land?: LandPolicy): string {
-  if (land?.pull_requests) return openWords[openGate(land)] ?? openWords.owner;
+  if (land?.pull_requests)
+    return `${openWords[openGate(land)] ?? openWords.owner}; ${mergeWords[mergeGate(land)] ?? mergeWords.pm}`;
   if (pmDecides(land)) return "The PM decides, once it's signed off";
   return land?.approve === "none"
     ? "It lands once the checks pass"
@@ -145,6 +155,10 @@ export function pmLandingLine(task: Task): string {
   const decided = task.land_decision;
   if (!decided || decided.by !== "pm") return "";
   if (!decided.land) return `Held by the PM: ${decided.reason}`;
+  if (task.proposal?.merge_approved)
+    return task.status === "landed"
+      ? `Merged on the PM's word: ${decided.reason}`
+      : `The PM is merging it: ${decided.reason}`;
   if (task.playbook?.land?.pull_requests)
     return `The PM opened its pull request: ${decided.reason}`;
   const how =

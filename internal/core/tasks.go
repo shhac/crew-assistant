@@ -258,6 +258,10 @@ type Proposal struct {
 	// Answering is an implementer's round on what the pull request asked
 	// for; it ends when the task leaves writing.
 	Answering bool `json:"answering,omitempty"`
+	// MergeApproved is the revision approved to merge once its pull request
+	// is ready, by the owner or the PM: apart from Task.Approved, which
+	// approved it opening.
+	MergeApproved int `json:"merge_approved,omitempty"`
 	// Outbox is what the team has to say on the pull request, posted once
 	// the revision it came with has been pushed.
 	Outbox []PRPost `json:"outbox,omitempty"`

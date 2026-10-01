@@ -2922,7 +2922,7 @@ describe("the project's tabs", () => {
       github: "shhac/crew-qa-demo",
       merge: "rebase",
       open: "pm",
-      approve: "before",
+      approve: "pm",
     });
   });
   it("offers the PM the decision to land only for a push", async () => {

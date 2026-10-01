@@ -89,7 +89,9 @@ describe("landing", () => {
           open: "owner",
         }),
       )[2],
-    ).toBe("It merges by squash once GitHub says it's approved and green.");
+    ).toBe(
+      "Once it's approved where review is asked for, green and every thread is resolved, the PM decides whether it merges once it's ready, by squash.",
+    );
     // A way this dashboard doesn't know lands as a new branch.
     expect(landsBy(code({ via: "carrier-pigeon" }))).toBe("New local branch");
     expect(reversibility({ via: "carrier-pigeon" })).toBe("Undoable");
@@ -117,11 +119,23 @@ describe("landing", () => {
     // A policy the server would refuse never reads as the PM's.
     // With pull requests the PM decides which open, unless told otherwise.
     expect(approvalText({ pull_requests: true, target: "main" })).toBe(
-      "The PM decides whether its pull request opens, once it's signed off",
+      "The PM decides whether its pull request opens, once it's signed off; the PM decides whether it merges once it's ready",
     );
     expect(
       approvalText({ pull_requests: true, target: "main", open: "owner" }),
-    ).toBe("You approve each pull request before it opens");
+    ).toBe(
+      "You approve each pull request before it opens; the PM decides whether it merges once it's ready",
+    );
+    expect(
+      approvalText({
+        pull_requests: true,
+        target: "main",
+        open: "implementer",
+        approve: "none",
+      }),
+    ).toBe(
+      "Its pull request opens once the checks pass; it merges as soon as it's ready",
+    );
     expect(
       whatHappens(
         code({ pull_requests: true, target: "main", github: "o/r" }),

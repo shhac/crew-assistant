@@ -291,16 +291,16 @@ func TestThePMIsNotAskedAboutAChangeThatIsNotSignedOff(t *testing.T) {
 	}
 }
 
-func TestPullRequestAndBranchProjectsCannotLeaveLandingToThePM(t *testing.T) {
+// A new branch lands nothing, so there is nothing for the PM to decide; a
+// push lands, and a pull request merges, on the PM's word.
+func TestABranchProjectCannotLeaveLandingToThePM(t *testing.T) {
 	w := newPMPush(t, "", "")
 	ctx := context.Background()
-	for _, land := range []core.LandPolicy{
-		{PullRequests: true, Target: "main", GitHub: "owner/service", Approve: core.ApprovePM},
-		{Via: core.LandBranch, Approve: core.ApprovePM},
-	} {
-		if _, err := w.a.SetLanding(ctx, w.p.ID, land); err == nil || !strings.Contains(err.Error(), "only for changes that land by push") {
-			t.Errorf("%s: %v", land.Via, err)
-		}
+	if _, err := w.a.SetLanding(ctx, w.p.ID, core.LandPolicy{Via: core.LandBranch, Approve: core.ApprovePM}); err == nil || !strings.Contains(err.Error(), "only for changes that land by push or pull request") {
+		t.Errorf("branch: %v", err)
+	}
+	if _, err := w.a.SetLanding(ctx, w.p.ID, core.LandPolicy{PullRequests: true, Target: "main", GitHub: "owner/service", Approve: core.ApprovePM}); err != nil {
+		t.Errorf("pull requests: %v", err)
 	}
 }
 

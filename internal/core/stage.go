@@ -104,6 +104,11 @@ func stageOf(v *Snapshot, t Task) string {
 		}
 		return StageImplementing
 	case TaskReviewing, TaskDeciding:
+		// A pull request whose latest draft is pushed is past its checks:
+		// it is being decided whether it merges.
+		if t.Status == TaskDeciding && t.PROpen() && len(t.Revisions) > 0 && t.Proposal.Pushed == t.Revisions[len(t.Revisions)-1].Ref {
+			return landingStage(t)
+		}
 		return checkStage(v, t)
 	case TaskWaiting:
 		return waitingStage(v, t)

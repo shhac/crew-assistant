@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/shhac/crew-assistant/internal/text"
 )
@@ -95,10 +96,7 @@ func (s *Service) AnswerPRAsPM(ctx context.Context, taskID, messageID string, a 
 			t.Post(PRPost{Body: text.Clip(reply, 4000), By: m.To})
 		}
 		if note := strings.TrimSpace(a.Implementer); note != "" && !t.Finished() {
-			direction := TeamMessage{ID: uid(), To: implementerName(*t), Kind: RoleImplementer, From: m.To, Text: text.Clip(note, 4000), Status: MessageWaiting, At: now}
-			if err := direct(v, t, &direction, now); err == nil {
-				t.Messages = append(t.Messages, direction)
-			}
+			directFrom(v, t, m.To, note, now)
 		}
 		if question := strings.TrimSpace(a.AskOwner); question != "" && t.Status != TaskWaiting {
 			openTaskDecision(v, t, DecisionQuestion, DecisionInput{
@@ -119,4 +117,56 @@ func implementerName(t Task) string {
 		return r[0].Name
 	}
 	return "Implementer"
+}
+
+// directFrom gives the implementer direction from a teammate, as a message
+// that is part of the task's direction; it is dropped while the task is
+// landing, which no direction may interrupt.
+func directFrom(v *Snapshot, t *Task, from, note string, now time.Time) {
+	m := TeamMessage{ID: uid(), To: implementerName(*t), Kind: RoleImplementer, From: from, Text: text.Clip(note, 4000), Status: MessageWaiting, At: now}
+	if direct(v, t, &m, now) == nil {
+		t.Messages = append(t.Messages, m)
+	}
+}
+
+// DirectFromPM sends the PM's direction to the implementer, as when it sends
+// a ready pull request back rather than merging it.
+func (s *Service) DirectFromPM(ctx context.Context, taskID, from, note string) error {
+	return s.store.update(ctx, func(v *Snapshot) error {
+		t := task(v, taskID)
+		if t == nil {
+			return ErrNotFound
+		}
+		now := s.now().UTC()
+		if t.Status == TaskDeciding {
+			t.Status, t.Detail = TaskAwaiting, ""
+		}
+		directFrom(v, t, from, note, now)
+		t.UpdatedAt = now
+		recordTask(v, now, t, "task.message", fmt.Sprintf("%s sent %s back to the implementer: %s", from, t.Objective, text.Clip(note, 200)))
+		derive(v, t)
+		return nil
+	})
+}
+
+// ReconsiderMerge withdraws the open decision to merge a task's pull request
+// once the pull request changed under it, and sends the task to look at it
+// again, in one change, so the withdrawal never reads as the owner closing
+// the task.
+func (s *Service) ReconsiderMerge(ctx context.Context, taskID, why string) error {
+	return s.store.update(ctx, func(v *Snapshot) error {
+		t := task(v, taskID)
+		if t == nil {
+			return ErrNotFound
+		}
+		d := decision(v, t.DecisionID)
+		if t.Status != TaskWaiting || !t.PROpen() || d == nil || d.Status != DecisionOpen || d.Kind != DecisionDelivery {
+			return nil
+		}
+		now := s.now().UTC()
+		dismiss(v, d, now, why)
+		t.Status, t.DecisionID, t.Detail, t.UpdatedAt = TaskLanding, "", why, now
+		derive(v, t)
+		return nil
+	})
 }

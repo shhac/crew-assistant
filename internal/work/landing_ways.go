@@ -197,6 +197,9 @@ func (prWay) alreadyLanded(context.Context, gitMedium, core.Task, core.Revision)
 
 func (prWay) note(m gitMedium, t core.Task) string {
 	land := m.playbook.Land
+	if t.PROpen() {
+		return fmt.Sprintf("Approving merges pull request #%d (%s) into %s by %s. It is approved where review is asked for, its checks are green and every thread is resolved.", t.Proposal.Number, t.Proposal.URL, land.Target, land.MergeMethod())
+	}
 	note := fmt.Sprintf("Approving opens a pull request on %s from %s into %s. The team answers its reviews and checks, and it merges by %s once it's approved and green.", land.GitHub, m.branchName(t), land.Target, land.MergeMethod())
 	pr := prText(t)
 	return note + "\n\nIt opens as “" + pr.Title + "”:\n" + text.Clip(pr.Body, 1500)

@@ -80,12 +80,18 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 	spec := lp.baseSpec(seat, dir, pmLandingPrompt(snap, p, t, r))
 	lp.withTools(&spec, lp.managerTools(p.ID, seat))
 	var decided core.LandDecision
+	var sendBack string
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
-		decided, err = parsePMLanding(reply)
+		decided, sendBack, err = parsePMLanding(reply)
 		return err
 	})
 	if why := errors.Join(err, parseErr); why != nil {
 		return lp.askOwnerToLand(ctx, p, t, r, m, core.DecisionInput{Context: fmt.Sprintf("%s couldn't decide whether it lands: %s.", seat.Name, text.Clip(why.Error(), 300))})
+	}
+	// A ready pull request the PM wants more done on goes back to the
+	// implementer, not to the owner.
+	if !decided.Land && sendBack != "" && t.PROpen() {
+		return lp.Core.DirectFromPM(ctx, t.ID, seat.Name, sendBack)
 	}
 	decided.Revision = r.N
 	return lp.pmDecided(ctx, t, r, m, seat, decided)
@@ -181,7 +187,11 @@ func pmLandingPrompt(snap core.Snapshot, p core.Project, t core.Task, r core.Rev
 	land := taskPlaybook(p, t).Land
 	target := land.Target
 	fmt.Fprintf(&b, "You are the PM for the project %s. Goal: %s\n", p.Title, p.Brief.Goal)
-	if land.PullRequests {
+	if t.PROpen() {
+		fmt.Fprintf(&b, `
+Decide whether pull request #%d (%s) merges into %s now. It is ready: approved where review is asked for, its checks are green, every review thread is resolved and it merges cleanly; it merges by %s. Hold it when it should wait, for example until another change lands first, or for a code freeze; or send it back to the implementer with what still needs doing. Only decide: do not change anything, and do not direct the team otherwise.
+`, t.Proposal.Number, t.Proposal.URL, target, land.MergeMethod())
+	} else if land.PullRequests {
 		fmt.Fprintf(&b, `
 Decide whether this change opens as a pull request on %s into %s now, or is held. Every reviewer and QA passed it and nothing waits on the owner. Opening it pushes the change's branch to GitHub and opens the pull request for others to review; the team then answers its reviews and checks, and merging comes later. Hold it when it should wait, for example until another change lands first. Only decide: do not change anything, and do not direct the team.
 `, land.GitHub, target)
@@ -220,6 +230,12 @@ If it lands, choose how. "squash" lands it as one commit worded from the request
 		}
 	}
 	b.WriteString(pmToldText(snap, p))
+	if t.PROpen() {
+		b.WriteString(`
+Reply with only this JSON object:
+{"land": true to merge it or false not to, "reason": "one short line the owner reads on the task", "implementer": "what still needs doing, only when you send it back"}`)
+		return b.String()
+	}
 	if land.PullRequests {
 		b.WriteString(`
 Reply with only this JSON object:
@@ -232,27 +248,33 @@ Reply with only this JSON object:
 	return b.String()
 }
 
-// parsePMLanding reads the PM's land-or-hold answer. Both land and reason are
-// needed: the owner reads the reason whichever it decides. A landing that
-// names no way lands as one commit, as every push landing did before.
-func parsePMLanding(reply string) (core.LandDecision, error) {
+// parsePMLanding reads the PM's land-or-hold answer, and what it sends back
+// to the implementer instead, if anything. Both land and reason are needed:
+// the owner reads the reason whichever it decides. A landing that names no
+// way lands as one commit, as every push landing did before.
+func parsePMLanding(reply string) (core.LandDecision, string, error) {
 	var in struct {
-		Land   *bool  `json:"land"`
-		How    string `json:"how"`
-		Reason string `json:"reason"`
+		Land        *bool  `json:"land"`
+		How         string `json:"how"`
+		Reason      string `json:"reason"`
+		Implementer string `json:"implementer"`
 	}
 	if err := decodeReply(reply, &in); err != nil {
-		return core.LandDecision{}, errors.New("the reply was not valid JSON")
+		return core.LandDecision{}, "", errors.New("the reply was not valid JSON")
 	}
 	reason := text.Clip(strings.TrimSpace(in.Reason), 300)
 	if in.Land == nil || reason == "" {
-		return core.LandDecision{}, errors.New(`the reply needs "land" and a "reason"`)
+		return core.LandDecision{}, "", errors.New(`the reply needs "land" and a "reason"`)
 	}
 	how := strings.TrimSpace(in.How)
 	if !*in.Land {
 		how = ""
 	} else if how != "" && how != core.LandSquash && how != core.LandKeepCommits {
-		return core.LandDecision{}, errors.New(`"how" is "squash" or "fast-forward"`)
+		return core.LandDecision{}, "", errors.New(`"how" is "squash" or "fast-forward"`)
 	}
-	return core.LandDecision{Land: *in.Land, Method: how, Reason: reason}, nil
+	sendBack := ""
+	if !*in.Land {
+		sendBack = strings.TrimSpace(in.Implementer)
+	}
+	return core.LandDecision{Land: *in.Land, Method: how, Reason: reason}, sendBack, nil
 }

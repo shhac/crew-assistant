@@ -111,7 +111,7 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 		}
 		return roles.Result{Text: reply}, nil
 	}
-	if !spec.Write && (strings.Contains(spec.Prompt, "Decide whether this change lands") || strings.Contains(spec.Prompt, "Decide whether this change opens")) {
+	if !spec.Write && (strings.Contains(spec.Prompt, "Decide whether this change lands") || strings.Contains(spec.Prompt, "Decide whether this change opens") || strings.Contains(spec.Prompt, "Decide whether pull request")) {
 		if r.onPMLand != nil {
 			r.onPMLand()
 		}

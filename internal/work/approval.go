@@ -17,6 +17,20 @@ func (lp *Loop) approve(ctx context.Context, t core.Task) error {
 	return err
 }
 
+// approveMerge records the owner's approval of the latest revision merging
+// through its open pull request, and moves the task on to landing.
+func (lp *Loop) approveMerge(ctx context.Context, t core.Task) error {
+	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if len(t.Revisions) > 0 && t.Proposal != nil {
+			t.Proposal.MergeApproved = t.Revisions[len(t.Revisions)-1].N
+		}
+		t.LandDecision, t.LandingFailures = nil, nil
+		t.Status, t.DecisionID, t.ResumeStatus, t.Detail = core.TaskLanding, "", "", "Merging"
+		return fmt.Sprintf("Merging pull request #%d for %s", t.Proposal.Number, t.Objective), nil
+	})
+	return err
+}
+
 // approveLatest approves a task's latest revision, within a change, and
 // says so.
 func approveLatest(t *core.Task) string {
@@ -126,7 +140,10 @@ func (lp *Loop) askForDelivery(ctx context.Context, p core.Project, t core.Task,
 	if l != nil {
 		return lp.catchUpRound(ctx, t, c, *l)
 	}
-	if approvalHolds(p, t) || !asksFirst(p, t) || proposed(t) {
+	if proposed(t) {
+		return lp.askToMerge(ctx, p, t, r, m)
+	}
+	if approvalHolds(p, t) || !asksFirst(p, t) {
 		return lp.resumeLanding(ctx, t)
 	}
 	if pmDecides(p, t) {
@@ -135,10 +152,39 @@ func (lp *Loop) askForDelivery(ctx context.Context, p core.Project, t core.Task,
 	return lp.askOwnerToLand(ctx, p, t, r, m, core.DecisionInput{})
 }
 
+// askToMerge asks whoever the project says approves a ready pull request
+// merging: the PM, or the owner. Anything else about an open pull request,
+// an update to push or one not yet ready, goes on to landing, which looks
+// at it again.
+func (lp *Loop) askToMerge(ctx context.Context, p core.Project, t core.Task, r core.Revision, m medium) error {
+	if !readyToMerge(t, r) || mergeApproved(t, r) || taskPlaybook(p, t).Land.MergeGate() == core.ApproveNone {
+		return lp.resumeLanding(ctx, t)
+	}
+	if pmDecides(p, t) {
+		return lp.pmLanding(ctx, p, t, r, m)
+	}
+	return lp.askOwnerToLand(ctx, p, t, r, m, core.DecisionInput{})
+}
+
+// readyToMerge reports a pull request the loop last saw ready, with the
+// latest revision on it.
+func readyToMerge(t core.Task, r core.Revision) bool {
+	prop := t.Proposal
+	return prop != nil && prop.Number > 0 && prop.Pushed == r.Ref && prop.Observed != nil && prop.Observed.Ready
+}
+
+// mergeApproved reports the latest revision approved to merge.
+func mergeApproved(t core.Task, r core.Revision) bool {
+	return t.Proposal != nil && t.Proposal.MergeApproved == r.N
+}
+
 // approvalTitle says what approving does.
 func approvalTitle(t core.Task, playbook *core.Playbook) string {
 	if playbook == nil || playbook.Medium != core.MediumGit {
 		return fmt.Sprintf("Approve “%s”", t.Objective)
+	}
+	if t.PROpen() {
+		return fmt.Sprintf("Merge pull request #%d for “%s”", t.Proposal.Number, t.Objective)
 	}
 	switch playbook.Land.Way() {
 	case core.LandPush:

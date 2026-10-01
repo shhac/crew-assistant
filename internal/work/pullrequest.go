@@ -217,6 +217,14 @@ func (lp *Loop) reactTo(ctx context.Context, t core.Task, m gitMedium, r core.Re
 	if feedback := prFeedback(pr, prop, r); len(feedback) > 0 {
 		return lp.answerPR(ctx, t, r, pr, prop, feedback)
 	}
+	if prop.Observed.Ready && !mergeApproved(t, r) && land.MergeGate() != core.ApproveNone {
+		// Ready: whoever approves merging decides, as checks passing does,
+		// with the pull request still watched meanwhile.
+		if err := lp.watchPR(ctx, t, land.GitHub, pr); err != nil {
+			return err
+		}
+		return lp.setStatus(ctx, t.ID, core.TaskDeciding, fmt.Sprintf("Pull request #%d is ready to merge", prop.Number))
+	}
 	if prop.Observed.Ready {
 		if _, err := lp.updateOpen(ctx, t.ID, func(current *core.Task, _ *core.Project) (string, error) {
 			if why := core.BlockerReasons(*current); len(why) > 0 && current.Delivering == nil {
@@ -423,6 +431,19 @@ func (lp *Loop) answerPR(ctx context.Context, t core.Task, r core.Revision, pr g
 // awaitPR puts the task to sleep until the pull request's checks or reviews
 // change, through wakes the loop holds itself.
 func (lp *Loop) awaitPR(ctx context.Context, t core.Task, repo string, pr github.PR) error {
+	if err := lp.watchPR(ctx, t, repo, pr); err != nil {
+		return err
+	}
+	review := strings.ToLower(strings.ReplaceAll(pr.ReviewDecision, "_", " "))
+	if review == "" {
+		review = "no review required"
+	}
+	return lp.setStatus(ctx, t.ID, core.TaskAwaiting, fmt.Sprintf("Waiting on pull request #%d: checks %s, %s", pr.Number, strings.ToLower(pr.CheckState()), review))
+}
+
+// watchPR has the loop's wakes watch the pull request's checks and reviews,
+// so a change to them is noticed whatever the task is doing meanwhile.
+func (lp *Loop) watchPR(ctx context.Context, t core.Task, repo string, pr github.PR) error {
 	target := github.PRRef{Repo: repo, Number: pr.Number}.String()
 	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
@@ -450,11 +471,7 @@ func (lp *Loop) awaitPR(ctx context.Context, t core.Task, repo string, pr github
 			return err
 		}
 	}
-	review := strings.ToLower(strings.ReplaceAll(pr.ReviewDecision, "_", " "))
-	if review == "" {
-		review = "no review required"
-	}
-	return lp.setStatus(ctx, t.ID, core.TaskAwaiting, fmt.Sprintf("Waiting on pull request #%d: checks %s, %s", pr.Number, strings.ToLower(pr.CheckState()), review))
+	return nil
 }
 
 // prChecksValue changes when the checks, the head, mergeability or the pull

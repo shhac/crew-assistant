@@ -119,6 +119,8 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 	switch {
 	case chose(choiceStop):
 		return lp.stopTask(ctx, t, "You stopped it")
+	case d.Kind == core.DecisionDelivery && t.PROpen() && chose(choiceApprove):
+		return lp.approveMerge(ctx, t)
 	case d.Approves() && chose(choiceApprove),
 		d.Kind == core.DecisionEscalation && chose(choiceAcceptDraft):
 		return lp.approve(ctx, t)

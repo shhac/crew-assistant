@@ -285,9 +285,11 @@ function RequestActions({
             })
           }
         >
-          {task.playbook?.land?.pull_requests
-            ? "Open the pull request"
-            : `Land on ${land?.target}`}
+          {task.proposal?.number
+            ? "Merge the pull request"
+            : task.playbook?.land?.pull_requests
+              ? "Open the pull request"
+              : `Land on ${land?.target}`}
         </button>
       )}
       {teamChanged && (

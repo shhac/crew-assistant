@@ -48,11 +48,16 @@ const activityPMLanding = "task.pm_landing"
 // says so, so the owner taking the decision back applies to work already
 // under way, for a task that goes out the same way.
 func PMGates(p Project, t Task) bool {
-	if p.Playbook == nil || t.Playbook == nil || !p.Playbook.Land.ByPM() || p.Playbook.Land.Way() != t.Playbook.Land.Way() || t.PROpen() {
+	if p.Playbook == nil || t.Playbook == nil || p.Playbook.Land.Way() != t.Playbook.Land.Way() {
 		return false
 	}
+	land := p.Playbook.Land
+	gated := land.ByPM()
+	if t.PROpen() {
+		gated = land.MergeGate() == ApprovePM
+	}
 	_, ok := p.PMSeat()
-	return ok
+	return gated && ok
 }
 
 // pmDeciding reports a task whose signed-off change waits only on the PM's
@@ -159,12 +164,19 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 		if why := signedOff(v, *t); len(why) > 0 {
 			return fmt.Errorf("it is not signed off: %s: %w", strings.Join(why, "; "), ErrConflict)
 		}
+		approvedBefore := t.Approved
 		t.Approved = d.Revision
 		t.Status, t.DecisionID, t.ResumeStatus, t.Detail = TaskLanding, "", "", "Landing"
 		// Only approved so far: catching up, QA on the merged result and the
 		// push are still to come, and "landed" is said once they succeed.
 		approved := fmt.Sprintf("The PM approved %s to land %s: %s", t.Objective, d.How(), d.Reason)
-		if t.UsesPRs() {
+		switch {
+		case t.PROpen():
+			// Merging is approved apart from the opening it already had.
+			t.Approved = approvedBefore
+			t.Proposal.MergeApproved = d.Revision
+			approved = fmt.Sprintf("The PM approved merging pull request #%d for %s: %s", t.Proposal.Number, t.Objective, d.Reason)
+		case t.UsesPRs():
 			approved = fmt.Sprintf("The PM approved opening a pull request for %s: %s", t.Objective, d.Reason)
 		}
 		recordTask(v, now, t, activityPMLanding, approved)
@@ -184,10 +196,21 @@ func (s *Service) LandAheadOfPM(ctx context.Context, projectID, taskID string) (
 			return fmt.Errorf("it is not waiting on the PM's decision to land: %w", ErrConflict)
 		}
 		now := s.now().UTC()
-		t.Approved = t.Revisions[len(t.Revisions)-1].N
+		latest := t.Revisions[len(t.Revisions)-1].N
+		said := "You're landing " + t.Objective + " ahead of the PM"
+		switch {
+		case t.PROpen():
+			t.Proposal.MergeApproved = latest
+			said = fmt.Sprintf("You're merging pull request #%d for %s ahead of the PM", t.Proposal.Number, t.Objective)
+		case t.UsesPRs():
+			t.Approved = latest
+			said = "You're opening a pull request for " + t.Objective + " ahead of the PM"
+		default:
+			t.Approved = latest
+		}
 		t.LandDecision, t.LandingFailures = nil, nil
 		t.Status, t.DecisionID, t.ResumeStatus, t.Detail, t.UpdatedAt = TaskLanding, "", "", "Landing", now
-		recordTask(v, now, t, "task.landing", "You're landing "+t.Objective+" ahead of the PM")
+		recordTask(v, now, t, "task.landing", said)
 		derive(v, t)
 		return nil
 	})

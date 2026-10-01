@@ -241,6 +241,11 @@ func prEvent(w core.Wake, value string) string {
 // wakeTask sends a task asleep on something outside the team back to
 // landing, to look again.
 func (lp *Loop) wakeTask(ctx context.Context, taskID, event string) error {
+	// A pull request that changed while someone decides whether it merges
+	// is decided again, as it is now.
+	if err := lp.Core.ReconsiderMerge(ctx, taskID, event+"; it is looked at again before anyone decides"); err != nil && !errors.Is(err, core.ErrNotFound) {
+		return err
+	}
 	_, err := lp.Core.UpdateTask(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
 		if t.Status == core.TaskAwaiting {
 			t.Status, t.Detail = core.TaskLanding, event

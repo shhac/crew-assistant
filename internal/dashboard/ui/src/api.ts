@@ -218,7 +218,10 @@ export interface LandPolicy {
   merge?: string;
   /** Who decides that a pull request opens: pm (the default), owner or implementer. */
   open?: "pm" | "owner" | "implementer" | (string & {});
-  /** pm lets the team's PM decide what lands; push only. */
+  /**
+   * Who approves a change landing: before (the owner), none, or pm (the
+   * team's PM). With pull requests it is who approves merging, pm unless set.
+   */
   approve?: "before" | "none" | "pm" | (string & {});
 }
 /** The PM's decision to land or hold a task's change, and why. */
@@ -500,6 +503,8 @@ export interface Proposal {
   observed?: Observed;
   /** The implementer's round on what the pull request asked for. */
   answering?: boolean;
+  /** The revision approved to merge once its pull request is ready. */
+  merge_approved?: number;
 }
 /** An open pull request as the loop last saw it. */
 export interface Observed {

@@ -159,7 +159,7 @@ func newPRScenario(t *testing.T, reviews int, setups ...prSetup) *prScenario {
 		t.Fatal(err)
 	}
 	team := TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check"}
-	land := core.LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", Merge: "squash", Open: core.OpenOwner}
+	land := core.LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", Merge: "squash", Open: core.OpenOwner, Approve: core.ApproveNone}
 	for _, setup := range setups {
 		setup(t, a, &team, &land)
 	}
@@ -700,5 +700,96 @@ func TestThePMAnswersAPullRequestQuestionAndAsksTheOwner(t *testing.T) {
 	})
 	if asked < 0 || task.Status != core.TaskWaiting {
 		t.Fatalf("no question for the owner: %s %+v", task.Status, snap.Decisions)
+	}
+}
+
+// readyPR has the scenario's pull request approved and green on its head,
+// and lets the loop's wakes notice.
+func (s *prScenario) readyPR(t *testing.T) {
+	t.Helper()
+	s.gh.set(func() { s.gh.checks, s.gh.checksOn, s.gh.decision = "SUCCESS", "", "APPROVED" })
+	if err := s.a.checkWakes(s.ctx, time.Now().Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// opensUnasked and mergeBy set who opens and who approves merging.
+func opensUnasked(_ *testing.T, _ *Loop, _ *TeamChoice, land *core.LandPolicy) {
+	land.Open = core.OpenImplementer
+}
+
+func mergeBy(gate string) prSetup {
+	return func(_ *testing.T, _ *Loop, _ *TeamChoice, land *core.LandPolicy) { land.Approve = gate }
+}
+
+// By default the PM decides whether a ready pull request merges.
+func TestThePMMergesAReadyPullRequest(t *testing.T) {
+	s := newPRScenario(t, 2, withPM, opensUnasked, mergeBy(""))
+	if task := s.current(t); task.Status != core.TaskAwaiting || !task.PROpen() {
+		t.Fatalf("the pull request did not open: %s %s", task.Status, task.Detail)
+	}
+	s.readyPR(t)
+	task := s.current(t)
+	if task.Status != core.TaskLanded || len(s.gh.merges) != 1 {
+		t.Fatalf("not merged on the PM's word: %s %s merges %v", task.Status, task.Detail, s.gh.merges)
+	}
+	if !activityHas(t, s.a, "The PM approved merging pull request #7") {
+		t.Fatal("the PM's decision to merge is not in the activity")
+	}
+}
+
+// The owner can keep merging for themselves; a pull request that changes
+// while they decide is looked at again rather than merged as it was, and
+// the task is not taken for closed.
+func TestTheOwnerApprovesAMergeThatIsReconsideredWhenThePullRequestChanges(t *testing.T) {
+	s := newPRScenario(t, 4, opensUnasked, mergeBy(core.ApproveBefore))
+	s.current(t)
+	s.readyPR(t)
+	task := s.current(t)
+	d := openDecision(t, s.a, task)
+	if task.Status != core.TaskWaiting || task.Stage != core.StageReady || d.Title != "Merge pull request #7 for “Add A”" || !strings.Contains(d.Context, "Approving merges pull request #7") {
+		t.Fatalf("not asked to merge: %s %s %q", task.Status, task.Stage, d.Title)
+	}
+	s.review(t, "One more thing: handle the nil case.", time.Now().Add(3*time.Minute))
+	task = s.current(t)
+	snap, _ := s.a.Core.Snapshot(s.ctx)
+	if dismissed, _ := findDecision(snap, d.ID); dismissed.Status != core.DecisionDismissed || task.Status == core.TaskStopped || len(s.gh.merges) != 0 {
+		t.Fatalf("decision %s, task %s %s, merges %v", dismissed.Status, task.Status, task.Detail, s.gh.merges)
+	}
+	if len(task.Revisions) != 2 {
+		t.Fatalf("the review was not answered: %d revisions, %s", len(task.Revisions), task.Status)
+	}
+	s.readyPR(t)
+	task = s.current(t)
+	if d = openDecision(t, s.a, task); d.Title != "Merge pull request #7 for “Add A”" {
+		t.Fatalf("not asked again: %q", d.Title)
+	}
+	s.a.Core.ChooseDecision(s.ctx, d.ID, choiceApprove)
+	if task = s.current(t); task.Status != core.TaskLanded || len(s.gh.merges) != 1 || !slices.Contains(s.gh.merges[0], task.Revisions[1].Ref) {
+		t.Fatalf("not merged on the owner's approval: %s merges %v", task.Status, s.gh.merges)
+	}
+}
+
+// The PM can send a ready pull request back to the implementer with what
+// still needs doing, rather than merging it or asking the owner; what the
+// implementer does then is decided on afresh.
+func TestThePMSendsAReadyPullRequestBack(t *testing.T) {
+	s := newPRScenario(t, 4, withPM, opensUnasked, mergeBy(""))
+	s.runner.mu.Lock()
+	s.runner.pmLand = []string{`{"land": false, "reason": "it needs a changelog entry", "implementer": "Add a changelog entry for Feature."}`}
+	s.runner.mu.Unlock()
+	s.current(t)
+	s.readyPR(t)
+	task := s.current(t)
+	if !slices.ContainsFunc(task.Direction, func(d string) bool { return strings.Contains(d, "changelog") }) || !activityHas(t, s.a, "sent Add A back to the implementer") {
+		t.Fatalf("not sent back: direction %v", task.Direction)
+	}
+	snap, _ := s.a.Core.Snapshot(s.ctx)
+	if slices.ContainsFunc(snap.Decisions, func(d core.Decision) bool { return d.TaskID == s.id }) {
+		t.Fatal("the owner was asked although the PM decides")
+	}
+	// Only the draft made with the PM's note in view merged.
+	if len(task.Revisions) != 2 || len(s.gh.merges) != 1 || !slices.Contains(s.gh.merges[0], task.Revisions[1].Ref) {
+		t.Fatalf("revisions %d merges %v", len(task.Revisions), s.gh.merges)
 	}
 }

@@ -26,9 +26,10 @@ type LandPolicy struct {
 	// Open is who decides that a change's pull request opens: OpenPM (the
 	// default), OpenOwner or OpenImplementer.
 	Open string `json:"open,omitempty"`
-	// Approve is ApproveBefore (the owner approves before landing, or before a
-	// pull request opens), ApproveNone, or ApprovePM (the team's PM decides
-	// whether a signed-off change lands; push only).
+	// Approve is who approves a change landing: ApproveBefore (the owner),
+	// ApproveNone, or ApprovePM (the team's PM). Without pull requests it is
+	// the owner unless set, and the PM only for a push; with them it is who
+	// approves a ready pull request merging, the PM unless set.
 	Approve string `json:"approve,omitempty"`
 }
 
@@ -81,6 +82,14 @@ func (l LandPolicy) OpenGate() string {
 	return l.Open
 }
 
+// MergeGate is who approves a ready pull request merging, the PM unless set.
+func (l LandPolicy) MergeGate() string {
+	if l.Approve == "" {
+		return ApprovePM
+	}
+	return l.Approve
+}
+
 // AsksFirst reports whether someone, the owner or the PM, approves before a
 // change goes out: lands, or opens its pull request.
 func (l LandPolicy) AsksFirst() bool {
@@ -108,8 +117,8 @@ func (l LandPolicy) validate() error {
 	if l.Approve != "" && l.Approve != ApproveBefore && l.Approve != ApproveNone && l.Approve != ApprovePM {
 		return errors.New("approve must be before, none or pm")
 	}
-	if l.Approve == ApprovePM && l.Way() != LandPush {
-		return errors.New("the PM can decide only for changes that land by push: a pull request is merged as GitHub's reviews say, and a new branch lands nothing")
+	if l.Approve == ApprovePM && !l.PullRequests && l.Way() != LandPush {
+		return errors.New("the PM can decide only for changes that land by push or pull request: a new branch lands nothing")
 	}
 	if l.PullRequests {
 		if !branchName(l.Target) {

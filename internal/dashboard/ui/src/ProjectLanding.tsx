@@ -3,6 +3,7 @@ import {
   approvalText,
   landingWays,
   openGate,
+  mergeGate,
   mergeMethod,
   pmCanDecide,
   reversibility,
@@ -116,6 +117,7 @@ function LandingEditor({
   const [github, setGithub] = useState(land?.github ?? "");
   const [merge, setMerge] = useState(mergeMethod(land));
   const [open, setOpen] = useState(openGate(land));
+  const [merging, setMerging] = useState(mergeGate(land));
   const [target, setTarget] = useState(land?.target || "main");
   const [chosenApprove, setApprove] = useState(land?.approve || "before");
   const way = pullRequests ? "pull-request" : via;
@@ -144,7 +146,7 @@ function LandingEditor({
         github: pullRequests ? github.trim() : "",
         merge: pullRequests ? merge : "",
         open: pullRequests ? open : "",
-        approve,
+        approve: pullRequests ? merging : approve,
       });
       await refresh();
       onDone();
@@ -238,6 +240,28 @@ function LandingEditor({
                 : open === "owner"
                   ? "You see the title and description the implementer wrote before it opens."
                   : "A change opens its pull request as soon as the reviewers and QA pass it."}
+            </span>
+          </label>
+        )}
+        {pullRequests && (
+          <label htmlFor="land-merge">
+            Before it merges
+            <select
+              id="land-merge"
+              className="field"
+              value={merging}
+              onChange={(e) => setMerging(e.target.value)}
+            >
+              <option value="pm">The PM decides</option>
+              <option value="before">Ask me first</option>
+              <option value="none">Merge once it's ready</option>
+            </select>
+            <span className="hint">
+              Ready means approved where the repository asks for review, every
+              check green, every review thread resolved, and no conflicts.
+              {merging === "pm" &&
+                !hasPM &&
+                " The team has no PM yet, so you're asked until it has one."}
             </span>
           </label>
         )}
