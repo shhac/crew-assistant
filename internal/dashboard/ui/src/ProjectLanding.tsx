@@ -139,7 +139,8 @@ function PauseLanding({
         </>
       ) : (
         <form
-          className="form-row"
+          className="form"
+          aria-label="Pause landing"
           onSubmit={(e) => {
             e.preventDefault();
             void toggle(true);
@@ -156,9 +157,11 @@ function PauseLanding({
               onChange={(e) => setReason(e.target.value)}
             />
           </label>
-          <button type="submit" className="btn btn-sm" disabled={busy}>
-            Pause landing
-          </button>
+          <div className="actions">
+            <button type="submit" className="btn btn-sm" disabled={busy}>
+              Pause landing
+            </button>
+          </div>
         </form>
       )}
       <p className="hint">
