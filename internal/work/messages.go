@@ -31,6 +31,9 @@ func (lp *Loop) answerMessages(ctx context.Context, snap core.Snapshot, waited b
 	var started []<-chan any
 	for _, open := range checkerMessages(snap) {
 		t, m := open.task, open.message
+		if snap.ProjectPaused(t.ProjectID) {
+			continue
+		}
 		if role, ok := t.Role(m.To); ok {
 			if wait, _ := lp.usageWait(ctx, role); !wait.IsZero() {
 				continue

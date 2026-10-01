@@ -46,6 +46,7 @@ type Project struct {
 	Prefix            string    `json:"prefix"`
 	NextTask          int       `json:"next_task,omitempty"`
 	Status            string    `json:"status"`
+	Paused            bool      `json:"paused,omitempty"`
 	Brief             Brief     `json:"brief"`
 	Playbook          *Playbook `json:"playbook,omitempty"`
 	Directories       []string  `json:"directories"`
@@ -258,4 +259,14 @@ type DecisionInput struct {
 	// the loop sets them. See Decision.
 	FollowUp  *TaskInput `json:"-"`
 	OwnerStep *OwnerStep `json:"-"`
+}
+
+// ProjectPaused reports whether coordination is held for this project.
+func (s Snapshot) ProjectPaused(id string) bool {
+	for _, p := range s.Projects {
+		if p.ID == id {
+			return p.Paused
+		}
+	}
+	return false
 }

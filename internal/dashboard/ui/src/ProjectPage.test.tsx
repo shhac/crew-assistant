@@ -10,6 +10,8 @@ import {
   within,
 } from "@testing-library/react";
 import { ProjectPage } from "./ProjectPage";
+import { ProjectsPage } from "./ProjectsPage";
+import { waitingLine } from "./turns";
 import { ActivityTab } from "./ProjectActivity";
 import { ConfigTab } from "./ProjectConfig";
 import { parseRoute, requestHref, type ProjectTab } from "./router";
@@ -157,6 +159,86 @@ function show(
   );
 }
 const writes = () => calls.filter((c) => c.method !== "GET");
+
+describe("project pause", () => {
+  it.each([false, true])(
+    "offers the header control for paused=%s",
+    async (paused) => {
+      show(project({ paused }));
+      const header = document.querySelector(".project-header")!;
+      const button = within(header as HTMLElement).getByRole("button", {
+        name: paused ? "Resume project" : "Pause project",
+      });
+      expect(button.getAttribute("aria-pressed")).toBe(String(paused));
+      expect(within(header as HTMLElement).queryByText("Paused") !== null).toBe(
+        paused,
+      );
+      fireEvent.click(button);
+      await waitFor(() => expect(refresh).toHaveBeenCalled());
+      expect(writes()).toEqual([
+        {
+          path: "/api/projects/p1/paused",
+          method: "PUT",
+          body: { paused: !paused },
+        },
+      ]);
+    },
+  );
+  it("keeps the state and shows a failed request", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: "Project not found" }),
+      })),
+    );
+    show(project());
+    fireEvent.click(screen.getByRole("button", { name: "Pause project" }));
+    await waitFor(() =>
+      expect(screen.getByText("Project not found")).toBeTruthy(),
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "Pause project" })
+        .getAttribute("aria-pressed"),
+    ).toBe("false");
+    expect(refresh).not.toHaveBeenCalled();
+  });
+  it("marks only paused projects on the list", () => {
+    const state = normalizeState({
+      projects: [
+        project({ paused: true }),
+        project({ id: "p2", title: "Other" }),
+      ],
+    });
+    render(<ProjectsPage state={state} onNew={() => {}} />);
+    const paused = screen.getByRole("link", { name: /Service/ });
+    const running = screen.getByRole("link", { name: /Other/ });
+    expect(within(paused).getByText("Paused")).toBeTruthy();
+    expect(within(running).queryByText("Paused")).toBeNull();
+  });
+  it("explains project pause after global reasons", () => {
+    const request = started({ status: "writing", stage: "implementing" });
+    const state = normalizeState({ projects: [project({ paused: true })] });
+    expect(waitingLine(request, state, Date.now())).toContain(
+      "this project is paused",
+    );
+    expect(
+      waitingLine(request, { ...state, paused: true }, Date.now()),
+    ).toContain("teams are paused");
+    expect(
+      waitingLine(
+        request,
+        { ...state, paused: true, stopping: true },
+        Date.now(),
+      ),
+    ).toContain("crew-assistant is stopping");
+    expect(
+      waitingLine({ ...request, project_id: "other" }, state, Date.now()),
+    ).not.toContain("this project is paused");
+  });
+});
 
 describe("the board", () => {
   it("puts each request in its stage, with what needs the owner marked", () => {

@@ -112,6 +112,11 @@ function ProjectRow({ project, state }: { project: Project; state: State }) {
       <a className="project-row" href={projectHref(project.id)}>
         <span className="project-name">
           <span className="project-title">{project.title}</span>
+          {project.paused && (
+            <Pill tone="needs" dot>
+              Paused
+            </Pill>
+          )}
           <span className="muted small">
             {kind}
             {open ? ` · ${open} open` : ""}

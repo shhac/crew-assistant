@@ -70,6 +70,8 @@ function waitReason(
 ) {
   if (state.stopping) return "crew-assistant is stopping";
   if (state.paused) return "teams are paused";
+  if (state.projects.find((p) => p.id === task.project_id)?.paused)
+    return "this project is paused";
   const running = state.turns[0];
   if (running) {
     if (!running.task_id) return `${running.seat} is ordering the to-do list`;

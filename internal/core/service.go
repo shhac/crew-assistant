@@ -281,3 +281,16 @@ func pendingOperation(v Snapshot, id string) PendingOperation {
 	}
 	return out
 }
+
+// SetProjectPaused holds new coordination steps without cancelling running work.
+func (s *Service) SetProjectPaused(ctx context.Context, id string, paused bool) (Project, error) {
+	return s.editProject(ctx, id, func(p *Project, v *Snapshot) error {
+		if p.Paused == paused {
+			return nil
+		}
+		p.Paused = paused
+		p.UpdatedAt = s.now().UTC()
+		record(v, p.UpdatedAt, id, "project.paused", fmt.Sprintf("Paused: %t", paused))
+		return nil
+	})
+}

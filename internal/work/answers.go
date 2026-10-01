@@ -91,6 +91,9 @@ func (lp *Loop) stopTask(ctx context.Context, t core.Task, reason string) error 
 // settleAnswers applies the owner's answers to decisions tasks are waiting on.
 func (lp *Loop) settleAnswers(ctx context.Context, snap core.Snapshot) (bool, error) {
 	for _, t := range snap.Tasks {
+		if snap.ProjectPaused(t.ProjectID) {
+			continue
+		}
 		if t.Status != core.TaskWaiting || t.DecisionID == "" {
 			continue
 		}

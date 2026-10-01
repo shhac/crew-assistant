@@ -232,6 +232,7 @@ export interface LandingInput {
   approve: string;
 }
 export interface Project {
+  paused?: boolean;
   id: string;
   title: string;
   /** Starts the readable IDs of the project's tasks, as CA does CA-12. */
@@ -1047,6 +1048,14 @@ export function setDirectories(projectID: string, paths: string[]) {
   return api<Project>(`${projectPath(projectID)}/directories`, {
     method: "PUT",
     body: JSON.stringify({ directories: paths }),
+  });
+}
+
+/** Holds new project work without cancelling running steps. */
+export function setProjectPaused(projectID: string, paused: boolean) {
+  return api<Project>(`${projectPath(projectID)}/paused`, {
+    method: "PUT",
+    body: JSON.stringify({ paused }),
   });
 }
 

@@ -197,7 +197,7 @@ func (s *Service) Schedule(ctx context.Context, admit Admit) ([]Scheduled, error
 		stages := holdings(v)
 		var active []*Task
 		for i := range v.Tasks {
-			if v.Tasks[i].Active() {
+			if v.Tasks[i].Active() && !v.ProjectPaused(v.Tasks[i].ProjectID) {
 				active = append(active, &v.Tasks[i])
 			}
 		}
@@ -502,7 +502,7 @@ func offer(v *Snapshot, t *Task, busy map[string]Wait, admit Admit, now time.Tim
 func startQueued(v *Snapshot, p *Project, busy map[string]Wait, admit Admit, stages held, waits map[string]*Wait, now time.Time) []Scheduled {
 	// Nothing starts while the PM is ordering the list: the order it sets
 	// is the one tasks start in.
-	if p.Playbook == nil || slices.ContainsFunc(p.Claims, func(c Claim) bool { return c.Step == StepPM }) {
+	if p.Paused || p.Playbook == nil || slices.ContainsFunc(p.Claims, func(c Claim) bool { return c.Step == StepPM }) {
 		return nil
 	}
 	active := 0
@@ -591,6 +591,9 @@ func (s *Service) ClaimMessage(ctx context.Context, taskID, messageID string, ad
 		if t == nil {
 			return ErrNotFound
 		}
+		if v.ProjectPaused(t.ProjectID) {
+			return nil
+		}
 		i := slices.IndexFunc(t.Messages, func(m TeamMessage) bool { return m.ID == messageID })
 		if i < 0 || !t.Messages[i].Open() || t.alone() || t.Finished() || len(t.Revisions) == 0 {
 			return nil
@@ -646,7 +649,7 @@ func (s *Service) claimPM(ctx context.Context, projectID, step string, admit Adm
 			return ErrNotFound
 		}
 		pm, ok := p.PMSeat()
-		if !ok || (step == StepPM && !p.PMDue) || len(p.Claims) > 0 {
+		if !ok || (step == StepPM && (p.Paused || !p.PMDue)) || len(p.Claims) > 0 {
 			return nil
 		}
 		var wait *Wait

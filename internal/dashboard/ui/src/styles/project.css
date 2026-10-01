@@ -28,6 +28,13 @@
   gap: 12px;
 }
 
+.project-pause-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
 .project-meta {
   display: flex;
   align-items: center;

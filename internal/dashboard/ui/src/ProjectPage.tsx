@@ -21,8 +21,8 @@ import {
   projectTasks,
 } from "./stages";
 import { landsBy } from "./landing";
-import { Icon, Pill } from "./ui";
-import type { Project, State } from "./api";
+import { ErrorNotice, useAction, Icon, Pill } from "./ui";
+import { setProjectPaused, type Project, type State } from "./api";
 
 const tabLabels: Record<ProjectTab, string> = {
   board: "Board",
@@ -43,6 +43,7 @@ export function ProjectPage({
   state: State;
   refresh: () => Promise<void>;
 }) {
+  const { busy, error, run } = useAction();
   const tasks = projectTasks(project, state.tasks);
   const waiting = tasks.filter(needsYou).length;
   const code = isCode(project.playbook);
@@ -57,13 +58,43 @@ export function ProjectPage({
           <span aria-hidden="true">/</span>
           <span aria-current="page">{project.title}</span>
         </nav>
-        <div className="project-title-row">
-          <h1>{project.title}</h1>
-          {waiting > 0 && (
-            <Pill tone="needs" dot>
-              {waiting} need{waiting === 1 ? "s" : ""} you
-            </Pill>
-          )}
+        <div className="page-header page-header-actions">
+          <div className="project-title-row">
+            <h1>{project.title}</h1>
+            {project.paused && (
+              <Pill tone="needs" dot>
+                Paused
+              </Pill>
+            )}
+            {waiting > 0 && (
+              <Pill tone="needs" dot>
+                {waiting} need{waiting === 1 ? "s" : ""} you
+              </Pill>
+            )}
+          </div>
+          <div className="project-pause-control">
+            <button
+              className="btn btn-sm"
+              aria-pressed={!!project.paused}
+              disabled={busy}
+              onClick={() =>
+                run(async () => {
+                  await setProjectPaused(project.id, !project.paused);
+                  await refresh();
+                })
+              }
+            >
+              <Icon name={project.paused ? "Play" : "Pause"} size={14} />
+              {project.paused ? "Resume project" : "Pause project"}
+            </button>
+            {project.paused && (
+              <p className="soft small">
+                Nothing new starts in this project. Steps already running
+                finish.
+              </p>
+            )}
+            <ErrorNotice error={error} />
+          </div>
         </div>
         <p className="project-meta soft">
           {code && <Icon name="Branch" size={14} />}

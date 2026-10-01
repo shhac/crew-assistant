@@ -148,6 +148,9 @@ func (lp *Loop) notDelivering(ctx context.Context, taskID string) error {
 func (lp *Loop) settleDeliveries(ctx context.Context, snap core.Snapshot) error {
 	var errs []error
 	for _, t := range snap.Tasks {
+		if snap.ProjectPaused(t.ProjectID) {
+			continue
+		}
 		if t.Delivering == nil || !t.Finished() || len(t.Claims) > 0 || lp.jobs.hasTask(t.ID) {
 			continue
 		}

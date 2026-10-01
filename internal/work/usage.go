@@ -34,6 +34,9 @@ func (lp *Loop) holdForUsage(ctx context.Context, t core.Task, r core.Role) (boo
 func (lp *Loop) releaseUsageHolds(ctx context.Context, snap core.Snapshot) error {
 	now := time.Now()
 	for _, t := range snap.Tasks {
+		if snap.ProjectPaused(t.ProjectID) {
+			continue
+		}
 		engine := heldFor(t)
 		if engine == "" || !t.RetryAt.After(now) || t.Finished() {
 			continue

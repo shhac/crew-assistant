@@ -37,6 +37,9 @@ func (lp *Loop) checkBlockers(ctx context.Context, snap core.Snapshot) error {
 	}
 	commit, stamped := build()
 	for _, t := range snap.Tasks {
+		if snap.ProjectPaused(t.ProjectID) {
+			continue
+		}
 		if t.Finished() {
 			continue
 		}

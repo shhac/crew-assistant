@@ -28,6 +28,9 @@ import (
 func (lp *Loop) managePM(ctx context.Context, snap core.Snapshot, waited bool) ([]<-chan any, bool, error) {
 	var started []<-chan any
 	for _, p := range snap.Projects {
+		if p.Paused {
+			continue
+		}
 		seat, ok := p.PMSeat()
 		if !ok && snap.HasTriage(p.ID) {
 			if err := lp.Core.ReleaseTriage(ctx, p.ID, "the team has no PM"); err != nil {

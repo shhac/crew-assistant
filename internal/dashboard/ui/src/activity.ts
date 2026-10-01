@@ -10,6 +10,7 @@ const labels: Record<string, string> = {
   "assistant.theme": "Appearance",
   "assistant.update": "Assistant",
   "brief.updated": "Brief",
+  "project.paused": "Pause",
   "coordination.paused": "Pause",
   "decision.dismissed": "Closed",
   "decision.opened": "Asked you",
