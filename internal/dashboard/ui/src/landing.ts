@@ -133,7 +133,7 @@ const mergeWords: Record<string, string> = {
  * Whether the project's PM decides what goes out: what lands by push, or
  * which pull requests open.
  */
-export const pmDecides = (land?: LandPolicy) =>
+const pmDecides = (land?: LandPolicy) =>
   land?.pull_requests
     ? openGate(land) === "pm"
     : land?.approve === "pm" && pmCanDecide(wayOf(land));
