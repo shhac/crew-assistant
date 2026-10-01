@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
-	"github.com/shhac/crew-assistant/internal/integrations/github"
 	"github.com/shhac/crew-assistant/internal/text"
 )
 
@@ -163,7 +162,7 @@ type prWay struct{}
 
 func (prWay) start(ctx context.Context, m gitMedium, t core.Task) (string, string, error) {
 	target := m.playbook.Land.Target
-	base, err := m.repo.FetchFrom(ctx, m.url(), target, github.CredentialConfig())
+	base, err := m.fetchGitHub(ctx, target)
 	if err != nil {
 		return "", "", err
 	}
@@ -172,7 +171,7 @@ func (prWay) start(ctx context.Context, m gitMedium, t core.Task) (string, strin
 
 func (prWay) line(ctx context.Context, m gitMedium, t core.Task) (*line, error) {
 	if prop := t.Proposal; prop != nil && prop.Pushed != "" {
-		head, err := m.repo.FetchFrom(ctx, m.url(), prop.Branch, github.CredentialConfig())
+		head, err := m.fetchGitHub(ctx, prop.Branch)
 		if err == nil && head != prop.Pushed {
 			if in, err := m.repo.Contains(ctx, tipOf(t), head); err == nil && !in {
 				return &line{Commit: head, Name: prop.Branch, What: "someone else pushed to the pull request's branch " + prop.Branch, Foreign: true}, nil
@@ -180,7 +179,7 @@ func (prWay) line(ctx context.Context, m gitMedium, t core.Task) (*line, error) 
 		}
 	}
 	target := m.playbook.Land.Target
-	tip, err := m.repo.FetchFrom(ctx, m.url(), target, github.CredentialConfig())
+	tip, err := m.fetchGitHub(ctx, target)
 	if err != nil {
 		return nil, err
 	}

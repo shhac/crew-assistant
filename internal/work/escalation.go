@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -244,8 +242,8 @@ func (lp *Loop) judgeEscalation(ctx context.Context, p core.Project, t core.Task
 	if held, err := lp.holdSeat(ctx, t.ID, seat.Name); err != nil || !held {
 		return "", nil, seat.Name
 	}
-	dir := filepath.Join(lp.Core.StateDirectory(), "roles", "pm-work")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	dir, err := lp.pmWorkDir()
+	if err != nil {
 		return "", nil, ""
 	}
 	spec := lp.baseSpec(seat, dir, prompt)
@@ -483,8 +481,8 @@ func (lp *Loop) judgeOwnerStep(ctx context.Context, p core.Project, t core.Task,
 	if held, err := lp.holdSeat(ctx, t.ID, seat.Name); err != nil || !held {
 		return nil, seat.Name
 	}
-	dir := filepath.Join(lp.Core.StateDirectory(), "roles", "pm-work")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	dir, err := lp.pmWorkDir()
+	if err != nil {
 		return nil, ""
 	}
 	spec := lp.baseSpec(seat, dir, ownerStepPrompt(p, t, u))

@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -16,8 +14,8 @@ import (
 // task's pull request: a reply posted there, direction for the implementer,
 // or a question for the owner. It changes nothing itself.
 func (lp *Loop) answerPRAsPM(ctx context.Context, p core.Project, t core.Task, seat core.Role, m core.TeamMessage) error {
-	dir := filepath.Join(lp.Core.StateDirectory(), "roles", "pm-work")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	dir, err := lp.pmWorkDir()
+	if err != nil {
 		return err
 	}
 	spec := lp.baseSpec(seat, dir, prPMPrompt(p, t, m))

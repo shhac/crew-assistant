@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -338,8 +336,8 @@ func (lp *Loop) route(ctx context.Context, p core.Project, t core.Task, current 
 	if held, err := lp.holdSeat(ctx, t.ID, seat.Name); err != nil || !held {
 		return next, seat.Name
 	}
-	dir := filepath.Join(lp.Core.StateDirectory(), "roles", "pm-work")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	dir, err := lp.pmWorkDir()
+	if err != nil {
 		return next, ""
 	}
 	spec := lp.baseSpec(seat, dir, routePrompt(p, t, current, options))

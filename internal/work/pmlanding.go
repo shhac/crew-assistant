@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -17,16 +15,10 @@ import (
 // sent back to the implementer, before the owner decides instead.
 const maxPMLandingFailures = 2
 
-// pmDecides reports whether the team's PM, not the owner, decides whether
-// the task's change goes out: lands by push, or opens its pull request.
-func pmDecides(p core.Project, t core.Task) bool {
-	return core.PMGates(p, t)
-}
-
 // asksFirst reports whether the owner or the PM approves the task's change
 // before it lands.
 func asksFirst(p core.Project, t core.Task) bool {
-	return pmDecides(p, t) || taskPlaybook(p, t).Land.AsksFirst()
+	return core.PMGates(p, t) || taskPlaybook(p, t).Land.AsksFirst()
 }
 
 // pmApproved reports whether the approval the task's change lands on is the
@@ -38,7 +30,7 @@ func pmApproved(t core.Task) bool {
 // approvalHolds reports whether the task's approval still lets it land: it
 // stands, and if the PM gave it, the PM still decides.
 func approvalHolds(p core.Project, t core.Task) bool {
-	return approvalStands(t) && (!pmApproved(t) || pmDecides(p, t))
+	return approvalStands(t) && (!pmApproved(t) || core.PMGates(p, t))
 }
 
 // pmLanding asks the team's PM whether a change every checker passed lands.
@@ -72,8 +64,8 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 	if held, err := lp.holdSeat(ctx, t.ID, seat.Name); err != nil || !held {
 		return errors.Join(err, lp.waitForSeat(ctx, t, seat.Name))
 	}
-	dir := filepath.Join(lp.Core.StateDirectory(), "roles", "pm-work")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	dir, err := lp.pmWorkDir()
+	if err != nil {
 		return err
 	}
 	// Like its look at the list, the PM reads only what its prompt carries.

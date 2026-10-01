@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/integrations/github"
 	"github.com/shhac/crew-assistant/internal/media"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 	"github.com/shhac/crew-assistant/internal/text"
@@ -40,6 +41,18 @@ func (m gitMedium) locked() func() {
 }
 
 // url is where a pull request's branch is pushed and its base fetched from.
+// fetchGitHub fetches branch from the project's GitHub repository with the
+// owner's gh login, returning its tip.
+func (m gitMedium) fetchGitHub(ctx context.Context, branch string) (string, error) {
+	return m.repo.FetchFrom(ctx, m.url(), branch, github.CredentialConfig())
+}
+
+// pushGitHub pushes ref to the project's own branch on GitHub with the
+// owner's gh login, leased on what was last pushed there.
+func (m gitMedium) pushGitHub(ctx context.Context, ref, branch, lease string) error {
+	return m.repo.PushOwned(ctx, m.url(), ref, branch, lease, github.CredentialConfig())
+}
+
 func (m gitMedium) url() string { return m.remote(m.playbook.Land.GitHub) }
 
 func (m gitMedium) workspace(t core.Task) string { return m.repo.Task(t.ID).Workspace() }

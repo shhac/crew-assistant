@@ -250,17 +250,9 @@ func (lp *Loop) landingFailed(ctx context.Context, t core.Task, r core.Revision,
 // stands. A change built on another that has not landed yet is refused, so
 // the two land in the order they were built.
 func (lp *Loop) LandTask(ctx context.Context, projectID, taskID string) (core.Task, error) {
-	snap, err := lp.Core.Snapshot(ctx)
+	snap, p, t, err := lp.lookUp(ctx, projectID, taskID)
 	if err != nil {
 		return core.Task{}, err
-	}
-	p, ok := findProject(snap, projectID)
-	if !ok {
-		return core.Task{}, core.ErrNotFound
-	}
-	t, ok := findTask(snap, projectID, taskID)
-	if !ok {
-		return core.Task{}, core.ErrNotFound
 	}
 	if why := core.LandingHeld(&p, t); len(why) > 0 {
 		return core.Task{}, fmt.Errorf("%s: %w", strings.Join(why, "; "), core.ErrConflict)

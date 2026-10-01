@@ -348,6 +348,31 @@ func browserGuide(b core.Browser) string {
 	return roles.BrowserGuide("You can use a browser this turn; your shell reaches no network, so it can't open an app you start.", b.Name)
 }
 
+// lookUp is a project's task as the state holds it now, with the project
+// and the whole state it was read from.
+func (lp *Loop) lookUp(ctx context.Context, projectID, taskID string) (core.Snapshot, core.Project, core.Task, error) {
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return core.Snapshot{}, core.Project{}, core.Task{}, err
+	}
+	p, ok := findProject(snap, projectID)
+	if !ok {
+		return core.Snapshot{}, core.Project{}, core.Task{}, core.ErrNotFound
+	}
+	t, ok := findTask(snap, projectID, taskID)
+	if !ok {
+		return core.Snapshot{}, core.Project{}, core.Task{}, core.ErrNotFound
+	}
+	return snap, p, t, nil
+}
+
+// pmWorkDir is the folder the PM's turns run in, which none of them uses:
+// the PM reads only what its prompt carries.
+func (lp *Loop) pmWorkDir() (string, error) {
+	dir := filepath.Join(lp.Core.StateDirectory(), "roles", "pm-work")
+	return dir, os.MkdirAll(dir, 0o700)
+}
+
 // runtimeHome is the private home a role's Codex session runs in.
 func (lp *Loop) runtimeHome(engine string) string {
 	return filepath.Join(lp.Core.StateDirectory(), "roles", engine)

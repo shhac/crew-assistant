@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -84,8 +82,8 @@ func (lp *Loop) pmTurn(ctx context.Context, projectID string, seat core.Role) er
 	if !ok {
 		return core.ErrNotFound
 	}
-	dir := filepath.Join(lp.Core.StateDirectory(), "roles", "pm-work")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	dir, err := lp.pmWorkDir()
+	if err != nil {
 		return err
 	}
 	base := pmPrompt(snap, p)
@@ -318,8 +316,8 @@ func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (string, 
 	if wait, _ := lp.usageWait(ctx, seat); !wait.IsZero() {
 		return "", fmt.Errorf("%s is holding back for its usage allowance until %s: %w", seat.Name, wait.Format("15:04"), core.ErrConflict)
 	}
-	dir := filepath.Join(lp.Core.StateDirectory(), "roles", "pm-work")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	dir, err := lp.pmWorkDir()
+	if err != nil {
 		return "", err
 	}
 	var b strings.Builder

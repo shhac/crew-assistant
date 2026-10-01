@@ -146,7 +146,7 @@ func (lp *Loop) askForDelivery(ctx context.Context, p core.Project, t core.Task,
 	if approvalHolds(p, t) || !asksFirst(p, t) {
 		return lp.resumeLanding(ctx, t)
 	}
-	if pmDecides(p, t) {
+	if core.PMGates(p, t) {
 		return lp.pmLanding(ctx, p, t, r, m)
 	}
 	return lp.askOwnerToLand(ctx, p, t, r, m, core.DecisionInput{})
@@ -160,7 +160,7 @@ func (lp *Loop) askToMerge(ctx context.Context, p core.Project, t core.Task, r c
 	if !readyToMerge(t, r) || mergeApproved(t, r) || taskPlaybook(p, t).Land.MergeGate() == core.ApproveNone {
 		return lp.resumeLanding(ctx, t)
 	}
-	if pmDecides(p, t) {
+	if core.PMGates(p, t) {
 		return lp.pmLanding(ctx, p, t, r, m)
 	}
 	return lp.askOwnerToLand(ctx, p, t, r, m, core.DecisionInput{})

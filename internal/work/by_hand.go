@@ -155,17 +155,9 @@ func ownersRevision(ctx context.Context, g gitMedium, t core.Task, ref, note str
 
 // taskAt is a task, its project and the medium its work is in.
 func (lp *Loop) taskAt(ctx context.Context, projectID, taskID string) (core.Task, core.Project, medium, error) {
-	snap, err := lp.Core.Snapshot(ctx)
+	_, p, t, err := lp.lookUp(ctx, projectID, taskID)
 	if err != nil {
 		return core.Task{}, core.Project{}, nil, err
-	}
-	t, ok := findTask(snap, projectID, taskID)
-	if !ok {
-		return core.Task{}, core.Project{}, nil, core.ErrNotFound
-	}
-	p, ok := findProject(snap, projectID)
-	if !ok {
-		return core.Task{}, core.Project{}, nil, core.ErrNotFound
 	}
 	m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
 	return t, p, m, err

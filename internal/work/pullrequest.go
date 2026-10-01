@@ -126,18 +126,18 @@ func (lp *Loop) publish(ctx context.Context, t core.Task, m gitMedium, r core.Re
 			return true, err
 		}
 	}
-	err := m.repo.PushOwned(ctx, m.url(), r.Ref, prop.Branch, prop.Pushed, github.CredentialConfig())
+	err := m.pushGitHub(ctx, r.Ref, prop.Branch, prop.Pushed)
 	if errors.Is(err, gitrepo.ErrLeaseLost) {
 		// Someone else pushed to the branch. If this revision already took
 		// their commits in, lease on what it took in; otherwise catch up.
-		head, fetchErr := m.repo.FetchFrom(ctx, m.url(), prop.Branch, github.CredentialConfig())
+		head, fetchErr := m.fetchGitHub(ctx, prop.Branch)
 		if fetchErr != nil {
 			return true, lp.landingFailed(ctx, t, r, fetchErr)
 		}
 		if in, _ := m.repo.Contains(ctx, r.Ref, head); !in {
 			return lp.catchUpIfBehind(ctx, t, m, r)
 		}
-		err = m.repo.PushOwned(ctx, m.url(), r.Ref, prop.Branch, head, github.CredentialConfig())
+		err = m.pushGitHub(ctx, r.Ref, prop.Branch, head)
 	}
 	if err != nil {
 		return true, lp.landingFailed(ctx, t, r, err)

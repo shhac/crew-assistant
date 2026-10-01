@@ -3,8 +3,6 @@ package work
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -112,8 +110,8 @@ func (lp *Loop) pmChatTurn(ctx context.Context, projectID string, m core.PMChatM
 	if !ok {
 		return core.ErrNotFound
 	}
-	dir := filepath.Join(lp.Core.StateDirectory(), "roles", "pm-work")
-	if err = os.MkdirAll(dir, 0700); err != nil {
+	dir, err := lp.pmWorkDir()
+	if err != nil {
 		return err
 	}
 	var b strings.Builder
