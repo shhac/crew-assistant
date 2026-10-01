@@ -136,9 +136,10 @@ func findProjectIn(snap Snapshot, id string) (Project, bool) {
 	return Project{}, false
 }
 
-// The browser is QA's, and only an engine that ships one it can drive from
-// a sandboxed session can have it on: Claude, not Codex.
-func TestOnlyQAOnAnEngineWithABrowserCanUseIt(t *testing.T) {
+// A member may allow the browser whatever their roles, on any engine whose
+// sandboxed sessions admit it, as Claude's and Codex's both do. A project
+// seat's own setting is QA's, for using the app.
+func TestTheBrowserIsAMembersChoiceAndASeatsIsQAs(t *testing.T) {
 	s, _ := fixture(t)
 	p := codeProject(t, s, "claude")
 	seat := func(engine string, kinds []string, b Browser) error {
@@ -157,11 +158,11 @@ func TestOnlyQAOnAnEngineWithABrowserCanUseIt(t *testing.T) {
 	if err := seat("claude", []string{RoleQA, RoleResearcher}, Browser{On: true, Name: "Work laptop"}); err != nil {
 		t.Fatalf("Claude QA with a named browser: %v", err)
 	}
-	if err := seat("codex", []string{RoleQA}, Browser{On: true}); err == nil || !strings.Contains(err.Error(), "Claude") {
+	if err := seat("codex", []string{RoleQA}, Browser{On: true}); err != nil {
 		t.Fatalf("Codex QA with the browser: %v", err)
 	}
 	if err := seat("claude", []string{RoleResearcher}, Browser{On: true}); err == nil {
-		t.Fatal("a seat that isn't QA was given the browser")
+		t.Fatal("a seat that isn't QA was given QA's browser setting")
 	}
 	if err := seat("codex", []string{RoleQA}, Browser{Name: "kept while off"}); err != nil {
 		t.Fatalf("a browser that is off is no one's concern: %v", err)
@@ -171,17 +172,13 @@ func TestOnlyQAOnAnEngineWithABrowserCanUseIt(t *testing.T) {
 	if err != nil || !m.Browser.On || m.Browser.Name != "Chrome" {
 		t.Fatalf("member %+v %v", m, err)
 	}
-	if _, err := s.SaveMember(testContext, m.ID, MemberInput{Name: "Quinn", Kinds: []string{RoleQA}, Engine: "codex", Browser: m.Browser}); err == nil {
-		t.Fatal("moving a member to Codex left the browser on")
+	if m, err = s.SaveMember(testContext, m.ID, MemberInput{Name: "Quinn", Kinds: []string{RoleQA}, Engine: "codex", Browser: m.Browser}); err != nil || !m.Browser.On {
+		t.Fatalf("moving a member to Codex: %+v %v", m, err)
 	}
-	if _, err := s.SaveMember(testContext, "", MemberInput{Name: "Rex", Kinds: []string{RoleQA}, Engine: "codex", Browser: Browser{On: true}}); err == nil {
-		t.Fatal("a Codex member was given the browser")
-	}
-	if _, err := s.SaveMember(testContext, "", MemberInput{Name: "Ida", Kinds: []string{RoleImplementer}, Engine: "claude", Browser: Browser{On: true}}); err == nil {
-		t.Fatal("a member who isn't QA was given the browser")
-	}
-	if m, err = s.SaveMember(testContext, m.ID, MemberInput{Name: "Quinn", Kinds: []string{RoleQA}, Engine: "codex"}); err != nil || m.Browser.On {
-		t.Fatalf("switching the browser off and moving to Codex: %+v %v", m, err)
+	for _, kinds := range [][]string{{RoleImplementer}, {RoleDesigner}, {RoleReviewer}, {RolePM}} {
+		if _, err := s.SaveMember(testContext, "", MemberInput{Name: "Ida " + kinds[0], Kinds: kinds, Engine: "codex", Browser: Browser{On: true}}); err != nil {
+			t.Fatalf("a %s allowed the browser: %v", kinds[0], err)
+		}
 	}
 }
 

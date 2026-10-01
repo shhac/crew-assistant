@@ -77,7 +77,9 @@ func (a appRun) apply(spec *roles.Spec) {
 	}
 	spec.Env = append(append([]string(nil), spec.Env...), "PORT="+strconv.Itoa(a.port))
 	spec.Loopback = true
-	spec.Browser = a.browser.On
+	// The member may already allow the browser everywhere; QA's own setting
+	// adds it for using the app, never takes it away.
+	spec.Browser = spec.Browser || a.browser.On
 }
 
 // ports are the loopback ports held by checks under way, so no two checks

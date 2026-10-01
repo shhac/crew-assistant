@@ -344,8 +344,12 @@ func TestQAWithoutARecipeRunsTheCheckAsBefore(t *testing.T) {
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add Feature"})
 	task = settleCode(t, a, task.ID)
 	qa := runner.qa[0]
-	if qa.Loopback || qa.Browser || qa.Web || portOf(qa) != "" || strings.Contains(qa.Prompt, "use the app") || strings.Contains(qa.Prompt, "evidence") {
+	if qa.Loopback || qa.Web || portOf(qa) != "" || strings.Contains(qa.Prompt, "use the app") || strings.Contains(qa.Prompt, "evidence") {
 		t.Fatalf("QA without a recipe was given the app: %+v", qa)
+	}
+	// Its member allows the browser, so it has one all the same, for looking.
+	if !qa.Browser || !strings.Contains(qa.Instructions, "only for controlling a browser") {
+		t.Fatalf("QA whose member allows the browser: %+v", qa)
 	}
 	// Ordinary QA gets no writable copy: the check runs in the read-only
 	// checkout, exactly as before.

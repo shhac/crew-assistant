@@ -103,20 +103,21 @@ type Browser struct {
 
 const maxBrowserName = 100
 
-// validate checks a browser setting for a seat or member on engine that
-// holds kinds.
-func (b Browser) validate(engine string, qa bool) error {
+// validate checks a browser setting on engine. forRole is whether the
+// setting belongs where it is: any member may allow the browser, while a
+// seat's own setting is QA's, for using the app.
+func (b Browser) validate(engine string, forRole bool) error {
 	if len(b.Name) > maxBrowserName || strings.ContainsFunc(b.Name, unicode.IsControl) {
 		return fmt.Errorf("a browser name must be one line of at most %d characters", maxBrowserName)
 	}
 	if !b.On {
 		return nil
 	}
-	if !qa {
-		return errors.New("the browser is for QA; give the QA role or switch the browser off")
+	if !forRole {
+		return errors.New("a seat's browser setting is QA's; give the QA role or switch the browser off")
 	}
 	if !config.Supports(engine, config.UseBrowser) {
-		return fmt.Errorf("QA on %s can't use the browser; choose %s, or switch the browser off first", config.EngineLabel(engine), engineLabels(config.EnginesFor(config.UseBrowser)))
+		return fmt.Errorf("%s can't use the browser; choose %s, or switch the browser off first", config.EngineLabel(engine), engineLabels(config.EnginesFor(config.UseBrowser)))
 	}
 	return nil
 }

@@ -28,7 +28,7 @@ The researcher or the PM may propose one instead: it comes as a decision, "… p
 - Switch the browser on, either for the member (**Team page → the member → Edit → Browser → "QA uses the browser to try the app"**) before seating them, or for this project only (**project → Team → QA's browser → Edit**).
 - Leave **Connected browser** empty to use the browser the extension connects by default, which is the normal case. Give a name only if several browsers are connected; QA selects it with `select_browser` first.
 
-The setting can't be switched on for an engine without a browser QA can drive (Codex, Grok).
+The setting can't be switched on for an engine whose sandboxed sessions don't admit a browser (Grok). Claude and Codex both can: Codex's runs through the ChatGPT app's bridge, which lib-agent-harness proves is confined by the session's sandbox before launch.
 
 ## 3. Run a request through QA
 

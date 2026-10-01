@@ -151,7 +151,7 @@ func (in MemberInput) validate(v *Snapshot, id string) error {
 	if len(in.Personality) > MaxPersonality {
 		return fmt.Errorf("a personality must be at most %d characters", MaxPersonality)
 	}
-	if err := in.Browser.validate(in.Engine, slices.Contains(kinds, RoleQA)); err != nil {
+	if err := in.Browser.validate(in.Engine, true); err != nil {
 		return err
 	}
 	if in.Avatar != nil {
