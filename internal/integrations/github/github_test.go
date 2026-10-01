@@ -175,3 +175,28 @@ func TestRepliesResolvesCommentsAndEditsNameWhatTheyAct(t *testing.T) {
 		t.Fatal("accepted a malformed target")
 	}
 }
+
+// Every command that names a repository refuses one that isn't owner/name
+// before gh sees it, opening and merging included.
+func TestEveryPullRequestCommandRefusesAMalformedRepository(t *testing.T) {
+	c := Client{Run: func(context.Context, ...string) ([]byte, error) {
+		t.Fatal("gh ran with a malformed repository")
+		return nil, nil
+	}}
+	ctx, bad := context.Background(), "o/r --admin"
+	if _, _, err := c.Open(ctx, bad, "main", "crew/x", "T", "B"); err == nil {
+		t.Error("open")
+	}
+	if err := c.Merge(ctx, bad, 1, "squash", "abc"); err == nil {
+		t.Error("merge")
+	}
+	if _, _, _, err := c.FindOpen(ctx, bad, "crew/x"); err == nil {
+		t.Error("find")
+	}
+	if err := c.Close(ctx, bad, 1, "why"); err == nil {
+		t.Error("close")
+	}
+	if err := c.Edit(ctx, bad, 1, "T", "B"); err == nil {
+		t.Error("edit")
+	}
+}

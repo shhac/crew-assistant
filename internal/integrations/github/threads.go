@@ -95,51 +95,40 @@ func (c Client) threads(ctx context.Context, repo string, number int) ([]Thread,
 	return threads, nil
 }
 
-func threadID(id string) bool {
-	return id != "" && len(id) <= 200 && !strings.ContainsAny(id, " \t\n\"\\")
+// onThread runs a GraphQL mutation on a review thread, after checking the
+// thread's id, with the mutation's other fields after.
+func (c Client) onThread(ctx context.Context, thread, query string, fields ...string) error {
+	if thread == "" || len(thread) > 200 || strings.ContainsAny(thread, " \t\n\"\\") {
+		return errors.New("not a review thread")
+	}
+	_, err := c.Run(ctx, append([]string{"api", "graphql", "-f", "query=" + query, "-f", "thread=" + thread}, fields...)...)
+	return err
 }
 
 // Comment adds a comment to the pull request's conversation.
 func (c Client) Comment(ctx context.Context, repo string, number int, body string) error {
-	if !repoName.MatchString(repo) {
-		return errors.New("not a GitHub repository name")
-	}
-	_, err := c.Run(ctx, "pr", "comment", strconv.Itoa(number), "--repo", repo, "--body", body)
+	_, err := c.pr(ctx, "comment", repo, number, "--body", body)
 	return err
 }
 
 // Reply answers a review thread.
 func (c Client) Reply(ctx context.Context, thread, body string) error {
-	if !threadID(thread) {
-		return errors.New("not a review thread")
-	}
-	_, err := c.Run(ctx, "api", "graphql", "-f", `query=mutation($thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $thread, body: $body}) { comment { id } } }`, "-f", "thread="+thread, "-f", "body="+body)
-	return err
+	return c.onThread(ctx, thread, `mutation($thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $thread, body: $body}) { comment { id } } }`, "-f", "body="+body)
 }
 
 // Resolve marks a review thread resolved.
 func (c Client) Resolve(ctx context.Context, thread string) error {
-	if !threadID(thread) {
-		return errors.New("not a review thread")
-	}
-	_, err := c.Run(ctx, "api", "graphql", "-f", `query=mutation($thread: ID!) { resolveReviewThread(input: {threadId: $thread}) { thread { id } } }`, "-f", "thread="+thread)
-	return err
+	return c.onThread(ctx, thread, `mutation($thread: ID!) { resolveReviewThread(input: {threadId: $thread}) { thread { id } } }`)
 }
 
 // Edit sets the pull request's title and description.
 func (c Client) Edit(ctx context.Context, repo string, number int, title, body string) error {
-	if !repoName.MatchString(repo) {
-		return errors.New("not a GitHub repository name")
-	}
-	_, err := c.Run(ctx, "pr", "edit", strconv.Itoa(number), "--repo", repo, "--title", title, "--body", body)
+	_, err := c.pr(ctx, "edit", repo, number, "--title", title, "--body", body)
 	return err
 }
 
 // Close closes the pull request without merging it, saying why.
 func (c Client) Close(ctx context.Context, repo string, number int, comment string) error {
-	if !repoName.MatchString(repo) {
-		return errors.New("not a GitHub repository name")
-	}
-	_, err := c.Run(ctx, "pr", "close", strconv.Itoa(number), "--repo", repo, "--comment", comment)
+	_, err := c.pr(ctx, "close", repo, number, "--comment", comment)
 	return err
 }

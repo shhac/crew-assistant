@@ -219,7 +219,7 @@ func TestBlockerAddedAfterClaimStillStopsPullRequestMerge(t *testing.T) {
 		t.Fatal("merge reached the service while held")
 		return nil, nil
 	}}
-	m := gitMedium{playbook: core.Playbook{Land: core.LandPolicy{PullRequests: true, Target: "main", Approve: core.ApproveNone}}}
+	m := gitMedium{playbook: core.Playbook{Land: core.LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", Approve: core.ApproveNone}}}
 	// The stale task is the one held by a landing already claimed before the owner added the condition.
 	pr := github.PR{State: "OPEN", HeadRefOid: "abc", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN", ReviewDecision: "APPROVED"}
 	err = lp.reactTo(ctx, task, m, task.Revisions[0], core.Proposal{Pushed: "abc"}, pr)
@@ -256,7 +256,7 @@ func TestSuccessfulMergeRequestReleasesDeliveryMarkAndKeepsBlockersEffective(t *
 	}
 	calls := 0
 	lp.github = github.Client{Run: func(context.Context, ...string) ([]byte, error) { calls++; return nil, nil }}
-	m := gitMedium{playbook: core.Playbook{Land: core.LandPolicy{PullRequests: true, Target: "main", Approve: core.ApproveNone}}}
+	m := gitMedium{playbook: core.Playbook{Land: core.LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", Approve: core.ApproveNone}}}
 	prop := core.Proposal{Pushed: "abc"}
 	pr := github.PR{State: "OPEN", HeadRefOid: "abc", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN", ReviewDecision: "APPROVED"}
 	if err := lp.reactTo(ctx, task, m, task.Revisions[0], prop, pr); err != nil {

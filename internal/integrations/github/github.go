@@ -268,11 +268,25 @@ func ParsePRRef(s string) (PRRef, error) {
 
 var repoName = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
 
-func (c Client) View(ctx context.Context, repo string, number int) (PR, error) {
+// checkRepo refuses anything but an owner/name repository, before it can
+// reach gh's command line.
+func checkRepo(repo string) error {
 	if !repoName.MatchString(repo) {
-		return PR{}, errors.New("not a GitHub repository name")
+		return errors.New("not a GitHub repository name")
 	}
-	out, err := c.Run(ctx, "pr", "view", strconv.Itoa(number), "--repo", repo, "--json", "number,url,state,mergeable,mergeStateStatus,reviewDecision,headRefOid,statusCheckRollup,reviews,comments,mergeCommit")
+	return nil
+}
+
+// pr runs gh pr verb on a pull request of repo, with args after.
+func (c Client) pr(ctx context.Context, verb, repo string, number int, args ...string) ([]byte, error) {
+	if err := checkRepo(repo); err != nil {
+		return nil, err
+	}
+	return c.Run(ctx, append([]string{"pr", verb, strconv.Itoa(number), "--repo", repo}, args...)...)
+}
+
+func (c Client) View(ctx context.Context, repo string, number int) (PR, error) {
+	out, err := c.pr(ctx, "view", repo, number, "--json", "number,url,state,mergeable,mergeStateStatus,reviewDecision,headRefOid,statusCheckRollup,reviews,comments,mergeCommit")
 	if err != nil {
 		return PR{}, err
 	}
@@ -290,6 +304,9 @@ var prNumber = regexp.MustCompile(`/pull/(\d+)\s*$`)
 
 // Open creates a pull request and returns its number and address.
 func (c Client) Open(ctx context.Context, repo, base, head, title, body string) (int, string, error) {
+	if err := checkRepo(repo); err != nil {
+		return 0, "", err
+	}
 	out, err := c.Run(ctx, "pr", "create", "--repo", repo, "--base", base, "--head", head, "--title", title, "--body", body)
 	if err != nil {
 		return 0, "", err
@@ -306,8 +323,8 @@ func (c Client) Open(ctx context.Context, repo, base, head, title, body string) 
 // FindOpen returns the open pull request from head, if there is one, so an
 // opening that happened but was never recorded is picked up, not repeated.
 func (c Client) FindOpen(ctx context.Context, repo, head string) (int, string, bool, error) {
-	if !repoName.MatchString(repo) {
-		return 0, "", false, errors.New("not a GitHub repository name")
+	if err := checkRepo(repo); err != nil {
+		return 0, "", false, err
 	}
 	out, err := c.Run(ctx, "pr", "list", "--repo", repo, "--head", head, "--state", "open", "--json", "number,url", "--limit", "1")
 	if err != nil {
@@ -332,6 +349,6 @@ func (c Client) Merge(ctx context.Context, repo string, number int, method, head
 	if method != "squash" && method != "merge" && method != "rebase" {
 		return fmt.Errorf("unknown merge method %q", method)
 	}
-	_, err := c.Run(ctx, "pr", "merge", strconv.Itoa(number), "--repo", repo, "--"+method, "--match-head-commit", head)
+	_, err := c.pr(ctx, "merge", repo, number, "--"+method, "--match-head-commit", head)
 	return err
 }
