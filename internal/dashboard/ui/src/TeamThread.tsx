@@ -7,7 +7,7 @@ import {
   verdictOutcome,
 } from "./stages";
 import { kindLabel, memberOf, workingKind } from "./members";
-import { stageFlow } from "./taskFlow";
+import { stageFlow, type FlowRow } from "./taskFlow";
 import { MemberIdentity } from "./MemberIdentity";
 import { Avatar } from "./Avatar";
 import { ErrorNotice, Icon, Pill, counted, sinceLabel, useAction } from "./ui";
@@ -50,6 +50,34 @@ function prompt(role: Role | undefined, code: boolean) {
   return "Ask the reviewer to check something";
 }
 
+/** How each state of a stage row reads on its pill. */
+const rowPills: Record<FlowRow["state"], { tone: string; label: string }> = {
+  working: { tone: "work", label: "Working now" },
+  done: { tone: "done", label: "Done" },
+  interrupted: { tone: "", label: "Incomplete" },
+  "not-started": { tone: "wait", label: "Not started" },
+};
+
+/**
+ * The row each seat's messages are counted on: its current one, then its
+ * next, then its last.
+ */
+export function countRows(rows: FlowRow[]): Map<string, string> {
+  const bySeat = new Map<string, FlowRow[]>();
+  for (const row of rows)
+    if (row.role)
+      bySeat.set(row.role.name, [...(bySeat.get(row.role.name) ?? []), row]);
+  const counting = new Map<string, string>();
+  for (const [seat, own] of bySeat) {
+    const row =
+      own.find((r) => r.state === "working" || r.state === "interrupted") ??
+      own.find((r) => r.state === "not-started") ??
+      own.at(-1);
+    if (row) counting.set(seat, row.key);
+  }
+  return counting;
+}
+
 /** Ordered task stages; member panels remain addressed by seat. */
 export function TeamFlow({
   project,
@@ -64,25 +92,16 @@ export function TeamFlow({
 }) {
   const rows = stageFlow(task, project, state);
   if (!rows.length) return null;
-  // Counts belong to the current, then next, then last occurrence of a seat.
-  const countRows = new Map<string, string>();
-  for (const row of rows) {
-    if (!row.role) continue;
-    const own = rows.filter((r) => r.role?.name === row.role?.name);
-    countRows.set(
-      row.role.name,
-      (own.find((r) => r.state === "working" || r.state === "interrupted") ??
-        own.find((r) => r.state === "not-started") ??
-        own.at(-1))!.key,
-    );
-  }
+  const counting = countRows(rows);
   return (
     <section className="section" aria-label="Team">
       <h3>Team</h3>
       <ol className="task-stage-flow">
         {rows.map((row) => {
+          const role = row.role;
+          const pill = rowPills[row.state];
           const messages =
-            countRows.get(row.role?.name ?? "") === row.key
+            counting.get(role?.name ?? "") === row.key
               ? (task.messages ?? []).filter((m) => m.to === row.role?.name)
               : [];
           const open = messages.filter(isOpenMessage).length;
@@ -120,25 +139,8 @@ export function TeamFlow({
                 )}
               </span>
               <span className="task-stage-meta small">
-                <Pill
-                  tone={
-                    row.state === "working"
-                      ? "work"
-                      : row.state === "done"
-                        ? "done"
-                        : row.state === "interrupted"
-                          ? ""
-                          : "wait"
-                  }
-                  dot={row.state === "working"}
-                >
-                  {row.state === "working"
-                    ? "Working now"
-                    : row.state === "done"
-                      ? "Done"
-                      : row.state === "interrupted"
-                        ? "Incomplete"
-                        : "Not started"}
+                <Pill tone={pill.tone} dot={row.state === "working"}>
+                  {pill.label}
                 </Pill>
                 {row.exception && (
                   <Pill
@@ -169,13 +171,13 @@ export function TeamFlow({
           );
           return (
             <li key={row.key} data-progress={row.state}>
-              {row.role ? (
+              {role ? (
                 <button
                   type="button"
                   className="task-stage-row"
-                  data-seat={row.role.name}
+                  data-seat={role.name}
                   data-stage={row.key}
-                  onClick={() => onOpen(row.role!.name, row.key)}
+                  onClick={() => onOpen(role.name, row.key)}
                 >
                   {content}
                 </button>
