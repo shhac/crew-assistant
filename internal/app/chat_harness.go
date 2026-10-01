@@ -26,10 +26,10 @@ import (
 // not as long as any one turn.
 func harnessChatOpener(life context.Context) chatOpener {
 	return func(ctx context.Context, spec chatSpec, ref *session.Ref) (chatModel, session.Opened, error) {
-		s, opened, err := openChatSession(life, spec, ref)
-		if spec.Config.Browser.On && roles.BrowserUnreachable(err) {
-			spec = withoutBrowser(spec)
-			s, opened, err = openChatSession(life, spec, ref)
+		h := &harnessChat{life: life, spec: spec, ref: ref}
+		opened, err := h.open()
+		if spec.Browser.On && roles.BrowserUnreachable(err) {
+			opened, err = h.withoutBrowser()
 		}
 		var capability *session.CapabilityError
 		if errors.As(err, &capability) {
@@ -40,15 +40,7 @@ func harnessChatOpener(life context.Context) chatOpener {
 		if err != nil {
 			return nil, session.Opened{}, err
 		}
-		chat := &harnessChat{s: s, life: life}
-		if spec.Config.Browser.On {
-			restricted := withoutBrowser(spec)
-			chat.withoutBrowser = func() (*session.Session, error) {
-				s, _, err := openChatSession(life, restricted, ref)
-				return s, err
-			}
-		}
-		return chat, opened, nil
+		return h, opened, nil
 	}
 }
 
@@ -72,7 +64,7 @@ func openChatSession(life context.Context, spec chatSpec, ref *session.Ref) (*se
 // withoutBrowser is spec for a chat whose browser isn't connected: it goes on
 // limited to the assistant's tools until the chat next opens a session.
 func withoutBrowser(spec chatSpec) chatSpec {
-	spec.Config.Browser = config.Browser{}
+	spec.Browser = config.Browser{}
 	return spec
 }
 
@@ -120,7 +112,7 @@ func chatSessionOptions(spec chatSpec) (session.Options, error) {
 		o.Loop = chatLoop(spec.Config)
 		return o, nil
 	}
-	if b := spec.Config.Browser; b.On {
+	if b := spec.Browser; b.On {
 		// The browser's tools come only with the CLI's own, so the session
 		// is sandboxed, reading but never writing, its shell reaching no
 		// network, rather than restricted to the assistant's tools.
@@ -188,14 +180,14 @@ func chatLoop(ec engine.Config) session.Loop {
 	}
 }
 
-// harnessChat is a chat session held by lib-agent-harness.
+// harnessChat is a chat session held by lib-agent-harness, with what it was
+// opened from, so it can open again without the browser.
 type harnessChat struct {
+	life context.Context
+	ref  *session.Ref
 	mu   sync.Mutex
 	s    *session.Session
-	life context.Context
-	// withoutBrowser opens the session again without the browser, for a
-	// session given one that turns out not to be connected.
-	withoutBrowser func() (*session.Session, error)
+	spec chatSpec
 }
 
 func (h *harnessChat) session() *session.Session {
@@ -204,22 +196,52 @@ func (h *harnessChat) session() *session.Session {
 	return h.s
 }
 
+// open opens the chat's session as its spec says, in place of any it had.
+func (h *harnessChat) open() (session.Opened, error) {
+	h.mu.Lock()
+	spec := h.spec
+	h.mu.Unlock()
+	s, opened, err := openChatSession(h.life, spec, h.ref)
+	if err != nil {
+		return opened, err
+	}
+	h.mu.Lock()
+	old := h.s
+	h.s = s
+	h.mu.Unlock()
+	if old != nil {
+		release(old)
+	}
+	return opened, nil
+}
+
+// withoutBrowser opens the chat again with the browser off: a browser that
+// isn't connected leaves it limited to the assistant's tools until the chat
+// next opens a session.
+func (h *harnessChat) withoutBrowser() (session.Opened, error) {
+	h.mu.Lock()
+	h.spec = withoutBrowser(h.spec)
+	h.mu.Unlock()
+	return h.open()
+}
+
+func (h *harnessChat) browsing() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.spec.Browser.On
+}
+
 func (h *harnessChat) Turn(ctx context.Context, text string, onEvent func(session.Event)) (session.Result, error) {
 	result, err := h.turn(ctx, text, onEvent)
-	if h.withoutBrowser == nil || !roles.BrowserUnreachable(err) {
+	if !h.browsing() || !roles.BrowserUnreachable(err) {
 		return result, err
 	}
 	// Claude says whether the browser is connected only once its first
 	// turn starts, before the model sees it, so that turn runs again on a
 	// session without the browser.
-	s, reopenErr := h.withoutBrowser()
-	if reopenErr != nil {
+	if _, reopenErr := h.withoutBrowser(); reopenErr != nil {
 		return result, errors.Join(err, reopenErr)
 	}
-	h.Close()
-	h.mu.Lock()
-	h.s, h.withoutBrowser = s, nil
-	h.mu.Unlock()
 	return h.turn(ctx, text, onEvent)
 }
 
@@ -266,10 +288,13 @@ func (h *harnessChat) Recovered() session.Recovery { return h.session().Recovere
 
 // Close lets the CLI go, confirming its process is gone and, for Codex,
 // keeping any refreshed login. Its conversation stays saved to resume.
-func (h *harnessChat) Close() {
+func (h *harnessChat) Close() { release(h.session()) }
+
+// release lets a session's CLI go, confirming its process is gone.
+func release(s *session.Session) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	_, _ = h.session().Release(ctx)
+	_, _ = s.Release(ctx)
 }
 
 // drain passes a turn's events on until its stream closes.

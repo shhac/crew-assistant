@@ -60,7 +60,8 @@ func TestTheChatsSessionHasOnlyTheAssistantsToolsInFoldersOfItsOwn(t *testing.T)
 func TestAnAssistantAllowedTheBrowserChatsInASandboxedSession(t *testing.T) {
 	state := t.TempDir()
 	spec := chatSpec{
-		Config:       engine.Config{Provider: harness.Provider{Engine: harness.Claude}, Model: "opus", Browser: config.Browser{On: true, Name: "Work"}},
+		Config:       engine.Config{Provider: harness.Provider{Engine: harness.Claude}, Model: "opus"},
+		Browser:      config.Browser{On: true, Name: "Work"},
 		Instructions: "Be brief.",
 		StateDir:     state,
 		Tool: func(context.Context, string, json.RawMessage) session.ToolResult {
@@ -88,8 +89,7 @@ func TestAnAssistantAllowedTheBrowserChatsInASandboxedSession(t *testing.T) {
 	if err != nil || o.Sandbox != nil || o.Browser || o.Restriction == nil || o.Instructions.Text != "Be brief." {
 		t.Fatalf("without the browser: %+v %v", o, err)
 	}
-	ec := spec.Config
-	if chatKey("c", ec, "i") == chatKey("c", withoutBrowser(spec).Config, "i") {
+	if chatKey("c", spec.Config, "i", spec.Browser) == chatKey("c", spec.Config, "i", withoutBrowser(spec).Browser) {
 		t.Fatal("switching the browser kept the session open")
 	}
 }

@@ -231,7 +231,7 @@ func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Resul
 	}
 	eventIDs := map[string]string{}
 	ec := a.assistantConfig(ctx, cfg)
-	ec.AssistantName, ec.Personality, ec.Browser, ec.MaxTurns = seated.Name, seated.Personality, seated.Browser, cfg.Limits.MaxModelTurns
+	ec.AssistantName, ec.Personality, ec.MaxTurns = seated.Name, seated.Personality, cfg.Limits.MaxModelTurns
 	ec.OnTool = func(ctx context.Context, event engine.ToolEvent) error {
 		id := eventIDs[event.ID]
 		if event.Status == "running" {
@@ -257,15 +257,16 @@ func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Resul
 	}
 	// The config is read once for the turn: a rate limit rests the provider
 	// the turn's requests went to, whatever Settings say by the time it ends.
-	result, err := a.runChatTurnOn(ctx, turn, ec)
+	result, err := a.runChatTurnOn(ctx, turn, ec, seated.Browser)
 	return result, a.restRateLimited(cfg, ec, err)
 }
 
-// runChatTurnOn runs a chat turn on the model ec reaches.
-func (a *App) runChatTurnOn(ctx context.Context, turn core.ChatTurn, ec engine.Config) (engine.Result, error) {
+// runChatTurnOn runs a chat turn on the model ec reaches, with the owner's
+// browser where the assistant may use it and the turn runs on a session.
+func (a *App) runChatTurnOn(ctx context.Context, turn core.ChatTurn, ec engine.Config, browser config.Browser) (engine.Result, error) {
 	// On a model session the CLI keeps the conversation and compacts it
 	// itself; the turn-by-turn way below sends everything each time.
-	if result, err := a.runSessionTurn(ctx, turn, ec); !errors.Is(err, errNoChatSession) {
+	if result, err := a.runSessionTurn(ctx, turn, ec, browser); !errors.Is(err, errNoChatSession) {
 		return result, err
 	}
 	if err := a.compactChatHistory(ctx, turn.UserMessageID, ec); err != nil {

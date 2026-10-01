@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/engine"
@@ -46,7 +47,9 @@ type chatModel interface {
 // chatSpec is what a chat session is opened with.
 type chatSpec struct {
 	// Config names the engine and the CLI and login it runs on.
-	Config       engine.Config
+	Config engine.Config
+	// Browser is the owner's browser the assistant may use.
+	Browser      config.Browser
 	Instructions string
 	StateDir     string
 	// Tool runs one of the assistant's tools for the model.
@@ -98,7 +101,7 @@ type chatSessions struct {
 // or resuming it first. errNoChatSession means it can't, and the turn should
 // run the stateless way: the engine can't hold a session whose only tools
 // are the assistant's.
-func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.Config) (engine.Result, error) {
+func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.Config, browser config.Browser) (engine.Result, error) {
 	if a.sessions.open == nil || !harness.Support(ec.Provider.Engine, harness.Session, harness.RestrictTools).Usable() {
 		return engine.Result{}, errNoChatSession
 	}
@@ -112,8 +115,8 @@ func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.
 		return engine.Result{}, err
 	}
 	instructions := engine.Instructions(ec.AssistantName, ec.Personality) + sessionNote
-	spec := chatSpec{Config: ec, Instructions: instructions, StateDir: a.Core.StateDirectory(), Tool: a.sessionTool, Context: a.sessionContext}
-	key := chatKey(conversation, ec, instructions)
+	spec := chatSpec{Config: ec, Browser: browser, Instructions: instructions, StateDir: a.Core.StateDirectory(), Tool: a.sessionTool, Context: a.sessionContext}
+	key := chatKey(conversation, ec, instructions, browser)
 	if err := a.foldBeforeNewSession(ctx, turn.UserMessageID, ec, key, record); err != nil {
 		return engine.Result{}, err
 	}
@@ -339,9 +342,9 @@ func (a *App) closeIdleChat(now time.Time) {
 
 // chatKey names what a session was opened for: a change to any of it means
 // a different session.
-func chatKey(conversation string, ec engine.Config, instructions string) string {
+func chatKey(conversation string, ec engine.Config, instructions string, browser config.Browser) string {
 	sum := sha256.Sum256([]byte(instructions))
-	return strings.Join([]string{conversation, modelHome(ec), ec.Model, ec.Effort, hex.EncodeToString(sum[:8]), strconv.FormatBool(ec.Browser.On), ec.Browser.Name}, "|")
+	return strings.Join([]string{conversation, modelHome(ec), ec.Model, ec.Effort, hex.EncodeToString(sum[:8]), strconv.FormatBool(browser.On), browser.Name}, "|")
 }
 
 // sessionTool runs a tool the model called, with the same checks and the
