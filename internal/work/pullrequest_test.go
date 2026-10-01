@@ -1009,3 +1009,52 @@ func TestARefusedMergeComesToTheOwner(t *testing.T) {
 		t.Fatalf("decision %s %q, delivering %+v", d.Kind, d.Context, task.Delivering)
 	}
 }
+
+// A pull request that won't close is tried again next pass, one already
+// merged needs nothing more, and one GitHub keeps refusing is left to the
+// owner rather than tried for ever.
+func TestClosingAnEndedPullRequestIsTriedAFewTimes(t *testing.T) {
+	s := newPRScenario(t, 2)
+	s.open(t)
+	closeTo := func(c core.PRClose) {
+		t.Helper()
+		if _, err := s.a.Core.UpdateTask(s.ctx, s.id, func(t *core.Task, _ *core.Project) (string, error) {
+			t.ClosePR = &c
+			return "", nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pass := func() core.Task {
+		t.Helper()
+		snap, _ := s.a.Core.Snapshot(s.ctx)
+		s.a.closeEndedPRs(s.ctx, snap)
+		snap, _ = s.a.Core.Snapshot(s.ctx)
+		task, _ := snap.FindTask(s.id)
+		return task
+	}
+	run := s.a.github.Run
+	refuse := true
+	s.a.github.Run = func(ctx context.Context, args ...string) ([]byte, error) {
+		if refuse && strings.Join(args[:2], " ") == "pr close" {
+			return nil, fmt.Errorf("could not close")
+		}
+		return run(ctx, args...)
+	}
+	closeTo(core.PRClose{Repo: "o/r", Number: 7, Note: "Landing another way."})
+	if task := pass(); task.ClosePR == nil || task.ClosePR.Failures != 1 {
+		t.Fatalf("after a refusal: %+v", task.ClosePR)
+	}
+	if task := pass(); task.ClosePR == nil || task.ClosePR.Failures != 2 {
+		t.Fatalf("after two: %+v", task.ClosePR)
+	}
+	if task := pass(); task.ClosePR != nil || !activityHas(t, s.a, "close it yourself") {
+		t.Fatalf("not left to the owner: %+v", task.ClosePR)
+	}
+	// Already merged: closing fails, but there's nothing left to close.
+	s.gh.set(func() { s.gh.merged = "abc" })
+	closeTo(core.PRClose{Repo: "o/r", Number: 7, Note: "Landing another way."})
+	if task := pass(); task.ClosePR != nil {
+		t.Fatalf("a merged pull request was tried again: %+v", task.ClosePR)
+	}
+}

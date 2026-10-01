@@ -23,11 +23,13 @@ type PRFlowChoice struct {
 	Keep bool
 }
 
-// PRClose is a pull request to close, and what to say on it.
+// PRClose is a pull request to close, what to say on it, and how often
+// GitHub refused.
 type PRClose struct {
-	Repo   string `json:"repo"`
-	Number int    `json:"number"`
-	Note   string `json:"note"`
+	Repo     string `json:"repo"`
+	Number   int    `json:"number"`
+	Note     string `json:"note"`
+	Failures int    `json:"failures,omitempty"`
 }
 
 // EndPullRequests is a project turning pull requests off. Its unfinished

@@ -569,22 +569,34 @@ func prReviewValue(pr github.PR) string {
 }
 
 // closeEndedPRs closes the pull requests of tasks that now land another way,
-// saying why on each. One that can't be closed yet is tried again next pass.
+// saying why on each. One already closed or merged needs nothing more; one
+// GitHub refuses to close is tried again next pass, and left to the owner
+// after maxPostFailures.
 func (lp *Loop) closeEndedPRs(ctx context.Context, snap core.Snapshot) {
 	for _, t := range snap.Tasks {
 		c := t.ClosePR
 		if c == nil {
 			continue
 		}
-		if err := lp.github.Close(ctx, c.Repo, c.Number, c.Note+"\n\n— crew-assistant\n"+ownPost); err != nil {
-			continue
+		err := lp.github.Close(ctx, c.Repo, c.Number, c.Note+"\n\n— crew-assistant\n"+ownPost)
+		if err != nil {
+			if pr, viewErr := lp.github.View(ctx, c.Repo, c.Number); viewErr == nil && pr.State != "OPEN" {
+				err = nil
+			}
 		}
 		_, _ = lp.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			if t.ClosePR == nil || *t.ClosePR != *c {
 				return "", nil
 			}
+			if err == nil {
+				t.ClosePR = nil
+				return fmt.Sprintf("Closed pull request #%d for %s", c.Number, t.Objective), nil
+			}
+			if t.ClosePR.Failures++; t.ClosePR.Failures < maxPostFailures {
+				return "", nil
+			}
 			t.ClosePR = nil
-			return fmt.Sprintf("Closed pull request #%d for %s", c.Number, t.Objective), nil
+			return fmt.Sprintf("Couldn't close pull request #%d for %s, which now lands another way; close it yourself: %s", c.Number, t.Objective, text.Clip(err.Error(), 200)), nil
 		})
 	}
 }
