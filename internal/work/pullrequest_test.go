@@ -908,3 +908,24 @@ func TestTheTeamsOwnThreadReplyStartsNoRound(t *testing.T) {
 		t.Fatalf("its own reply started another round: edits %d replies %d status %s", s.runner.edits, len(s.gh.postsOf("reply")), task.Status)
 	}
 }
+
+// A reply posted in the same look as new feedback arrives is posted once:
+// answering the feedback never puts back what was already posted.
+func TestAPostedReplyIsNotPostedAgainWhenFeedbackArrivesInTheSameLook(t *testing.T) {
+	s := newPRScenario(t, 4)
+	s.open(t)
+	if _, err := s.a.Core.UpdateTask(s.ctx, s.id, func(t *core.Task, _ *core.Project) (string, error) {
+		t.Post(core.PRPost{Body: "Checked on a clean clone.", By: "QA"})
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.review(t, "Handle the nil case.", time.Now())
+	task := s.current(t)
+	if comments := s.gh.postsOf("comment"); len(comments) != 1 {
+		t.Fatalf("posted %d times: %v", len(comments), comments)
+	}
+	if len(task.Proposal.Outbox) != 0 {
+		t.Fatalf("outbox %+v", task.Proposal.Outbox)
+	}
+}

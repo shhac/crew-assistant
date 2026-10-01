@@ -60,7 +60,7 @@ func (lp *Loop) landPR(ctx context.Context, t core.Task, m gitMedium) error {
 		return lp.landingFailed(ctx, t, r, err)
 	}
 	prop.Observed = observed(pr, prop, time.Now().UTC())
-	if err := lp.saveProposal(ctx, t.ID, prop, ""); err != nil {
+	if err := lp.editProposal(ctx, t.ID, "", func(p *core.Proposal) { p.Observed, p.Described = prop.Observed, prop.Described }); err != nil {
 		return err
 	}
 	return lp.reactTo(ctx, t, m, r, prop, pr)
@@ -166,7 +166,9 @@ func (lp *Loop) publish(ctx context.Context, t core.Task, m gitMedium, r core.Re
 		return true, lp.landingFailed(ctx, t, r, err)
 	}
 	prop.Pushed, prop.PushedAt = r.Ref, time.Now().UTC()
-	return false, lp.saveProposal(ctx, t.ID, *prop, "")
+	return false, lp.editProposal(ctx, t.ID, "", func(p *core.Proposal) {
+		p.Branch, p.Pushed, p.PushedAt = prop.Branch, prop.Pushed, prop.PushedAt
+	})
 }
 
 // openPR opens the pull request, or picks up one that was opened but never
@@ -185,7 +187,9 @@ func (lp *Loop) openPR(ctx context.Context, t core.Task, m gitMedium, r core.Rev
 		prop.Described = described(pr)
 	}
 	prop.Number, prop.URL = n, url
-	return false, lp.saveProposal(ctx, t.ID, *prop, "Opened pull request #"+fmt.Sprint(n))
+	return false, lp.editProposal(ctx, t.ID, "Opened pull request #"+fmt.Sprint(n), func(p *core.Proposal) {
+		p.Branch, p.Number, p.URL, p.Described = prop.Branch, prop.Number, prop.URL, prop.Described
+	})
 }
 
 // reactTo does what the pull request's state calls for: record a merge, bring
@@ -204,8 +208,7 @@ func (lp *Loop) reactTo(ctx context.Context, t core.Task, m gitMedium, r core.Re
 		}
 		return lp.recordLanded(ctx, t, landed, land.Target, fmt.Sprintf("pull request #%d", prop.Number))
 	case pr.State == "CLOSED":
-		prop.Number, prop.URL = 0, ""
-		if err := lp.saveProposal(ctx, t.ID, prop, ""); err != nil {
+		if err := lp.editProposal(ctx, t.ID, "", func(p *core.Proposal) { p.Number, p.URL = 0, "" }); err != nil {
 			return err
 		}
 		return lp.landingFailed(ctx, t, r, fmt.Errorf("pull request #%d was closed without merging; trying again opens a new one", pr.Number))
@@ -362,16 +365,18 @@ func signed(post core.PRPost) string {
 	return post.Body + "\n\n— " + post.By + ", for crew-assistant\n" + ownPost
 }
 
-func (lp *Loop) saveProposal(ctx context.Context, taskID string, prop core.Proposal, activity string) error {
+// editProposal changes the fields of the task's stored proposal that one
+// step owns, on the record as it is now, never from a copy taken earlier: so
+// what other steps wrote meanwhile, the team's posts and the pull request's
+// text, is kept.
+func (lp *Loop) editProposal(ctx context.Context, taskID, activity string, edit func(*core.Proposal)) error {
 	_, err := lp.updateOpen(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
-		// What the team writes for the pull request is changed only where
-		// it is written and posted, never from a copy taken earlier.
-		if t.Proposal != nil {
-			prop.Title, prop.Body, prop.Outbox = t.Proposal.Title, t.Proposal.Body, t.Proposal.Outbox
+		if t.Proposal == nil {
+			t.Proposal = &core.Proposal{}
 		}
-		t.Proposal = &prop
-		if prop.URL != "" {
-			t.DeliveredTo = prop.URL
+		edit(t.Proposal)
+		if t.Proposal.URL != "" {
+			t.DeliveredTo = t.Proposal.URL
 		}
 		if activity != "" {
 			return t.Objective + ": " + activity, nil
@@ -454,10 +459,6 @@ func feedbackFinding(f github.Feedback) core.Finding {
 // needs no approval: the owner approved the pull request, and its reviewers
 // review what the team pushes next.
 func (lp *Loop) answerPR(ctx context.Context, t core.Task, r core.Revision, pr github.PR, prop core.Proposal, feedback []core.Verdict) error {
-	prop.Seen = pr.Latest()
-	if pr.CheckState() == "FAILURE" {
-		prop.ChecksFor = r.Ref
-	}
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
 		now := time.Now().UTC()
 		for _, v := range feedback {
@@ -466,8 +467,13 @@ func (lp *Loop) answerPR(ctx context.Context, t core.Task, r core.Revision, pr g
 			v.Revision, v.BriefVersion, v.At = r.N, p.Brief.Version, now
 			t.Verdicts = append(t.Verdicts, v)
 		}
-		prop.Answering = true
-		t.Proposal = &prop
+		if t.Proposal == nil {
+			t.Proposal = &core.Proposal{}
+		}
+		t.Proposal.Seen, t.Proposal.Answering = pr.Latest(), true
+		if pr.CheckState() == "FAILURE" {
+			t.Proposal.ChecksFor = r.Ref
+		}
 		t.NextRound()
 		t.Status, t.Detail = core.TaskWriting, fmt.Sprintf("Answering pull request #%d", prop.Number)
 		return fmt.Sprintf("Answering feedback on pull request #%d for %s", prop.Number, t.Objective), nil
