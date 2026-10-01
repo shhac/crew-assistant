@@ -7,6 +7,7 @@ import {
   workingSeats,
 } from "./members";
 import {
+  prWords,
   decisionFor,
   decisionKind,
   finished,
@@ -338,7 +339,9 @@ export function stageFlow(
       state: "working",
       support:
         task.status === "awaiting"
-          ? "Waiting on checks and reviews"
+          ? task.proposal?.number
+            ? `Pull request #${task.proposal.number}: ${prWords(task.proposal.observed)}`
+            : "Waiting on checks and reviews"
           : "Landing",
       previous: [],
     });

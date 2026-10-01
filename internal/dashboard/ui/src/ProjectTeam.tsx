@@ -2,7 +2,7 @@ import { ProviderIcon } from "./ProviderIcon";
 import { useState } from "react";
 import { href, memberHref, projectHref, requestHref } from "./router";
 import { isCode } from "./landing";
-import { boardColumns, readyLabel } from "./boardLanes";
+import { boardColumns, boardRows } from "./boardLanes";
 import { finished, projectTasks } from "./stages";
 import { holds, kindLabel, kindsLabel, memberOf } from "./members";
 import { Avatar } from "./Avatar";
@@ -211,11 +211,12 @@ function RoleGroup({
   const empty =
     kind === "researcher" ? "No research" : (nobody[kind] ?? "No one yet");
   const tasks = projectTasks(project, state.tasks);
-  const lanes = boardColumns(project, tasks).flatMap((c) => c.lanes);
+  const lanes = [
+    ...boardColumns(project, tasks).flatMap((c) => c.lanes),
+    ...boardRows(project, tasks),
+  ];
   const where = (task: Task) =>
-    task.stage === "ready"
-      ? readyLabel(project)
-      : (lanes.find((l) => l.stage === task.stage)?.label ?? "");
+    lanes.find((l) => l.stage === task.stage)?.label ?? "";
   const lastRequired = required && seats.length === 1;
   return (
     <li className="seat role-group">

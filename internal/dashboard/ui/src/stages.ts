@@ -5,6 +5,7 @@ import { holds, pmSeat, taskPlaybook, workingSeats } from "./members";
 import {
   pendingDecisions,
   type Decision,
+  type Observed,
   type Playbook,
   type Project,
   type Role,
@@ -251,6 +252,10 @@ export function stageLabel(stage: Stage, playbook?: Playbook) {
       return "Reviewing";
     case "qa":
       return "QA";
+    case "pr_opening":
+      return "PR to open";
+    case "pr_open":
+      return "PR open";
     case "ready":
       return isCode(playbook) ? "Ready to land" : "Ready";
   }
@@ -346,6 +351,9 @@ export function requestStep(
       const writer =
         seats[0]?.name ??
         roleName(task, "implementer", code ? "Implementer" : "Writer");
+      const pr = task.proposal;
+      if (pr?.answering && pr.number)
+        return `${round}${writer} answering pull request #${pr.number}`;
       return idle ? withSeat(writer) : `${round}${writer} working`;
     }
     case "reviewing":
@@ -373,12 +381,19 @@ export function requestStep(
       if (task.answered) return "Your answer is in; it carries on next";
       return decisionKind(decision).step(task);
     case "landing": {
+      if (task.playbook?.land?.pull_requests) {
+        const n = task.proposal?.number;
+        if (!n) return "Opening a pull request";
+        return task.proposal?.observed?.ready
+          ? `Merging pull request #${n}`
+          : `Updating pull request #${n}`;
+      }
       const target = task.playbook?.land?.target;
       return target ? `Landing on ${target}` : "Landing";
     }
     case "awaiting":
       return task.proposal?.number
-        ? `Pull request #${task.proposal.number}: waiting on checks and reviews`
+        ? `Pull request #${task.proposal.number}: ${prWords(task.proposal.observed)}`
         : "Waiting on checks and reviews";
     case "landed":
       return task.delivered_to ? `Landed on ${task.delivered_to}` : "Landed";
@@ -453,4 +468,32 @@ export function leadRequest(own: Task[]) {
   return own
     .filter((t) => !finished(t))
     .sort((a, b) => groupOrder[a.status] - groupOrder[b.status])[0];
+}
+
+/** What an open pull request waits on, as the loop last saw it. */
+export function prWords(observed?: Observed): string {
+  if (!observed) return "waiting on checks and reviews";
+  if (observed.ready) return "ready to land";
+  const checks: Record<string, string> = {
+    SUCCESS: "checks passed",
+    FAILURE: "checks failed",
+    PENDING: "checks running",
+    NONE: "no checks",
+  };
+  const review: Record<string, string> = {
+    APPROVED: "approved",
+    CHANGES_REQUESTED: "changes requested",
+    REVIEW_REQUIRED: "review required",
+  };
+  const unresolved = observed.unresolved ?? 0;
+  return [
+    checks[observed.checks] ?? `checks ${observed.checks.toLowerCase()}`,
+    observed.review ? (review[observed.review] ?? observed.review) : "",
+    unresolved
+      ? `${unresolved} unresolved thread${unresolved === 1 ? "" : "s"}`
+      : "",
+    observed.conflicting ? "conflicts with its base" : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
 }

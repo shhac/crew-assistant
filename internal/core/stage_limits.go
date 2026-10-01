@@ -29,12 +29,16 @@ func placeStage(v *Snapshot, t Task) string {
 		_, pending := t.nextChecker(briefVersion(v, t))
 		switch {
 		case !pending && !turnedDown(v, t, RoleReviewer, RoleQA):
-			return StageReady
+			return passedStage(t)
 		case !pending && t.Place != "":
 			return t.Place
 		case turnedDown(v, t, RoleReviewer) && !later(t.Place, StageReviewing):
 			return StageReviewing
 		}
+	}
+	// Opening a pull request needs room among the open ones.
+	if t.Status == TaskLanding && t.UsesPRs() && !t.PROpen() {
+		return StagePROpen
 	}
 	if stage := stageOf(v, t); slices.Contains(limitStages, stage) {
 		return stage
@@ -79,7 +83,9 @@ func holdings(v *Snapshot) held {
 	for i := range v.Tasks {
 		t := &v.Tasks[i]
 		stage := placeStage(v, *t)
-		if stage == "" || t.Place == "" || !later(stage, t.Place) {
+		// A pull request GitHub says is ready moved on outside the team, so
+		// its task moves with it.
+		if stage == "" || t.Place == "" || !later(stage, t.Place) || (t.Status == TaskAwaiting && t.UsesPRs()) {
 			t.Place = stage
 		}
 		p := project(v, t.ProjectID)

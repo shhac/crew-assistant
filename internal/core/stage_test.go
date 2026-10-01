@@ -7,6 +7,7 @@ import (
 )
 
 func TestATaskSitsOnTheBoardWhereTheLoopHasGotTo(t *testing.T) {
+	prs := &Playbook{Land: LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r"}}
 	team := []Role{{Name: "Implementer", Kinds: []string{RoleImplementer}}, {Name: "Reviewer", Kinds: []string{RoleReviewer}}, {Name: "QA", Kinds: []string{RoleQA}}}
 	noQA := team[:2]
 	drafted := []Revision{{N: 1}, {N: 2}}
@@ -40,6 +41,15 @@ func TestATaskSitsOnTheBoardWhereTheLoopHasGotTo(t *testing.T) {
 		"with the designer":          {Task{Status: TaskDesigning, Roles: team, Design: []DesignRequest{{Step: TaskWriting}}}, StageDesigning},
 		"failed while designing":     {Task{Status: TaskWaiting, DecisionID: "failure", ResumeStatus: TaskDesigning, Roles: team}, StageDesigning},
 		"design question":            {Task{Status: TaskWaiting, DecisionID: "question", Roles: team, Design: []DesignRequest{{Step: TaskResearching, Decision: "question"}}}, StageResearching},
+		// A task landing through a pull request stands where its pull
+		// request has got.
+		"PR still to open":        {Task{Status: TaskLanding, Playbook: prs}, StagePROpening},
+		"PR opening approval":     {Task{Status: TaskWaiting, DecisionID: "delivery", Playbook: prs, Roles: team, Revisions: drafted}, StagePROpening},
+		"PR open":                 {Task{Status: TaskAwaiting, Playbook: prs, Proposal: &Proposal{Number: 7, Observed: &Observed{Checks: "PENDING"}}}, StagePROpen},
+		"PR ready":                {Task{Status: TaskAwaiting, Playbook: prs, Proposal: &Proposal{Number: 7, Observed: &Observed{Checks: "SUCCESS", Ready: true}}}, StageReady},
+		"PR update to approve":    {Task{Status: TaskWaiting, DecisionID: "update", Playbook: prs, Proposal: &Proposal{Number: 7}, Roles: team, Revisions: drafted}, StagePROpen},
+		"answering the PR":        {Task{Status: TaskWriting, Playbook: prs, Proposal: &Proposal{Number: 7, Answering: true}, Roles: team}, StagePROpen},
+		"revising with a PR open": {Task{Status: TaskWriting, Playbook: prs, Proposal: &Proposal{Number: 7}, Roles: team}, StageImplementing},
 	} {
 		if got := stageOf(&Snapshot{Decisions: decisions}, tc.task); got != tc.want {
 			t.Errorf("%s: stage %q, want %q", name, got, tc.want)

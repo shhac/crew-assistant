@@ -245,7 +245,41 @@ type Proposal struct {
 	// ChecksFor the commit whose failing checks were.
 	Seen      time.Time `json:"seen,omitzero"`
 	ChecksFor string    `json:"checks_for,omitempty"`
+	// PushedAt is when Pushed went up, so checks that haven't started yet
+	// aren't taken for none at all.
+	PushedAt time.Time `json:"pushed_at,omitzero"`
+	// Observed is what the loop last saw of the open pull request.
+	Observed *Observed `json:"observed,omitempty"`
+	// Answering is an implementer's round on what the pull request asked
+	// for; it ends when the task leaves writing.
+	Answering bool `json:"answering,omitempty"`
 }
+
+// Observed is the state of an open pull request as the loop last saw it.
+type Observed struct {
+	// Checks is SUCCESS, FAILURE, PENDING or NONE.
+	Checks string `json:"checks"`
+	// Review is GitHub's review decision, empty where the repository asks
+	// for none.
+	Review     string `json:"review,omitempty"`
+	Unresolved int    `json:"unresolved,omitempty"`
+	// Conflicting is a pull request that can't merge into its base as it is.
+	Conflicting bool `json:"conflicting,omitempty"`
+	// Ready is approved where review is asked for, green, every thread
+	// resolved and mergeable: ready to land.
+	Ready bool `json:"ready,omitempty"`
+	// Ignored counts feedback from people outside the repository, which
+	// the team never acts on.
+	Ignored int       `json:"ignored,omitempty"`
+	At      time.Time `json:"at"`
+}
+
+// PROpen reports a task with a pull request open for it.
+func (t Task) PROpen() bool { return t.Proposal != nil && t.Proposal.Number > 0 }
+
+// UsesPRs reports a task that lands through a pull request, as its team had
+// it when it started.
+func (t Task) UsesPRs() bool { return t.Playbook != nil && t.Playbook.Land.PullRequests }
 
 // Delivering is a landing under way: the revision going out, and when.
 type Delivering struct {
@@ -519,6 +553,9 @@ func (s *Service) updateTask(ctx context.Context, id string, fn func(*Snapshot, 
 			return err
 		}
 		t.UpdatedAt = s.now().UTC()
+		if t.Status != TaskWriting && t.Proposal != nil {
+			t.Proposal.Answering = false
+		}
 		if t.Finished() {
 			cancelTaskWakes(v, t.ID)
 			closeMessages(t, t.UpdatedAt)

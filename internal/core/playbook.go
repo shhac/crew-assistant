@@ -138,7 +138,7 @@ type Playbook struct {
 
 // limitStages are the stages of the board a project can limit, in board
 // order: each working stage, up to landing.
-var limitStages = []string{StageResearching, StageDesigning, StageImplementing, StageReviewing, StageQA, StageReady}
+var limitStages = []string{StageResearching, StageDesigning, StageImplementing, StageReviewing, StageQA, StagePROpening, StagePROpen, StageReady}
 
 // stageRole maps each stage to the role providing its default capacity.
 var stageRole = map[string]string{
@@ -284,7 +284,7 @@ func (p Playbook) Validate() error {
 			return fmt.Errorf("stage_limits: %q is not a stage that can have a limit; use one of %s", stage, strings.Join(limitStages, ", "))
 		}
 		if limit < 0 || limit > maxActiveLimit {
-			return fmt.Errorf("stage_limits: %s must be between 1 and %d, or 0 for the role seat count (no limit for Ready)", stage, maxActiveLimit)
+			return fmt.Errorf("stage_limits: %s must be between 1 and %d, or 0 for the role seat count (no limit for the pull request stages and Ready)", stage, maxActiveLimit)
 		}
 	}
 	return nil

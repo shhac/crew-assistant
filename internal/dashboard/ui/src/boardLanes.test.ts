@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardColumns, doneLabel, readyLabel } from "./boardLanes";
+import { boardColumns, boardRows, doneLabel, readyLabel } from "./boardLanes";
 import type { Playbook, Project, Task } from "./api";
 
 const writing: Playbook = {
@@ -133,5 +133,22 @@ describe("the board's lanes", () => {
     const withDee = task({ status: "designing", stage: "designing" });
     expect(hasLane(project(code()), [withDee], "designing")).toBe(true);
     expect(hasLane(project(code()), [], "designing")).toBe(false);
+  });
+});
+
+describe("the board's rows", () => {
+  const rows = (p: Project, tasks: Task[] = []) =>
+    boardRows(p, tasks).map((r) => r.label);
+  it("shows the pull request rows only where pull requests are on, in the order work reaches them", () => {
+    expect(rows(project(code()))).toEqual(["Ready to land"]);
+    expect(
+      rows(
+        project(code({ pull_requests: true, target: "main", github: "o/r" })),
+      ),
+    ).toEqual(["PR to open", "PR open", "Ready to land"]);
+    // A task that started with pull requests keeps its row after they're off.
+    expect(
+      rows(project(code()), [task({ status: "awaiting", stage: "pr_open" })]),
+    ).toEqual(["PR open", "Ready to land"]);
   });
 });

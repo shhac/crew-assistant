@@ -556,3 +556,49 @@ func TestStageLimitsAreForWorkingStages(t *testing.T) {
 		}
 	}
 }
+
+// Opening a pull request needs room among the open ones; one GitHub says is
+// ready moves on to Ready by itself and makes room.
+func TestALimitOnOpenPullRequestsHoldsTheNextOpening(t *testing.T) {
+	s, _ := fixture(t)
+	p := staged(t, s, newProject(t, s), 0, map[string]int{StagePROpen: 1})
+	tasks := queueAll(t, s, p, "A", "B")
+	claimed(t, s)
+	for i, task := range tasks {
+		if _, err := s.UpdateTask(testContext, task.ID, func(t *Task, p *Project) (string, error) {
+			pinned := *p.Playbook
+			pinned.Land = LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r"}
+			t.Playbook = &pinned
+			t.Claims, t.Revisions, t.Place = nil, []Revision{{N: 1}}, StagePROpening
+			t.Status = TaskLanding
+			if i == 0 {
+				t.Status, t.Proposal = TaskAwaiting, &Proposal{Number: 7, Observed: &Observed{Checks: "PENDING"}}
+			}
+			return "", nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claimed(t, s)
+	if got := onBoard(t, s, tasks[0].ID); got.Place != StagePROpen || got.Stage != StagePROpen {
+		t.Fatalf("A's open pull request is not in PR open: %+v", got)
+	}
+	if w := waiting(t, s, tasks[1].ID); w == nil || w.Kind != WaitStage || w.Stage != StagePROpen || w.Limit != 1 {
+		t.Fatalf("B opened a pull request past the limit: %+v", w)
+	}
+	if got := onBoard(t, s, tasks[1].ID); got.Stage != StagePROpening {
+		t.Fatalf("B waits in %q", got.Stage)
+	}
+	if _, err := s.UpdateTask(testContext, tasks[0].ID, func(t *Task, _ *Project) (string, error) {
+		t.Proposal.Observed = &Observed{Checks: "SUCCESS", Ready: true}
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := claimed(t, s); !slices.Contains(got, "B: landing by ") {
+		t.Fatalf("B did not go on to open its pull request: %v", got)
+	}
+	if got := onBoard(t, s, tasks[0].ID); got.Stage != StageReady {
+		t.Fatalf("A is in %q, not Ready", got.Stage)
+	}
+}

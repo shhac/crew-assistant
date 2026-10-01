@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  prWords,
   activeCap,
   capLine,
   stageLimit,
@@ -649,5 +650,68 @@ describe("stage defaults", () => {
     expect(stageLimit(pb, "ready")).toBe(0);
     expect(stageLimit({ ...pb, roles: [] }, "qa")).toBe(0);
     expect(stageLimit(undefined, "implementing")).toBe(0);
+  });
+});
+
+describe("a task landing through a pull request", () => {
+  const prs = {
+    template: "code",
+    medium: "git",
+    roles: [{ name: "Implementer", kinds: ["implementer"], engine: "claude" }],
+    max_rounds: 3,
+    deliver: "owner",
+    land: { pull_requests: true, target: "main", github: "o/r" },
+  } satisfies Playbook;
+  const pr = (t: Partial<Task>): Task => ({
+    id: "t",
+    project_id: "p",
+    objective: "o",
+    criteria: [],
+    status: "landing",
+    stage: "pr_opening",
+    round: 1,
+    revisions: [],
+    verdicts: [],
+    playbook: prs,
+    ...t,
+  });
+  it("says how far its pull request has got", () => {
+    expect(requestStep(pr({}))).toBe("Opening a pull request");
+    expect(requestStep(pr({ proposal: { branch: "b", number: 7 } }))).toBe(
+      "Updating pull request #7",
+    );
+    expect(
+      requestStep(
+        pr({
+          status: "awaiting",
+          proposal: {
+            branch: "b",
+            number: 7,
+            observed: {
+              checks: "FAILURE",
+              review: "CHANGES_REQUESTED",
+              unresolved: 2,
+              at: "",
+            },
+          },
+        }),
+      ),
+    ).toBe(
+      "Pull request #7: checks failed, changes requested, 2 unresolved threads",
+    );
+    expect(
+      requestStep(
+        pr({
+          status: "writing",
+          proposal: { branch: "b", number: 7, answering: true },
+        }),
+      ),
+    ).toBe("Implementer answering pull request #7");
+    expect(prWords({ checks: "SUCCESS", ready: true, at: "" })).toBe(
+      "ready to land",
+    );
+    expect(prWords({ checks: "NONE", conflicting: true, at: "" })).toBe(
+      "no checks, conflicts with its base",
+    );
   });
 });

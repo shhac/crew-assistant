@@ -3,7 +3,7 @@ import { Folders } from "./ProjectFolders";
 import { RunRecipeSettings } from "./RunRecipe";
 import { LandingSettings } from "./ProjectLanding";
 import { TeamSettings } from "./TeamSettings";
-import { boardColumns, readyLabel } from "./boardLanes";
+import { boardColumns, boardRows } from "./boardLanes";
 import { isCode, stageLimit, stageRole } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
 import {
@@ -15,7 +15,6 @@ import {
   type Member,
   type Playbook,
   type Project,
-  type Stage,
 } from "./api";
 
 const signing: Record<string, string> = {
@@ -94,7 +93,7 @@ const limitStages = (project: Project) => [
   ...boardColumns(project, [])
     .flatMap((c) => c.lanes)
     .filter((l) => l.stage !== "todo" && l.stage !== "triage"),
-  { stage: "ready" as Stage, label: readyLabel(project) },
+  ...boardRows(project, []),
 ];
 
 /** Stage capacities and the optional overall limit. */

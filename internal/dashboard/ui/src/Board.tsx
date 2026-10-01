@@ -8,7 +8,7 @@ import {
   requestStep,
   stageLimit,
 } from "./stages";
-import { boardColumns, doneLabel, readyLabel } from "./boardLanes";
+import { boardColumns, boardRows, doneLabel } from "./boardLanes";
 import { AskForm } from "./AskForm";
 import { CardList } from "./BoardCard";
 import { TodoQueue } from "./TodoQueue";
@@ -27,7 +27,7 @@ export function Board({
   const tasks = projectTasks(project, state.tasks);
   const columns = boardColumns(project, tasks);
   const at = (stage: Stage) => tasks.filter((t) => t.stage === stage);
-  const ready = at("ready");
+  const rows = boardRows(project, tasks);
   const done = latestFirst(at("done"));
   const stopped = at("stopped");
   const cards = (list: Task[]) => (
@@ -57,18 +57,21 @@ export function Board({
       />
     );
   };
-  // With a limit, Ready always shows its count against it, even empty.
-  const readyLimited = stageLimit(project.playbook, "ready") > 0;
   const cap = capLine(project, state.tasks);
   return (
     <div className="board-page">
       <AskForm project={project} refresh={refresh} />
-      {(ready.length > 0 || readyLimited) && (
-        <section className="board-ready" aria-label={readyLabel(project)}>
-          {title("ready", readyLabel(project), ready.length)}
-          {cards(ready)}
-        </section>
-      )}
+      {rows.map(({ stage, label }) => {
+        const list = at(stage);
+        // With a limit, a row always shows its count against it, even empty.
+        if (!list.length && !stageLimit(project.playbook, stage)) return null;
+        return (
+          <section key={stage} className="board-ready" aria-label={label}>
+            {title(stage, label, list.length)}
+            {cards(list)}
+          </section>
+        );
+      })}
       {tasks.length > 0 && cap && (
         <p className="board-cap muted small">
           {cap} · <a href={projectHref(project.id, "config")}>Tasks at once</a>

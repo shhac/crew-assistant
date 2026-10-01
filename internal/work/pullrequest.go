@@ -44,7 +44,32 @@ func (lp *Loop) landPR(ctx context.Context, t core.Task, m gitMedium) error {
 	if err != nil {
 		return lp.landingFailed(ctx, t, r, err)
 	}
+	prop.Observed = observed(pr, prop, time.Now().UTC())
+	if err := lp.saveProposal(ctx, t.ID, prop, ""); err != nil {
+		return err
+	}
 	return lp.reactTo(ctx, t, m, r, prop, pr)
+}
+
+// checksGrace is how long after a push a pull request with no checks is
+// taken to have checks still to start, not none at all.
+const checksGrace = 3 * time.Minute
+
+// observed is what the loop records of a pull request it looked at.
+func observed(pr github.PR, prop core.Proposal, now time.Time) *core.Observed {
+	checks := pr.CheckState()
+	if checks == "NONE" && now.Sub(prop.PushedAt) < checksGrace {
+		checks = "PENDING"
+	}
+	return &core.Observed{
+		Checks:      checks,
+		Review:      pr.ReviewDecision,
+		Unresolved:  pr.Unresolved(),
+		Conflicting: pr.Mergeable == "CONFLICTING" || pr.MergeStateStatus == "DIRTY",
+		Ready:       pr.Ready() && checks != "PENDING",
+		Ignored:     len(untrusted(pr, prop)),
+		At:          now,
+	}
 }
 
 // wokenRound gives the implementer a round when a wake it asked for has come,
@@ -63,6 +88,9 @@ func (lp *Loop) wokenRound(ctx context.Context, t core.Task) (bool, error) {
 		}
 		_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.NextRound()
+			if t.Proposal != nil {
+				t.Proposal.Answering = true
+			}
 			t.Status, t.Detail = core.TaskWriting, w.Event
 			return "", nil
 		})
@@ -122,7 +150,7 @@ func (lp *Loop) publish(ctx context.Context, t core.Task, m gitMedium, r core.Re
 	if err != nil {
 		return true, lp.landingFailed(ctx, t, r, err)
 	}
-	prop.Pushed = r.Ref
+	prop.Pushed, prop.PushedAt = r.Ref, time.Now().UTC()
 	return false, lp.saveProposal(ctx, t.ID, *prop, "")
 }
 
@@ -149,6 +177,9 @@ func (lp *Loop) openPR(ctx context.Context, t core.Task, m gitMedium, r core.Rev
 // catch up with a moved base, merge when ready, or wait.
 func (lp *Loop) reactTo(ctx context.Context, t core.Task, m gitMedium, r core.Revision, prop core.Proposal, pr github.PR) error {
 	land := m.playbook.Land
+	if prop.Observed == nil {
+		prop.Observed = observed(pr, prop, time.Now().UTC())
+	}
 	switch {
 	case pr.State == "MERGED":
 		landed := r
@@ -170,7 +201,7 @@ func (lp *Loop) reactTo(ctx context.Context, t core.Task, m gitMedium, r core.Re
 	if feedback := prFeedback(pr, prop, r); len(feedback) > 0 {
 		return lp.answerPR(ctx, t, r, pr, prop, feedback)
 	}
-	if pr.Ready() {
+	if prop.Observed.Ready {
 		if _, err := lp.updateOpen(ctx, t.ID, func(current *core.Task, _ *core.Project) (string, error) {
 			if why := core.BlockerReasons(*current); len(why) > 0 && current.Delivering == nil {
 				return "", errDeliveryBlocked
@@ -210,13 +241,30 @@ func (lp *Loop) saveProposal(ctx context.Context, taskID string, prop core.Propo
 	return err
 }
 
-// prFeedback is what arrived since the team last looked: reviews and
-// comments that ask for something, and checks that failed on the latest
+// ownPost marks what the loop posts on a pull request, so the team never
+// takes its own replies for feedback.
+const ownPost = "<!-- crew-assistant -->"
+
+// untrusted is feedback since the team last looked from people the
+// repository's owner didn't let in: shown, never acted on.
+func untrusted(pr github.PR, prop core.Proposal) []github.Feedback {
+	var out []github.Feedback
+	for _, f := range pr.FeedbackSince(prop.Seen) {
+		if !f.Trusted() && !strings.Contains(f.Body, ownPost) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// prFeedback is what arrived since the team last looked: reviews, comments
+// and review-thread comments that ask for something, from the repository's
+// owner, members and collaborators, and checks that failed on the latest
 // revision. An approval asks for nothing.
 func prFeedback(pr github.PR, prop core.Proposal, r core.Revision) []core.Verdict {
 	var out []core.Verdict
 	for _, f := range pr.FeedbackSince(prop.Seen) {
-		if f.Kind == "review (approved)" && strings.TrimSpace(f.Body) == "" {
+		if !f.Trusted() || strings.Contains(f.Body, ownPost) || (f.Kind == "review (approved)" && strings.TrimSpace(f.Body) == "") {
 			continue
 		}
 		out = append(out, core.Verdict{
@@ -227,7 +275,7 @@ func prFeedback(pr github.PR, prop core.Proposal, r core.Revision) []core.Verdic
 			Outcome:  core.VerdictRevise,
 			Summary:  strings.ToUpper(f.Kind[:1]) + f.Kind[1:] + " on the pull request.",
 			Outside:  true,
-			Findings: []core.Finding{{Note: text.Clip(f.Body, 1500)}},
+			Findings: []core.Finding{feedbackFinding(f)},
 		})
 	}
 	if pr.CheckState() == "FAILURE" && pr.HeadRefOid == r.Ref && prop.ChecksFor != r.Ref {
@@ -240,6 +288,16 @@ func prFeedback(pr github.PR, prop core.Proposal, r core.Revision) []core.Verdic
 		out = append(out, core.Verdict{Ref: pr.HeadRefOid, Role: "CI", Outcome: core.VerdictRevise, Summary: "Checks failed on the pull request.", Findings: findings})
 	}
 	return out
+}
+
+// feedbackFinding is one piece of feedback as the implementer reads it; a
+// thread comment names its place in the code and the thread to answer.
+func feedbackFinding(f github.Feedback) core.Finding {
+	finding := core.Finding{Note: text.Clip(f.Body, 1500)}
+	if f.Thread != "" {
+		finding.Criterion = fmt.Sprintf("%s:%d (thread %s)", f.Path, f.Line, f.Thread)
+	}
+	return finding
 }
 
 // answerPR gives the team another round with the pull request's feedback. It
@@ -258,6 +316,7 @@ func (lp *Loop) answerPR(ctx context.Context, t core.Task, r core.Revision, pr g
 			v.Revision, v.BriefVersion, v.At = r.N, p.Brief.Version, now
 			t.Verdicts = append(t.Verdicts, v)
 		}
+		prop.Answering = true
 		t.Proposal = &prop
 		t.NextRound()
 		t.Status, t.Detail = core.TaskWriting, fmt.Sprintf("Answering pull request #%d", prop.Number)
@@ -276,7 +335,7 @@ func (lp *Loop) awaitPR(ctx context.Context, t core.Task, repo string, pr github
 	}
 	have := map[string]bool{}
 	for _, w := range snap.Wakes {
-		if w.TaskID == t.ID && w.Owner == core.WakeLoop && w.Status == core.WakeWaiting && w.Target == target {
+		if w.TaskID == t.ID && w.Owner == core.WakeLoop && w.Status == core.WakeWaiting && (w.Target == target || w.On == core.WakeOnTime) {
 			have[w.On] = true
 		}
 	}
@@ -285,6 +344,14 @@ func (lp *Loop) awaitPR(ctx context.Context, t core.Task, repo string, pr github
 			continue
 		}
 		if _, err = lp.Core.RegisterWake(ctx, core.WakeInput{Owner: core.WakeLoop, TaskID: t.ID, ProjectID: t.ProjectID, On: on, Target: target, Baseline: baseline, Timeout: core.MaxWakeFor}); err != nil {
+			return err
+		}
+	}
+	// Checks that may yet start after a push change nothing GitHub reports,
+	// so the loop looks again once they've had the time to.
+	if pr.CheckState() == "NONE" && t.Proposal != nil && time.Since(t.Proposal.PushedAt) < checksGrace && !have[core.WakeOnTime] {
+		at := t.Proposal.PushedAt.Add(checksGrace).UTC().Format(time.RFC3339)
+		if _, err = lp.Core.RegisterWake(ctx, core.WakeInput{Owner: core.WakeLoop, TaskID: t.ID, ProjectID: t.ProjectID, On: core.WakeOnTime, Target: at, Baseline: "not yet", Timeout: checksGrace + time.Minute}); err != nil {
 			return err
 		}
 	}
@@ -301,6 +368,8 @@ func prChecksValue(pr github.PR) string {
 	return pr.CheckState() + "@" + text.Short(pr.HeadRefOid) + "/" + pr.MergeStateStatus + "/" + pr.State
 }
 
+// prReviewValue changes with any review, comment or thread comment, the
+// review decision, or a thread resolved or reopened.
 func prReviewValue(pr github.PR) string {
-	return pr.Latest().UTC().Format(time.RFC3339) + "/" + pr.ReviewDecision
+	return fmt.Sprintf("%s/%s/%d", pr.Latest().UTC().Format(time.RFC3339), pr.ReviewDecision, pr.Unresolved())
 }

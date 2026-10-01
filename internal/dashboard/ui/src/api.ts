@@ -322,6 +322,8 @@ export type Stage =
   | "implementing"
   | "reviewing"
   | "qa"
+  | "pr_opening"
+  | "pr_open"
   | "ready"
   | "done"
   | "stopped";
@@ -489,6 +491,22 @@ export interface Proposal {
   branch: string;
   number?: number;
   url?: string;
+  /** What the loop last saw of the open pull request. */
+  observed?: Observed;
+  /** The implementer's round on what the pull request asked for. */
+  answering?: boolean;
+}
+/** An open pull request as the loop last saw it. */
+export interface Observed {
+  checks: "SUCCESS" | "FAILURE" | "PENDING" | "NONE" | (string & {});
+  /** GitHub's review decision; empty where the repository asks for none. */
+  review?: string;
+  unresolved?: number;
+  conflicting?: boolean;
+  ready?: boolean;
+  /** Feedback from people outside the repository, never acted on. */
+  ignored?: number;
+  at: string;
 }
 /** Who or what a task's ready step waits for. */
 export interface Wait {

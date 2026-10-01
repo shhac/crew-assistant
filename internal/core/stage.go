@@ -13,9 +13,14 @@ const (
 	StageImplementing = "implementing"
 	StageReviewing    = "reviewing"
 	StageQA           = "qa"
-	StageReady        = "ready"
-	StageDone         = "done"
-	StageStopped      = "stopped"
+	// StagePROpening and StagePROpen are a task landing through a pull
+	// request: its checks passed and the pull request is still to open, and
+	// open but not yet ready to land.
+	StagePROpening = "pr_opening"
+	StagePROpen    = "pr_open"
+	StageReady     = "ready"
+	StageDone      = "done"
+	StageStopped   = "stopped"
 )
 
 func deriveStages(v *Snapshot) {
@@ -94,13 +99,16 @@ func stageOf(v *Snapshot, t Task) string {
 	case TaskDesigning:
 		return StageDesigning
 	case TaskWriting:
+		if t.Proposal != nil && t.Proposal.Answering {
+			return StagePROpen
+		}
 		return StageImplementing
 	case TaskReviewing, TaskDeciding:
 		return checkStage(v, t)
 	case TaskWaiting:
 		return waitingStage(v, t)
 	case TaskLanding, TaskAwaiting:
-		return StageReady
+		return landingStage(t)
 	case TaskDelivered, TaskLanded:
 		return StageDone
 	case TaskStopped:
@@ -211,6 +219,28 @@ func lastCheck(t Task) string {
 	return StageReviewing
 }
 
+// landingStage is where a task on its way out stands: Ready, or for one
+// landing through a pull request, how far the pull request has got.
+func landingStage(t Task) string {
+	switch {
+	case !t.UsesPRs():
+		return StageReady
+	case !t.PROpen():
+		return StagePROpening
+	case t.Proposal.Observed != nil && t.Proposal.Observed.Ready:
+		return StageReady
+	}
+	return StagePROpen
+}
+
+// passedStage is the stage a task enters once every check passed it.
+func passedStage(t Task) string {
+	if t.UsesPRs() && !t.PROpen() {
+		return StagePROpening
+	}
+	return landingStage(t)
+}
+
 // waitingStage keeps a task that needs the owner in the column it stopped
 // in: approval is the last step before landing; a question stays with
 // whoever asked it, a design question with the step that asked for design
@@ -222,7 +252,12 @@ func waitingStage(v *Snapshot, t Task) string {
 		kind = d.Kind
 	}
 	switch kind {
-	case DecisionDelivery, DecisionUpdate:
+	case DecisionDelivery:
+		return landingStage(t)
+	case DecisionUpdate:
+		if t.UsesPRs() {
+			return StagePROpen
+		}
 		return StageReady
 	case DecisionFailure:
 		if t.ResumeStatus == "" || t.ResumeStatus == TaskWaiting {
