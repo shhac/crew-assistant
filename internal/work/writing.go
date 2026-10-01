@@ -2,10 +2,8 @@ package work
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -190,75 +188,4 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 		h.Seat = &r
 	}
 	return lp.handOff(ctx, t, m, h)
-}
-
-// parsePRText reads the implementer's ```pr block: the title and description
-// its pull request opens with, or is rewritten to. A problem with it is told
-// to the implementer in its next round, as a wake block's is.
-func parsePRText(block string) (*core.PRText, string) {
-	if block == "" {
-		return nil, ""
-	}
-	var in core.PRText
-	if err := json.Unmarshal([]byte(block), &in); err != nil {
-		return nil, "the pr block was not valid JSON: " + err.Error()
-	}
-	in.Title = strings.Join(strings.Fields(in.Title), " ")
-	in.Body = strings.TrimSpace(in.Body)
-	if in.Title == "" || in.Body == "" {
-		return nil, `the pr block needs a "title" and a "body"`
-	}
-	in.Title, in.Body = text.Clip(in.Title, 120), text.Clip(in.Body, 6000)
-	return &in, ""
-}
-
-// prHandTo is the teammate an implementer hands a pull request's question
-// to, and what it asks them.
-type prHandTo struct {
-	To       string `json:"to"`
-	Question string `json:"question"`
-}
-
-// parsePRReply reads the implementer's ```pr-reply block: replies on the
-// pull request, in a thread or its conversation, threads its pushed draft
-// resolves, and a teammate to hand a question to. Replies wait to be posted
-// until the draft they came with is pushed.
-func parsePRReply(block, by string, open bool, revision int) ([]core.PRPost, *prHandTo, []string) {
-	if block == "" {
-		return nil, nil, nil
-	}
-	if !open {
-		return nil, nil, []string{"the pr-reply block was for a pull request that isn't open"}
-	}
-	var in struct {
-		Replies []struct {
-			Thread string `json:"thread"`
-			Body   string `json:"body"`
-		} `json:"replies"`
-		Resolve []string  `json:"resolve"`
-		HandTo  *prHandTo `json:"hand_to"`
-	}
-	if err := json.Unmarshal([]byte(block), &in); err != nil {
-		return nil, nil, []string{"the pr-reply block was not valid JSON: " + err.Error()}
-	}
-	var posts []core.PRPost
-	var problems []string
-	for _, r := range in.Replies {
-		body := strings.TrimSpace(r.Body)
-		if body == "" {
-			problems = append(problems, "a pr-reply reply had no body")
-			continue
-		}
-		posts = append(posts, core.PRPost{Thread: strings.TrimSpace(r.Thread), Body: text.Clip(body, 4000), By: by, Revision: revision})
-	}
-	for _, thread := range in.Resolve {
-		if thread = strings.TrimSpace(thread); thread != "" {
-			posts = append(posts, core.PRPost{Thread: thread, Resolve: true, By: by, Revision: revision})
-		}
-	}
-	if h := in.HandTo; h != nil && (strings.TrimSpace(h.To) == "" || strings.TrimSpace(h.Question) == "") {
-		problems = append(problems, `a pr-reply hand_to needs "to" and "question"`)
-		in.HandTo = nil
-	}
-	return posts, in.HandTo, problems
 }

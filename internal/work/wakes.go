@@ -99,22 +99,6 @@ func (lp *Loop) OpenWakes(ctx context.Context) ([]core.Wake, error) {
 	return out, nil
 }
 
-// viewPR reads a pull request named as owner/name#number.
-func (lp *Loop) viewPR(ctx context.Context, target string) (github.PR, error) {
-	ref, err := github.ParsePRRef(target)
-	if err != nil {
-		return github.PR{}, err
-	}
-	return lp.github.View(ctx, ref.Repo, ref.Number)
-}
-
-func prValue(on string, pr github.PR) string {
-	if on == core.WakeOnReview {
-		return prReviewValue(pr)
-	}
-	return prChecksValue(pr)
-}
-
 // wakeTime reads a time as RFC 3339 or as a duration from now.
 func wakeTime(target string, now time.Time) (time.Time, error) {
 	if at, err := time.Parse(time.RFC3339, target); err == nil {
@@ -225,19 +209,6 @@ func (lp *Loop) observe(ctx context.Context, snap core.Snapshot, w core.Wake, no
 	return firing{}, false
 }
 
-// prEvent says what changed on a pull request, in words.
-func prEvent(w core.Wake, value string) string {
-	state, _, _ := strings.Cut(value, "@")
-	if w.On != core.WakeOnChecks {
-		return fmt.Sprintf("New review activity on pull request %s", w.Target)
-	}
-	words := map[string]string{"SUCCESS": "passed", "FAILURE": "failed", "PENDING": "are running", "NONE": "are gone"}
-	if said, ok := words[state]; ok {
-		return fmt.Sprintf("Checks %s on pull request %s", said, w.Target)
-	}
-	return fmt.Sprintf("Checks on pull request %s are now %s", w.Target, strings.ToLower(state))
-}
-
 // wakeTask sends a task asleep on something outside the team back to
 // landing, to look again.
 func (lp *Loop) wakeTask(ctx context.Context, taskID, event string) error {
@@ -263,22 +234,6 @@ func (lp *Loop) wakeTask(ctx context.Context, taskID, event string) error {
 type wakeBlock struct {
 	WakeMeWhen []WakeRequest `json:"wake_me_when"`
 	Cancel     []string      `json:"cancel"`
-}
-
-// splitBlock takes the last fenced block of a kind, such as ```wake, off a
-// role's reply, returning the reply without it and the block's contents.
-func splitBlock(text, kind string) (string, string) {
-	fence := "```" + kind
-	start := strings.LastIndex(text, fence+"\n")
-	if start < 0 {
-		return text, ""
-	}
-	rest := text[start+len(fence):]
-	end := strings.Index(rest, "```")
-	if end < 0 {
-		return text, ""
-	}
-	return strings.TrimSpace(text[:start] + rest[end+3:]), strings.TrimSpace(rest[:end])
 }
 
 // applyWakeBlock registers and cancels the implementer's wakes. Problems are
@@ -337,10 +292,7 @@ func (lp *Loop) wakePrompt(ctx context.Context, t core.Task, woken []core.Wake) 
 		b.WriteString("\nYour last wake block had problems: " + strings.Join(t.WakeErrors, "; ") + ".\n")
 	}
 	if t.UsesPRs() {
-		if proposed(t) {
-			b.WriteString("\nIts pull request is open. Feedback on it reaches you as findings; a review thread names its id. Answer on the pull request by ending your reply with a pr-reply block: replies go in a thread or, without one, in its conversation, and are posted once your draft is pushed; resolve a thread only when a draft you made fixes it. You can hand a question to a teammate, a reviewer, QA or the PM, whose answer is posted there too; the PM can also ask the owner. Feedback that needs nothing from you needs no block.\n```pr-reply\n{\"replies\": [{\"thread\": \"thread id, or empty for the conversation\", \"body\": \"...\"}], \"resolve\": [\"thread id\"], \"hand_to\": {\"to\": \"QA\", \"question\": \"...\"}}\n```\n")
-		}
-		b.WriteString("\nThis change goes out as a GitHub pull request. End your reply with a pr block giving its title, under 72 characters, and its description, for a reviewer: what changed, why, and how it was checked. Give it again whenever a draft changes what it should say; an open pull request is updated to match.\n```pr\n{\"title\": \"...\", \"body\": \"...\"}\n```\n")
+		b.WriteString(prBlockGuide(t))
 		b.WriteString("\nIf something outside this change matters later, you can end your reply with a wake block and be woken in a later round, with your own note:\n```wake\n{\"wake_me_when\": [{\"on\": \"pr_checks\", \"target\": \"this\", \"match\": \"\", \"prompt\": \"what to do then\", \"timeout\": \"2h\"}], \"cancel\": []}\n```\non can be pr_checks or pr_review (target this), branch (a branch name), time (RFC 3339 or a duration) or task (a task id). Cancel handles you no longer need.\n")
 	}
 	return b.String(), nil
