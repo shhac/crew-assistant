@@ -929,3 +929,63 @@ func TestAPostedReplyIsNotPostedAgainWhenFeedbackArrivesInTheSameLook(t *testing
 		t.Fatalf("outbox %+v", task.Proposal.Outbox)
 	}
 }
+
+// Replies that came with a draft wait for it to be pushed, even when a
+// teammate's answer is posted first, so a thread is never resolved for a fix
+// a reviewer then turns down.
+func TestRepliesWithADraftWaitForItsPushEvenWhenQAAnswersFirst(t *testing.T) {
+	s := newPRScenario(t, 4)
+	s.open(t)
+	snap, _ := s.a.Core.Snapshot(s.ctx)
+	task, _ := snap.FindTask(s.id)
+	if _, err := s.a.Core.UpdateTask(s.ctx, s.id, func(t *core.Task, _ *core.Project) (string, error) {
+		t.Post(core.PRPost{Thread: "T1", Body: "Fixed in the next draft.", By: "Implementer", Revision: len(t.Revisions) + 1},
+			core.PRPost{Thread: "T1", Resolve: true, By: "Implementer", Revision: len(t.Revisions) + 1},
+			core.PRPost{Body: "It passes on a clean clone.", By: "QA"})
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.a.postOutbox(s.ctx, s.id, "o/r", task.Proposal.Number); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.gh.postsOf("comment")) != 1 || len(s.gh.postsOf("reply")) != 0 || len(s.gh.postsOf("resolve")) != 0 {
+		t.Fatalf("posted before the draft was pushed: comments %v replies %v resolves %v", s.gh.postsOf("comment"), s.gh.postsOf("reply"), s.gh.postsOf("resolve"))
+	}
+	if task = s.current(t); len(task.Proposal.Outbox) != 2 {
+		t.Fatalf("outbox %+v", task.Proposal.Outbox)
+	}
+}
+
+// A reply GitHub keeps refusing, such as one to a thread that doesn't exist,
+// is given up after a few looks rather than holding the pull request.
+func TestAReplyGitHubKeepsRefusingIsGivenUp(t *testing.T) {
+	s := newPRScenario(t, 2)
+	s.open(t)
+	run := s.a.github.Run
+	s.a.github.Run = func(ctx context.Context, args ...string) ([]byte, error) {
+		if args[0] == "api" && strings.Contains(args[3], "addPullRequestReviewThreadReply") {
+			return nil, fmt.Errorf("no such thread")
+		}
+		return run(ctx, args...)
+	}
+	if _, err := s.a.Core.UpdateTask(s.ctx, s.id, func(t *core.Task, _ *core.Project) (string, error) {
+		t.Post(core.PRPost{Thread: "T9", Body: "Answered.", By: "Implementer"}, core.PRPost{Body: "And this.", By: "Implementer"})
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for look := 1; look <= maxPostFailures; look++ {
+		if err := s.a.postOutbox(s.ctx, s.id, "o/r", 7); err != nil {
+			t.Fatal(err)
+		}
+		task := s.current(t)
+		if look < maxPostFailures && (len(task.Proposal.Outbox) != 2 || task.Proposal.Outbox[0].Failures != look) {
+			t.Fatalf("look %d: outbox %+v", look, task.Proposal.Outbox)
+		}
+	}
+	task := s.current(t)
+	if len(task.Proposal.Outbox) != 0 || len(s.gh.postsOf("comment")) != 1 || !activityHas(t, s.a, "Gave up posting Implementer's reply on pull request #7") {
+		t.Fatalf("outbox %+v comments %v", task.Proposal.Outbox, s.gh.postsOf("comment"))
+	}
+}

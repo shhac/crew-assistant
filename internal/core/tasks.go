@@ -272,12 +272,16 @@ type Proposal struct {
 
 // PRPost is a reply on a pull request: in a review thread, or with Thread
 // empty, in its conversation; or with Resolve, a thread marked resolved.
-// By is the seat it is from.
+// By is the seat it is from. Revision is the draft it came with, which must
+// be pushed before it is posted; 0 posts at once. Failures counts GitHub
+// refusing it.
 type PRPost struct {
-	Thread  string `json:"thread,omitempty"`
-	Body    string `json:"body,omitempty"`
-	Resolve bool   `json:"resolve,omitempty"`
-	By      string `json:"by"`
+	Thread   string `json:"thread,omitempty"`
+	Body     string `json:"body,omitempty"`
+	Resolve  bool   `json:"resolve,omitempty"`
+	By       string `json:"by"`
+	Revision int    `json:"revision,omitempty"`
+	Failures int    `json:"failures,omitempty"`
 }
 
 // Post queues replies for the task's pull request.

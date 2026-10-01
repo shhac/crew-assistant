@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -321,9 +322,15 @@ func description(pr core.PRText) string {
 	return strings.TrimSpace(pr.Body) + "\n\n" + prFooter
 }
 
+// maxPostFailures is how often GitHub may refuse a post before the team
+// gives it up, so one bad reply never holds the pull request.
+const maxPostFailures = 3
+
 // postOutbox posts what the team has to say on the pull request, one at a
-// time, each taken off the outbox in the change after GitHub has it, so a
-// restart never posts twice and a failure loses nothing.
+// time, each only once the draft it came with is pushed and each taken off
+// the outbox in the change after GitHub has it, so a restart never posts
+// twice and a failure loses nothing. One GitHub refuses is tried again at
+// the next look, and given up after maxPostFailures.
 func (lp *Loop) postOutbox(ctx context.Context, taskID, repo string, number int) error {
 	lp.posting.Lock()
 	defer lp.posting.Unlock()
@@ -333,30 +340,72 @@ func (lp *Loop) postOutbox(ctx context.Context, taskID, repo string, number int)
 			return err
 		}
 		t, ok := snap.FindTask(taskID)
-		if !ok || t.Proposal == nil || len(t.Proposal.Outbox) == 0 {
+		if !ok {
 			return nil
 		}
-		post := t.Proposal.Outbox[0]
-		switch {
-		case post.Resolve:
-			err = lp.github.Resolve(ctx, post.Thread)
-		case post.Thread != "":
-			err = lp.github.Reply(ctx, post.Thread, signed(post))
-		default:
-			err = lp.github.Comment(ctx, repo, number, signed(post))
+		post, ok := nextPost(t)
+		if !ok {
+			return nil
 		}
-		if err != nil {
-			return err
-		}
+		sent := lp.sendPost(ctx, repo, number, post)
+		retry := false
 		if _, err = lp.Core.UpdateTask(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
-			if t.Proposal != nil && len(t.Proposal.Outbox) > 0 && t.Proposal.Outbox[0] == post {
-				t.Proposal.Outbox = t.Proposal.Outbox[1:]
+			if t.Proposal == nil {
+				return "", nil
+			}
+			outbox := t.Proposal.Outbox
+			i := slices.Index(outbox, post)
+			if i < 0 {
+				return "", nil
+			}
+			if sent != nil {
+				outbox[i].Failures++
+				if retry = outbox[i].Failures < maxPostFailures; retry {
+					return "", nil
+				}
+			}
+			t.Proposal.Outbox = slices.Delete(outbox, i, i+1)
+			if sent != nil {
+				return fmt.Sprintf("Gave up posting %s's reply on pull request #%d: %s", post.By, number, text.Clip(sent.Error(), 200)), nil
 			}
 			return "", nil
 		}); err != nil {
 			return err
 		}
+		if retry {
+			return nil
+		}
 	}
+}
+
+// nextPost is the first post the task's pull request has the draft for.
+func nextPost(t core.Task) (core.PRPost, bool) {
+	if t.Proposal == nil {
+		return core.PRPost{}, false
+	}
+	pushed := 0
+	for _, r := range t.Revisions {
+		if r.Ref == t.Proposal.Pushed {
+			pushed = r.N
+		}
+	}
+	for _, post := range t.Proposal.Outbox {
+		if post.Revision <= pushed {
+			return post, true
+		}
+	}
+	return core.PRPost{}, false
+}
+
+// sendPost puts one post on the pull request.
+func (lp *Loop) sendPost(ctx context.Context, repo string, number int, post core.PRPost) error {
+	switch {
+	case post.Resolve:
+		return lp.github.Resolve(ctx, post.Thread)
+	case post.Thread != "":
+		return lp.github.Reply(ctx, post.Thread, signed(post))
+	}
+	return lp.github.Comment(ctx, repo, number, signed(post))
 }
 
 // signed is a post as GitHub shows it: whose it is, and marked as the

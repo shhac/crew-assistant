@@ -106,7 +106,9 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	if problem != "" {
 		wakeErrors = append(wakeErrors, problem)
 	}
-	posts, handTo, problems := parsePRReply(answered, writer, t.PROpen())
+	// Replies with a new draft wait for it to be pushed; without one, for
+	// the draft the pull request has.
+	posts, handTo, problems := parsePRReply(answered, writer, t.PROpen(), len(t.Revisions)+1)
 	wakeErrors = append(wakeErrors, problems...)
 	if handTo != nil {
 		if _, err := lp.Core.AskAboutPR(ctx, t.ID, writer, handTo.To, handTo.Question); err != nil {
@@ -151,6 +153,11 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 			took(t)
 			if prText != nil {
 				t.Describe(*prText)
+			}
+			// No new draft came: the replies go with the one the pull
+			// request has.
+			for i := range posts {
+				posts[i].Revision = len(t.Revisions)
 			}
 			t.Post(posts...)
 			t.AnswerDirection(seen, 0, "No change needed: "+reply, time.Now().UTC())
@@ -216,7 +223,7 @@ type prHandTo struct {
 // pull request, in a thread or its conversation, threads its pushed draft
 // resolves, and a teammate to hand a question to. Replies wait to be posted
 // until the draft they came with is pushed.
-func parsePRReply(block, by string, open bool) ([]core.PRPost, *prHandTo, []string) {
+func parsePRReply(block, by string, open bool, revision int) ([]core.PRPost, *prHandTo, []string) {
 	if block == "" {
 		return nil, nil, nil
 	}
@@ -242,11 +249,11 @@ func parsePRReply(block, by string, open bool) ([]core.PRPost, *prHandTo, []stri
 			problems = append(problems, "a pr-reply reply had no body")
 			continue
 		}
-		posts = append(posts, core.PRPost{Thread: strings.TrimSpace(r.Thread), Body: text.Clip(body, 4000), By: by})
+		posts = append(posts, core.PRPost{Thread: strings.TrimSpace(r.Thread), Body: text.Clip(body, 4000), By: by, Revision: revision})
 	}
 	for _, thread := range in.Resolve {
 		if thread = strings.TrimSpace(thread); thread != "" {
-			posts = append(posts, core.PRPost{Thread: thread, Resolve: true, By: by})
+			posts = append(posts, core.PRPost{Thread: thread, Resolve: true, By: by, Revision: revision})
 		}
 	}
 	if h := in.HandTo; h != nil && (strings.TrimSpace(h.To) == "" || strings.TrimSpace(h.Question) == "") {
