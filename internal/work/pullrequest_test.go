@@ -38,12 +38,25 @@ type fakeGitHub struct {
 	merged   string
 	merges   [][]string
 	closed   bool
+	// threads are the review threads gh's GraphQL answers with; posts are
+	// the comments, replies, resolves and edits the loop made.
+	threads []map[string]any
+	posts   [][]string
 }
 
 func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch strings.Join(args[:2], " ") {
+	case "api graphql":
+		if strings.Contains(args[3], "reviewThreads") {
+			return json.Marshal(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"reviewThreads": map[string]any{"nodes": f.threads}}}}})
+		}
+		f.posts = append(f.posts, args)
+		return []byte("{}"), nil
+	case "pr comment", "pr edit":
+		f.posts = append(f.posts, args)
+		return nil, nil
 	case "pr list":
 		if f.opened == 0 || f.closed {
 			return []byte("[]"), nil

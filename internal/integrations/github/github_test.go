@@ -108,3 +108,70 @@ func TestAPullRequestRefRoundTripsAndRefusesAnythingElse(t *testing.T) {
 		}
 	}
 }
+
+// View reads the review threads gh's pull request view leaves out, and an
+// unresolved one keeps the pull request from being ready.
+func TestViewReadsReviewThreadsAndAnUnresolvedOneHoldsReadiness(t *testing.T) {
+	threads := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
+		{"id":"T1","isResolved":false,"isOutdated":false,"path":"main.go","line":12,"comments":{"nodes":[{"author":{"login":"alice"},"authorAssociation":"COLLABORATOR","body":"Rename this?","createdAt":"2026-10-01T09:05:00Z"}]}},
+		{"id":"T2","isResolved":true,"path":"a.go","line":1,"comments":{"nodes":[{"author":{"login":"bob"},"authorAssociation":"NONE","body":"done","createdAt":"2026-10-01T09:00:00Z"}]}}]}}}}}`
+	var asked [][]string
+	c := Client{Run: func(_ context.Context, args ...string) ([]byte, error) {
+		asked = append(asked, args)
+		if args[0] == "api" {
+			return []byte(threads), nil
+		}
+		return []byte(`{"number":7,"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":"","statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS"}],"comments":[{"author":{"login":"eve"},"authorAssociation":"NONE","body":"spam","createdAt":"2026-10-01T09:01:00Z"}]}`), nil
+	}}
+	pr, err := c.View(context.Background(), "o/r", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pr.Threads) != 2 || pr.Unresolved() != 1 || pr.Ready() {
+		t.Fatalf("threads %+v unresolved %d ready %v", pr.Threads, pr.Unresolved(), pr.Ready())
+	}
+	if !slices.Contains(asked[1], "owner=o") || !slices.Contains(asked[1], "name=r") || !slices.Contains(asked[1], "number=7") {
+		t.Fatalf("graphql %v", asked[1])
+	}
+	feedback := pr.FeedbackSince(time.Date(2026, 10, 1, 9, 0, 30, 0, time.UTC))
+	if len(feedback) != 2 || feedback[0].Body != "spam" || feedback[0].Trusted() || feedback[1].Thread != "T1" || feedback[1].Path != "main.go" || feedback[1].Line != 12 || !feedback[1].Trusted() {
+		t.Fatalf("feedback %+v", feedback)
+	}
+	if !pr.Latest().Equal(time.Date(2026, 10, 1, 9, 5, 0, 0, time.UTC)) {
+		t.Fatalf("latest %v", pr.Latest())
+	}
+	pr.Threads[0].Resolved = true
+	if !pr.Ready() {
+		t.Fatal("green, clean, no review required and every thread resolved is not ready")
+	}
+}
+
+func TestRepliesResolvesCommentsAndEditsNameWhatTheyAct(t *testing.T) {
+	var calls [][]string
+	c := Client{Run: func(_ context.Context, args ...string) ([]byte, error) {
+		calls = append(calls, args)
+		return []byte("{}"), nil
+	}}
+	ctx := context.Background()
+	if err := c.Reply(ctx, "PRRT_x", "Renamed."); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Resolve(ctx, "PRRT_x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Comment(ctx, "o/r", 7, "Thanks"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Edit(ctx, "o/r", 7, "Title", "Body"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(calls[0], "thread=PRRT_x") || !slices.Contains(calls[0], "body=Renamed.") || !slices.Contains(calls[1], "thread=PRRT_x") {
+		t.Fatalf("thread calls %v", calls[:2])
+	}
+	if !slices.Equal(calls[2], []string{"pr", "comment", "7", "--repo", "o/r", "--body", "Thanks"}) || !slices.Equal(calls[3], []string{"pr", "edit", "7", "--repo", "o/r", "--title", "Title", "--body", "Body"}) {
+		t.Fatalf("calls %v", calls[2:])
+	}
+	if c.Reply(ctx, "x\"; y", "b") == nil || c.Resolve(ctx, "") == nil || c.Comment(ctx, "bad repo", 1, "b") == nil {
+		t.Fatal("accepted a malformed target")
+	}
+}

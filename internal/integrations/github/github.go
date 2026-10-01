@@ -53,7 +53,10 @@ type Author struct {
 }
 
 type Review struct {
-	Author      Author    `json:"author"`
+	Author Author `json:"author"`
+	// Association is the author's standing in the repository, such as
+	// OWNER, MEMBER, COLLABORATOR or NONE.
+	Association string    `json:"authorAssociation"`
 	State       string    `json:"state"`
 	Body        string    `json:"body"`
 	SubmittedAt time.Time `json:"submittedAt"`
@@ -65,9 +68,10 @@ type Review struct {
 }
 
 type Comment struct {
-	Author    Author    `json:"author"`
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"createdAt"`
+	Author      Author    `json:"author"`
+	Association string    `json:"authorAssociation"`
+	Body        string    `json:"body"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 // Check is one entry of the status rollup: a check run or a commit status.
@@ -122,6 +126,9 @@ type PR struct {
 	MergeCommit      *struct {
 		Oid string `json:"oid"`
 	} `json:"mergeCommit"`
+	// Threads are the review threads on the code, which gh's pull request
+	// view leaves out; View reads them apart.
+	Threads []Thread `json:"-"`
 }
 
 // CheckState is the combined state of the checks: FAILURE, PENDING, SUCCESS,
@@ -142,32 +149,50 @@ func (p PR) CheckState() string {
 	return state
 }
 
-// Feedback is a review or comment written after since, newest last. Commit
-// is the head a review was made on; a comment is on the conversation, not a
-// commit, and has none.
+// Feedback is a review, comment or review-thread comment written after
+// since, newest last. Commit is the head a review was made on; a comment is
+// on the conversation, not a commit, and has none. Thread, Path and Line
+// place a thread comment on the code.
 type Feedback struct {
-	Author, Kind, Body, Commit string
-	At                         time.Time
+	Author, Association, Kind, Body, Commit string
+	Thread, Path                            string
+	Line                                    int
+	At                                      time.Time
 }
 
-// FeedbackSince lists reviews and comments newer than since.
+// trusted are the standings whose words the team may act on: people the
+// repository's owner let in, never anyone who can merely comment.
+var trusted = map[string]bool{"OWNER": true, "MEMBER": true, "COLLABORATOR": true}
+
+// Trusted reports feedback from the repository's owner, members or
+// collaborators.
+func (f Feedback) Trusted() bool { return trusted[f.Association] }
+
+// FeedbackSince lists reviews, comments and thread comments newer than since.
 func (p PR) FeedbackSince(since time.Time) []Feedback {
 	var out []Feedback
 	for _, r := range p.Reviews {
 		if r.SubmittedAt.After(since) {
-			out = append(out, Feedback{Author: r.Author.Login, Kind: "review (" + strings.ToLower(strings.ReplaceAll(r.State, "_", " ")) + ")", Body: r.Body, Commit: r.Commit.Oid, At: r.SubmittedAt})
+			out = append(out, Feedback{Author: r.Author.Login, Association: r.Association, Kind: "review (" + strings.ToLower(strings.ReplaceAll(r.State, "_", " ")) + ")", Body: r.Body, Commit: r.Commit.Oid, At: r.SubmittedAt})
 		}
 	}
 	for _, c := range p.Comments {
 		if c.CreatedAt.After(since) {
-			out = append(out, Feedback{Author: c.Author.Login, Kind: "comment", Body: c.Body, At: c.CreatedAt})
+			out = append(out, Feedback{Author: c.Author.Login, Association: c.Association, Kind: "comment", Body: c.Body, At: c.CreatedAt})
+		}
+	}
+	for _, th := range p.Threads {
+		for _, c := range th.Comments {
+			if c.CreatedAt.After(since) {
+				out = append(out, Feedback{Author: c.Author.Login, Association: c.Association, Kind: "thread comment", Body: c.Body, Thread: th.ID, Path: th.Path, Line: th.Line, At: c.CreatedAt})
+			}
 		}
 	}
 	slices.SortStableFunc(out, func(a, b Feedback) int { return a.At.Compare(b.At) })
 	return out
 }
 
-// Latest is the time of the newest review or comment.
+// Latest is the time of the newest review, comment or thread comment.
 func (p PR) Latest() time.Time {
 	var latest time.Time
 	for _, r := range p.Reviews {
@@ -176,7 +201,23 @@ func (p PR) Latest() time.Time {
 	for _, c := range p.Comments {
 		latest = later(latest, c.CreatedAt)
 	}
+	for _, th := range p.Threads {
+		for _, c := range th.Comments {
+			latest = later(latest, c.CreatedAt)
+		}
+	}
 	return latest
+}
+
+// Unresolved counts the review threads still open.
+func (p PR) Unresolved() int {
+	n := 0
+	for _, th := range p.Threads {
+		if !th.Resolved {
+			n++
+		}
+	}
+	return n
 }
 
 func later(a, b time.Time) time.Time {
@@ -186,10 +227,11 @@ func later(a, b time.Time) time.Time {
 	return a
 }
 
-// Ready reports a pull request the platform would merge now: approved (or
-// needing no review), every check green, and nothing behind or in conflict.
+// Ready reports a pull request ready to land: approved where the
+// repository asks for review, every check green, no review thread left
+// unresolved, and nothing behind or in conflict.
 func (p PR) Ready() bool {
-	if p.State != "OPEN" || p.Mergeable != "MERGEABLE" {
+	if p.State != "OPEN" || p.Mergeable != "MERGEABLE" || p.Unresolved() > 0 {
 		return false
 	}
 	if p.ReviewDecision != "" && p.ReviewDecision != "APPROVED" {
@@ -237,6 +279,9 @@ func (c Client) View(ctx context.Context, repo string, number int) (PR, error) {
 	var pr PR
 	if err = json.Unmarshal(out, &pr); err != nil {
 		return PR{}, fmt.Errorf("gh gave an unreadable pull request: %w", err)
+	}
+	if pr.Threads, err = c.threads(ctx, repo, number); err != nil {
+		return PR{}, err
 	}
 	return pr, nil
 }
