@@ -391,5 +391,5 @@ func parsePM(reply string) (core.PMAnswer, []string, error) {
 			answer.PRFlow = append(answer.PRFlow, core.PRFlowChoice{Task: strings.TrimSpace(c.Task), Keep: *c.Keep})
 		}
 	}
-	return answer, listed(in.Questions, 5), nil
+	return answer, asked(in.Questions, 5), nil
 }

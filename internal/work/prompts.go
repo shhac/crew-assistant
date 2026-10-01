@@ -554,11 +554,17 @@ func jsonBody(reply string) string {
 
 // listed is a role's list as kept: trimmed, without blanks, at most max
 // items of at most 500 characters each.
-func listed(items []string, max int) []string {
+func listed(items []string, max int) []string { return bounded(items, max, 500) }
+
+// asked keeps questions for the owner whole up to maxPlanItem, since a
+// question clipped mid-sentence can't be answered.
+func asked(items []string, max int) []string { return bounded(items, max, maxPlanItem) }
+
+func bounded(items []string, max, size int) []string {
 	var out []string
 	for _, item := range items {
 		if item = strings.TrimSpace(item); item != "" && len(out) < max {
-			out = append(out, text.Clip(item, 500))
+			out = append(out, text.Clip(item, size))
 		}
 	}
 	return out

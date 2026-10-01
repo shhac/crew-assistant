@@ -179,7 +179,7 @@ func parsePlan(reply string, designs, noDesigner bool) (core.Plan, []string, str
 	plan.Tests = keep(in.Tests)
 	plan.Exists = keep(in.Exists)
 	plan.OutOfScope = keep(in.OutOfScope)
-	plan.Questions = listed(in.Questions, maxPlanItems)
+	plan.Questions = asked(in.Questions, maxPlanItems)
 	for _, part := range in.SplitOff {
 		if title := strings.TrimSpace(part.Title); title != "" && len(plan.SplitOff) < core.MaxSplitOff {
 			plan.SplitOff = append(plan.SplitOff, core.SplitPart{Objective: text.Clip(title, 500), Criteria: listed(part.Requirements, maxPlanItems)})

@@ -172,7 +172,7 @@ func TestAPlanKeepsItsStepsWholeWithinABound(t *testing.T) {
 		"changes":       []string{long, strings.Repeat("b", maxPlanItem+500)},
 		"failure_paths": []string{"Stopped after the first write: the record says the task is still writing."},
 		"tests":         []string{"A crash between the two writes leaves one record"},
-		"questions":     []string{strings.Repeat("q", 900)},
+		"questions":     []string{strings.Repeat("q", 900), strings.Repeat("r", maxPlanItem+500)},
 	})
 	plan, _, _, err := parsePlan(string(reply), false, true)
 	if err != nil {
@@ -181,8 +181,12 @@ func TestAPlanKeepsItsStepsWholeWithinABound(t *testing.T) {
 	if len(plan.Changes) != 2 || plan.Changes[0] != long || !strings.HasSuffix(plan.Changes[1], "…") || len(plan.Changes[1]) > maxPlanItem+len("…") {
 		t.Fatalf("changes %d: %d, %d chars", len(plan.Changes), len(plan.Changes[0]), len(plan.Changes[1]))
 	}
-	if len(plan.FailurePaths) != 1 || len(plan.Tests) != 1 || len([]rune(plan.Questions[0])) > 501 {
+	if len(plan.FailurePaths) != 1 || len(plan.Tests) != 1 {
 		t.Fatalf("plan %+v", plan)
+	}
+	// The owner answers the questions, so a long one reaches them whole.
+	if len(plan.Questions) != 2 || plan.Questions[0] != strings.Repeat("q", 900) || len(plan.Questions[1]) > maxPlanItem+len("…") {
+		t.Fatalf("questions %d", len(plan.Questions))
 	}
 	shown := planText(core.Task{Plan: &plan})
 	for _, want := range []string{"What will change:\n- " + long + "\n", "What the record must say if a step stops part-way:\n- Stopped after the first write", "Tests:\n- A crash between the two writes"} {
