@@ -25,8 +25,10 @@ type Handoff struct {
 	Reply      string          `json:"reply,omitempty"`
 	Request    int             `json:"request,omitempty"`
 	WakeErrors []string        `json:"wake_errors,omitempty"`
-	// PR is the pull request text the implementer wrote with the draft.
-	PR *PRText `json:"pr,omitempty"`
+	// PR is the pull request text the implementer wrote with the draft, and
+	// Posts its replies on the pull request, posted once the draft is.
+	PR    *PRText  `json:"pr,omitempty"`
+	Posts []PRPost `json:"posts,omitempty"`
 	// Unreachable are the requirements the implementer said it can't meet
 	// from its sandbox in this turn.
 	Unreachable []Unreachable `json:"unreachable,omitempty"`

@@ -56,6 +56,9 @@ type scriptedRunner struct {
 	// meet, each in order; after them, a reply that can't be read.
 	escalate  []string
 	ownerStep []string
+	// pmOnPR answers the PM handed a pull request question, in order; after
+	// them, an answer that does nothing.
+	pmOnPR []string
 }
 
 // sendOn is the PM's plain answer to what waits in triage: every task sent
@@ -115,6 +118,13 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 		reply := `{"land": true, "reason": "it is signed off and nothing waits on it"}`
 		if len(r.pmLand) > 0 {
 			reply, r.pmLand = r.pmLand[0], r.pmLand[1:]
+		}
+		return roles.Result{Text: reply}, nil
+	}
+	if !spec.Write && strings.Contains(spec.Prompt, "handed you this about the pull request") {
+		reply := `{}`
+		if len(r.pmOnPR) > 0 {
+			reply, r.pmOnPR = r.pmOnPR[0], r.pmOnPR[1:]
 		}
 		return roles.Result{Text: reply}, nil
 	}

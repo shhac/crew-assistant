@@ -310,8 +310,7 @@ export function MessageView({
     <li className="thread-message">
       <p className="thread-line">
         <span className="thread-who">
-          {m.from === "assistant" ? "The assistant" : "You"} →{" "}
-          {member && <Avatar of={member} size={16} />}
+          {senderWords(m)} → {member && <Avatar of={member} size={16} />}
           {m.to}
         </span>
         {m.at && <span className="muted small">{sinceLabel(m.at)}</span>}
@@ -365,4 +364,11 @@ function Reply({ message: m, made }: { message: TeamMessage; made: string }) {
       {m.reply && <p className="thread-text">{m.reply}</p>}
     </div>
   );
+}
+
+/** Who sent a message to the team: the owner, the assistant, or a teammate. */
+export function senderWords(m: TeamMessage) {
+  if (m.from === "owner") return "You";
+  if (m.from === "assistant") return "The assistant";
+  return m.for_pr ? `${m.from}, about the pull request,` : m.from;
 }

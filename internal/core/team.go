@@ -32,6 +32,9 @@ type TeamMessage struct {
 	Direction  int       `json:"direction"`
 	At         time.Time `json:"at"`
 	AnsweredAt time.Time `json:"answered_at,omitzero"`
+	// ForPR is a teammate asked, by the seat in From, about the task's pull
+	// request: its reply is posted there.
+	ForPR bool `json:"for_pr,omitempty"`
 }
 
 const (
@@ -266,6 +269,9 @@ func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID strin
 			return nil
 		}
 		m.Status, m.Reply, m.Outcome, m.Revision = MessageAnswered, verdict.Summary, verdict.Outcome, verdict.Revision
+		if m.ForPR {
+			t.Post(PRPost{Body: text.Clip(verdict.Summary, 4000), By: m.To})
+		}
 		latest := 0
 		if n := len(t.Revisions); n > 0 {
 			latest = t.Revisions[n-1].N

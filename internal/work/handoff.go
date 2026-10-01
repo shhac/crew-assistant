@@ -103,6 +103,7 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 	if h.PR != nil {
 		t.Describe(*h.PR)
 	}
+	t.Post(h.Posts...)
 	if t.WriterRequest == h.Request {
 		t.WriterNext = ""
 	}

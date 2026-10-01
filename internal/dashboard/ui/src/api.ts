@@ -447,6 +447,8 @@ export interface TeamMessage {
   direction: number;
   at?: string;
   answered_at?: string;
+  /** Asked by a teammate, named in from, about the pull request; the reply is posted there. */
+  for_pr?: boolean;
 }
 /** What the researcher worked out before anything was written. */
 export interface Plan {

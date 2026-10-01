@@ -64,6 +64,9 @@ type Loop struct {
 	github    github.Client
 	githubURL func(repo string) string
 	prSeen    sync.Map
+	// posting is held while the team's replies go up on a pull request, by
+	// the landing step or by a teammate answering beside it.
+	posting sync.Mutex
 	// Build and Includes are injectable read-only observations of this daemon.
 	Build         func() (revision string, ok bool)
 	Includes      func(context.Context, string, string, string, string) (bool, error)

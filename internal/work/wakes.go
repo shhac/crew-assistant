@@ -332,6 +332,9 @@ func (lp *Loop) wakePrompt(ctx context.Context, t core.Task, woken []core.Wake) 
 		b.WriteString("\nYour last wake block had problems: " + strings.Join(t.WakeErrors, "; ") + ".\n")
 	}
 	if t.UsesPRs() {
+		if proposed(t) {
+			b.WriteString("\nIts pull request is open. Feedback on it reaches you as findings; a review thread names its id. Answer on the pull request by ending your reply with a pr-reply block: replies go in a thread or, without one, in its conversation, and are posted once your draft is pushed; resolve a thread only when a draft you made fixes it. You can hand a question to a teammate, a reviewer, QA or the PM, whose answer is posted there too; the PM can also ask the owner. Feedback that needs nothing from you needs no block.\n```pr-reply\n{\"replies\": [{\"thread\": \"thread id, or empty for the conversation\", \"body\": \"...\"}], \"resolve\": [\"thread id\"], \"hand_to\": {\"to\": \"QA\", \"question\": \"...\"}}\n```\n")
+		}
 		b.WriteString("\nThis change goes out as a GitHub pull request. End your reply with a pr block giving its title, under 72 characters, and its description, for a reviewer: what changed, why, and how it was checked. Give it again whenever a draft changes what it should say; an open pull request is updated to match.\n```pr\n{\"title\": \"...\", \"body\": \"...\"}\n```\n")
 		b.WriteString("\nIf something outside this change matters later, you can end your reply with a wake block and be woken in a later round, with your own note:\n```wake\n{\"wake_me_when\": [{\"on\": \"pr_checks\", \"target\": \"this\", \"match\": \"\", \"prompt\": \"what to do then\", \"timeout\": \"2h\"}], \"cancel\": []}\n```\non can be pr_checks or pr_review (target this), branch (a branch name), time (RFC 3339 or a duration) or task (a task id). Cancel handles you no longer need.\n")
 	}

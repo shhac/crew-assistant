@@ -594,3 +594,111 @@ func TestARewrittenDescriptionUpdatesTheOpenPullRequest(t *testing.T) {
 		t.Fatalf("posts %v", s.gh.posts)
 	}
 }
+
+// thread is a collaborator's review thread on feature.go.
+func thread(id, body string, at time.Time) map[string]any {
+	return map[string]any{"id": id, "isResolved": false, "path": "feature.go", "line": 3, "comments": map[string]any{"nodes": []map[string]any{{"author": map[string]string{"login": "alice"}, "authorAssociation": "COLLABORATOR", "body": body, "createdAt": at.Format(time.RFC3339)}}}}
+}
+
+// postsOf are the posts the loop made of one kind: thread replies, resolves
+// or conversation comments.
+func (f *fakeGitHub) postsOf(kind string) [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out [][]string
+	for _, args := range f.posts {
+		switch {
+		case kind == "reply" && args[0] == "api" && strings.Contains(args[3], "addPullRequestReviewThreadReply"),
+			kind == "resolve" && args[0] == "api" && strings.Contains(args[3], "resolveReviewThread"),
+			kind == "comment" && args[0] == "pr" && args[1] == "comment":
+			out = append(out, args)
+		}
+	}
+	return out
+}
+
+// The implementer answers a thread that needs no change on the pull request
+// itself, signed, and resolves it; nothing it posts is taken for feedback.
+func TestTheImplementerAnswersAThreadOnThePullRequest(t *testing.T) {
+	s := newPRScenario(t, 2)
+	s.open(t)
+	s.runner.onEdit = func(_ string, n int) bool { return n == 1 }
+	s.runner.ending = func(n int) string {
+		if n == 1 {
+			return ""
+		}
+		return "\n```pr-reply\n{\"replies\": [{\"thread\": \"T1\", \"body\": \"It matches the API.\"}], \"resolve\": [\"T1\"]}\n```"
+	}
+	at := time.Now()
+	s.gh.set(func() { s.gh.threads = []map[string]any{thread("T1", "Why this name?", at)} })
+	if err := s.a.checkWakes(s.ctx, at.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	task := s.current(t)
+	replies, resolves := s.gh.postsOf("reply"), s.gh.postsOf("resolve")
+	if len(replies) != 1 || !slices.Contains(replies[0], "thread=T1") || !slices.ContainsFunc(replies[0], func(a string) bool {
+		return strings.HasPrefix(a, "body=It matches the API.") && strings.Contains(a, "— Implementer, for crew-assistant") && strings.Contains(a, ownPost)
+	}) {
+		t.Fatalf("replies %v", replies)
+	}
+	if len(resolves) != 1 || !slices.Contains(resolves[0], "thread=T1") {
+		t.Fatalf("resolves %v", resolves)
+	}
+	if len(task.Revisions) != 1 || len(task.Proposal.Outbox) != 0 || task.Status != core.TaskAwaiting {
+		t.Fatalf("after answering: %s revisions %d outbox %+v", task.Status, len(task.Revisions), task.Proposal.Outbox)
+	}
+}
+
+// A question about trying the product can go to QA, whose answer is posted
+// on the pull request in its own name.
+func TestTheImplementerHandsAPullRequestQuestionToQA(t *testing.T) {
+	s := newPRScenario(t, 3)
+	s.open(t)
+	s.runner.onEdit = func(_ string, n int) bool { return n == 1 }
+	s.runner.ending = func(n int) string {
+		if n == 1 {
+			return ""
+		}
+		return "\n```pr-reply\n{\"hand_to\": {\"to\": \"QA\", \"question\": \"Does the feature still pass make check on a clean clone?\"}}\n```"
+	}
+	s.review(t, "Did anyone try this on a clean clone?", time.Now())
+	task := s.current(t)
+	asked := slices.IndexFunc(task.Messages, func(m core.TeamMessage) bool { return m.ForPR && m.To == "QA" })
+	if asked < 0 || task.Messages[asked].Status != core.MessageAnswered || task.Messages[asked].From != "Implementer" {
+		t.Fatalf("messages %+v", task.Messages)
+	}
+	comments := s.gh.postsOf("comment")
+	if len(comments) != 1 || !strings.Contains(argAfter(comments[0], "--body"), "— QA, for crew-assistant") {
+		t.Fatalf("comments %v", comments)
+	}
+}
+
+// Handed to the PM, a pull request question can be answered there and put
+// to the owner.
+func TestThePMAnswersAPullRequestQuestionAndAsksTheOwner(t *testing.T) {
+	s := newPRScenario(t, 2, withPM)
+	s.open(t)
+	s.runner.onEdit = func(_ string, n int) bool { return n == 1 }
+	s.runner.ending = func(n int) string {
+		if n == 1 {
+			return ""
+		}
+		return "\n```pr-reply\n{\"hand_to\": {\"to\": \"pm\", \"question\": \"The reviewer wants this behind a flag; is that in scope?\"}}\n```"
+	}
+	s.runner.mu.Lock()
+	s.runner.pmOnPR = []string{`{"reply": "Thanks; checking scope with the owner.", "ask_owner": "Should the feature ship behind a flag?"}`}
+	s.runner.mu.Unlock()
+	s.review(t, "Put this behind a flag.", time.Now())
+	task := s.current(t)
+	comments := s.gh.postsOf("comment")
+	if len(comments) != 1 || !strings.Contains(argAfter(comments[0], "--body"), "Thanks; checking scope with the owner.\n\n— Pim, for crew-assistant") {
+		t.Fatalf("comments %v", comments)
+	}
+	snap, _ := s.a.Core.Snapshot(s.ctx)
+	asked := slices.IndexFunc(snap.Decisions, func(d core.Decision) bool {
+		return d.TaskID == s.id && d.Kind == core.DecisionQuestion && strings.Contains(d.Context, "behind a flag")
+	})
+	if asked < 0 || task.Status != core.TaskWaiting {
+		t.Fatalf("no question for the owner: %s %+v", task.Status, snap.Decisions)
+	}
+}

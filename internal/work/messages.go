@@ -62,6 +62,15 @@ func (lp *Loop) answerMessage(ctx context.Context, p core.Project, t core.Task, 
 	if s.Seat.Name == "" {
 		return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, nil, core.Screenshots{}, m.To+" is not on this task's team")
 	}
+	if m.ForPR {
+		return lp.answerOnPR(ctx, p, t, s, m)
+	}
+	return lp.answerCheck(ctx, p, t, s, m)
+}
+
+// answerCheck answers a message to a reviewer or QA with a check of the
+// latest revision.
+func (lp *Loop) answerCheck(ctx context.Context, p core.Project, t core.Task, s core.Scheduled, m core.TeamMessage) error {
 	failed := func(err error) error {
 		return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, nil, core.Screenshots{}, err.Error())
 	}
@@ -106,9 +115,28 @@ func checkerMessages(snap core.Snapshot) []openMessage {
 }
 
 func messageNote(m core.TeamMessage) string {
+	if m.ForPR {
+		return fmt.Sprintf("\n\n%s, the implementer, handed you this about the change's open pull request on GitHub:\n\n%s\n\nYour summary is posted on the pull request as your reply, signed with your name: write it for the people reviewing the pull request, as well as giving your verdict.", m.From, m.Text)
+	}
 	who := "The owner"
 	if m.From == core.FromAssistant {
 		who = "The owner's assistant"
 	}
 	return fmt.Sprintf("\n\n%s asked you for this check directly, saying:\n\n%s\n\nAnswer what they asked in your summary, as well as giving your verdict.", who, m.Text)
+}
+
+// answerOnPR has a teammate answer what the implementer handed it about the
+// pull request, and posts the answer there at once: a reviewer or QA with a
+// check, the PM with what it decides.
+func (lp *Loop) answerOnPR(ctx context.Context, p core.Project, t core.Task, s core.Scheduled, m core.TeamMessage) error {
+	var err error
+	if m.Kind == core.RolePM {
+		err = lp.answerPRAsPM(ctx, p, t, s.Seat, m)
+	} else {
+		err = lp.answerCheck(ctx, p, t, s, m)
+	}
+	if err != nil || !t.PROpen() || t.Playbook == nil {
+		return err
+	}
+	return lp.postOutbox(ctx, t.ID, t.Playbook.Land.GitHub, t.Proposal.Number)
 }

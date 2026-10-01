@@ -45,6 +45,9 @@ func (lp *Loop) landPR(ctx context.Context, t core.Task, m gitMedium) error {
 			return err
 		}
 	}
+	if err := lp.postOutbox(ctx, t.ID, m.playbook.Land.GitHub, prop.Number); err != nil {
+		return lp.landingFailed(ctx, t, r, err)
+	}
 	if text := prText(t); prop.Described != described(text) {
 		// The implementer rewrote the pull request's text with a later draft.
 		if err := lp.github.Edit(ctx, m.playbook.Land.GitHub, prop.Number, text.Title, description(text)); err != nil {
@@ -270,8 +273,57 @@ func description(pr core.PRText) string {
 	return strings.TrimSpace(pr.Body) + "\n\n" + prFooter
 }
 
+// postOutbox posts what the team has to say on the pull request, one at a
+// time, each taken off the outbox in the change after GitHub has it, so a
+// restart never posts twice and a failure loses nothing.
+func (lp *Loop) postOutbox(ctx context.Context, taskID, repo string, number int) error {
+	lp.posting.Lock()
+	defer lp.posting.Unlock()
+	for {
+		snap, err := lp.Core.Snapshot(ctx)
+		if err != nil {
+			return err
+		}
+		t, ok := snap.FindTask(taskID)
+		if !ok || t.Proposal == nil || len(t.Proposal.Outbox) == 0 {
+			return nil
+		}
+		post := t.Proposal.Outbox[0]
+		switch {
+		case post.Resolve:
+			err = lp.github.Resolve(ctx, post.Thread)
+		case post.Thread != "":
+			err = lp.github.Reply(ctx, post.Thread, signed(post))
+		default:
+			err = lp.github.Comment(ctx, repo, number, signed(post))
+		}
+		if err != nil {
+			return err
+		}
+		if _, err = lp.Core.UpdateTask(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
+			if t.Proposal != nil && len(t.Proposal.Outbox) > 0 && t.Proposal.Outbox[0] == post {
+				t.Proposal.Outbox = t.Proposal.Outbox[1:]
+			}
+			return "", nil
+		}); err != nil {
+			return err
+		}
+	}
+}
+
+// signed is a post as GitHub shows it: whose it is, and marked as the
+// team's own so it is never taken for feedback.
+func signed(post core.PRPost) string {
+	return post.Body + "\n\n— " + post.By + ", for crew-assistant\n" + ownPost
+}
+
 func (lp *Loop) saveProposal(ctx context.Context, taskID string, prop core.Proposal, activity string) error {
 	_, err := lp.updateOpen(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
+		// What the team writes for the pull request is changed only where
+		// it is written and posted, never from a copy taken earlier.
+		if t.Proposal != nil {
+			prop.Title, prop.Body, prop.Outbox = t.Proposal.Title, t.Proposal.Body, t.Proposal.Outbox
+		}
 		t.Proposal = &prop
 		if prop.URL != "" {
 			t.DeliveredTo = prop.URL

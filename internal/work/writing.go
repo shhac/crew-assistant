@@ -99,11 +99,19 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	reply, learned := splitBlock(result.Text, "learned")
 	reply, block := splitBlock(reply, "wake")
 	reply, unmet := splitBlock(reply, "owner-step")
+	reply, answered := splitBlock(reply, "pr-reply")
 	reply, described := splitBlock(reply, "pr")
 	wakeErrors := lp.applyWakeBlock(ctx, p, t, block)
 	prText, problem := parsePRText(described)
 	if problem != "" {
 		wakeErrors = append(wakeErrors, problem)
+	}
+	posts, handTo, problems := parsePRReply(answered, writer, t.PROpen())
+	wakeErrors = append(wakeErrors, problems...)
+	if handTo != nil {
+		if _, err := lp.Core.AskAboutPR(ctx, t.ID, writer, handTo.To, handTo.Question); err != nil {
+			wakeErrors = append(wakeErrors, "handing the pull request to "+handTo.To+": "+err.Error())
+		}
 	}
 	r, ok := t.Role(writer)
 	if ok {
@@ -144,6 +152,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 			if prText != nil {
 				t.Describe(*prText)
 			}
+			t.Post(posts...)
 			t.AnswerDirection(seen, 0, "No change needed: "+reply, time.Now().UTC())
 			if t.DirectionPending > 0 {
 				t.ReviseWithDirection()
@@ -168,7 +177,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	// The draft counts only once the project's records hold it; the handoff
 	// carries the round's whole outcome until then.
 	revision.Summary = text.Clip(reply, 2000)
-	h := core.Handoff{DraftCatchUp: integration, Revision: revision, Writer: writer, Session: result.Session, Seen: seen, Reply: reply, Request: applied, WakeErrors: wakeErrors, PR: prText, Unreachable: parseOwnerSteps(unmet, n, t.Criteria, t.OwnersAlready())}
+	h := core.Handoff{DraftCatchUp: integration, Revision: revision, Writer: writer, Session: result.Session, Seen: seen, Reply: reply, Request: applied, WakeErrors: wakeErrors, PR: prText, Posts: posts, Unreachable: parseOwnerSteps(unmet, n, t.Criteria, t.OwnersAlready())}
 	if ok {
 		r.Learnings = nil
 		h.Seat = &r
@@ -194,4 +203,55 @@ func parsePRText(block string) (*core.PRText, string) {
 	}
 	in.Title, in.Body = text.Clip(in.Title, 120), text.Clip(in.Body, 6000)
 	return &in, ""
+}
+
+// prHandTo is the teammate an implementer hands a pull request's question
+// to, and what it asks them.
+type prHandTo struct {
+	To       string `json:"to"`
+	Question string `json:"question"`
+}
+
+// parsePRReply reads the implementer's ```pr-reply block: replies on the
+// pull request, in a thread or its conversation, threads its pushed draft
+// resolves, and a teammate to hand a question to. Replies wait to be posted
+// until the draft they came with is pushed.
+func parsePRReply(block, by string, open bool) ([]core.PRPost, *prHandTo, []string) {
+	if block == "" {
+		return nil, nil, nil
+	}
+	if !open {
+		return nil, nil, []string{"the pr-reply block was for a pull request that isn't open"}
+	}
+	var in struct {
+		Replies []struct {
+			Thread string `json:"thread"`
+			Body   string `json:"body"`
+		} `json:"replies"`
+		Resolve []string  `json:"resolve"`
+		HandTo  *prHandTo `json:"hand_to"`
+	}
+	if err := json.Unmarshal([]byte(block), &in); err != nil {
+		return nil, nil, []string{"the pr-reply block was not valid JSON: " + err.Error()}
+	}
+	var posts []core.PRPost
+	var problems []string
+	for _, r := range in.Replies {
+		body := strings.TrimSpace(r.Body)
+		if body == "" {
+			problems = append(problems, "a pr-reply reply had no body")
+			continue
+		}
+		posts = append(posts, core.PRPost{Thread: strings.TrimSpace(r.Thread), Body: text.Clip(body, 4000), By: by})
+	}
+	for _, thread := range in.Resolve {
+		if thread = strings.TrimSpace(thread); thread != "" {
+			posts = append(posts, core.PRPost{Thread: thread, Resolve: true, By: by})
+		}
+	}
+	if h := in.HandTo; h != nil && (strings.TrimSpace(h.To) == "" || strings.TrimSpace(h.Question) == "") {
+		problems = append(problems, `a pr-reply hand_to needs "to" and "question"`)
+		in.HandTo = nil
+	}
+	return posts, in.HandTo, problems
 }

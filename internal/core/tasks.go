@@ -258,6 +258,30 @@ type Proposal struct {
 	// Answering is an implementer's round on what the pull request asked
 	// for; it ends when the task leaves writing.
 	Answering bool `json:"answering,omitempty"`
+	// Outbox is what the team has to say on the pull request, posted once
+	// the revision it came with has been pushed.
+	Outbox []PRPost `json:"outbox,omitempty"`
+}
+
+// PRPost is a reply on a pull request: in a review thread, or with Thread
+// empty, in its conversation; or with Resolve, a thread marked resolved.
+// By is the seat it is from.
+type PRPost struct {
+	Thread  string `json:"thread,omitempty"`
+	Body    string `json:"body,omitempty"`
+	Resolve bool   `json:"resolve,omitempty"`
+	By      string `json:"by"`
+}
+
+// Post queues replies for the task's pull request.
+func (t *Task) Post(posts ...PRPost) {
+	if len(posts) == 0 {
+		return
+	}
+	if t.Proposal == nil {
+		t.Proposal = &Proposal{}
+	}
+	t.Proposal.Outbox = append(t.Proposal.Outbox, posts...)
 }
 
 // Observed is the state of an open pull request as the loop last saw it.
