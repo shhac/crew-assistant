@@ -42,6 +42,7 @@ export function TaskActivity({
         ))}
       </>
     );
+  if (task.waiting) return null;
   const waiting = waitingLine(task, state, now);
   if (!waiting) return null;
   return <p className="task-activity waiting">{waiting}</p>;

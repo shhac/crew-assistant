@@ -18,6 +18,7 @@ import {
   requestTone,
   taskPlaybook,
   underWay,
+  waitingWords,
 } from "./stages";
 import type { Decision, Playbook, Project, Stage, Task } from "./api";
 
@@ -431,6 +432,55 @@ describe("the board", () => {
       requestStep(task({ status: "waiting", waiting }), decision("delivery")),
     ).toBe("Waiting for your approval");
   });
+  it.each([
+    [
+      { kind: "stage", stage: "reviewing", count: 2, limit: 2 },
+      "Waiting for room in Reviewing (2 of 2)",
+    ],
+    [
+      { kind: "stage", stage: "reviewing", count: 1, limit: 1, on: "CA-12" },
+      "Waiting for room in Reviewing (1 of 1) · held by CA-12",
+    ],
+    [
+      {
+        kind: "member",
+        seat: "Lucius",
+        member: "m1",
+        on: "CA-27",
+        objective: "Tidy the logs",
+      },
+      "Waiting for Lucius (busy on CA-27 “Tidy the logs”)",
+    ],
+    [
+      {
+        kind: "member",
+        seat: "Lucius",
+        member: "m1",
+        on: "XY-3",
+        objective: "Tidy the logs",
+        project: "Notes",
+      },
+      "Waiting for Lucius (busy on XY-3 “Tidy the logs” in Notes)",
+    ],
+    [
+      {
+        kind: "member",
+        seat: "Lucius",
+        member: "m1",
+        objective: "Tidy the logs",
+      },
+      "Waiting for Lucius (busy on “Tidy the logs”)",
+    ],
+    [
+      { kind: "member", seat: "Lucius", member: "m1", on: "CA-27" },
+      "Waiting for Lucius (busy on CA-27)",
+    ],
+  ] as [NonNullable<Task["waiting"]>, string][])(
+    "words a recorded wait: %j",
+    (wait, words) => {
+      expect(waitingWords(task({}), wait)).toBe(words);
+    },
+  );
   it("names the full column and capacity with or without a previous stage", () => {
     for (const from of [undefined, "reviewing"] as const) {
       expect(

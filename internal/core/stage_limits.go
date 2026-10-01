@@ -109,7 +109,17 @@ func stageLimit(v *Snapshot, projectID, stage string) int {
 func (h held) room(v *Snapshot, projectID, from, stage string) *Wait {
 	limit := stageLimit(v, projectID, stage)
 	if count := h[projectID][stage]; limit > 0 && count >= limit {
-		return &Wait{Kind: WaitStage, Stage: stage, From: from, Count: count, Limit: limit}
+		wait := &Wait{Kind: WaitStage, Stage: stage, From: from, Count: count, Limit: limit}
+		if count == 1 {
+			for _, t := range v.Tasks {
+				if t.ProjectID == projectID && (t.Place == stage || (stage == StageTodo && t.Status == TaskQueued)) {
+					holder := onTask(v, t)
+					wait.On, wait.Objective = holder.On, holder.Objective
+					break
+				}
+			}
+		}
+		return wait
 	}
 	return nil
 }

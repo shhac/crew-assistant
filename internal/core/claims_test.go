@@ -555,6 +555,10 @@ func TestAMemberSeatedInTwoProjectsWorksOneStepAtATime(t *testing.T) {
 	s, _ := fixture(t)
 	first := seated(t, s, newProject(t, s), 0, lucius(RoleImplementer))
 	second := seated(t, s, newProject(t, s), 0, lucius(RoleImplementer))
+	second, err := s.SetProjectTitle(testContext, second.ID, "Notes")
+	if err != nil {
+		t.Fatal(err)
+	}
 	at := s.now()
 	s.now = func() time.Time { return at.Add(time.Minute) }
 	b := queueAll(t, s, second, "B")[0]
@@ -565,7 +569,7 @@ func TestAMemberSeatedInTwoProjectsWorksOneStepAtATime(t *testing.T) {
 	}
 	snap, _ := s.Snapshot(testContext)
 	onB, _ := snap.FindTask(b.ID)
-	if w := waiting(t, s, a.ID); w == nil || *w != (Wait{Kind: WaitMember, Seat: "Lucius", Member: "lucius", On: onB.Ref}) || onB.Ref == "" {
+	if w := waiting(t, s, a.ID); w == nil || *w != (Wait{Kind: WaitMember, Seat: "Lucius", Member: "lucius", On: onB.Ref, Objective: onB.Objective, Project: second.Title}) || onB.Ref == "" {
 		t.Fatalf("A should wait for Lucius, busy on %s: %+v", onB.Ref, w)
 	}
 	if got := claimed(t, s); len(got) != 0 {
@@ -611,7 +615,7 @@ func TestAMemberHoldingTwoRolesDoesOneAtATime(t *testing.T) {
 	if got := claimed(t, s); !slices.Equal(got, []string{"A: reviewing by Lucius #2"}) {
 		t.Fatalf("Lucius should check A, and not write B beside it: %v", got)
 	}
-	if w := waiting(t, s, tasks[1].ID); w == nil || w.Kind != WaitMember || w.Seat != "Lucius #2" || w.On == "" {
+	if w := waiting(t, s, tasks[1].ID); w == nil || *w != (Wait{Kind: WaitMember, Seat: "Lucius #2", Member: "lucius", On: p.TaskRef(tasks[0].Number), Objective: "A"}) {
 		t.Fatalf("B should wait for Lucius, reviewing: %+v", w)
 	}
 }

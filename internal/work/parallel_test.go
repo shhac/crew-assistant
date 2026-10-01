@@ -415,7 +415,7 @@ func TestAMemberSharedByTwoProjectsWorksOneStepAtATime(t *testing.T) {
 	if len(runner.twice) != 0 {
 		t.Fatalf("Lucius worked on two steps at once: %v", runner.twice)
 	}
-	if ref := taskByID(t, a, first.ID).Ref; waited == nil || *waited != (core.Wait{Kind: core.WaitMember, Seat: "Lucius", Member: waited.Member, On: ref}) || waited.Member == "" || ref == "" {
+	if ref := taskByID(t, a, first.ID).Ref; waited == nil || *waited != (core.Wait{Kind: core.WaitMember, Seat: "Lucius", Member: waited.Member, On: ref, Objective: first.Objective, Project: one.Title}) || waited.Member == "" || ref == "" {
 		t.Fatalf("B should wait for Lucius, busy on %s: %+v", ref, waited)
 	}
 	if got := taskByID(t, a, b.ID); got.Status != core.TaskWaiting || len(got.Revisions) != 1 {

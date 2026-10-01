@@ -526,8 +526,12 @@ export interface Wait {
   /** The busy person's seat, and the member it is filled from, if any. */
   seat?: string;
   member?: string;
-  /** The readable ID of the task they are busy on. */
+  /** The readable ID of the busy task or full stage's sole holder. */
   on?: string;
+  /** Objective of the busy task or the sole stage holder. */
+  objective?: string;
+  /** Title of the busy task's project, only when it differs. */
+  project?: string;
   /** The project whose to-do list they are busy with instead. */
   list?: string;
   active?: number;

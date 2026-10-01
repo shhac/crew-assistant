@@ -1471,12 +1471,27 @@ describe("a team member's panel", () => {
     ];
     const { poll } = routed(
       project(),
-      { tasks: [writing()] },
+      {
+        tasks: [
+          writing({
+            waiting: {
+              kind: "member",
+              seat: "Lucius",
+              member: "m7",
+              on: "XY-3",
+              objective: "Tidy the logs",
+              project: "Notes",
+            },
+          }),
+        ],
+      },
       "#/projects/p1/requests/t1/team/Implementer",
     );
     const panel = await screen.findByRole("region", { name: "Implementer" });
     expect(
-      within(panel).getByText("Waiting for the implementer to pick this up"),
+      within(panel).getByText(
+        "Waiting for Lucius (busy on XY-3 “Tidy the logs” in Notes)",
+      ),
     ).toBeTruthy();
     steps.Implementer = [
       ...steps.Implementer,
@@ -2007,15 +2022,13 @@ describe("whether a role is at work", () => {
     );
     const onOther = turn({ task_id: "t2", member: "m9", seat: "Reviewer" });
     expect(waiting({ turns: [onOther] })).toBe(
-      "Waiting for Ada to pick this up · the team is on “Tidy the logs”",
+      "Waiting for Ada to pick this up",
     );
     expect(waiting({ turns: [turn({ task_id: "t2" })] })).toBe(
-      "Waiting for Ada to pick this up · Ada is on “Tidy the logs”",
+      "Waiting for Ada to pick this up",
     );
     const pm = turn({ task_id: undefined, role: "pm", seat: "Pia" });
-    expect(waiting({ turns: [pm] })).toBe(
-      "Waiting for Ada to pick this up · Pia is ordering the to-do list",
-    );
+    expect(waiting({ turns: [pm] })).toBe("Waiting for Ada to pick this up");
     const retry = new Date(now.valueOf() + 30 * 60_000);
     const at = retry.toLocaleTimeString(undefined, {
       hour: "2-digit",
@@ -2040,6 +2053,46 @@ describe("whether a role is at work", () => {
       "Waiting for Ada to pick this up",
     );
   });
+  it.each([
+    [
+      { kind: "stage", stage: "reviewing", count: 1, limit: 1 },
+      "Waiting for room in Reviewing (1 of 1)",
+    ],
+    [
+      {
+        kind: "member",
+        seat: "Ada",
+        member: "m1",
+        on: "CA-27",
+        objective: "Tidy the logs",
+      },
+      "Waiting for Ada (busy on CA-27 “Tidy the logs”)",
+    ],
+    [
+      {
+        kind: "member",
+        seat: "Ada",
+        member: "m1",
+        on: "XY-3",
+        objective: "Tidy the logs",
+        project: "Notes",
+      },
+      "Waiting for Ada (busy on XY-3 “Tidy the logs” in Notes)",
+    ],
+  ] as [Task["waiting"], string][])(
+    "shows the recorded wait once on a card: %j",
+    (waiting, words) => {
+      show(project(), {
+        tasks: [writing({ status: "reviewing", waiting })],
+        turns: [turn({ project_id: "other", task_id: "other-task" })],
+      });
+      const request = card("Cache the lookups");
+      expect(request.querySelector(".board-card-step")?.textContent).toBe(
+        words,
+      );
+      expect(line(request)).toBeUndefined();
+    },
+  );
   it("says nothing of the sort for work that waits on the owner or the list", () => {
     show(project(), {
       tasks: [

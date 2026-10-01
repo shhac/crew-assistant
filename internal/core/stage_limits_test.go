@@ -33,6 +33,9 @@ func TestOwnerAndOutsideWaitsCountTowardsColumnCapacity(t *testing.T) {
 				finish(t, s, last.ID, TaskReviewing)
 				claimed(t, s)
 				want := Wait{Kind: WaitStage, Stage: StageReviewing, From: StageImplementing, Count: capacity, Limit: capacity}
+				if capacity == 1 {
+					want.On, want.Objective = p.TaskRef(tasks[0].Number), tasks[0].Objective
+				}
 				if w := waiting(t, s, last.ID); w == nil || *w != want {
 					t.Fatalf("full column: %+v, want %+v", w, want)
 				}
@@ -295,6 +298,10 @@ func TestAFullStagePushesBackUpThePipeline(t *testing.T) {
 		{StageImplementing, Wait{Kind: WaitStage, Stage: StageReviewing, From: StageImplementing, Count: 1, Limit: 1}},
 		{StageTodo, Wait{Kind: WaitStage, Stage: StageImplementing, Count: 1, Limit: 1}},
 	} {
+		if i > 0 {
+			holder := onBoard(t, s, tasks[i-1].ID)
+			want.wait.On, want.wait.Objective = holder.Ref, holder.Objective
+		}
 		got := onBoard(t, s, tasks[i].ID)
 		if got.Stage != want.stage {
 			t.Errorf("%s shows in %s, want %s", got.Objective, got.Stage, want.stage)
@@ -372,7 +379,9 @@ func TestStageLimitsCombineWithPeopleAndTheCap(t *testing.T) {
 			}
 			w := waiting(t, s, tasks[1].ID)
 			if w != nil {
-				w.On = ""
+				if w.Kind == WaitMember || w.Kind == WaitStage {
+					c.want.On, c.want.Objective = p.TaskRef(tasks[0].Number), tasks[0].Objective
+				}
 			}
 			if w == nil || *w != c.want {
 				t.Fatalf("B waits for %+v, want %+v", w, c.want)
@@ -437,7 +446,7 @@ func TestChecksRunSideBySideWhateverQAHolds(t *testing.T) {
 	// Ready is now full: A, once QA passes it, waits in QA.
 	judge(t, s, tasks[0].ID, "Quinn", VerdictPass)
 	claimed(t, s)
-	if a := onBoard(t, s, tasks[0].ID); a.Stage != StageQA || a.Waiting == nil || *a.Waiting != (Wait{Kind: WaitStage, Stage: StageReady, From: StageQA, Count: 1, Limit: 1}) {
+	if a := onBoard(t, s, tasks[0].ID); a.Stage != StageQA || a.Waiting == nil || *a.Waiting != (Wait{Kind: WaitStage, Stage: StageReady, From: StageQA, Count: 1, Limit: 1, On: p.TaskRef(tasks[1].Number), Objective: tasks[1].Objective}) {
 		t.Fatalf("A should wait in QA for room in Ready: %s %+v", a.Stage, a.Waiting)
 	}
 }

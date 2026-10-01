@@ -163,10 +163,14 @@ type Wait struct {
 	// filled from, if any.
 	Seat   string `json:"seat,omitempty"`
 	Member string `json:"member,omitempty"`
-	// On is the readable ID of the task the person is busy on; List is the
-	// title of the project whose to-do list they are busy with instead.
+	// On is the readable ID of the busy task or a full stage's sole holder.
+	// List is the title of the project whose to-do list they are busy with.
 	On   string `json:"on,omitempty"`
 	List string `json:"list,omitempty"`
+	// Objective names the busy task, or a full stage's sole holder.
+	Objective string `json:"objective,omitempty"`
+	// Project names the busy task's project only when it differs.
+	Project string `json:"project,omitempty"`
 	// Active and Cap are the project's tasks under way and its cap on them.
 	Active int `json:"active,omitempty"`
 	Cap    int `json:"cap,omitempty"`
@@ -345,10 +349,15 @@ func playbookRoles(p *Project) []Role {
 	return p.Playbook.Roles
 }
 
-// busyPeople are the people with a claim, a task's or a project's own, in
-// any project, each with what they are busy on, as a Wait for them.
-func busyPeople(v *Snapshot) map[string]Wait {
-	busy := map[string]Wait{}
+// busyWork retains the project alongside the recorded wait.
+type busyWork struct {
+	wait      Wait
+	projectID string
+}
+
+// busyPeople are the people with a claim in any project and what they are on.
+func busyPeople(v *Snapshot) map[string]busyWork {
+	busy := map[string]busyWork{}
 	for _, t := range v.Tasks {
 		for _, c := range t.Claims {
 			if c.Seat == "" {
@@ -357,14 +366,14 @@ func busyPeople(v *Snapshot) map[string]Wait {
 			r, team := seatRole(v, t.ProjectID, t.Roles, c.Seat)
 			doing := onTask(v, t)
 			doing.Kind, doing.Seat, doing.Member = WaitMember, r.Name, r.Member
-			busy[personKey(t.ProjectID, team, r)] = doing
+			busy[personKey(t.ProjectID, team, r)] = busyWork{doing, t.ProjectID}
 		}
 	}
 	for _, p := range v.Projects {
 		for _, c := range p.Claims {
 			if c.Seat != "" {
 				r, team := seatRole(v, p.ID, nil, c.Seat)
-				busy[personKey(p.ID, team, r)] = Wait{Kind: WaitMember, Seat: r.Name, Member: r.Member, List: p.Title}
+				busy[personKey(p.ID, team, r)] = busyWork{Wait{Kind: WaitMember, Seat: r.Name, Member: r.Member, List: p.Title}, p.ID}
 			}
 		}
 	}
@@ -374,22 +383,28 @@ func busyPeople(v *Snapshot) map[string]Wait {
 // onTask is a person busy on t, as a Wait for them names it.
 func onTask(v *Snapshot, t Task) Wait {
 	if p := project(v, t.ProjectID); p != nil {
-		return Wait{On: p.TaskRef(t.Number)}
+		return Wait{On: p.TaskRef(t.Number), Objective: t.Objective}
 	}
-	return Wait{}
+	return Wait{Objective: t.Objective}
 }
 
 // freeSeat is the first of seats, on team, whose person is free and that
 // admit lets run, which it marks busy on what doing names. With none, it
 // says what the seats wait for: what admit refused, or else the first
 // seat's person, busy elsewhere.
-func freeSeat(projectID string, team, seats []Role, busy map[string]Wait, admit Admit, doing Wait) (Role, *Wait) {
+func freeSeat(v *Snapshot, projectID string, team, seats []Role, busy map[string]busyWork, admit Admit, doing Wait) (Role, *Wait) {
 	var wait *Wait
 	for _, r := range seats {
 		key := personKey(projectID, team, r)
 		if on, ok := busy[key]; ok {
 			if wait == nil {
-				wait = &on
+				w := on.wait
+				if on.projectID != projectID && w.List == "" {
+					if p := project(v, on.projectID); p != nil {
+						w.Project = p.Title
+					}
+				}
+				wait = &w
 			}
 			continue
 		}
@@ -401,7 +416,7 @@ func freeSeat(projectID string, team, seats []Role, busy map[string]Wait, admit 
 			continue
 		}
 		doing.Kind, doing.Seat, doing.Member = WaitMember, r.Name, r.Member
-		busy[key] = doing
+		busy[key] = busyWork{doing, projectID}
 		return r, nil
 	}
 	return Role{}, wait
@@ -413,7 +428,7 @@ var stepKinds = map[string]string{TaskResearching: RoleResearcher, TaskDesigning
 // offer claims what t can do next: its step, or each check its latest draft
 // still needs. With nothing of the task under way or claimed, it says what
 // a step that is ready waits for.
-func offer(v *Snapshot, t *Task, busy map[string]Wait, admit Admit, now time.Time) ([]Scheduled, *Wait) {
+func offer(v *Snapshot, t *Task, busy map[string]busyWork, admit Admit, now time.Time) ([]Scheduled, *Wait) {
 	if t.alone() {
 		return nil, nil
 	}
@@ -430,7 +445,7 @@ func offer(v *Snapshot, t *Task, busy map[string]Wait, admit Admit, now time.Tim
 		if len(seats) == 0 {
 			return whole(t.Status, Role{})
 		}
-		seat, wait := freeSeat(t.ProjectID, t.Roles, seats, busy, admit, onTask(v, *t))
+		seat, wait := freeSeat(v, t.ProjectID, t.Roles, seats, busy, admit, onTask(v, *t))
 		if wait == nil {
 			return whole(t.Status, seat)
 		}
@@ -456,7 +471,7 @@ func offer(v *Snapshot, t *Task, busy map[string]Wait, admit Admit, now time.Tim
 			if slices.ContainsFunc(t.Claims, func(c Claim) bool { return c.Group == g.Key }) {
 				continue
 			}
-			seat, wait := freeSeat(t.ProjectID, t.Roles, g.Seats, busy, admit, onTask(v, *t))
+			seat, wait := freeSeat(v, t.ProjectID, t.Roles, g.Seats, busy, admit, onTask(v, *t))
 			if wait != nil {
 				waiting = cmp.Or(waiting, wait)
 				continue
@@ -503,7 +518,7 @@ func offer(v *Snapshot, t *Task, busy map[string]Wait, admit Admit, now time.Tim
 // its first stage has room and a seat is free for the first step. A queued
 // task never starts ahead of one before it that could; the first that
 // can't records in waits what it waits for.
-func startQueued(v *Snapshot, p *Project, busy map[string]Wait, admit Admit, stages held, waits map[string]*Wait, now time.Time) []Scheduled {
+func startQueued(v *Snapshot, p *Project, busy map[string]busyWork, admit Admit, stages held, waits map[string]*Wait, now time.Time) []Scheduled {
 	// Nothing starts while the PM is ordering the list: the order it sets
 	// is the one tasks start in.
 	if p.Paused || p.Playbook == nil || slices.ContainsFunc(p.Claims, func(c Claim) bool { return c.Step == StepPM }) {
@@ -536,7 +551,7 @@ func startQueued(v *Snapshot, p *Project, busy map[string]Wait, admit Admit, sta
 		var seat Role
 		if seats := rolesOf(p.Playbook.Roles, stepKinds[status]); len(seats) > 0 {
 			var wait *Wait
-			if seat, wait = freeSeat(p.ID, p.Playbook.Roles, seats, busy, admit, onTask(v, *t)); wait != nil {
+			if seat, wait = freeSeat(v, p.ID, p.Playbook.Roles, seats, busy, admit, onTask(v, *t)); wait != nil {
 				waits[t.ID] = wait
 				break
 			}
@@ -615,7 +630,7 @@ func (s *Service) ClaimMessage(ctx context.Context, taskID, messageID string, ad
 			return nil
 		}
 		if ok {
-			if _, wait := freeSeat(t.ProjectID, t.Roles, []Role{seat}, busyPeople(v), admit, Wait{}); wait != nil {
+			if _, wait := freeSeat(v, t.ProjectID, t.Roles, []Role{seat}, busyPeople(v), admit, Wait{}); wait != nil {
 				return nil
 			}
 		}
@@ -813,7 +828,7 @@ func (s *Service) takePM(v *Snapshot, projectID, step string, admit Admit) (Clai
 	}
 	var wait *Wait
 	var seat Role
-	if seat, wait = freeSeat(p.ID, p.Playbook.Roles, []Role{pm}, busyPeople(v), admit, Wait{}); wait != nil {
+	if seat, wait = freeSeat(v, p.ID, p.Playbook.Roles, []Role{pm}, busyPeople(v), admit, Wait{}); wait != nil {
 		return Claim{}, Role{}, false, nil
 	}
 	p.Attempt++

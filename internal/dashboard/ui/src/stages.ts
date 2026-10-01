@@ -290,11 +290,14 @@ export function waitingWords(task: Task, wait: Wait, project?: Project) {
   switch (wait.kind) {
     case "stage": {
       const stage = stageLabel(wait.stage!, taskPlaybook(task, project));
-      return `Waiting for room in ${stage} (${wait.count} of ${wait.limit})`;
+      return `Waiting for room in ${stage} (${wait.count} of ${wait.limit})${wait.on ? ` · held by ${wait.on}` : ""}`;
     }
     case "member": {
-      const busy = wait.on
-        ? ` (busy on ${wait.on})`
+      const on = [wait.on, wait.objective ? `“${wait.objective}”` : ""]
+        .filter(Boolean)
+        .join(" ");
+      const busy = on
+        ? ` (busy on ${on}${wait.project ? ` in ${wait.project}` : ""})`
         : wait.list
           ? ` (busy with the ${wait.list} to-do list)`
           : "";

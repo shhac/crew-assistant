@@ -1,7 +1,7 @@
 import { counted, recordedTime } from "./ui";
 import { roleAtWork } from "./members";
-import { needsYou, seatWords } from "./stages";
-import type { Role, Stage, State, Task, Turn } from "./api";
+import { needsYou, seatWords, waitingWords } from "./stages";
+import type { Stage, State, Task, Turn } from "./api";
 
 /** Past this long without a word from its session, a turn may have stalled. */
 export const quietAfter = 2 * 60_000;
@@ -62,25 +62,11 @@ export function workingParts(turn: Turn, now: number, short: boolean) {
  * Why a request in a working lane has not been picked up, when that can be
  * told. A request held for usage already says so in its step.
  */
-function waitReason(
-  task: Task,
-  role: Role | undefined,
-  state: State,
-  now: number,
-) {
+function waitReason(task: Task, state: State, now: number) {
   if (state.stopping) return "crew-assistant is stopping";
   if (state.paused) return "teams are paused";
   if (state.projects.find((p) => p.id === task.project_id)?.paused)
     return "this project is paused";
-  const running = state.turns[0];
-  if (running) {
-    if (!running.task_id) return `${running.seat} is ordering the to-do list`;
-    const same = !!role?.member && running.member === role.member;
-    const objective =
-      state.tasks.find((t) => t.id === running.task_id)?.objective ??
-      "another request";
-    return `${same ? role.name : "the team"} is on “${objective}”`;
-  }
   const until = recordedTime(task.retry_at);
   if (until && until.valueOf() > now && !task.detail)
     return `tries again at ${until.toLocaleTimeString(undefined, {
@@ -102,8 +88,14 @@ export function waitingLine(task: Task, state: State, now: number) {
     turnFor(task, state.turns)
   )
     return "";
+  if (task.waiting)
+    return waitingWords(
+      task,
+      task.waiting,
+      state.projects.find((p) => p.id === task.project_id),
+    );
   const role = roleAtWork(task);
-  const reason = waitReason(task, role, state, now);
+  const reason = waitReason(task, state, now);
   const who = role ? seatWords(task, role.name) : "the team";
   return `Waiting for ${who} to pick this up${reason ? ` · ${reason}` : ""}`;
 }
