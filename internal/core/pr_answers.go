@@ -19,11 +19,7 @@ func (s *Service) AskAboutPR(ctx context.Context, taskID, from, to, question str
 		return TeamMessage{}, errors.New("a question is required and must be at most 8 KiB")
 	}
 	var out TeamMessage
-	err := s.store.update(ctx, func(v *Snapshot) error {
-		t := task(v, taskID)
-		if t == nil {
-			return ErrNotFound
-		}
+	_, err := s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		if t.Finished() || !t.PROpen() {
 			return fmt.Errorf("there is no open pull request to answer on: %w", ErrConflict)
 		}
@@ -65,21 +61,11 @@ type PMOnPR struct {
 // to the implementer, its question opened for the owner. failure records a
 // PM that couldn't answer.
 func (s *Service) AnswerPRAsPM(ctx context.Context, taskID, messageID string, a PMOnPR, failure string) error {
-	return s.store.update(ctx, func(v *Snapshot) error {
-		t := task(v, taskID)
-		if t == nil {
+	_, err := s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
+		m := t.Message(messageID)
+		if m == nil {
 			return ErrNotFound
 		}
-		i := -1
-		for j := range t.Messages {
-			if t.Messages[j].ID == messageID {
-				i = j
-			}
-		}
-		if i < 0 {
-			return ErrNotFound
-		}
-		m := &t.Messages[i]
 		if !m.Open() {
 			return nil
 		}
@@ -110,6 +96,7 @@ func (s *Service) AnswerPRAsPM(ctx context.Context, taskID, messageID string, a 
 		derive(v, t)
 		return nil
 	})
+	return err
 }
 
 func implementerName(t Task) string {
@@ -132,11 +119,7 @@ func directFrom(v *Snapshot, t *Task, from, note string, now time.Time) {
 // DirectFromPM sends the PM's direction to the implementer, as when it sends
 // a ready pull request back rather than merging it.
 func (s *Service) DirectFromPM(ctx context.Context, taskID, from, note string) error {
-	return s.store.update(ctx, func(v *Snapshot) error {
-		t := task(v, taskID)
-		if t == nil {
-			return ErrNotFound
-		}
+	_, err := s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		now := s.now().UTC()
 		if t.Status == TaskDeciding {
 			t.Status, t.Detail = TaskAwaiting, ""
@@ -147,6 +130,7 @@ func (s *Service) DirectFromPM(ctx context.Context, taskID, from, note string) e
 		derive(v, t)
 		return nil
 	})
+	return err
 }
 
 // ReconsiderMerge withdraws the open decision to merge a task's pull request
@@ -154,11 +138,7 @@ func (s *Service) DirectFromPM(ctx context.Context, taskID, from, note string) e
 // again, in one change, so the withdrawal never reads as the owner closing
 // the task.
 func (s *Service) ReconsiderMerge(ctx context.Context, taskID, why string) error {
-	return s.store.update(ctx, func(v *Snapshot) error {
-		t := task(v, taskID)
-		if t == nil {
-			return ErrNotFound
-		}
+	_, err := s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		d := decision(v, t.DecisionID)
 		if t.Status != TaskWaiting || !t.PROpen() || d == nil || d.Status != DecisionOpen || d.Kind != DecisionDelivery {
 			return nil
@@ -169,4 +149,5 @@ func (s *Service) ReconsiderMerge(ctx context.Context, taskID, why string) error
 		derive(v, t)
 		return nil
 	})
+	return err
 }

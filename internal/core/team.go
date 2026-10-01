@@ -37,6 +37,17 @@ type TeamMessage struct {
 	ForPR bool `json:"for_pr,omitempty"`
 }
 
+// Message is the task's team message with this id, to change in place, or
+// nil.
+func (t *Task) Message(id string) *TeamMessage {
+	for i := range t.Messages {
+		if t.Messages[i].ID == id {
+			return &t.Messages[i]
+		}
+	}
+	return nil
+}
+
 const (
 	MessageWaiting  = "waiting"
 	MessageWorking  = "working"
@@ -249,12 +260,7 @@ func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID strin
 		if t == nil {
 			return ErrNotFound
 		}
-		var m *TeamMessage
-		for i := range t.Messages {
-			if t.Messages[i].ID == messageID {
-				m = &t.Messages[i]
-			}
-		}
+		m := t.Message(messageID)
 		if m == nil {
 			return ErrNotFound
 		}
