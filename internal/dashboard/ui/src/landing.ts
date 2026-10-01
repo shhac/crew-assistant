@@ -1,4 +1,4 @@
-import type { LandPolicy, Playbook, Project, Task } from "./api";
+import type { LandingInput, LandPolicy, Playbook, Project, Task } from "./api";
 
 /** Whether a team works on code; landing only has meaning for code. */
 export const isCode = (playbook?: Playbook) => playbook?.medium === "git";
@@ -173,4 +173,82 @@ export function pmLandingLine(task: Task): string {
   return task.status === "landed"
     ? `Landed by the PM ${how}: ${decided.reason}`
     : `The PM is landing it ${how}: ${decided.reason}`;
+}
+
+/** Said where the PM is to decide but the team has none to. */
+export const NO_PM_YET =
+  "The team has no PM yet, so you're asked until it has one.";
+
+/** Who approves a change landing: only a push can leave it to the PM. */
+export const effectiveApprove = (chosen: string, way: string) =>
+  chosen === "pm" && !pmCanDecide(way) ? "before" : chosen;
+
+/** The hint under who approves a change landing without pull requests. */
+export function approveHint(
+  way: string,
+  approve: string,
+  hasPM: boolean,
+): string {
+  if (!pmCanDecide(way))
+    return "The PM can't decide here: a new branch lands nothing.";
+  if (approve !== "pm") return "";
+  return hasPM
+    ? "Once the reviewers and QA pass a change, nothing waits on you and what it depends on has landed, the PM lands or holds it and says why. It lands a change as one commit or keeps the team's commits, and cleans up the branch. You can still land or stop it yourself."
+    : NO_PM_YET;
+}
+
+const openHints: Record<string, string> = {
+  pm: "Once the reviewers and QA pass a change, the PM opens its pull request or holds it and says why. You can still open it yourself.",
+  owner:
+    "You see the title and description the implementer wrote before it opens.",
+  implementer:
+    "A change opens its pull request as soon as the reviewers and QA pass it.",
+};
+
+/** The hint under who decides that a pull request opens. */
+export function openHint(open: string, hasPM: boolean): string {
+  if (open === "pm" && !hasPM) return NO_PM_YET;
+  return openHints[open] ?? openHints.pm;
+}
+
+/** The hint under who approves a ready pull request merging. */
+export function mergeHint(merging: string, hasPM: boolean): string {
+  const ready =
+    "Ready means approved where the repository asks for review, every check green, every review thread resolved, and no conflicts.";
+  return merging === "pm" && !hasPM ? `${ready} ${NO_PM_YET}` : ready;
+}
+
+/** What the landing editor's choices are, as the owner made them. */
+export interface LandingForm {
+  means: string;
+  via: string;
+  pullRequests: boolean;
+  target: string;
+  github: string;
+  merge: string;
+  open: string;
+  merging: string;
+  approve: string;
+}
+
+/**
+ * The landing policy the editor saves: only what the way needs, with who
+ * approves merging standing in for who approves landing when pull requests
+ * are on.
+ */
+export function landingInput(form: LandingForm): LandingInput {
+  const way = form.pullRequests ? "pull-request" : form.via;
+  return {
+    means: form.means.trim(),
+    via: form.via,
+    target: way === "branch" ? "" : form.target.trim(),
+    method: form.via === "push" ? "fast-forward" : "",
+    pull_requests: form.pullRequests,
+    github: form.pullRequests ? form.github.trim() : "",
+    merge: form.pullRequests ? form.merge : "",
+    open: form.pullRequests ? form.open : "",
+    approve: form.pullRequests
+      ? form.merging
+      : effectiveApprove(form.approve, way),
+  };
 }

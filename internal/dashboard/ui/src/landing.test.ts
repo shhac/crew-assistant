@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  approveHint,
+  landingInput,
+  mergeHint,
+  NO_PM_YET,
+  openHint,
   approvalText,
   approveLabel,
   landsBy,
@@ -187,5 +192,59 @@ describe("landing", () => {
     expect(
       pmLandingLine({ ...task("landed", true), land_decision: undefined }),
     ).toBe("");
+  });
+});
+
+describe("the landing editor", () => {
+  const form = {
+    means: " merged ",
+    via: "push",
+    pullRequests: false,
+    target: " main ",
+    github: " o/r ",
+    merge: "rebase",
+    open: "owner",
+    merging: "none",
+    approve: "pm",
+  };
+  it("saves only what the way needs", () => {
+    expect(landingInput(form)).toEqual({
+      means: "merged",
+      via: "push",
+      target: "main",
+      method: "fast-forward",
+      pull_requests: false,
+      github: "",
+      merge: "",
+      open: "",
+      approve: "pm",
+    });
+    // With pull requests, who approves merging is what is saved.
+    expect(landingInput({ ...form, pullRequests: true })).toMatchObject({
+      pull_requests: true,
+      github: "o/r",
+      merge: "rebase",
+      open: "owner",
+      approve: "none",
+    });
+    // A branch has no target, and never leaves landing to the PM.
+    expect(landingInput({ ...form, via: "branch" })).toMatchObject({
+      target: "",
+      method: "",
+      approve: "before",
+    });
+  });
+  it("hints at who decides, and asks the owner while the team has no PM", () => {
+    expect(approveHint("branch", "before", true)).toContain(
+      "a new branch lands nothing",
+    );
+    expect(approveHint("push", "before", true)).toBe("");
+    expect(approveHint("push", "pm", false)).toBe(NO_PM_YET);
+    expect(openHint("pm", false)).toBe(NO_PM_YET);
+    expect(openHint("implementer", false)).toContain(
+      "as soon as the reviewers and QA pass it",
+    );
+    expect(mergeHint("pm", false)).toContain(NO_PM_YET);
+    expect(mergeHint("none", false)).not.toContain(NO_PM_YET);
   });
 });
