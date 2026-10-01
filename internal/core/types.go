@@ -69,6 +69,9 @@ type Project struct {
 	PMDue bool `json:"pm_due,omitempty"`
 	// PMDirection is what the owner told the PM, for its next look.
 	PMDirection string `json:"pm_direction,omitempty"`
+	// PRChoices are tasks that started with pull requests, since turned off,
+	// whose PM is to choose whether they carry on with them.
+	PRChoices []string `json:"pr_choices,omitempty"`
 	// Claims are the project's own steps a seat has taken and not yet
 	// finished, such as the PM's look at the to-do list; Attempt numbers
 	// them, and only goes up. See claims.go.

@@ -134,3 +134,12 @@ func (c Client) Edit(ctx context.Context, repo string, number int, title, body s
 	_, err := c.Run(ctx, "pr", "edit", strconv.Itoa(number), "--repo", repo, "--title", title, "--body", body)
 	return err
 }
+
+// Close closes the pull request without merging it, saying why.
+func (c Client) Close(ctx context.Context, repo string, number int, comment string) error {
+	if !repoName.MatchString(repo) {
+		return errors.New("not a GitHub repository name")
+	}
+	_, err := c.Run(ctx, "pr", "close", strconv.Itoa(number), "--repo", repo, "--comment", comment)
+	return err
+}

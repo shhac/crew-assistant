@@ -59,6 +59,10 @@ func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
 	case "pr comment", "pr edit":
 		f.posts = append(f.posts, args)
 		return nil, nil
+	case "pr close":
+		f.posts = append(f.posts, args)
+		f.closed = true
+		return nil, nil
 	case "pr list":
 		if f.opened == 0 || f.closed {
 			return []byte("[]"), nil
@@ -814,5 +818,57 @@ func TestAPausedProjectHoldsAReadyPullRequestUntilLandingResumes(t *testing.T) {
 	}
 	if task = s.current(t); task.Status != core.TaskLanded || len(s.gh.merges) != 1 {
 		t.Fatalf("not merged once landing resumed: %s %s merges %v", task.Status, task.Detail, s.gh.merges)
+	}
+}
+
+// Turning pull requests off has the PM choose for each task that started
+// with them: one it moves lands the project's way, its pull request closed
+// with a word on why, and is decided again before it lands.
+func TestThePMMovesATaskOffPullRequestsWhenTheyAreTurnedOff(t *testing.T) {
+	s := newPRScenario(t, 2, withPM, opensUnasked, mergeBy(core.ApproveBefore))
+	if task := s.current(t); !task.PROpen() || task.Status != core.TaskAwaiting {
+		t.Fatalf("the pull request did not open: %s %s", task.Status, task.Detail)
+	}
+	s.runner.mu.Lock()
+	s.runner.pm = []string{fmt.Sprintf(`{"order": [], "pull_requests": [{"task": %q, "keep": false}], "note": "it hasn't been reviewed yet"}`, s.id)}
+	s.runner.mu.Unlock()
+	if _, err := s.a.SetLanding(s.ctx, s.p.ID, core.LandPolicy{Via: core.LandPush, Target: "main", Approve: core.ApproveBefore}); err != nil {
+		t.Fatal(err)
+	}
+	task := s.current(t)
+	closed := slices.IndexFunc(s.gh.posts, func(args []string) bool { return args[0] == "pr" && args[1] == "close" })
+	if closed < 0 || !strings.Contains(argAfter(s.gh.posts[closed], "--comment"), "will land another way") {
+		t.Fatalf("the pull request was not closed: %v", s.gh.posts)
+	}
+	if task.UsesPRs() || task.Proposal != nil || task.ClosePR != nil || task.Status != core.TaskWaiting {
+		t.Fatalf("not moved off pull requests: %s %+v %+v", task.Status, task.Proposal, task.ClosePR)
+	}
+	if d := openDecision(t, s.a, task); d.Title != "Land “Add A” on main" {
+		t.Fatalf("not asked to land it the new way: %q", d.Title)
+	}
+	if !activityHas(t, s.a, "The PM moved Add A off pull requests") {
+		t.Fatal("the PM's choice is not in the activity")
+	}
+}
+
+// Without a PM the owner is asked, and keeping its pull request leaves the
+// task as it started.
+func TestTheOwnerKeepsATaskOnItsPullRequestWhenTheyAreTurnedOff(t *testing.T) {
+	s := newPRScenario(t, 2, opensUnasked, mergeBy(core.ApproveBefore))
+	s.current(t)
+	if _, err := s.a.SetLanding(s.ctx, s.p.ID, core.LandPolicy{Via: core.LandPush, Target: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := s.a.Core.Snapshot(s.ctx)
+	i := slices.IndexFunc(snap.Decisions, func(d core.Decision) bool { return d.TaskID == s.id && d.Kind == core.DecisionPRFlow })
+	if i < 0 || snap.Decisions[i].Status != core.DecisionOpen {
+		t.Fatalf("the owner was not asked: %+v", snap.Decisions)
+	}
+	if _, err := s.a.Core.ChooseDecision(s.ctx, snap.Decisions[i].ID, core.ChoiceKeepPR); err != nil {
+		t.Fatal(err)
+	}
+	task := s.current(t)
+	if !task.UsesPRs() || !task.PROpen() || task.Status != core.TaskAwaiting || task.ClosePR != nil {
+		t.Fatalf("keeping changed the task: %s %+v", task.Status, task.Proposal)
 	}
 }

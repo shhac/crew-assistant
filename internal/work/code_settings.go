@@ -38,13 +38,22 @@ func (lp *Loop) SetWorkspace(ctx context.Context, projectID string, in Workspace
 
 // SetLanding sets what landing means for a code project. The owner and the
 // assistant can; nothing inside the project can. Tasks already under way keep
-// the policy they started with.
+// the policy they started with; turning pull requests off has someone choose
+// whether those that started with them carry on with them.
 func (lp *Loop) SetLanding(ctx context.Context, projectID string, land core.LandPolicy) (core.Project, error) {
-	return lp.editPlaybook(ctx, projectID, "landing policies are for code teams; choose a code team first", func(_ *core.Snapshot, _ *core.Project, playbook *core.Playbook) error {
+	p, err := lp.editPlaybook(ctx, projectID, "landing policies are for code teams; choose a code team first", func(_ *core.Snapshot, _ *core.Project, playbook *core.Playbook) error {
 		land.Means, land.Target, land.GitHub = strings.TrimSpace(land.Means), strings.TrimSpace(land.Target), strings.TrimSpace(land.GitHub)
 		playbook.Land = land
 		return nil
 	})
+	if err != nil || land.PullRequests {
+		return p, err
+	}
+	if err = lp.Core.EndPullRequests(ctx, projectID); err != nil {
+		return p, err
+	}
+	lp.Nudge()
+	return p, nil
 }
 
 // SetRunRecipe sets how QA starts a code project to use it, or with nil

@@ -522,3 +522,24 @@ func prChecksValue(pr github.PR) string {
 func prReviewValue(pr github.PR) string {
 	return fmt.Sprintf("%s/%s/%d", pr.Latest().UTC().Format(time.RFC3339), pr.ReviewDecision, pr.Unresolved())
 }
+
+// closeEndedPRs closes the pull requests of tasks that now land another way,
+// saying why on each. One that can't be closed yet is tried again next pass.
+func (lp *Loop) closeEndedPRs(ctx context.Context, snap core.Snapshot) {
+	for _, t := range snap.Tasks {
+		c := t.ClosePR
+		if c == nil {
+			continue
+		}
+		if err := lp.github.Close(ctx, c.Repo, c.Number, c.Note+"\n\n— crew-assistant\n"+ownPost); err != nil {
+			continue
+		}
+		_, _ = lp.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+			if t.ClosePR == nil || *t.ClosePR != *c {
+				return "", nil
+			}
+			t.ClosePR = nil
+			return fmt.Sprintf("Closed pull request #%d for %s", c.Number, t.Objective), nil
+		})
+	}
+}

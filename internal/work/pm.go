@@ -189,10 +189,36 @@ The order is yours to set directly. Never ask the owner to approve or confirm an
 Tasks in triage are new work from the owner or the assistant, waiting for you before the team takes them. For each one: tidy its title and requirements with edit_task so the researcher starts from a clear ask, and link it with link_tasks where it depends on or relates to other work. Then send it on to the team, "to": "research", which puts it on the to-do list, where the order below may place it; or, only when you cannot shape it without the owner, keep it in triage and ask them, "to": "owner", with the question. A task left out stays in triage until you next look.
 `)
 	}
+	if pmPRChoices(&b, snap, p) {
+		b.WriteString(`
+The owner turned pull requests off for this project. Each task above under "Started with pull requests" began with them: choose whether it carries on with them as it started ("keep": true), or lands the project's way from here ("keep": false), which closes its pull request, if one is open, and decides again before it lands. Keep one far along with its reviewers; move one that hasn't reached its pull request yet, or whose pull request has nothing worth keeping.
+`)
+	}
 	b.WriteString(`
 Name each task by one id: its readable id, such as CA-3, or its canonical id. Reply with only this JSON object:
-{"triage": [{"task": "id of a task in triage", "to": "research or owner", "question": "for the owner only: what you need them to decide"}], "order": ["every queued task id, in the order they should start, with any you send on from triage"], "depends": [{"task": "id", "on": ["ids it must wait for; the full list, replacing what it has"]}], "note": "one line on what you changed and why", "questions": ["only decisions the owner must make, such as conflicting priorities; never approval of an order"]}`)
+{"triage": [{"task": "id of a task in triage", "to": "research or owner", "question": "for the owner only: what you need them to decide"}], "order": ["every queued task id, in the order they should start, with any you send on from triage"], "depends": [{"task": "id", "on": ["ids it must wait for; the full list, replacing what it has"]}], "pull_requests": [{"task": "id of a task that started with pull requests", "keep": true}], "note": "one line on what you changed and why", "questions": ["only decisions the owner must make, such as conflicting priorities; never approval of an order"]}`)
 	return b.String()
+}
+
+// pmPRChoices lists the tasks whose pull requests the PM is to choose
+// about, and reports whether there are any.
+func pmPRChoices(b *strings.Builder, snap core.Snapshot, p core.Project) bool {
+	found := false
+	for _, id := range p.PRChoices {
+		t, ok := findTask(snap, p.ID, id)
+		if !ok || t.Finished() {
+			continue
+		}
+		if !found {
+			b.WriteString("\nStarted with pull requests:\n")
+			found = true
+		}
+		fmt.Fprintf(b, "- %s (%s, on the board in %s): %s\n", t.Label(), t.Status, t.Stage, text.Clip(t.Objective, 300))
+		if t.PROpen() {
+			fmt.Fprintf(b, "  its pull request #%d is open\n", t.Proposal.Number)
+		}
+	}
+	return found
 }
 
 // pmTasks is the list as the PM keeps it: every unfinished task, queued ones
@@ -342,6 +368,10 @@ func parsePM(reply string) (core.PMAnswer, []string, error) {
 			Task string   `json:"task"`
 			On   []string `json:"on"`
 		} `json:"depends"`
+		PullRequests []struct {
+			Task string `json:"task"`
+			Keep *bool  `json:"keep"`
+		} `json:"pull_requests"`
 		Note      string   `json:"note"`
 		Questions []string `json:"questions"`
 	}
@@ -354,6 +384,11 @@ func parsePM(reply string) (core.PMAnswer, []string, error) {
 	}
 	for _, r := range in.Triage {
 		answer.Triage = append(answer.Triage, core.TriageRelease{Task: strings.TrimSpace(r.Task), To: strings.ToLower(strings.TrimSpace(r.To)), Question: strings.TrimSpace(r.Question)})
+	}
+	for _, c := range in.PullRequests {
+		if c.Keep != nil {
+			answer.PRFlow = append(answer.PRFlow, core.PRFlowChoice{Task: strings.TrimSpace(c.Task), Keep: *c.Keep})
+		}
 	}
 	return answer, listed(in.Questions, 5), nil
 }

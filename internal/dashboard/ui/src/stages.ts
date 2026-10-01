@@ -151,7 +151,7 @@ export interface DecisionKindWords {
   prompt: string;
   send: string;
   /** The words for "Approve", when approving sends the work on. */
-  approve?: (playbook?: Playbook) => string;
+  approve?: (playbook?: Playbook, task?: Task) => string;
   /** Whether the card says how hard landing is to undo. */
   reversible?: boolean;
 }
@@ -174,7 +174,11 @@ const decisionKinds: Record<string, DecisionKindWords> = {
     recommend: false,
     answering: "through-choice",
     ...askForChanges,
-    approve: approveLabel,
+    // An open pull request's approval is to merge it.
+    approve: (playbook, task) =>
+      task?.proposal?.number && playbook?.land?.pull_requests
+        ? "Merge pull request"
+        : approveLabel(playbook),
     reversible: true,
   },
   update: {
@@ -200,6 +204,11 @@ const decisionKinds: Record<string, DecisionKindWords> = {
     ...askForAnswer,
   },
   "pm-question": { ...otherDecision, badge: "Question from the PM" },
+  "pr-flow": {
+    ...otherDecision,
+    badge: "Pull requests are off",
+    step: () => "Waiting on whether it keeps its pull request",
+  },
   failure: {
     badge: "Stuck",
     step: () => "Stuck until you decide",

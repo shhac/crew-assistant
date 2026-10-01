@@ -189,7 +189,10 @@ type Task struct {
 	OwnerTook []string `json:"owner_took,omitempty"`
 	// Proposal is the pull request a task lands through, and the branch the
 	// project owns for it.
-	Proposal  *Proposal `json:"proposal,omitempty"`
+	Proposal *Proposal `json:"proposal,omitempty"`
+	// ClosePR is a pull request the task no longer lands through, for the
+	// loop to close.
+	ClosePR   *PRClose  `json:"close_pr,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	// StartedAt is when the task first left the to-do list.
 	StartedAt time.Time `json:"started_at,omitzero"`
@@ -322,7 +325,7 @@ func (t *Task) Describe(text PRText) {
 }
 
 // PROpen reports a task with a pull request open for it.
-func (t Task) PROpen() bool { return t.Proposal != nil && t.Proposal.Number > 0 }
+func (t Task) PROpen() bool { return t.UsesPRs() && t.Proposal != nil && t.Proposal.Number > 0 }
 
 // UsesPRs reports a task that lands through a pull request, as its team had
 // it when it started.

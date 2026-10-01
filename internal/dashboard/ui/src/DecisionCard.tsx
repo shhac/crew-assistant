@@ -25,8 +25,9 @@ function choiceLabel(
   choice: string,
   kind: DecisionKindWords,
   playbook?: Playbook,
+  task?: Task,
 ) {
-  if (choice === "Approve" && kind.approve) return kind.approve(playbook);
+  if (choice === "Approve" && kind.approve) return kind.approve(playbook, task);
   if (choice === "Stop") return "Stop request";
   if (choice === "Use your judgment" || choice === "Use your judgement")
     return "Let the team decide";
@@ -88,7 +89,7 @@ export function DecisionCard({
     },
   };
   const choices = decision.choices ?? [];
-  const label = (choice: string) => choiceLabel(choice, kind, playbook);
+  const label = (choice: string) => choiceLabel(choice, kind, playbook, task);
   const closeWithoutDeciding = closable && (
     <button
       type="button"

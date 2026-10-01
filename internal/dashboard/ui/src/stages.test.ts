@@ -707,6 +707,11 @@ describe("a task landing through a pull request", () => {
         }),
       ),
     ).toBe("Implementer answering pull request #7");
+    const delivery = decisionKind(decision("delivery"));
+    expect(delivery.approve?.(prs, pr({}))).toBe("Open pull request");
+    expect(
+      delivery.approve?.(prs, pr({ proposal: { branch: "b", number: 7 } })),
+    ).toBe("Merge pull request");
     expect(prWords({ checks: "SUCCESS", ready: true, at: "" })).toBe(
       "ready to land",
     );

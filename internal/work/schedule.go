@@ -73,6 +73,7 @@ func (lp *Loop) pass(ctx context.Context, waited bool) (bool, []<-chan any, erro
 	if err := lp.checkBlockers(ctx, snap); err != nil {
 		return false, nil, err
 	}
+	lp.closeEndedPRs(ctx, snap)
 	if progressed, err := lp.settleAnswers(ctx, snap); progressed || err != nil {
 		return progressed, nil, err
 	}

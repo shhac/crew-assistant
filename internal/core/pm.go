@@ -22,6 +22,9 @@ type PMAnswer struct {
 	Order   []string
 	Depends map[string][]string
 	Note    string
+	// PRFlow is the PM's choice for tasks that started with pull requests,
+	// since turned off: whether each carries on with them.
+	PRFlow []PRFlowChoice
 	// The order read before the PM's look.
 	SeenOrderedBy string
 	SeenOrderedAt time.Time
@@ -57,6 +60,15 @@ func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (s
 		}
 		p.PMDue, p.PMDirection = false, ""
 		now := s.now().UTC()
+		for _, c := range in.PRFlow {
+			id := canonicalID(v, c.Task)
+			if !slices.Contains(p.PRChoices, id) {
+				continue
+			}
+			choosePRFlow(v, id, c.Keep, "The PM", now)
+		}
+		// A task the PM left out is put to it again at its next look.
+		p.PMDue = len(p.PRChoices) > 0
 		for _, r := range in.Triage {
 			if line := triage(v, p, r, now); line != "" {
 				triaged = append(triaged, line)

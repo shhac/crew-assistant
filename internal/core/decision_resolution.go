@@ -59,6 +59,9 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 			}
 		}
 		now := s.now().UTC()
+		if d.Kind == DecisionPRFlow && disposition == DispositionChoice {
+			choosePRFlow(v, d.TaskID, answer == ChoiceKeepPR, "You", now)
+		}
 		d.ResolvedAt = &now
 		d.Disposition = disposition
 		if disposition == DispositionDismissed {
