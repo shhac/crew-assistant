@@ -81,6 +81,57 @@ const (
 	plainDesign = `{"input": "Keep it plain.", "escalate": null}`
 )
 
+// scripted is a kind of read-only turn the runner answers from a script:
+// the prompts it is known by, its queue of replies and the reply once they
+// run out. before runs first, and may fail the turn.
+type scripted struct {
+	markers  []string
+	queue    *[]string
+	fallback func(roles.Spec) string
+	before   func(roles.Spec) error
+}
+
+func always(reply string) func(roles.Spec) string { return func(roles.Spec) string { return reply } }
+
+// scripts are the turns the runner answers from a script, in the order it
+// tries them.
+func (r *scriptedRunner) scripts() []scripted {
+	return []scripted{
+		{markers: []string{"Plan this task before anything is written"}, queue: &r.plans, fallback: always(plainPlan)},
+		{markers: []string{"asks for your design input"}, queue: &r.designs, fallback: always(plainDesign), before: r.onDesigner},
+		{markers: []string{"Decide whether this change lands", "Decide whether this change opens", "Decide whether pull request"}, queue: &r.pmLand,
+			fallback: always(`{"land": true, "reason": "it is signed off and nothing waits on it"}`),
+			before: func(roles.Spec) error {
+				if r.onPMLand != nil {
+					r.onPMLand()
+				}
+				return nil
+			}},
+		{markers: []string{"handed you this about the pull request"}, queue: &r.pmOnPR, fallback: always(`{}`)},
+		{markers: []string{"Decide where this task goes next"}, queue: &r.route, fallback: always("no choice")},
+		{markers: []string{"Judge what remains at the round limit"}, queue: &r.escalate, fallback: always("no judgement")},
+		{markers: []string{"Judge whether a requirement the implementer can't meet"}, queue: &r.ownerStep, fallback: always("no judgement")},
+		{markers: []string{"You keep the to-do list"}, queue: &r.pm, fallback: func(spec roles.Spec) string {
+			return fmt.Sprintf(`{"triage": %s, "order": [], "depends": [], "note": "", "questions": []}`, sendOn(spec.Prompt))
+		}},
+	}
+}
+
+// script is the scripted kind of turn spec is, if it is one.
+func (r *scriptedRunner) script(spec roles.Spec) (scripted, bool) {
+	if spec.Write {
+		return scripted{}, false
+	}
+	for _, s := range r.scripts() {
+		for _, marker := range s.markers {
+			if strings.Contains(spec.Prompt, marker) {
+				return s, true
+			}
+		}
+	}
+	return scripted{}, false
+}
+
 func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -92,67 +143,15 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 			return roles.Result{}, err
 		}
 	}
-	if !spec.Write && strings.Contains(spec.Prompt, "Plan this task before anything is written") {
-		reply := plainPlan
-		if len(r.plans) > 0 {
-			reply, r.plans = r.plans[0], r.plans[1:]
-		}
-		return roles.Result{Text: reply}, nil
-	}
-	if !spec.Write && strings.Contains(spec.Prompt, "asks for your design input") {
-		if r.onDesigner != nil {
-			if err := r.onDesigner(spec); err != nil {
+	if script, ok := r.script(spec); ok {
+		if script.before != nil {
+			if err := script.before(spec); err != nil {
 				return roles.Result{}, err
 			}
 		}
-		reply := plainDesign
-		if len(r.designs) > 0 {
-			reply, r.designs = r.designs[0], r.designs[1:]
-		}
-		return roles.Result{Text: reply}, nil
-	}
-	if !spec.Write && (strings.Contains(spec.Prompt, "Decide whether this change lands") || strings.Contains(spec.Prompt, "Decide whether this change opens") || strings.Contains(spec.Prompt, "Decide whether pull request")) {
-		if r.onPMLand != nil {
-			r.onPMLand()
-		}
-		reply := `{"land": true, "reason": "it is signed off and nothing waits on it"}`
-		if len(r.pmLand) > 0 {
-			reply, r.pmLand = r.pmLand[0], r.pmLand[1:]
-		}
-		return roles.Result{Text: reply}, nil
-	}
-	if !spec.Write && strings.Contains(spec.Prompt, "handed you this about the pull request") {
-		reply := `{}`
-		if len(r.pmOnPR) > 0 {
-			reply, r.pmOnPR = r.pmOnPR[0], r.pmOnPR[1:]
-		}
-		return roles.Result{Text: reply}, nil
-	}
-	if !spec.Write && strings.Contains(spec.Prompt, "Decide where this task goes next") {
-		reply := "no choice"
-		if len(r.route) > 0 {
-			reply, r.route = r.route[0], r.route[1:]
-		}
-		return roles.Result{Text: reply}, nil
-	}
-	if !spec.Write && strings.Contains(spec.Prompt, "Judge what remains at the round limit") {
-		reply := "no judgement"
-		if len(r.escalate) > 0 {
-			reply, r.escalate = r.escalate[0], r.escalate[1:]
-		}
-		return roles.Result{Text: reply}, nil
-	}
-	if !spec.Write && strings.Contains(spec.Prompt, "Judge whether a requirement the implementer can't meet") {
-		reply := "no judgement"
-		if len(r.ownerStep) > 0 {
-			reply, r.ownerStep = r.ownerStep[0], r.ownerStep[1:]
-		}
-		return roles.Result{Text: reply}, nil
-	}
-	if !spec.Write && strings.Contains(spec.Prompt, "You keep the to-do list") {
-		reply := fmt.Sprintf(`{"triage": %s, "order": [], "depends": [], "note": "", "questions": []}`, sendOn(spec.Prompt))
-		if len(r.pm) > 0 {
-			reply, r.pm = r.pm[0], r.pm[1:]
+		reply := script.fallback(spec)
+		if queue := *script.queue; len(queue) > 0 {
+			reply, *script.queue = queue[0], queue[1:]
 		}
 		return roles.Result{Text: reply}, nil
 	}
