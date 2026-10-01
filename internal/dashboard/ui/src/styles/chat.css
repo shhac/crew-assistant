@@ -480,3 +480,39 @@
 .composer-large .composer-row > button {
   margin-left: auto;
 }
+
+.pm-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 24rem;
+}
+.pm-chat-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 16px;
+}
+.pm-chat-header p {
+  margin: 4px 0;
+}
+.pm-chat-log {
+  max-height: 60vh;
+  min-height: 12rem;
+  overflow-y: auto;
+}
+.pm-chat .message-by {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.pm-chat .message-by time {
+  margin-left: auto;
+}
+.pm-chat-running {
+  color: var(--work);
+}
+.pm-chat-receipt {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 8px;
+}

@@ -40,6 +40,7 @@ type roleTools struct {
 	// every change, and may queue new ones, at most maxPMQueued a look.
 	manages bool
 	queued  *int
+	chat    *pmChatChanges
 	// notesOnly limits the PM to leaving notes, for a turn that answers a
 	// question and so changes nothing else.
 	notesOnly bool
@@ -126,7 +127,19 @@ func (r roleTools) Handler() session.ToolHandler {
 
 var errNoTask = errors.New("there is no such task in this project")
 
-func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (string, error) {
+func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (out string, err error) {
+	if r.chat != nil {
+		r.chat.mu.Lock()
+		defer r.chat.mu.Unlock()
+		defer func() {
+			if err == nil {
+				r.recordChatChange(ctx, name, raw, out)
+			}
+		}()
+	}
+	return r.execute(ctx, name, raw)
+}
+func (r roleTools) execute(ctx context.Context, name string, raw json.RawMessage) (string, error) {
 	var in map[string]string
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return "", errors.New("arguments must be an object of strings")
@@ -141,6 +154,16 @@ func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (
 		taskID, while = in["task_id"], ""
 	}
 	switch name {
+	case "order_tasks":
+		ids := strings.FieldsFunc(in["task_ids"], func(c rune) bool { return c == ',' || c == '\n' })
+		for i := range ids {
+			ids[i] = strings.TrimSpace(ids[i])
+		}
+		tasks, err := r.lp.Core.OrderTasks(ctx, r.projectID, ids, core.OrderedByPM)
+		if err == nil && r.chat != nil {
+			r.chat.items = append(r.chat.items, orderedReceipt(tasks))
+		}
+		return changed("Reordered to-do list.", err)
 	case "list_tasks":
 		return r.list(ctx, in["which"], in["related_to"], in["text"])
 	case "read_task":
@@ -217,6 +240,9 @@ func (r roleTools) queue(ctx context.Context, title, requirements, dependsOn str
 		return "", hideProjects(err)
 	}
 	*r.queued++
+	if r.chat != nil {
+		r.chat.items = append(r.chat.items, core.PMChatChange{Kind: "queued", Summary: "Queued “" + t.Objective + "”", Tasks: []string{t.ID}})
+	}
 	return "Queued " + t.Label() + ".", nil
 }
 

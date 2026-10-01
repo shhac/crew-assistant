@@ -182,6 +182,9 @@ The order is yours to set directly. Never ask the owner to approve or confirm an
 	case core.OrderedByOwner, core.OrderedByAssistant:
 		fmt.Fprintf(&b, "\nThe %s set the current order; treat it as the owner's priorities. Keep it unless you have a concrete reason to change it, such as a dependency, new work or what unblocks the most. Never simply move back what they moved. Give the reason in note.\n", p.OrderedBy)
 	}
+	if history := pmChatHistory(snap, p.ID, "", 10); history != "" {
+		b.WriteString("\nRecent conversation with the owner; keep agreed priorities in mind:\n" + history)
+	}
 	b.WriteString(pmToldText(snap, p))
 	pmTasks(&b, snap, p)
 	if pmTriage(&b, snap, p) {

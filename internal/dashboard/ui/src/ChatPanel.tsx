@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   api,
   APIError,
@@ -36,7 +30,7 @@ import {
   type VisibleTurn,
 } from "./chatTurns";
 import { SessionLine } from "./ChatSessionLine";
-import { Composer } from "./Composer";
+import { Composer, LargeEditor, focusDraft } from "./Composer";
 import { TurnStatus } from "./TurnStatus";
 import type { ChatDraft } from "./chatDraft";
 
@@ -474,6 +468,7 @@ export function ChatPanel({
     }
   }
   const composerProps = {
+    id: "chat-message",
     value: message,
     onChange: setDraft,
     assets,
@@ -738,59 +733,5 @@ export function ChatPanel({
         </div>
       )}
     </div>
-  );
-}
-
-function focusDraft() {
-  const field = document.getElementById(
-    "chat-message",
-  ) as HTMLTextAreaElement | null;
-  field?.focus();
-  field?.setSelectionRange(field.value.length, field.value.length);
-}
-
-function LargeEditor({
-  onDone,
-  children,
-}: {
-  onDone: () => void;
-  children: ReactNode;
-}) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const element = dialog.current!;
-    element.showModal();
-    focusDraft();
-    return () => element.close();
-  }, []);
-  return (
-    <dialog
-      ref={dialog}
-      className="dialog composer-dialog"
-      aria-labelledby="composer-title"
-      onCancel={(event) => {
-        event.preventDefault();
-        onDone();
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          onDone();
-        }
-      }}
-    >
-      <div className="dialog-head">
-        <h2 id="composer-title">Write a message</h2>
-        <button
-          type="button"
-          className="btn btn-quiet"
-          aria-label="Done"
-          onClick={onDone}
-        >
-          Done
-        </button>
-      </div>
-      {children}
-    </dialog>
   );
 }

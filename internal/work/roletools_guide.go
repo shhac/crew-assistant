@@ -62,6 +62,9 @@ func (r roleTools) guideTools() string {
 
 func (r roleTools) Definitions() []session.ToolDefinition {
 	defs := r.definitions()
+	if r.chat != nil {
+		defs = append(defs, session.ToolDefinition{Name: "order_tasks", Description: "Set the entire queued to-do list in order. task_ids is every queued task id separated by commas. If the list changed, read it again and try again.", Schema: schema([]string{"task_ids"})})
+	}
 	if r.proposes && !r.notesOnly {
 		defs = append(defs, session.ToolDefinition{Name: "propose_run_recipe", Description: "Propose how QA starts this code project's app to use it, for the owner to accept; nothing changes until they do, and one proposal waits at a time. setup runs once first, offline, since dependencies come in through the project's prepare folders; or empty. start is the command that starts the app, which reads its port from the PORT environment variable. url is where it answers: http on 127.0.0.1, localhost or [::1], with {port} as its port and nowhere else, such as http://127.0.0.1:{port}/. ready is a command that succeeds once the app is ready, or empty to wait until url answers. why is one line on what you found that makes this the way to run it.", Schema: schema([]string{"setup", "start", "url", "ready", "why"})})
 	}

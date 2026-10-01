@@ -55,6 +55,7 @@ describe("addresses", () => {
       "#/settings/chat",
       "#/projects/p1",
       "#/projects/p1/team",
+      "#/projects/x/pm",
     ])
       expect(href(parseRoute(hash))).toBe(hash);
     expect(parseRoute(requestHref("p 1", "t/1"))).toEqual({

@@ -1,4 +1,4 @@
-import { type FormEvent } from "react";
+import { useEffect, useRef, type ReactNode, type FormEvent } from "react";
 import { Icon } from "./ui";
 import {
   sizeLabel,
@@ -6,13 +6,17 @@ import {
   type useFileDrop,
 } from "./composerAssets";
 
-type Props = ReturnType<typeof useFileDrop> & {
+type Props = Partial<ReturnType<typeof useFileDrop>> & {
+  id?: string;
+  placeholder?: string;
+  textOnly?: boolean;
+  maxLength?: number;
   value: string;
   onChange: (value: string) => void;
-  assets: ComposerAsset[];
-  onRemove: (id: string) => void;
-  reading: number;
-  suggestion: string;
+  assets?: ComposerAsset[];
+  onRemove?: (id: string) => void;
+  reading?: number;
+  suggestion?: string;
   onSubmit: (event: FormEvent) => void;
   name: string;
   large?: boolean;
@@ -22,11 +26,15 @@ type Props = ReturnType<typeof useFileDrop> & {
 
 /** Both editing spaces use the same draft and keyboard behavior. */
 export function Composer({
+  id = "chat-message",
+  placeholder,
+  textOnly = false,
+  maxLength = 20000,
   value,
   onChange,
-  assets,
+  assets = [],
   onRemove,
-  reading,
+  reading = 0,
   suggestion,
   onSubmit,
   name,
@@ -41,12 +49,12 @@ export function Composer({
     <form
       className={`composer${large ? " composer-large" : ""}${dragging ? " dragging" : ""}`}
       onSubmit={onSubmit}
-      {...dropHandlers}
+      {...(textOnly ? {} : dropHandlers)}
     >
-      <label className="sr-only" htmlFor="chat-message">
+      <label className="sr-only" htmlFor={id}>
         Message {name}
       </label>
-      {(assets.length > 0 || reading > 0) && (
+      {!textOnly && (assets.length > 0 || reading > 0) && (
         <ul className="attachments" aria-label="Attachments">
           {assets.map((asset) => (
             <li key={asset.id}>
@@ -56,7 +64,7 @@ export function Composer({
                 type="button"
                 className="btn btn-quiet btn-icon btn-sm"
                 aria-label={`Remove attachment ${asset.name}`}
-                onClick={() => onRemove(asset.id)}
+                onClick={() => onRemove?.(asset.id)}
               >
                 <Icon name="Close" size={12} />
               </button>
@@ -67,16 +75,16 @@ export function Composer({
       )}
       <div className="composer-row">
         <textarea
-          id="chat-message"
+          id={id}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          onPaste={onPaste}
+          onPaste={textOnly ? undefined : onPaste}
           // A suggestion is shown, never committed: the draft stays empty
           // and Send stays disabled until the owner takes it.
-          placeholder={suggestion || `Message ${name}`}
+          placeholder={placeholder || suggestion || `Message ${name}`}
           className={suggestion ? "has-suggestion" : undefined}
           rows={2}
-          maxLength={20000}
+          maxLength={maxLength}
           onKeyDown={(e) => {
             if (
               e.key === "Tab" &&
@@ -127,14 +135,68 @@ export function Composer({
           <>
             <span className="kbd">Tab</span> takes the suggestion
           </>
-        ) : !large && !showHint ? null : (
+        ) : !textOnly && !large && !showHint ? null : (
           <>
             <span className="kbd">Enter</span> sends ·{" "}
-            <span className="kbd">Shift Enter</span> new line · drop text files
-            to attach
+            <span className="kbd">Shift Enter</span> new line
+            {!textOnly && " · drop text files to attach"}
           </>
         )}
       </p>
     </form>
+  );
+}
+
+export function focusDraft(id = "chat-message") {
+  const field = document.getElementById(id) as HTMLTextAreaElement | null;
+  field?.focus();
+  field?.setSelectionRange(field.value.length, field.value.length);
+}
+
+export function LargeEditor({
+  id = "chat-message",
+  onDone,
+  children,
+}: {
+  id?: string;
+  onDone: () => void;
+  children: ReactNode;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current!;
+    element.showModal();
+    focusDraft(id);
+    return () => element.close();
+  }, [id]);
+  return (
+    <dialog
+      ref={dialog}
+      className="dialog composer-dialog"
+      aria-labelledby={`${id}-title`}
+      onCancel={(event) => {
+        event.preventDefault();
+        onDone();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onDone();
+        }
+      }}
+    >
+      <div className="dialog-head">
+        <h2 id={`${id}-title`}>Write a message</h2>
+        <button
+          type="button"
+          className="btn btn-quiet"
+          aria-label="Done"
+          onClick={onDone}
+        >
+          Done
+        </button>
+      </div>
+      {children}
+    </dialog>
   );
 }

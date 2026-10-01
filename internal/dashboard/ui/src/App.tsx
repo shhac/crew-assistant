@@ -42,6 +42,7 @@ export function App() {
   const [newProject, setNewProject] = useState(false);
   const chat = useChatPane();
   const draft = useChatDraft();
+  const [pmDrafts, setPMDrafts] = useState<Record<string, string>>({});
   const pause = useAction();
   const request = useRef(0);
   const refresh = useCallback(async () => {
@@ -207,6 +208,10 @@ export function App() {
               <ProjectPage
                 key={project.id}
                 project={project}
+                pmDraft={pmDrafts[project.id] || ""}
+                onPMDraft={(value) =>
+                  setPMDrafts((prior) => ({ ...prior, [project.id]: value }))
+                }
                 route={route}
                 state={state}
                 refresh={refresh}

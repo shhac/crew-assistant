@@ -26,7 +26,8 @@ type Claim struct {
 	// Group and Revision are the checkers and the draft a check is for.
 	Group    string `json:"group,omitempty"`
 	Revision int    `json:"revision,omitempty"`
-	// Message is the team message a StepMessage answers.
+	// Message is the team message a StepMessage answers, or the project
+	// PM chat message a StepPMChat answers.
 	Message string `json:"message,omitempty"`
 	// Shared is a check, which runs beside the task's other checks of the
 	// same draft; any other claim holds the task alone.
@@ -48,6 +49,7 @@ const (
 	// StepPMQuestion is the PM answering a question the assistant put to
 	// it for the owner, which changes nothing.
 	StepPMQuestion = "pm-question"
+	StepPMChat     = "pm-chat"
 )
 
 // ErrStale is a turn whose claim has gone: the task was stopped, or its step
@@ -646,23 +648,9 @@ func (s *Service) claimPM(ctx context.Context, projectID, step string, admit Adm
 	var seat Role
 	found := false
 	err := s.store.update(ctx, func(v *Snapshot) error {
-		p := project(v, projectID)
-		if p == nil {
-			return ErrNotFound
-		}
-		pm, ok := p.PMSeat()
-		if !ok || (step == StepPM && (p.Paused || !p.PMDue)) || len(p.Claims) > 0 {
-			return nil
-		}
-		var wait *Wait
-		if seat, wait = freeSeat(p.ID, p.Playbook.Roles, []Role{pm}, busyPeople(v), admit, Wait{}); wait != nil {
-			return nil
-		}
-		p.Attempt++
-		out = Claim{Token: fmt.Sprintf("%s/%s/%d", p.ID, step, p.Attempt), Step: step, Seat: seat.Name, At: s.now().UTC()}
-		p.Claims = append(p.Claims, out)
-		found = true
-		return nil
+		var err error
+		out, seat, found, err = s.takePM(v, projectID, step, admit)
+		return err
 	})
 	return out, seat, found, err
 }
@@ -671,6 +659,7 @@ func (s *Service) claimPM(ctx context.Context, projectID, step string, admit Adm
 func (s *Service) ReleaseProjectClaim(ctx context.Context, projectID, token string) error {
 	return s.store.update(ctx, func(v *Snapshot) error {
 		if p := project(v, projectID); p != nil {
+			s.stopPMChat(v, projectID, token)
 			p.Claims = slices.DeleteFunc(p.Claims, func(c Claim) bool { return c.Token == token })
 		}
 		return nil
@@ -756,6 +745,9 @@ func (s *Service) RecoverClaims(ctx context.Context, held map[string]string) err
 			p.Attempt++
 			p.Claims = slices.DeleteFunc(p.Claims, func(c Claim) bool {
 				_, ok := held[c.Token]
+				if !ok {
+					s.stopPMChat(v, p.ID, c.Token)
+				}
 				return !ok
 			})
 			for k := range p.Claims {
@@ -807,4 +799,24 @@ func (t Task) CheckerGroups() []CheckerGroup {
 		out = append(out, CheckerGroup{Key: key, Seats: []Role{r}})
 	}
 	return out
+}
+
+func (s *Service) takePM(v *Snapshot, projectID, step string, admit Admit) (Claim, Role, bool, error) {
+	p := project(v, projectID)
+	if p == nil {
+		return Claim{}, Role{}, false, ErrNotFound
+	}
+	pm, ok := p.PMSeat()
+	if !ok || (step == StepPM && (p.Paused || !p.PMDue)) || len(p.Claims) > 0 {
+		return Claim{}, Role{}, false, nil
+	}
+	var wait *Wait
+	var seat Role
+	if seat, wait = freeSeat(p.ID, p.Playbook.Roles, []Role{pm}, busyPeople(v), admit, Wait{}); wait != nil {
+		return Claim{}, Role{}, false, nil
+	}
+	p.Attempt++
+	out := Claim{Token: fmt.Sprintf("%s/%s/%d", p.ID, step, p.Attempt), Step: step, Seat: seat.Name, At: s.now().UTC()}
+	p.Claims = append(p.Claims, out)
+	return out, seat, true, nil
 }

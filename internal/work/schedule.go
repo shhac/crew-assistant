@@ -62,8 +62,9 @@ func (lp *Loop) pass(ctx context.Context, waited bool) (bool, []<-chan any, erro
 	if err != nil {
 		return false, nil, err
 	}
-	if snap.Paused {
-		return false, nil, nil
+	chats, err := lp.answerPMChats(ctx, snap, waited)
+	if err != nil || len(chats) > 0 || snap.Paused {
+		return len(chats) > 0, chats, err
 	}
 	// No new role turn is claimed while a chat message waits or is answered.
 	lp.noteChat(chatPending(snap))

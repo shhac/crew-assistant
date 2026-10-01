@@ -1,3 +1,5 @@
+import { NoPM } from "./PMChat";
+import { pmSeat } from "./members";
 import { ProviderIcon } from "./ProviderIcon";
 import { useState } from "react";
 import { href, memberHref, projectHref, requestHref } from "./router";
@@ -51,6 +53,7 @@ export function TeamTab({
   const playbook = project.playbook;
   return (
     <div className="tab-stack">
+      {!pmSeat(project) && <NoPM project={project} />}
       <section className="tab-panel card" aria-label="Team">
         <h2>Team</h2>
         {playbook ? (

@@ -1460,3 +1460,36 @@ export function clearBlocker(
     { method: "DELETE" },
   );
 }
+
+export interface PMChatChange {
+  kind: "reordered" | "updated" | "linked" | "queued";
+  summary: string;
+  tasks: string[];
+}
+export interface PMChatMessage {
+  id: string;
+  project_id: string;
+  from: "owner" | "pm";
+  by?: string;
+  text: string;
+  status: "waiting" | "working" | "answered" | "failed";
+  error?: string;
+  changes?: PMChatChange[];
+  at: string;
+  started_at?: string;
+  reply_to?: string;
+}
+const pmChatURL = (project: string) =>
+  `/api/projects/${encodeURIComponent(project)}/pm-chat`;
+export const getPMChat = (project: string) =>
+  api<{ messages: PMChatMessage[]; avatar_svg?: string }>(pmChatURL(project));
+export const sendPMChat = (project: string, id: string, text: string) =>
+  api<PMChatMessage>(`${pmChatURL(project)}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ id, text }),
+  });
+export const retryPMChat = (project: string, id: string) =>
+  api<PMChatMessage>(
+    `${pmChatURL(project)}/messages/${encodeURIComponent(id)}/retry`,
+    { method: "POST" },
+  );

@@ -218,6 +218,7 @@ type Snapshot struct {
 	// are the ones archived by /new and /clear.
 	ConversationID    string             `json:"-"`
 	Conversations     []Conversation     `json:"-"`
+	PMChats           []PMChatMessage    `json:"-"`
 	ChatTurns         []ChatTurn         `json:"-"`
 	ChatHold          *ChatHold          `json:"-"`
 	ChatQueueRevision int                `json:"-"`

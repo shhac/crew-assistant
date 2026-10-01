@@ -34,6 +34,7 @@ type Store struct {
 	temporaryState bool
 }
 type diskState struct {
+	PMChats []PMChatMessage `json:"pm_chats,omitempty"`
 	// Schema names the state model that wrote this document. Only the current
 	// model is ever read: an earlier one is upgraded first, on open.
 	Schema            int             `json:"schema"`
@@ -157,6 +158,7 @@ func readState(ctx context.Context, conn *sql.Conn) (Snapshot, error) {
 	d.Snapshot.ChatSession = d.ChatSession
 	d.Snapshot.ConversationID = d.ConversationID
 	d.Snapshot.Conversations = d.Conversations
+	d.Snapshot.PMChats = d.PMChats
 	d.Snapshot.ChatTurns = d.ChatTurns
 	d.Snapshot.ChatHold = d.ChatHold
 	d.Snapshot.ChatQueueRevision = d.ChatQueueRevision
@@ -212,7 +214,7 @@ func (s *Store) update(ctx context.Context, fn func(*Snapshot) error) error {
 	settleTaskWakes(&state, time.Now().UTC())
 	stored := state
 	stored.Tasks = withoutRefs(state.Tasks)
-	data, err := json.Marshal(diskState{Schema: stateSchema, ChatCheckpoint: state.ChatCheckpoint, ChatSession: state.ChatSession, ConversationID: state.ConversationID, Conversations: state.Conversations, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: stored, ModelCalls: state.ModelCalls, ModelWindows: state.ModelWindows, Events: state.Events})
+	data, err := json.Marshal(diskState{PMChats: state.PMChats, Schema: stateSchema, ChatCheckpoint: state.ChatCheckpoint, ChatSession: state.ChatSession, ConversationID: state.ConversationID, Conversations: state.Conversations, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: stored, ModelCalls: state.ModelCalls, ModelWindows: state.ModelWindows, Events: state.Events})
 	if err != nil {
 		return err
 	}

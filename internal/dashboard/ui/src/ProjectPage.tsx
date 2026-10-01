@@ -1,3 +1,5 @@
+import { PMChat, NoPM } from "./PMChat";
+import { pmSeat } from "./members";
 import { Board } from "./Board";
 import { BriefTab } from "./ProjectBrief";
 import { TeamTab } from "./ProjectTeam";
@@ -30,6 +32,7 @@ const tabLabels: Record<ProjectTab, string> = {
   team: "Team",
   config: "Config",
   activity: "Activity",
+  pm: "PM chat",
 };
 
 export function ProjectPage({
@@ -37,7 +40,11 @@ export function ProjectPage({
   route,
   state,
   refresh,
+  pmDraft,
+  onPMDraft,
 }: {
+  pmDraft?: string;
+  onPMDraft?: (value: string) => void;
   project: Project;
   route: Extract<Route, { page: "project" }>;
   state: State;
@@ -120,16 +127,18 @@ export function ProjectPage({
           )}
         </p>
         <nav className="tabs" aria-label="Project">
-          {projectTabs.map((t) => (
-            <a
-              key={t}
-              className="tab"
-              href={projectHref(project.id, t)}
-              aria-current={tab === t ? "page" : undefined}
-            >
-              {tabLabels[t]}
-            </a>
-          ))}
+          {projectTabs
+            .filter((t) => t !== "pm" || pmSeat(project))
+            .map((t) => (
+              <a
+                key={t}
+                className="tab"
+                href={projectHref(project.id, t)}
+                aria-current={tab === t ? "page" : undefined}
+              >
+                {tabLabels[t]}
+              </a>
+            ))}
         </nav>
       </header>
       {tab === "board" && (
@@ -146,6 +155,17 @@ export function ProjectPage({
           refresh={refresh}
         />
       )}
+      {tab === "pm" &&
+        (pmSeat(project) ? (
+          <PMChat
+            project={project}
+            state={state}
+            draft={pmDraft}
+            onDraft={onPMDraft}
+          />
+        ) : (
+          <NoPM project={project} />
+        ))}
       {tab === "activity" && <ActivityTab project={project} state={state} />}
       {route.request && (
         <RequestPanel

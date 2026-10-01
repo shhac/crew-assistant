@@ -1,10 +1,12 @@
-export type ProjectTab = "board" | "brief" | "team" | "config" | "activity";
+export type ProjectTab =
+  "board" | "brief" | "team" | "config" | "activity" | "pm";
 export const projectTabs: ProjectTab[] = [
   "board",
   "brief",
   "team",
   "config",
   "activity",
+  "pm",
 ];
 
 export type Route =
