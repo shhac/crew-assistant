@@ -217,6 +217,15 @@ func (lp *Loop) reactTo(ctx context.Context, t core.Task, m gitMedium, r core.Re
 	if feedback := prFeedback(pr, prop, r); len(feedback) > 0 {
 		return lp.answerPR(ctx, t, r, pr, prop, feedback)
 	}
+	if prop.Observed.Ready {
+		held, err := lp.heldFromMerging(ctx, t)
+		if err != nil {
+			return err
+		}
+		if len(held) > 0 {
+			return lp.holdReadyPR(ctx, t, land.GitHub, pr, held)
+		}
+	}
 	if prop.Observed.Ready && !mergeApproved(t, r) && land.MergeGate() != core.ApproveNone {
 		// Ready: whoever approves merging decides, as checks passing does,
 		// with the pull request still watched meanwhile.
@@ -226,15 +235,16 @@ func (lp *Loop) reactTo(ctx context.Context, t core.Task, m gitMedium, r core.Re
 		return lp.setStatus(ctx, t.ID, core.TaskDeciding, fmt.Sprintf("Pull request #%d is ready to merge", prop.Number))
 	}
 	if prop.Observed.Ready {
-		if _, err := lp.updateOpen(ctx, t.ID, func(current *core.Task, _ *core.Project) (string, error) {
-			if why := core.BlockerReasons(*current); len(why) > 0 && current.Delivering == nil {
+		var held []string
+		if _, err := lp.updateOpen(ctx, t.ID, func(current *core.Task, p *core.Project) (string, error) {
+			if held = core.LandingHeld(p, *current); len(held) > 0 && current.Delivering == nil {
 				return "", errDeliveryBlocked
 			}
 			current.Delivering = &core.Delivering{Revision: r.N, At: time.Now().UTC()}
 			return "", nil
 		}); err != nil {
 			if errors.Is(err, errDeliveryBlocked) {
-				return nil
+				return lp.holdReadyPR(ctx, t, land.GitHub, pr, held)
 			}
 			return err
 		}
@@ -249,6 +259,33 @@ func (lp *Loop) reactTo(ctx context.Context, t core.Task, m gitMedium, r core.Re
 		}
 	}
 	return lp.awaitPR(ctx, t, land.GitHub, pr)
+}
+
+// heldFromMerging says what holds the task's ready pull request from
+// merging: its blockers and the project's landing pause.
+func (lp *Loop) heldFromMerging(ctx context.Context, t core.Task) ([]string, error) {
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	p, ok := findProject(snap, t.ProjectID)
+	if !ok {
+		return nil, core.ErrNotFound
+	}
+	if fresh, ok := findTask(snap, t.ProjectID, t.ID); ok {
+		t = fresh
+	}
+	return core.LandingHeld(&p, t), nil
+}
+
+// holdReadyPR waits on a ready pull request something holds from merging,
+// still watching it, so the team answers whatever it says meanwhile; lifting
+// the hold looks at it again.
+func (lp *Loop) holdReadyPR(ctx context.Context, t core.Task, repo string, pr github.PR, held []string) error {
+	if err := lp.watchPR(ctx, t, repo, pr); err != nil {
+		return err
+	}
+	return lp.setStatus(ctx, t.ID, core.TaskAwaiting, fmt.Sprintf("Pull request #%d is ready, but held: %s", pr.Number, strings.Join(held, "; ")))
 }
 
 // prFooter ends every pull request description the loop writes.

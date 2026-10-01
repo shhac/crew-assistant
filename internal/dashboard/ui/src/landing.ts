@@ -1,4 +1,4 @@
-import type { LandPolicy, Playbook, Task } from "./api";
+import type { LandPolicy, Playbook, Project, Task } from "./api";
 
 /** Whether a team works on code; landing only has meaning for code. */
 export const isCode = (playbook?: Playbook) => playbook?.medium === "git";
@@ -112,6 +112,13 @@ export function whatHappens(playbook?: Playbook): string[] {
  * a new branch lands nothing.
  */
 export const pmCanDecide = (via?: string) => via === "push";
+
+/** Why a project's landing is paused, in a line, or "" when it isn't. */
+export function landingPausedLine(project: Project): string {
+  const paused = project.landing_paused;
+  if (!paused) return "";
+  return paused.reason ? `Landing paused: ${paused.reason}` : "Landing paused";
+}
 
 /** Who decides that a pull request opens, the PM unless set. */
 export const openGate = (land?: LandPolicy) => land?.open || "pm";

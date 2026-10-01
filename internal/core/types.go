@@ -47,6 +47,9 @@ type Project struct {
 	NextTask          int       `json:"next_task,omitempty"`
 	Status            string    `json:"status"`
 	Paused            bool      `json:"paused,omitempty"`
+	// LandingPaused holds the project's changes from landing, as for a
+	// code freeze, while the rest of its work goes on.
+	LandingPaused *LandingPause `json:"landing_paused,omitempty"`
 	Brief             Brief     `json:"brief"`
 	Playbook          *Playbook `json:"playbook,omitempty"`
 	Directories       []string  `json:"directories"`

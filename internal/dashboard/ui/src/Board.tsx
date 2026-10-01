@@ -1,5 +1,5 @@
 import { projectHref, requestHref } from "./router";
-import { pmLandingLine } from "./landing";
+import { landingPausedLine, pmLandingLine } from "./landing";
 import {
   capLine,
   underWay,
@@ -61,6 +61,12 @@ export function Board({
   return (
     <div className="board-page">
       <AskForm project={project} refresh={refresh} />
+      {project.landing_paused && (
+        <p className="board-cap muted small">
+          {landingPausedLine(project)} ·{" "}
+          <a href={projectHref(project.id, "config")}>Landing</a>
+        </p>
+      )}
       {rows.map(({ stage, label }) => {
         const list = at(stage);
         // With a limit, a row always shows its count against it, even empty.

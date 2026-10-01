@@ -2925,6 +2925,43 @@ describe("the project's tabs", () => {
       approve: "pm",
     });
   });
+  it("pauses landing for a code freeze, with why, and resumes it", async () => {
+    show(
+      project({ playbook: codeTeam({ via: "push", target: "main" }) }),
+      {},
+      { tab: "config" },
+    );
+    const landing = screen.getByRole("region", { name: "Landing" });
+    fireEvent.change(within(landing).getByLabelText("Why"), {
+      target: { value: " Release freeze until Friday " },
+    });
+    fireEvent.click(
+      within(landing).getByRole("button", { name: "Pause landing" }),
+    );
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/landing-paused",
+        method: "PUT",
+        body: { paused: true, reason: "Release freeze until Friday" },
+      },
+    ]);
+    cleanup();
+    show(
+      project({
+        playbook: codeTeam({ via: "push", target: "main" }),
+        landing_paused: {
+          reason: "Release freeze",
+          at: "2026-10-01T10:00:00Z",
+        },
+      }),
+      {},
+      { tab: "config" },
+    );
+    expect(screen.getByText("Landing paused: Release freeze")).toBeTruthy();
+    expect(screen.getAllByText("Landing paused").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Resume landing" })).toBeTruthy();
+  });
   it("offers the PM the decision to land only for a push", async () => {
     const withPM = codeTeam();
     withPM.roles = [

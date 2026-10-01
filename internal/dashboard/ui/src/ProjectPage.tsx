@@ -66,6 +66,11 @@ export function ProjectPage({
                 Paused
               </Pill>
             )}
+            {project.landing_paused && (
+              <Pill tone="needs" dot>
+                Landing paused
+              </Pill>
+            )}
             {waiting > 0 && (
               <Pill tone="needs" dot>
                 {waiting} need{waiting === 1 ? "s" : ""} you

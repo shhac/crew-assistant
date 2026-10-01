@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import {
   approvalText,
+  landingPausedLine,
   landingWays,
   openGate,
   mergeGate,
@@ -12,7 +13,12 @@ import {
   whatHappens,
 } from "./landing";
 import { ErrorNotice, useAction } from "./ui";
-import { setLanding, type Playbook, type Project } from "./api";
+import {
+  setLanding,
+  setLandingPaused,
+  type Playbook,
+  type Project,
+} from "./api";
 
 /**
  * What landing an approved change means for this project. Only the owner and
@@ -98,7 +104,78 @@ export function LandingSettings({
         Nothing the team does can change this, and a branch the team doesn't own
         is never overwritten.
       </p>
+      <PauseLanding project={project} refresh={refresh} />
     </section>
+  );
+}
+
+/**
+ * Holding everything landing, as for a code freeze, with why; the rest of
+ * the project's work goes on.
+ */
+function PauseLanding({
+  project,
+  refresh,
+}: {
+  project: Project;
+  refresh: () => Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const { busy, error, run } = useAction();
+  const paused = project.landing_paused;
+  const prs = !!project.playbook?.land?.pull_requests;
+  const toggle = (pause: boolean) =>
+    run(async () => {
+      await setLandingPaused(project.id, pause, pause ? reason.trim() : "");
+      setReason("");
+      await refresh();
+    });
+  return (
+    <div className="section">
+      <p className="label">Pause landing</p>
+      {paused ? (
+        <>
+          <p>{landingPausedLine(project)}</p>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={busy}
+            onClick={() => void toggle(false)}
+          >
+            Resume landing
+          </button>
+        </>
+      ) : (
+        <form
+          className="form-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void toggle(true);
+          }}
+        >
+          <label htmlFor="land-pause-reason">
+            Why
+            <input
+              id="land-pause-reason"
+              className="field"
+              value={reason}
+              maxLength={300}
+              placeholder="Release freeze until Friday"
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </label>
+          <button type="submit" className="btn btn-sm" disabled={busy}>
+            Pause landing
+          </button>
+        </form>
+      )}
+      <p className="hint">
+        {prs
+          ? "Pull requests still open and the team still answers their reviews; nothing merges until you resume."
+          : "Nothing lands until you resume; the team's other work goes on."}
+      </p>
+      <ErrorNotice error={error} />
+    </div>
   );
 }
 

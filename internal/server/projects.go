@@ -24,6 +24,20 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		}
 		reply(w, 200, v, err)
 	})
+	mux.HandleFunc("PUT /api/projects/{id}/landing-paused", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Paused bool   `json:"paused"`
+			Reason string `json:"reason"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Core.SetLandingPaused(r.Context(), r.PathValue("id"), in.Paused, in.Reason)
+		if err == nil && !in.Paused {
+			a.Work.Nudge()
+		}
+		reply(w, 200, v, err)
+	})
 	mux.HandleFunc("PUT /api/projects/{id}/brief", func(w http.ResponseWriter, r *http.Request) {
 		var in core.BriefInput
 		if decode(w, r, &in) != nil {

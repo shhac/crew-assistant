@@ -52,7 +52,7 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 	if fresh, ok := findTask(snap, p.ID, t.ID); ok {
 		t = fresh
 	}
-	if len(core.BlockerReasons(t)) > 0 {
+	if len(core.LandingHeld(&p, t)) > 0 {
 		return nil
 	}
 	if failed := t.LandingFailures; len(failed) >= maxPMLandingFailures || (len(failed) > 0 && t.Round >= t.MaxRounds) {

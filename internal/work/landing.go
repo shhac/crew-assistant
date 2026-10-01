@@ -53,8 +53,8 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 	// and the delivery, once begun, goes to its end: a task stopped or a
 	// daemon restarted meanwhile is settled from where the change went,
 	// never left half done or landed unrecorded.
-	if _, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if why := core.BlockerReasons(*t); len(why) > 0 && t.Delivering == nil {
+	if _, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
+		if why := core.LandingHeld(p, *t); len(why) > 0 && t.Delivering == nil {
 			return "", errDeliveryBlocked
 		}
 		t.Delivering = &core.Delivering{Revision: r.N, At: time.Now().UTC()}
@@ -253,7 +253,7 @@ func (lp *Loop) LandTask(ctx context.Context, projectID, taskID string) (core.Ta
 	if !ok {
 		return core.Task{}, core.ErrNotFound
 	}
-	if why := core.BlockerReasons(t); len(why) > 0 {
+	if why := core.LandingHeld(&p, t); len(why) > 0 {
 		return core.Task{}, fmt.Errorf("%s: %w", strings.Join(why, "; "), core.ErrConflict)
 	}
 	// A signed-off change waiting on the PM's decision lands on the owner's
@@ -298,8 +298,8 @@ func (lp *Loop) LandTask(ctx context.Context, projectID, taskID string) (core.Ta
 			return core.Task{}, fmt.Errorf("%q is built on %q, which has not landed on %s yet; land that first: %w", t.Objective, other.Objective, pinned.Land.Target, core.ErrConflict)
 		}
 	}
-	landing, err := lp.Core.UpdateTask(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if why := core.BlockerReasons(*t); len(why) > 0 {
+	landing, err := lp.Core.UpdateTask(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
+		if why := core.LandingHeld(p, *t); len(why) > 0 {
 			return "", fmt.Errorf("%s: %w", strings.Join(why, "; "), core.ErrConflict)
 		}
 		if t.Status != core.TaskDelivered {

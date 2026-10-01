@@ -793,3 +793,26 @@ func TestThePMSendsAReadyPullRequestBack(t *testing.T) {
 		t.Fatalf("revisions %d merges %v", len(task.Revisions), s.gh.merges)
 	}
 }
+
+// A code freeze holds a ready pull request from merging, not from being
+// watched; resuming merges it.
+func TestAPausedProjectHoldsAReadyPullRequestUntilLandingResumes(t *testing.T) {
+	s := newPRScenario(t, 2, opensUnasked, mergeBy(core.ApproveNone))
+	if task := s.current(t); !task.PROpen() {
+		t.Fatalf("the pull request did not open: %s %s", task.Status, task.Detail)
+	}
+	if _, err := s.a.Core.SetLandingPaused(s.ctx, s.p.ID, true, "release freeze"); err != nil {
+		t.Fatal(err)
+	}
+	s.readyPR(t)
+	task := s.current(t)
+	if task.Status != core.TaskAwaiting || task.Stage != core.StageReady || !strings.Contains(task.Detail, "release freeze") || len(s.gh.merges) != 0 {
+		t.Fatalf("not held: %s %s %q merges %v", task.Status, task.Stage, task.Detail, s.gh.merges)
+	}
+	if _, err := s.a.Core.SetLandingPaused(s.ctx, s.p.ID, false, ""); err != nil {
+		t.Fatal(err)
+	}
+	if task = s.current(t); task.Status != core.TaskLanded || len(s.gh.merges) != 1 {
+		t.Fatalf("not merged once landing resumed: %s %s merges %v", task.Status, task.Detail, s.gh.merges)
+	}
+}

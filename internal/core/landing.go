@@ -84,7 +84,7 @@ func signedOff(v *Snapshot, t Task) []string {
 	}
 	r := t.Revisions[len(t.Revisions)-1]
 	brief := briefVersion(v, t)
-	out := BlockerReasons(t)
+	out := LandingHeld(project(v, t.ProjectID), t)
 	if len(t.RolesOf(RoleQA)) == 0 {
 		out = append(out, "the team has no QA to check it")
 	}
@@ -145,7 +145,7 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 		if !PMGates(*p, *t) {
 			return fmt.Errorf("the PM no longer decides what goes out in this project: %w", ErrConflict)
 		}
-		if why := BlockerReasons(*t); len(why) > 0 {
+		if why := LandingHeld(p, *t); len(why) > 0 {
 			return fmt.Errorf("%s: %w", strings.Join(why, "; "), ErrConflict)
 		}
 		now := s.now().UTC()

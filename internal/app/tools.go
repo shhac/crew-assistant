@@ -106,6 +106,17 @@ var toolActions = map[string]toolAction{
 	"remove_team_seat": with(func(a *App, ctx context.Context, in engine.TeamSeatArgs) (any, error) {
 		return a.Work.RemoveSeat(ctx, in.ProjectID, in.Seat)
 	}),
+	"pause_landing": with(func(a *App, ctx context.Context, in engine.PauseLandingArgs) (any, error) {
+		switch strings.TrimSpace(in.Paused) {
+		case "yes":
+			return a.Core.SetLandingPaused(ctx, in.ProjectID, true, in.Reason)
+		case "no":
+			p, err := a.Core.SetLandingPaused(ctx, in.ProjectID, false, "")
+			a.Work.Nudge()
+			return p, err
+		}
+		return nil, errors.New(`paused is "yes" or "no"`)
+	}),
 	"set_parallel": with(func(a *App, ctx context.Context, in engine.SetParallelArgs) (any, error) {
 		n, err := strconv.Atoi(strings.TrimSpace(in.MaxActive))
 		if err != nil {

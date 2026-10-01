@@ -470,12 +470,14 @@ func offer(v *Snapshot, t *Task, busy map[string]Wait, admit Admit, now time.Tim
 		}
 	case TaskDeciding:
 		p := project(v, t.ProjectID)
-		if p != nil && PMGates(*p, *t) && holdsLanding(*t) {
-			return nil, &Wait{Kind: "blocker", On: strings.Join(BlockerReasons(*t), "; ")}
+		if p != nil && PMGates(*p, *t) {
+			if why := LandingHeld(p, *t); len(why) > 0 {
+				return nil, &Wait{Kind: "blocker", On: strings.Join(why, "; ")}
+			}
 		}
 	case TaskLanding:
-		if holdsLanding(*t) && t.Delivering == nil {
-			return nil, &Wait{Kind: "blocker", On: strings.Join(BlockerReasons(*t), "; ")}
+		if why := landingStepHeld(project(v, t.ProjectID), *t); len(why) > 0 && t.Delivering == nil {
+			return nil, &Wait{Kind: "blocker", On: strings.Join(why, "; ")}
 		}
 		// One landing at a time, counting one a stop cut off whose delivery
 		// has yet to be settled.

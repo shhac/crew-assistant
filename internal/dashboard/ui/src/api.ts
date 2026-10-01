@@ -247,6 +247,8 @@ export interface LandingInput {
 }
 export interface Project {
   paused?: boolean;
+  /** Landing held, as for a code freeze, while other work goes on. */
+  landing_paused?: { reason?: string; at: string };
   id: string;
   title: string;
   /** Starts the readable IDs of the project's tasks, as CA does CA-12. */
@@ -1092,6 +1094,18 @@ export function setProjectPaused(projectID: string, paused: boolean) {
   return api<Project>(`${projectPath(projectID)}/paused`, {
     method: "PUT",
     body: JSON.stringify({ paused }),
+  });
+}
+
+/** Holds, or lets go on, everything landing in a project. */
+export function setLandingPaused(
+  projectID: string,
+  paused: boolean,
+  reason = "",
+) {
+  return api<Project>(`${projectPath(projectID)}/landing-paused`, {
+    method: "PUT",
+    body: JSON.stringify({ paused, reason }),
   });
 }
 

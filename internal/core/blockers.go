@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/shhac/crew-assistant/internal/text"
 )
@@ -43,6 +44,74 @@ func holdsStart(t Task) bool {
 	return false
 }
 func holdsLanding(t Task) bool          { return len(BlockerReasons(t)) > 0 }
+
+// LandingPause is a project's landing held, and why.
+type LandingPause struct {
+	Reason string    `json:"reason,omitempty"`
+	At     time.Time `json:"at"`
+}
+
+// pausedLanding says why p's landing is paused, or "" when it isn't.
+func (p *Project) pausedLanding() string {
+	if p == nil || p.LandingPaused == nil {
+		return ""
+	}
+	if p.LandingPaused.Reason == "" {
+		return "landing is paused on this project"
+	}
+	return "landing is paused on this project: " + p.LandingPaused.Reason
+}
+
+// LandingHeld lists what holds t's change from going out on p: its
+// blockers, and p's landing pause, which holds a pull request only from
+// merging, never from opening or from the team answering its reviews.
+func LandingHeld(p *Project, t Task) []string {
+	out := BlockerReasons(t)
+	if paused := p.pausedLanding(); paused != "" && (!t.UsesPRs() || t.PROpen()) {
+		out = append(out, paused)
+	}
+	return out
+}
+
+// landingStepHeld lists what holds a landing step from starting at all. A
+// pull request's step also answers it, so a pause holds only its merge.
+func landingStepHeld(p *Project, t Task) []string {
+	if t.UsesPRs() {
+		return BlockerReasons(t)
+	}
+	return LandingHeld(p, t)
+}
+
+// SetLandingPaused holds or lets go of a project's landing, with why. Pull
+// requests the pause held from merging are looked at again when it ends.
+func (s *Service) SetLandingPaused(ctx context.Context, id string, paused bool, reason string) (Project, error) {
+	reason = strings.TrimSpace(reason)
+	if len(reason) > 300 || strings.ContainsFunc(reason, unicode.IsControl) {
+		return Project{}, errors.New("why landing is paused must be one line of at most 300 characters")
+	}
+	return s.editProject(ctx, id, func(p *Project, v *Snapshot) error {
+		now := s.now().UTC()
+		if !paused {
+			if p.LandingPaused == nil {
+				return nil
+			}
+			p.LandingPaused = nil
+			for i := range v.Tasks {
+				t := &v.Tasks[i]
+				if t.ProjectID == id && t.Status == TaskAwaiting && t.UsesPRs() {
+					t.Status, t.Detail = TaskLanding, "Landing resumed"
+				}
+			}
+			p.UpdatedAt = now
+			record(v, now, id, "project.landing_resumed", "Landing resumed")
+			return nil
+		}
+		p.LandingPaused = &LandingPause{Reason: reason, At: now}
+		p.UpdatedAt = now
+		record(v, now, id, "project.landing_paused", strings.TrimSpace("Landing paused "+reason))
+		return nil
+	})
+}
 func heldBack(v *Snapshot, t Task) bool { return holdsStart(t) || len(waitsFor(v, t)) > 0 }
 
 // BlockerReasons lists the conditions still holding delivery.
