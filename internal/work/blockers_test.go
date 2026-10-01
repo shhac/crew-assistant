@@ -206,6 +206,7 @@ func TestBlockerAddedAfterClaimStillStopsPullRequestMerge(t *testing.T) {
 	task, err := lp.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Status = core.TaskLanding
 		t.Revisions = []core.Revision{{N: 1, Ref: "abc"}}
+		t.Playbook = &core.Playbook{Land: core.LandPolicy{PullRequests: true, Target: "main", Approve: core.ApproveNone}}
 		return "", nil
 	})
 	if err != nil {
@@ -227,8 +228,17 @@ func TestBlockerAddedAfterClaimStillStopsPullRequestMerge(t *testing.T) {
 	}
 	snap, _ := lp.Core.Snapshot(ctx)
 	held, _ := snap.FindTask(task.ID)
-	if held.Delivering != nil || held.Status != core.TaskLanding {
+	// It waits on the pull request, still watched, rather than trying again
+	// and again; clearing the condition looks at it again.
+	if held.Delivering != nil || held.Status != core.TaskAwaiting || !strings.Contains(held.Detail, "a new build") {
 		t.Fatalf("blocked merge changed delivery: %+v", held)
+	}
+	if _, err := lp.Core.ClearBlocker(ctx, p.ID, task.ID, held.Blockers[0].ID, core.LinkedByOwner, "built"); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ = lp.Core.Snapshot(ctx)
+	if cleared, _ := snap.FindTask(task.ID); cleared.Status != core.TaskLanding {
+		t.Fatalf("clearing the condition left it waiting: %s", cleared.Status)
 	}
 }
 

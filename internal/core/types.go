@@ -43,19 +43,19 @@ type Project struct {
 	// Prefix starts the readable IDs of the project's tasks, as CA does
 	// CA-12; NextTask is the number the next task gets. A number is never
 	// given twice. See refs.go.
-	Prefix            string    `json:"prefix"`
-	NextTask          int       `json:"next_task,omitempty"`
-	Status            string    `json:"status"`
-	Paused            bool      `json:"paused,omitempty"`
+	Prefix   string `json:"prefix"`
+	NextTask int    `json:"next_task,omitempty"`
+	Status   string `json:"status"`
+	Paused   bool   `json:"paused,omitempty"`
 	// LandingPaused holds the project's changes from landing, as for a
 	// code freeze, while the rest of its work goes on.
-	LandingPaused *LandingPause `json:"landing_paused,omitempty"`
-	Brief             Brief     `json:"brief"`
-	Playbook          *Playbook `json:"playbook,omitempty"`
-	Directories       []string  `json:"directories"`
-	ScratchDirectory  string    `json:"scratch_directory"`
-	SourceID          string    `json:"source_id,omitempty"`
-	SourceDescription string    `json:"source_description,omitempty"`
+	LandingPaused     *LandingPause `json:"landing_paused,omitempty"`
+	Brief             Brief         `json:"brief"`
+	Playbook          *Playbook     `json:"playbook,omitempty"`
+	Directories       []string      `json:"directories"`
+	ScratchDirectory  string        `json:"scratch_directory"`
+	SourceID          string        `json:"source_id,omitempty"`
+	SourceDescription string        `json:"source_description,omitempty"`
 	// Landed is the project's most recently delivered code change. Other work
 	// in the project catches up with it before it is delivered.
 	Landed *Landing `json:"landed,omitempty"`

@@ -43,7 +43,7 @@ func holdsStart(t Task) bool {
 	}
 	return false
 }
-func holdsLanding(t Task) bool          { return len(BlockerReasons(t)) > 0 }
+func holdsLanding(t Task) bool { return len(BlockerReasons(t)) > 0 }
 
 // LandingPause is a project's landing held, and why.
 type LandingPause struct {
@@ -197,6 +197,11 @@ func (s *Service) clearBlocker(v *Snapshot, t *Task, b *Blocker, by, why string)
 	now := s.now().UTC()
 	b.ClearedAt, b.ClearedBy, b.Check = &now, by, ""
 	t.UpdatedAt = now
+	// A ready pull request the condition held waits on its wakes; with the
+	// last condition gone it is looked at again.
+	if t.Status == TaskAwaiting && t.UsesPRs() && len(BlockerReasons(*t)) == 0 {
+		t.Status, t.Detail = TaskLanding, "Nothing holds it now"
+	}
 	recordTask(v, now, t, "task.unblocked", b.Description+": "+why)
 	linksChanged(v, t.ProjectID, by)
 	derive(v, t)
