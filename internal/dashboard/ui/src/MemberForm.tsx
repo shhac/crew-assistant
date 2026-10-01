@@ -5,7 +5,11 @@ import { ModelFields } from "./ModelFields";
 import { PersonalityField, SuggestedLook } from "./ProfileFields";
 import type { Suggestion } from "./SuggestIdentity";
 import { ErrorNotice, useAction } from "./ui";
-import { BrowserFields, useBrowserOffered } from "./QABrowser";
+import {
+  BrowserFields,
+  savedBrowser,
+  useBrowserOffered,
+} from "./BrowserFields";
 import { saveMember, type Browser, type Member, type MemberKind } from "./api";
 
 export function MemberForm({
@@ -73,7 +77,7 @@ export function MemberForm({
         instructions: instructions.trim(),
         description: description.trim(),
         personality: personality.trim(),
-        browser: { on: browserOn, name: (browser.name ?? "").trim() },
+        browser: savedBrowser(browser),
         ...(!member && suggestion ? { avatar: suggestion.avatar } : {}),
       });
       await onSaved(saved);

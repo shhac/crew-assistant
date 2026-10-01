@@ -4,7 +4,11 @@ import { ModelFields, type ModelChoice } from "./ModelFields";
 import { PersonalityField, SuggestedLook } from "./ProfileFields";
 import type { Suggestion } from "./SuggestIdentity";
 import { ErrorNotice, useAction } from "./ui";
-import { BrowserFields, useBrowserOffered } from "./QABrowser";
+import {
+  BrowserFields,
+  savedBrowser,
+  useBrowserOffered,
+} from "./BrowserFields";
 import { saveAssistant, type AssistantProfile, type Browser } from "./api";
 
 const defaultMaxTokens = 4096;
@@ -67,7 +71,7 @@ export function AssistantForm({
           effort: choice.effort.trim(),
           max_tokens: maxTokens,
         },
-        browser: { on: !!browser.on, name: browser.name?.trim() ?? "" },
+        browser: savedBrowser(browser),
         ...(!assistant && suggestion ? { avatar: suggestion.avatar } : {}),
       });
       await onSaved(saved);
