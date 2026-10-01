@@ -1504,6 +1504,7 @@ export interface PMChatChange {
   tasks: string[];
 }
 export interface PMChatMessage {
+  conversation?: string;
   id: string;
   project_id: string;
   from: "owner" | "pm";

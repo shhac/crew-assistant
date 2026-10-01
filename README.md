@@ -151,7 +151,16 @@ Projects live in crew-assistant's local state. Linear, Notion, Slack and other c
 
 **Notion:** add an `agent-notion` connection without choosing a profile (`"profiles": []`, or omit the field). Search, page reads, and block reads use the CLI's current default account and native authentication, including its native environment credentials. The assistant never switches that default. Changing the default in `agent-notion` changes the account this connection reads. Named Notion profiles are rejected because the CLI cannot select them per call. Account discovery reads local metadata, not project or message content. Slack aliases with unavailable stored credentials remain visible with a re-authentication hint; configure credentials through the CLI on the daemon host.
 
-**Slack bot:** configure `slack.owner_user_id` and supply the environment variables referenced by `slack.bot_token_env` and `slack.app_token_env`. Use a Slack app with Socket Mode and direct-message events. Only the configured owner's direct messages reach the assistant. The same conversation and decisions appear in the dashboard. The bot remains a separate connection from CLI querying. See [integration setup and protocols](internal/integrations/README.md) for scopes and delivery semantics.
+**Slack bot:** edit **Settings → Connections → Slack bot messaging**. Set the workspace ID, your Slack user ID and the environment variable names holding the bot and app tokens. Choose the assistant, or a project whose PM will answer. Project messages use that PM’s existing tools and appear in the project conversation, with separate history for each Slack thread; only that project’s decisions are sent as notifications. A project can be selected before its team is chosen, but needs a PM to answer. Saved connection changes take effect after a restart; the current connection stays in use until then. Use a Slack Agent app with Socket Mode and `message.im` events. Only your original DMs in the configured workspace are accepted. The bot is separate from CLI querying. See [integration setup and protocols](internal/integrations/README.md) for scopes and delivery semantics.
+
+For credentials in a private dotenv file, pass its path explicitly at startup:
+
+```sh
+crew-assistant --env-file /path/to/.env.local doctor
+crew-assistant --env-file /path/to/.env.local serve --open
+```
+
+`--env-file` is supported by `serve` and `doctor`. Existing environment variables take precedence. Files are never discovered automatically in project folders, and demo mode refuses the flag. Values stay out of config and errors; sandboxed team sessions do not inherit these credential variables. Keep the file private and outside version control. `.env` and `.env.*` are already ignored in this repository.
 
 **Legacy Linear API:** set `linear.import_assignments` to `true` as well as explicit `linear.team_ids` and `linear.api_key_env` to enable assignment discovery. Omitted import flags stay off on upgrade, including older configurations. New setups should use the `lin` connection; configuring one supersedes legacy API discovery. Imported issues become projects without a brief or team; nothing starts until you ask for it.
 

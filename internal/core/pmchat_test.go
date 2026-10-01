@@ -39,6 +39,9 @@ func TestPMChatValidationQueueAndIdempotency(t *testing.T) {
 	if _, err := s.SendPMChat(testContext, p.ID, "0", "changed"); !errors.Is(err, ErrConflict) {
 		t.Fatal(err)
 	}
+	if _, err := s.SendPMChatInConversation(testContext, p.ID, "0", "hello", "another-thread"); !errors.Is(err, ErrConflict) {
+		t.Fatal("a repeated message changed conversations", err)
+	}
 	if _, err := s.SendPMChat(testContext, p.ID, "6", "hello"); !errors.Is(err, ErrConflict) {
 		t.Fatal(err)
 	}
@@ -131,7 +134,7 @@ func TestPMChatPersistenceRetentionAndIsolation(t *testing.T) {
 	s.SendPMChat(testContext, other.ID, "other", "other project")
 	for i := 0; i < 105; i++ {
 		id := fmt.Sprint(i)
-		if _, err = s.SendPMChat(testContext, p.ID, id, "hello"); err != nil {
+		if _, err = s.SendPMChatInConversation(testContext, p.ID, id, "hello", "slack:workspace:dm:thread"); err != nil {
 			t.Fatal(err)
 		}
 		m, c, seat, ok, e := s.ClaimPMChat(testContext, p.ID, anyone)
@@ -153,6 +156,11 @@ func TestPMChatPersistenceRetentionAndIsolation(t *testing.T) {
 	log, _ := s.PMChat(testContext, p.ID)
 	if len(log) != 200 || log[len(log)-1].Text != "reply" {
 		t.Fatal(len(log))
+	}
+	for _, m := range log {
+		if m.Conversation != "slack:workspace:dm:thread" {
+			t.Fatal("thread identity lost across the saved question, reply or reopen")
+		}
 	}
 	log, _ = s.PMChat(testContext, other.ID)
 	if len(log) != 1 || log[0].Text != "other project" {

@@ -28,14 +28,16 @@ type App struct {
 	Core             *core.Service
 	mu               sync.RWMutex
 	cfg              config.Config
-	configPath       string
-	Demo             bool
-	chat             chan struct{}
-	chatWake         chan struct{}
-	chatRunning      atomic.Bool
-	chatFailed       atomic.Bool
-	chatWaiters      sync.Map
-	chatInvoker      func(context.Context, engine.Config, engine.Request, engine.ToolExecutor) (engine.Result, error)
+	// slackConfig is the connection this boot uses. Edits are saved for restart.
+	slackConfig config.Slack
+	configPath  string
+	Demo        bool
+	chat        chan struct{}
+	chatWake    chan struct{}
+	chatRunning atomic.Bool
+	chatFailed  atomic.Bool
+	chatWaiters sync.Map
+	chatInvoker func(context.Context, engine.Config, engine.Request, engine.ToolExecutor) (engine.Result, error)
 	// sessions holds the model session the assistant's conversation runs on.
 	sessions  chatSessions
 	summarize smallCompletion // Writes the conversation's summaries.
@@ -57,7 +59,8 @@ type App struct {
 	stop lifecycle.Stop
 	// chatClosed is set once the chat queue takes no more turns, so a
 	// message queued after it hears so rather than waiting for an answer.
-	chatClosed atomic.Bool
+	chatClosed       atomic.Bool
+	dispatchDisabled atomic.Bool // Fixed by Run before integrations accept messages.
 }
 
 // Options are what the daemon decides about the app it builds.
@@ -73,7 +76,7 @@ type Options struct {
 }
 
 func New(s *core.Service, cfg config.Config, path string, opts Options) *App {
-	a := &App{Diagnostics: opts.Diagnostics, connectionClient: connections.New(), Core: s, cfg: cfg, configPath: path, Demo: opts.Demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), summarize: engine.Complete, stop: lifecycle.Now(context.Background()), statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
+	a := &App{Diagnostics: opts.Diagnostics, connectionClient: connections.New(), Core: s, cfg: cfg, slackConfig: cfg.Slack, configPath: path, Demo: opts.Demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), summarize: engine.Complete, stop: lifecycle.Now(context.Background()), statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
 	a.Work = work.New(s, a.Config, opts.Demo)
 	a.Work.Diagnostics = opts.Diagnostics
 	a.small.outOfUsage, a.small.recheck, a.small.busy = a.Work.OutOfUsage, a.Work.RecheckUsage, a.Work.Interactive
@@ -106,20 +109,18 @@ func (a *App) updateConfigLocked(cfg config.Config) error {
 }
 
 // checkConfigLocked refuses a config the running daemon can't take on:
-// an invalid one, or one that moves the dashboard or Slack, which only a
-// restart can.
+// an invalid one, or one that moves the dashboard, which only a restart can.
+// Slack edits are saved here, with the old connection used until restart.
 func (a *App) checkConfigLocked(cfg config.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
 	oldNetwork, _ := json.Marshal(a.cfg.Dashboard)
 	newNetwork, _ := json.Marshal(cfg.Dashboard)
-	oldSlack, _ := json.Marshal(a.cfg.Slack)
-	newSlack, _ := json.Marshal(cfg.Slack)
-	if !bytes.Equal(oldNetwork, newNetwork) || !bytes.Equal(oldSlack, newSlack) {
-		return errors.New("dashboard and Slack connection changes require stopping the daemon and editing its config")
+	if !bytes.Equal(oldNetwork, newNetwork) {
+		return errors.New("dashboard connection changes require stopping the daemon and editing its config")
 	}
-	return nil
+	return a.validateSlackProject(context.Background(), cfg.Slack)
 }
 
 func (a *App) applyConfigLocked(cfg config.Config) error {
@@ -163,6 +164,11 @@ func (a *App) Status(id, name, state, detail string) {
 // status left over from an earlier import no longer applies.
 func configuredIntegrations(cfg config.Config) ([]core.Integration, map[string]bool) {
 	list := []core.Integration{{ID: "model", Name: "Assistant model", Status: "not_configured", Detail: "Choose your assistant in Settings"}, {ID: "slack", Name: "Slack bot messaging", Status: "not_configured", Detail: "Sends and receives owner direct messages. Configure owner identity and Socket Mode credentials"}}
+	list[1].ProjectID = cfg.Slack.ProjectID
+	if cfg.Slack.OwnerUserID != "" {
+		list[1].Status = "configured"
+		list[1].Detail = "Owner direct messages in workspace " + cfg.Slack.WorkspaceID
+	}
 	if seated, ok := cfg.Seated(); ok && seated.Model.Model != "" {
 		list[0].Status = "configured"
 		list[0].Detail = strings.Join([]string{seated.Model.Engine, seated.Model.Model, seated.Model.Effort}, " / ")
@@ -217,6 +223,11 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 		s.Turns = a.Work.Turns()
 	}
 	integrations, ignoreLive := configuredIntegrations(cfg)
+	if cfg.Slack != a.slackConfig {
+		integrations[1].Status = "restart_required"
+		integrations[1].Detail = "Saved. Restart crew-assistant to use these settings; the current connection stays in use until then."
+		ignoreLive["slack"] = true
+	}
 	for _, p := range s.Projects {
 		if p.Linear != nil && p.Linear.Rules.PickUp {
 			integrations = append(integrations, core.Integration{ID: "linear-project:" + p.ID, Name: p.Title + " Linear pick-up", ProjectID: p.ID, Status: "configured"})

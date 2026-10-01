@@ -15,19 +15,21 @@ type PMChatChange struct {
 	Tasks   []string `json:"tasks"`
 }
 type PMChatMessage struct {
-	ID         string         `json:"id"`
-	ProjectID  string         `json:"project_id"`
-	From       string         `json:"from"`
-	By         string         `json:"by,omitempty"`
-	Text       string         `json:"text"`
-	Status     string         `json:"status"`
-	Error      string         `json:"error,omitempty"`
-	Token      string         `json:"token,omitempty"`
-	ReplyTo    string         `json:"reply_to,omitempty"`
-	Changes    []PMChatChange `json:"changes,omitempty"`
-	At         time.Time      `json:"at"`
-	StartedAt  *time.Time     `json:"started_at,omitempty"`
-	FinishedAt *time.Time     `json:"finished_at,omitempty"`
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+	// Conversation separates transport threads from the dashboard conversation.
+	Conversation string         `json:"conversation,omitempty"`
+	From         string         `json:"from"`
+	By           string         `json:"by,omitempty"`
+	Text         string         `json:"text"`
+	Status       string         `json:"status"`
+	Error        string         `json:"error,omitempty"`
+	Token        string         `json:"token,omitempty"`
+	ReplyTo      string         `json:"reply_to,omitempty"`
+	Changes      []PMChatChange `json:"changes,omitempty"`
+	At           time.Time      `json:"at"`
+	StartedAt    *time.Time     `json:"started_at,omitempty"`
+	FinishedAt   *time.Time     `json:"finished_at,omitempty"`
 }
 
 func pmChat(v *Snapshot, projectID, id string) *PMChatMessage {
@@ -40,8 +42,15 @@ func pmChat(v *Snapshot, projectID, id string) *PMChatMessage {
 	return nil
 }
 func (s *Service) SendPMChat(ctx context.Context, projectID, id, text string) (PMChatMessage, error) {
+	return s.SendPMChatInConversation(ctx, projectID, id, text, "")
+}
+
+func (s *Service) SendPMChatInConversation(ctx context.Context, projectID, id, text, conversation string) (PMChatMessage, error) {
 	if !validChatID(id) || strings.TrimSpace(text) == "" || utf8.RuneCountInString(text) > 24000 {
 		return PMChatMessage{}, fmt.Errorf("message needs an id and 1–24000 characters: %w", ErrChatValidation)
+	}
+	if len(conversation) > 512 || strings.ContainsAny(conversation, "\r\n") {
+		return PMChatMessage{}, ErrChatValidation
 	}
 	var out PMChatMessage
 	err := s.store.update(ctx, func(v *Snapshot) error {
@@ -50,7 +59,7 @@ func (s *Service) SendPMChat(ctx context.Context, projectID, id, text string) (P
 			return ErrNotFound
 		}
 		if m := pmChat(v, projectID, id); m != nil {
-			if m.Text != text || m.From != "owner" {
+			if m.Text != text || m.From != "owner" || m.Conversation != conversation {
 				return ErrConflict
 			}
 			out = *m
@@ -68,7 +77,7 @@ func (s *Service) SendPMChat(ctx context.Context, projectID, id, text string) (P
 		if pending >= 5 {
 			return fmt.Errorf("Five messages are waiting; wait for a reply: %w", ErrConflict)
 		}
-		out = PMChatMessage{ID: id, ProjectID: projectID, From: "owner", Text: text, Status: "waiting", At: s.now().UTC()}
+		out = PMChatMessage{ID: id, ProjectID: projectID, Conversation: conversation, From: "owner", Text: text, Status: "waiting", At: s.now().UTC()}
 		v.PMChats = append(v.PMChats, out)
 		trimPMChats(v, projectID)
 		return nil
@@ -158,7 +167,7 @@ func (s *Service) finishPMChat(ctx context.Context, projectID, id, token, by, re
 			m.Status = "failed"
 			m.Changes = append(m.Changes, changes...)
 		} else {
-			v.PMChats = append(v.PMChats, PMChatMessage{ID: uid(), ProjectID: projectID, From: "pm", By: by, Text: reply, Status: "answered", ReplyTo: id, Changes: changes, At: now})
+			v.PMChats = append(v.PMChats, PMChatMessage{ID: uid(), ProjectID: projectID, Conversation: m.Conversation, From: "pm", By: by, Text: reply, Status: "answered", ReplyTo: id, Changes: changes, At: now})
 		}
 		trimPMChats(v, projectID)
 		return nil

@@ -26,6 +26,7 @@ import (
 type options struct {
 	diagnostics           *diagnostics.Logger
 	configPath, statePath string
+	envFile               string
 	globals               *libcli.Globals
 	// version is the running build, said on startup so a log shows which
 	// daemon it came from.
@@ -50,12 +51,15 @@ func NewRoot(version string) *cobra.Command {
 			return pathErr
 		}
 		if before != nil {
-			return before(cmd, args)
+			if err := before(cmd, args); err != nil {
+				return err
+			}
 		}
-		return nil
+		return loadCommandEnvFile(cmd, o.envFile)
 	}
 	root.PersistentFlags().StringVar(&o.configPath, "config", paths.Config, "Configuration file")
 	root.PersistentFlags().StringVar(&o.statePath, "state", paths.State, "Durable SQLite state file")
+	root.PersistentFlags().StringVar(&o.envFile, "env-file", "", "Load a private dotenv file for serve or doctor; existing environment takes precedence")
 	init := &cobra.Command{Use: "init", Short: "Create private default configuration", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if _, err := os.Stat(o.configPath); err == nil {
 			return errors.New("configuration already exists; use config set to change it")

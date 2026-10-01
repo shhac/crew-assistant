@@ -60,17 +60,9 @@ export function AdvancedSettings({
   return (
     <>
       <p className="muted">
-        For a Slack bot of its own, or reading Linear directly. Connections are
-        the simpler way. Changes here need crew-assistant restarted.
+        Read Linear directly. You can also use a CLI account in Connections.
+        Changes here need crew-assistant restarted.
       </p>
-      <Panel title="Slack bot">
-        {field("slack", "owner_user_id", "Your Slack user ID")}
-        {field("slack", "bot_token_env", "Bot token variable", {
-          env: true,
-          hint: "The environment variable's name, never the token.",
-        })}
-        {field("slack", "app_token_env", "App token variable", { env: true })}
-      </Panel>
       <Panel title="Linear">
         <label className="check">
           <input

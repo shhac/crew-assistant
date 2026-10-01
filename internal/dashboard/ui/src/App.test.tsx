@@ -1117,10 +1117,85 @@ describe("settings", () => {
     });
     window.history.replaceState(null, "", "/#/settings/connections");
     render(<App />);
-    expect(await screen.findByText("Slack bot messaging")).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { name: "Slack bot messaging" }),
+    ).toBeTruthy();
+    const bot = screen.getByRole("region", { name: "Slack bot messaging" });
+    fireEvent.click(within(bot).getByRole("button", { name: "Edit" }));
+    expect(
+      within(bot).getByRole("textbox", { name: "Slack workspace ID" }),
+    ).toBeTruthy();
+    expect(
+      within(bot).getByRole("combobox", { name: "Destination" }),
+    ).toBeTruthy();
     expect(
       screen.getByText(/Reading only, through CLI accounts: personal/),
     ).toBeTruthy();
+  });
+  it("saves a Slack project destination through Connections before its team is chosen", async () => {
+    state.projects = [
+      {
+        id: "backend",
+        title: "Synthetic Backend",
+        status: "active",
+        brief: { version: 1, goal: "Develop the product", criteria: [] },
+      },
+    ];
+    const config = {
+      assistant: state.assistant,
+      connections: [],
+      slack: {
+        owner_user_id: "U_SYNTHETIC",
+        bot_token_env: "BOT_ENV",
+        app_token_env: "APP_ENV",
+      },
+    };
+    respond = (path, options) => {
+      if (path === "/api/config" && options?.method === "PUT") {
+        state.integrations = [
+          {
+            id: "slack",
+            name: "Slack bot messaging",
+            status: "restart_required",
+          },
+        ];
+        return { body: {} };
+      }
+      return { body: path === "/api/config" ? config : state };
+    };
+    window.history.replaceState(null, "", "/#/settings/connections");
+    render(<App />);
+    const bot = await screen.findByRole("region", {
+      name: "Slack bot messaging",
+    });
+    fireEvent.click(within(bot).getByRole("button", { name: "Edit" }));
+    fireEvent.change(
+      within(bot).getByRole("combobox", { name: "Destination" }),
+      { target: { value: "backend" } },
+    );
+    fireEvent.change(
+      within(bot).getByRole("textbox", { name: "Slack workspace ID" }),
+      { target: { value: "T_SYNTHETIC" } },
+    );
+    expect(within(bot).getByText(/Choose a project manager in/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Restart required")).toBeTruthy();
+    const saved = calls.find(
+      (c) => c.path === "/api/config" && c.options?.method === "PUT",
+    );
+    expect(JSON.parse(String(saved?.options?.body))).toEqual({
+      ...config,
+      slack: {
+        ...config.slack,
+        workspace_id: "T_SYNTHETIC",
+        project_id: "backend",
+      },
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: "Unsaved changes" }),
+      ).toBeNull(),
+    );
   });
 });
 

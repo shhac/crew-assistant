@@ -4,6 +4,7 @@ go 1.26.4
 
 require (
 	github.com/gofrs/flock v0.13.1
+	github.com/joho/godotenv v1.5.1
 	github.com/shhac/lib-agent-cli v0.27.0
 	github.com/shhac/lib-agent-mcp v0.23.1
 	github.com/shhac/lib-agent-output v0.12.0

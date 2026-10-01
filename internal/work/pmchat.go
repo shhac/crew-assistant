@@ -11,7 +11,11 @@ import (
 )
 
 func (lp *Loop) SendPMChat(ctx context.Context, projectID, id, message string) (core.PMChatMessage, error) {
-	m, err := lp.Core.SendPMChat(ctx, projectID, id, message)
+	return lp.SendPMChatInConversation(ctx, projectID, id, message, "")
+}
+
+func (lp *Loop) SendPMChatInConversation(ctx context.Context, projectID, id, message, conversation string) (core.PMChatMessage, error) {
+	m, err := lp.Core.SendPMChatInConversation(ctx, projectID, id, message, conversation)
 	if err == nil {
 		lp.Nudge()
 	}
@@ -60,11 +64,21 @@ func (lp *Loop) answerPMChats(ctx context.Context, snap core.Snapshot, waited bo
 	return started, nil
 }
 func pmChatHistory(snap core.Snapshot, projectID, beforeID string, limit int) string {
+	// A scheduled PM look sees all of its project's conversations. A chat
+	// reply sees only its own conversation, identified by the current message.
+	all := beforeID == ""
+	conversation := ""
+	for _, m := range snap.PMChats {
+		if m.ProjectID == projectID && m.ID == beforeID {
+			conversation = m.Conversation
+			break
+		}
+	}
 	// Replies are appended after queued questions. Select by the question's
 	// position, not the reply's position, so an earlier reply is still visible.
 	earlier := map[string]bool{}
 	for _, m := range snap.PMChats {
-		if m.ProjectID != projectID {
+		if m.ProjectID != projectID || !all && m.Conversation != conversation {
 			continue
 		}
 		if m.ID == beforeID {
@@ -76,7 +90,7 @@ func pmChatHistory(snap core.Snapshot, projectID, beforeID string, limit int) st
 	}
 	var messages []core.PMChatMessage
 	for _, m := range snap.PMChats {
-		if m.ProjectID != projectID || m.From != "owner" || !earlier[m.ID] {
+		if m.ProjectID != projectID || !all && m.Conversation != conversation || m.From != "owner" || !earlier[m.ID] {
 			continue
 		}
 		messages = append(messages, m)

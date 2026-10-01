@@ -234,3 +234,33 @@ func TestPMChatHistoryOnlyCompletedEarlierExchanges(t *testing.T) {
 		t.Fatal("look forgot completed chat")
 	}
 }
+
+func TestPMChatThreadHistoryIsSeparateWhileThePMLookSeesProjectPriorities(t *testing.T) {
+	var snap core.Snapshot
+	for _, conversation := range []string{"", "slack-thread-one", "slack-thread-two"} {
+		id := "question-" + conversation
+		snap.PMChats = append(snap.PMChats,
+			core.PMChatMessage{ID: id, ProjectID: "project", Conversation: conversation, From: "owner", Text: "question in " + id, Status: "answered"},
+			core.PMChatMessage{ID: "reply-" + conversation, ProjectID: "project", Conversation: conversation, From: "pm", ReplyTo: id, Text: "reply in " + id, Status: "answered"})
+	}
+	snap.PMChats = append(snap.PMChats,
+		core.PMChatMessage{ID: "other-project", ProjectID: "other", Conversation: "slack-thread-one", From: "owner", Text: "other project text", Status: "answered"},
+		core.PMChatMessage{ID: "current", ProjectID: "project", Conversation: "slack-thread-one", From: "owner", Text: "current text", Status: "working"})
+	history := pmChatHistory(snap, "project", "current", 20)
+	for _, want := range []string{"question in question-slack-thread-one", "reply in question-slack-thread-one"} {
+		if !strings.Contains(history, want) {
+			t.Errorf("thread omitted %q: %s", want, history)
+		}
+	}
+	for _, unwanted := range []string{"slack-thread-two", "question in question-\n", "other project text", "current text"} {
+		if strings.Contains(history, unwanted) {
+			t.Errorf("thread included %q: %s", unwanted, history)
+		}
+	}
+	look := pmChatHistory(snap, "project", "", 20)
+	for _, want := range []string{"question in question-\n", "slack-thread-one", "slack-thread-two"} {
+		if !strings.Contains(look, want) {
+			t.Errorf("project overview omitted %q: %s", want, look)
+		}
+	}
+}

@@ -83,7 +83,7 @@ func (r *intakeRun) finish(t *testing.T) error {
 
 func TestAnEventFromSomeoneElseIsAckedButNeverTaken(t *testing.T) {
 	inbox := &onceInbox{}
-	c := &Client{cfg: Config{OwnerUserID: "owner-one"}, inbox: inbox}
+	c := &Client{cfg: Config{OwnerUserID: "owner-one", WorkspaceID: "workspace-one"}, inbox: inbox}
 	r := startIntake(c, make(chan Message, 4))
 
 	r.events <- strangerEvent("stranger")
@@ -106,7 +106,7 @@ func TestAnEventFromSomeoneElseIsAckedButNeverTaken(t *testing.T) {
 }
 
 func TestRejectedCredentialsEndTheRun(t *testing.T) {
-	c := &Client{cfg: Config{OwnerUserID: "owner-one"}, inbox: &onceInbox{}}
+	c := &Client{cfg: Config{OwnerUserID: "owner-one", WorkspaceID: "workspace-one"}, inbox: &onceInbox{}}
 	events := make(chan socketmode.Event, 1)
 	handled := make(chan Message, 1)
 	handler := func(_ context.Context, m Message) (string, error) { handled <- m; return "answer", nil }
@@ -128,7 +128,7 @@ func TestRejectedCredentialsEndTheRun(t *testing.T) {
 // nor ack what it can't hold.
 func TestAFullQueueLeavesTheEventForSlackToRetry(t *testing.T) {
 	inbox := &onceInbox{}
-	c := &Client{cfg: Config{OwnerUserID: "owner-one"}, inbox: inbox}
+	c := &Client{cfg: Config{OwnerUserID: "owner-one", WorkspaceID: "workspace-one"}, inbox: inbox}
 	queue := make(chan Message, 1)
 	queue <- Message{ID: "already-waiting"}
 	r := startIntake(c, queue)
@@ -156,7 +156,7 @@ func TestAFullQueueLeavesTheEventForSlackToRetry(t *testing.T) {
 
 func TestAFailedClaimEndsIntakeWithoutAcking(t *testing.T) {
 	inbox := &onceInbox{fail: errors.New("disk full")}
-	c := &Client{cfg: Config{OwnerUserID: "owner-one"}, inbox: inbox}
+	c := &Client{cfg: Config{OwnerUserID: "owner-one", WorkspaceID: "workspace-one"}, inbox: inbox}
 	r := startIntake(c, make(chan Message, 4))
 
 	r.events <- ownerEvent("first")
@@ -177,7 +177,7 @@ func TestAFailedClaimEndsIntakeWithoutAcking(t *testing.T) {
 // so it is acked again but not answered twice.
 func TestARedeliveredEventIsAckedButNotAnsweredAgain(t *testing.T) {
 	inbox := &onceInbox{}
-	c := &Client{cfg: Config{OwnerUserID: "owner-one"}, inbox: inbox}
+	c := &Client{cfg: Config{OwnerUserID: "owner-one", WorkspaceID: "workspace-one"}, inbox: inbox}
 	events := make(chan socketmode.Event)
 	acked := make(chan string, 4)
 	replied := make(chan string, 4)

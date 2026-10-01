@@ -5,6 +5,7 @@ import { EngineSettings } from "./EngineSettings";
 import { SuggestionModel } from "./SuggestionModel";
 import { LimitsSettings } from "./LimitsSettings";
 import { AdvancedSettings } from "./AdvancedSettings";
+import { SlackBotSettings } from "./SlackBotSettings";
 import { Panel } from "./SettingsPanel";
 import { appearanceOf, applyAppearance, type Appearance } from "./appearance";
 import { href } from "./router";
@@ -187,36 +188,54 @@ export function Settings({
               )}
               {current === "connections" && (
                 <>
+                  <SlackBotSettings
+                    config={draft}
+                    projects={state.projects}
+                    integration={state.integrations.find(
+                      (i) => i.id === "slack",
+                    )}
+                    onChange={setDraft}
+                  />
+                  <p className="muted">
+                    Reading connections below let the assistant read service
+                    context through CLI accounts. Slack bot messaging above lets
+                    you talk to the assistant or a project manager.
+                  </p>
                   <ConnectionsSettings
                     connections={draft.connections || []}
                     onChange={(connections) =>
                       setDraft({ ...draft, connections })
                     }
                   />
-                  {state.integrations.length > 0 && (
+                  {state.integrations.some((i) => i.id !== "slack") && (
                     <Panel title="Status">
                       <ul className="rows">
-                        {state.integrations.map((i) => (
-                          <li key={i.id} className="integration">
-                            <span>
-                              <strong>{i.name}</strong>
-                              {i.detail && (
-                                <span className="muted small"> {i.detail}</span>
-                              )}
-                            </span>
-                            <Pill
-                              tone={
-                                ["connected", "ready", "configured"].includes(
-                                  i.status,
-                                )
-                                  ? "done"
-                                  : "needs"
-                              }
-                            >
-                              {humanStatus(i.status)}
-                            </Pill>
-                          </li>
-                        ))}
+                        {state.integrations
+                          .filter((i) => i.id !== "slack")
+                          .map((i) => (
+                            <li key={i.id} className="integration">
+                              <span>
+                                <strong>{i.name}</strong>
+                                {i.detail && (
+                                  <span className="muted small">
+                                    {" "}
+                                    {i.detail}
+                                  </span>
+                                )}
+                              </span>
+                              <Pill
+                                tone={
+                                  ["connected", "ready", "configured"].includes(
+                                    i.status,
+                                  )
+                                    ? "done"
+                                    : "needs"
+                                }
+                              >
+                                {humanStatus(i.status)}
+                              </Pill>
+                            </li>
+                          ))}
                       </ul>
                     </Panel>
                   )}

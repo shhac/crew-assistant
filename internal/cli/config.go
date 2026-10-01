@@ -99,6 +99,8 @@ func configKeys(o *options) []libcli.ConfigKey {
 		libcli.EnvNameKey(b, "slack.bot_token_env", "The environment variable holding the Slack bot token", func(c *config.Config) *string { return &c.Slack.BotTokenEnv }),
 		libcli.EnvNameKey(b, "slack.app_token_env", "The environment variable holding the Slack app token", func(c *config.Config) *string { return &c.Slack.AppTokenEnv }),
 		libcli.StringKey(b, "slack.owner_user_id", "The owner's Slack user ID", func(c *config.Config) *string { return &c.Slack.OwnerUserID }, nil),
+		libcli.StringKey(b, "slack.workspace_id", "The Slack workspace ID the bot connects to", func(c *config.Config) *string { return &c.Slack.WorkspaceID }, nil),
+		libcli.StringKey(b, "slack.project_id", "The project whose PM answers Slack messages; empty uses the assistant", func(c *config.Config) *string { return &c.Slack.ProjectID }, nil),
 		boolKey(b, "linear.import_assignments", "Import Linear issues assigned to the owner", func(c *config.Config) *bool { return &c.Linear.ImportAssignments }),
 		libcli.EnvNameKey(b, "linear.api_key_env", "The environment variable holding the Linear API key", func(c *config.Config) *string { return &c.Linear.APIKeyEnv }),
 		libcli.JSONKey[config.Config, []string](b, "linear.team_ids", "The Linear teams to import from, as a JSON array", func(c *config.Config) *[]string { return &c.Linear.TeamIDs }, nil),

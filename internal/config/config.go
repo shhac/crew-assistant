@@ -83,6 +83,9 @@ type Slack struct {
 	BotTokenEnv string `json:"bot_token_env"`
 	AppTokenEnv string `json:"app_token_env"`
 	OwnerUserID string `json:"owner_user_id"`
+	WorkspaceID string `json:"workspace_id"`
+	// ProjectID routes messages to this project's PM. Empty uses the assistant.
+	ProjectID string `json:"project_id"`
 }
 type Linear struct {
 	ImportAssignments bool     `json:"import_assignments"`
@@ -174,6 +177,9 @@ func (c Config) Validate() error {
 	}
 	if err := validateConnections(c.Connections); err != nil {
 		return err
+	}
+	if c.Slack.OwnerUserID != "" && c.Slack.WorkspaceID == "" {
+		return errors.New("slack.workspace_id is required when Slack bot messaging is enabled")
 	}
 	host, port, err := net.SplitHostPort(c.Dashboard.Addr)
 	if err != nil {

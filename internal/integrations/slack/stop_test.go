@@ -37,7 +37,7 @@ func ownerEvent(id string) socketmode.Event {
 // the next run.
 func TestAStopAnswersWhatWasClaimedAndClaimsNothingMore(t *testing.T) {
 	inbox := &claims{}
-	c := &Client{cfg: Config{OwnerUserID: "owner-one"}, inbox: inbox}
+	c := &Client{cfg: Config{OwnerUserID: "owner-one", WorkspaceID: "workspace-one"}, inbox: inbox}
 	events := make(chan socketmode.Event)
 	acked := make(chan string, 8)
 	replied := make(chan string, 8)
@@ -113,7 +113,7 @@ func returnsSoon(t *testing.T, done <-chan error) error {
 
 // A second stop ends an answer in progress, and Run returns.
 func TestASecondStopEndsTheAnswerInProgress(t *testing.T) {
-	c := &Client{cfg: Config{OwnerUserID: "owner-one"}, inbox: &claims{}}
+	c := &Client{cfg: Config{OwnerUserID: "owner-one", WorkspaceID: "workspace-one"}, inbox: &claims{}}
 	events := make(chan socketmode.Event)
 	started := make(chan struct{})
 	handler := func(ctx context.Context, m Message) (string, error) {
@@ -136,7 +136,7 @@ func TestASecondStopEndsTheAnswerInProgress(t *testing.T) {
 
 // A reply that can't be delivered ends Run with an error that says so.
 func TestAFailedReplyEndsRun(t *testing.T) {
-	c := &Client{cfg: Config{OwnerUserID: "owner-one"}, inbox: &claims{}}
+	c := &Client{cfg: Config{OwnerUserID: "owner-one", WorkspaceID: "workspace-one"}, inbox: &claims{}}
 	events := make(chan socketmode.Event, 1)
 	handler := func(context.Context, Message) (string, error) { return "answer", nil }
 	done := make(chan error, 1)

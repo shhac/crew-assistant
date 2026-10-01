@@ -134,8 +134,18 @@ func TestTheDaemonTakesOnAChangedConfigFile(t *testing.T) {
 		t.Fatalf("an unchanged file changed something: %v %v", changed, err)
 	}
 	cfg.Slack.OwnerUserID = "U123"
-	config.Save(a.configPath, cfg)
-	if _, err := a.ReloadConfig(); err == nil || a.Config().Slack.OwnerUserID != "" {
-		t.Fatal("a change that needs a restart was taken on")
+	cfg.Slack.WorkspaceID = "T123"
+	if err := config.Save(a.configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := a.ReloadConfig(); err != nil || !changed || a.Config().Slack.OwnerUserID != "U123" {
+		t.Fatal("Slack settings were not saved for restart", changed, err)
+	}
+	if a.slackConfig.OwnerUserID != "" {
+		t.Fatal("the active connection was changed without a restart")
+	}
+	snap, err := a.Snapshot(context.Background())
+	if err != nil || snap.Integrations[1].Status != "restart_required" {
+		t.Fatal("the owner was not told to restart", snap.Integrations, err)
 	}
 }

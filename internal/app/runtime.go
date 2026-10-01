@@ -27,6 +27,7 @@ func (a *App) Run(stop lifecycle.Stop, noDispatch bool) (runErr error) {
 	stop, cancel := stop.WithCancel()
 	var listeners sync.WaitGroup
 	a.setStop(stop)
+	a.dispatchDisabled.Store(noDispatch)
 	defer func() {
 		if runErr != nil {
 			cancel()
@@ -70,9 +71,8 @@ func (a *App) Run(stop lifecycle.Stop, noDispatch bool) (runErr error) {
 		a.Core.RecordActivity(stop.Force, "", "recovery.pending", fmt.Sprintf("%d interrupted inbound or outbound operations need inspection. Uncertain effects were not replayed.", len(pending)))
 	}
 	var slackClient *slackapi.Client
-	cfg := a.Config()
-	if cfg.Slack.OwnerUserID != "" {
-		slackClient, err = slackapi.New(slackapi.Config{BotTokenEnv: cfg.Slack.BotTokenEnv, AppTokenEnv: cfg.Slack.AppTokenEnv, OwnerUserID: cfg.Slack.OwnerUserID}, inbox{a.Core})
+	if a.slackConfig.OwnerUserID != "" {
+		slackClient, err = a.newSlack(stop.Force, a.slackConfig)
 		if err != nil {
 			a.Status("slack", "Slack bot messaging", "error", err.Error())
 		} else {
@@ -92,7 +92,7 @@ func (a *App) Run(stop lifecycle.Stop, noDispatch bool) (runErr error) {
 	// together. No look starts once stopping.
 	supervise := func() {
 		if slackClient != nil && !stop.Stopping() {
-			a.notify(stop.Force, slackClient.Notify)
+			a.notifyProject(stop.Force, a.slackConfig.ProjectID, slackClient.Notify)
 		}
 	}
 	supervise()
@@ -116,6 +116,9 @@ func (a *App) Run(stop lifecycle.Stop, noDispatch bool) (runErr error) {
 // message that arrives as the daemon stops is queued for the next run, and
 // the owner is told where the answer will be.
 func (a *App) answerSlack(ctx context.Context, m slackapi.Message) (string, error) {
+	if a.slackConfig.ProjectID != "" {
+		return a.answerSlackPM(ctx, m, a.slackConfig)
+	}
 	result, err := a.Chat(ctx, m.Text)
 	queued := errors.Is(err, ErrStopping)
 	if err != nil && !queued {
@@ -189,12 +192,16 @@ func (a *App) once(ctx context.Context, key string, fn func() error) error {
 	return a.Core.CompleteEvent(ctx, key)
 }
 func (a *App) notify(ctx context.Context, send func(context.Context, string) error) {
+	a.notifyProject(ctx, "", send)
+}
+
+func (a *App) notifyProject(ctx context.Context, projectID string, send func(context.Context, string) error) {
 	snap, err := a.Core.Snapshot(ctx)
 	if err != nil {
 		return
 	}
 	for _, d := range snap.Decisions {
-		if d.Status != "open" {
+		if d.Status != "open" || projectID != "" && d.ProjectID != projectID {
 			continue
 		}
 		key := "notify:decision:" + d.ID

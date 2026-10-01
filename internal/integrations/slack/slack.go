@@ -22,6 +22,7 @@ type Config struct {
 	BotTokenEnv string
 	AppTokenEnv string
 	OwnerUserID string
+	WorkspaceID string
 }
 type Message struct {
 	ID       string `json:"id"`
@@ -45,8 +46,8 @@ type Client struct {
 }
 
 func New(cfg Config, inbox Inbox) (*Client, error) {
-	if cfg.OwnerUserID == "" || cfg.BotTokenEnv == "" || cfg.AppTokenEnv == "" {
-		return nil, errors.New("Slack owner user ID and token environment references are required")
+	if cfg.OwnerUserID == "" || cfg.WorkspaceID == "" || cfg.BotTokenEnv == "" || cfg.AppTokenEnv == "" {
+		return nil, errors.New("Slack workspace ID, owner user ID and token environment references are required")
 	}
 	if inbox == nil {
 		return nil, errors.New("Slack requires a durable event inbox")
@@ -59,6 +60,21 @@ func New(cfg Config, inbox Inbox) (*Client, error) {
 	api := slackapi.New(bot, slackapi.OptionAppLevelToken(app), slackapi.OptionLog(log.New(io.Discard, "", 0)))
 	socket := socketmode.New(api, socketmode.OptionLog(log.New(io.Discard, "", 0)))
 	return &Client{cfg: cfg, inbox: inbox, api: api, socket: socket}, nil
+}
+
+// VerifyWorkspace refuses outbound messages through a bot installed elsewhere.
+// Errors deliberately omit provider payloads and credential values.
+func (c *Client) VerifyWorkspace(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	identity, err := c.api.AuthTestContext(ctx)
+	if err != nil {
+		return errors.New("cannot verify Slack bot workspace; check credentials and connectivity")
+	}
+	if identity.TeamID == "" || identity.TeamID != c.cfg.WorkspaceID {
+		return errors.New("Slack bot token belongs to a different workspace; check the workspace ID and credentials")
+	}
+	return nil
 }
 
 // ParseOwnerMessage is a pure allowlist gate. Channel messages, other users,
@@ -205,7 +221,7 @@ func (c *Client) ownerMessage(event socketmode.Event) (Message, bool) {
 		return Message{}, false
 	}
 	payload, ok := event.Data.(slackevents.EventsAPIEvent)
-	if !ok {
+	if !ok || c.cfg.WorkspaceID == "" || payload.TeamID != c.cfg.WorkspaceID {
 		return Message{}, false
 	}
 	return ParseOwnerMessage(c.cfg.OwnerUserID, payload)
