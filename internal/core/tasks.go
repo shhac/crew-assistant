@@ -131,6 +131,8 @@ type Task struct {
 	Blockers []Blocker `json:"blockers,omitempty"`
 	// Linear keeps source issues and their original context for the offline team.
 	Linear []LinearRef `json:"linear,omitempty"`
+	// LinearLinks keeps added references separate from imported team context.
+	LinearLinks []LinearRef `json:"linear_links,omitempty"`
 	// SplitFrom is the task this one was split off from by that task's
 	// researcher, which a later plan for it matches rather than queues again;
 	// see plans.go.

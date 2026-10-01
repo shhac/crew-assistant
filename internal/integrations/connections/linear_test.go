@@ -269,3 +269,78 @@ func mustLinearSession(t *testing.T, c Client) *LinearSession {
 	}
 	return session
 }
+
+func TestTaskLinearRefReads(t *testing.T) {
+	const id = "abcdefab-abcd-abcd-abcd-abcdefabcdef"
+	ctx := context.Background()
+	var calls [][]string
+	c := Client{Run: func(_ context.Context, _ string, args []string) ([]byte, error) {
+		if args[0] == "auth" {
+			return []byte(`{"alias":"home"}`), nil
+		}
+		calls = append(calls, args)
+		if args[2] == LinearIssueRefQuery {
+			return []byte(`{"issue":{"id":"` + id + `","identifier":"EX-1","title":"Work","url":"https://linear.app/issue/EX-1"}}`), nil
+		}
+		return []byte(`{"project":{"id":"` + id + `","name":"Work","url":"https://linear.app/project/work"}}`), nil
+	}}
+	session := mustLinearSession(t, c)
+	if _, err := session.LinearIssueRef(ctx, "https://linear.app/example/issue/EX-1/work"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.LinearProjectRef(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.LinearIssueRef(ctx, "ex-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.LinearIssueRef(ctx, strings.ToUpper(id)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.LinearProjectRef(ctx, strings.ToUpper(id)); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"api", "query", LinearIssueRefQuery, "--variables", `{"id":"EX-1"}`, "--format", "json", "--workspace", "home"},
+		{"api", "query", LinearProjectRefQuery, "--variables", `{"id":"` + id + `"}`, "--format", "json", "--workspace", "home"},
+		{"api", "query", LinearIssueRefQuery, "--variables", `{"id":"ex-1"}`, "--format", "json", "--workspace", "home"},
+		{"api", "query", LinearIssueRefQuery, "--variables", `{"id":"` + strings.ToUpper(id) + `"}`, "--format", "json", "--workspace", "home"},
+		{"api", "query", LinearProjectRefQuery, "--variables", `{"id":"` + strings.ToUpper(id) + `"}`, "--format", "json", "--workspace", "home"},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatal(calls)
+	}
+	for _, input := range []string{"-EX-1", "EX-1\n", "https://evil.example/issue/EX-1", "https://linear.app/other", "https://linear.app/issue/EX-1?key=value"} {
+		if _, err := session.LinearIssueRef(ctx, input); err == nil {
+			t.Fatal("invalid input accepted", input)
+		}
+	}
+	if _, err := session.LinearProjectRef(ctx, "slug"); err == nil {
+		t.Fatal("slug accepted")
+	}
+	if len(calls) != 5 {
+		t.Fatal("invalid inputs ran CLI")
+	}
+	if strings.Contains(strings.ToLower(LinearIssueRefQuery+LinearProjectRefQuery), "mutation") {
+		t.Fatal("mutation query")
+	}
+}
+func TestTaskLinearRefRejectsInvalidReads(t *testing.T) {
+	for _, data := range []string{
+		`{"errors":[{"message":"private output"}]}`, `{"issue":null}`,
+		`{"issue":{"id":"22222222-2222-2222-2222-222222222222","identifier":"OTHER-2","title":"Work","url":"https://linear.app/issue/EX-1"}}`,
+		`{"issue":{"id":"wrong","identifier":"EX-1","title":"Work","url":"https://linear.app/issue/EX-1"}}`,
+		`{"issue":{"id":"22222222-2222-2222-2222-222222222222","identifier":"EX-1","title":"Work","url":"http://linear.app/issue/EX-1"}}`,
+		strings.Repeat("x", 129*1024),
+	} {
+		c := Client{Run: func(_ context.Context, _ string, args []string) ([]byte, error) {
+			if args[0] == "auth" {
+				return []byte(`{"alias":"home"}`), nil
+			}
+			return []byte(data), nil
+		}}
+		if _, err := mustLinearSession(t, c).LinearIssueRef(context.Background(), "EX-1"); err == nil || strings.Contains(err.Error(), "private output") {
+			t.Fatal(err)
+		}
+	}
+}

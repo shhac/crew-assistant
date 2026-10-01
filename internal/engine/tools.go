@@ -139,6 +139,14 @@ type UnlinkTasksArgs struct {
 	TaskID      string `json:"task_id"`
 	OtherTaskID string `json:"other_task_id"`
 }
+type LinkTaskLinearArgs struct {
+	ProjectID    string `json:"project_id"`
+	TaskID       string `json:"task_id"`
+	ConnectionID string `json:"connection_id"`
+	Profile      string `json:"profile"`
+	Kind         string `json:"kind"`
+	Ref          string `json:"ref"`
+}
 type SetBlockerArgs struct {
 	ProjectID   string `json:"project_id"`
 	TaskID      string `json:"task_id"`
@@ -255,6 +263,8 @@ var tools = []labelled{
 	{Tool: tool("link_tasks", "Link two tasks of a project, each named by its readable or canonical id. relation is depends_on (task_id waits for other_task_id to finish before it starts, and cannot land before it lands), blocks (the other way round), or relates_to (worth reading alongside each other; nothing waits). A pair has one link at a time; unlink first to change it. Links you set, like the owner's, hold against the team: its PM and roles can add links but never take yours away. A task whose work has begun can still be made to wait. Use it when the owner asks, or when how tasks fit together is plain from what they ask for.", []string{"project_id", "task_id", "relation", "other_task_id"}, nil), label: "Link two tasks"},
 	{Tool: tool("unlink_tasks", "Take away the link between two tasks of a project, whichever way it points. Taking away what a task waits for can let it start.", []string{"project_id", "task_id", "other_task_id"}, nil), label: "Unlink two tasks"},
 	{Tool: tool("stop_task", "Stop a queued or running task when the owner asks; task_id is its readable or canonical id. A turn already under way finishes but changes nothing; any decision it was waiting on is closed.", []string{"project_id", "task_id"}, nil), label: "Stop a task"},
+	{Tool: tool("link_task_linear", "Link a task to a Linear issue (identifier or URL) or project (UUID). Reads and validates only; never writes to Linear. Empty connection_id and profile use the project's Linear connection. Task ids can be readable or canonical.", []string{"project_id", "task_id", "connection_id", "profile", "kind", "ref"}, nil), label: "Link a task to Linear"},
+	{Tool: tool("unlink_task_linear", "Remove an added Linear link from a task. ref is its stored UUID. Imported source links cannot be removed; removal never re-imports the issue.", []string{"project_id", "task_id", "kind", "ref"}, nil), label: "Remove a task's Linear link"},
 	{Tool: tool("set_blocker", "Hold a task on an external condition. kind is manual (description required) or daemon_includes (other_task_id names a landed or to-land task in the same code project; an empty description is generated). holds is start (also the default when empty, holding both start and landing) or landing (holding only landing). Task ids can be readable or canonical. Conditions you set, like the owner's, hold against the team, including on work already begun. Use it when the owner asks or when the condition is plain from what they ask for.", []string{"project_id", "task_id", "kind", "description", "other_task_id", "holds"}, nil), label: "Hold a task on a condition"},
 	{Tool: tool("clear_blocker", "Clear any open external condition on a task, whoever set it. blocker_id is the condition's id shown by read_state or read_task. Clearing can let work start or land. Use it when the owner asks or when clearing is plain from what they ask for.", []string{"project_id", "task_id", "blocker_id"}, nil), label: "Clear a task's condition"},
 	{Tool: tool("order_tasks", "Set the order a project's queued tasks start in: task_ids lists every queued task of the project, by readable or canonical id, first to start first. Set an order when the owner asks for one. The PM keeps the order and may change it for a stated reason; it treats your order as the owner's priorities. Tasks already started are not included. If the list has changed since you read it, read the state again and retry.", []string{"project_id"}, []string{"task_ids"}), label: "Reorder the to-do list"},

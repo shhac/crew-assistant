@@ -164,3 +164,62 @@ func (a *App) syncProjectLinear(ctx context.Context) error {
 	}
 	return errors.Join(failures...)
 }
+
+func (a *App) LinkTaskLinear(ctx context.Context, projectID, taskID, connectionID, profile, kind, input, by string) (core.Task, error) {
+	if a.Demo {
+		return core.Task{}, errors.New("demo mode does not query external accounts")
+	}
+	if err := a.refuseWhileStopping(); err != nil {
+		return core.Task{}, err
+	}
+	if kind != "issue" && kind != "project" {
+		return core.Task{}, errors.New("choose a Linear issue or project")
+	}
+	snap, err := a.Core.Snapshot(ctx)
+	if err != nil {
+		return core.Task{}, err
+	}
+	var found bool
+	for _, t := range snap.Tasks {
+		if (t.ID == taskID || t.Ref == taskID) && t.ProjectID == projectID {
+			found = true
+		}
+	}
+	if !found {
+		return core.Task{}, core.ErrNotFound
+	}
+	if connectionID == "" && profile == "" {
+		for _, p := range snap.Projects {
+			if p.ID == projectID && p.Linear != nil {
+				connectionID, profile = p.Linear.ConnectionID, p.Linear.Profile
+			}
+		}
+	}
+	session, err := a.connectionClient.LinearAccount(ctx, a.Config().Connections, connectionID, profile)
+	if err != nil {
+		return core.Task{}, err
+	}
+	var ref core.LinearRef
+	switch kind {
+	case "issue":
+		ref, err = session.LinearIssueRef(ctx, input)
+	case "project":
+		ref, err = session.LinearProjectRef(ctx, input)
+	}
+	if err != nil {
+		return core.Task{}, err
+	}
+	if err := a.refuseWhileStopping(); err != nil {
+		return core.Task{}, err
+	}
+	return a.Core.AddTaskLinear(ctx, projectID, taskID, ref, by)
+}
+func (a *App) UnlinkTaskLinear(ctx context.Context, projectID, taskID, kind, id, by string) (core.Task, error) {
+	if a.Demo {
+		return core.Task{}, errors.New("demo mode does not change external links")
+	}
+	if err := a.refuseWhileStopping(); err != nil {
+		return core.Task{}, err
+	}
+	return a.Core.RemoveTaskLinear(ctx, projectID, taskID, kind, id, by)
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/config"
@@ -299,4 +300,67 @@ func (s *LinearSession) PickUpIssues(ctx context.Context, l core.LinearLink, aft
 		return page, errors.New("Linear returned an invalid page cursor")
 	}
 	return out.Issues, nil
+}
+
+const LinearIssueRefQuery = `query CrewIssueRef($id: String!) { issue(id: $id) { id identifier title url } }`
+const LinearProjectRefQuery = `query CrewProjectRef($id: String!) { project(id: $id) { id name url } }`
+
+func (s *LinearSession) LinearIssueRef(ctx context.Context, input string) (core.LinearRef, error) {
+	if strings.HasPrefix(input, "https://") {
+		u, err := url.Parse(input)
+		if err != nil || u.Host != "linear.app" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return core.LinearRef{}, errors.New("invalid Linear issue reference")
+		}
+		parts := strings.Split(u.Path, "/")
+		input = ""
+		for n, part := range parts {
+			if part == "issue" && n+1 < len(parts) {
+				input = parts[n+1]
+				break
+			}
+		}
+	}
+	if !linearIssueID.MatchString(input) {
+		return core.LinearRef{}, errors.New("invalid Linear issue reference")
+	}
+	return s.linearRef(ctx, "issue", input, LinearIssueRefQuery)
+}
+func (s *LinearSession) LinearProjectRef(ctx context.Context, id string) (core.LinearRef, error) {
+	if !core.ValidLinearID(id) {
+		return core.LinearRef{}, errors.New("choose a Linear project")
+	}
+	return s.linearRef(ctx, "project", id, LinearProjectRefQuery)
+}
+func (s *LinearSession) linearRef(ctx context.Context, kind, id, query string) (core.LinearRef, error) {
+	var ref core.LinearRef
+	vars, _ := json.Marshal(map[string]string{"id": id})
+	data, err := s.read(ctx, []string{"api", "query", query, "--variables", string(vars)})
+	if err != nil {
+		return ref, err
+	}
+	var out struct {
+		Issue   *core.LinearIssue               `json:"issue"`
+		Project *struct{ ID, Name, URL string } `json:"project"`
+		Errors  json.RawMessage                 `json:"errors"`
+		Error   json.RawMessage                 `json:"error"`
+	}
+	if json.Unmarshal(data, &out) != nil || len(out.Errors) > 0 || len(out.Error) > 0 {
+		return ref, errors.New("Linear returned an invalid link")
+	}
+	ref.Kind, ref.ConnectionID, ref.Profile = kind, s.id, s.profile
+	if kind == "issue" && out.Issue != nil {
+		ref.LinearIssue = *out.Issue
+		if (core.ValidLinearID(id) && !strings.EqualFold(ref.ID, id)) || (!core.ValidLinearID(id) && !strings.EqualFold(ref.Identifier, id)) {
+			return core.LinearRef{}, errors.New("Linear returned a different issue")
+		}
+	} else if kind == "project" && out.Project != nil {
+		ref.LinearIssue = core.LinearIssue{ID: out.Project.ID, Identifier: out.Project.Name, Title: out.Project.Name, URL: out.Project.URL}
+		if !strings.EqualFold(ref.ID, id) {
+			return core.LinearRef{}, errors.New("Linear returned a different project")
+		}
+	}
+	if err := core.ValidateTaskLinear(ref); err != nil {
+		return core.LinearRef{}, err
+	}
+	return ref, nil
 }

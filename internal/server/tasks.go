@@ -11,6 +11,23 @@ import (
 // registerProjectTasks serves the outcomes the owner asks of a project, and
 // what those produced.
 func registerProjectTasks(mux *http.ServeMux, a *app.App) {
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/linear", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			ConnectionID string `json:"connection_id"`
+			Profile      string `json:"profile"`
+			Kind         string `json:"kind"`
+			Ref          string `json:"ref"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.LinkTaskLinear(r.Context(), r.PathValue("id"), r.PathValue("task"), in.ConnectionID, in.Profile, in.Kind, in.Ref, core.LinkedByOwner)
+		reply(w, 200, v, err)
+	})
+	mux.HandleFunc("DELETE /api/projects/{id}/tasks/{task}/linear/{kind}/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		v, err := a.UnlinkTaskLinear(r.Context(), r.PathValue("id"), r.PathValue("task"), r.PathValue("kind"), r.PathValue("ref"), core.LinkedByOwner)
+		reply(w, 200, v, err)
+	})
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/blockers", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Kind        string `json:"kind"`

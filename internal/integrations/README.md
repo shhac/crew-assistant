@@ -40,6 +40,15 @@ Explicitly enable `linear.import_assignments` (default false), set `linear.api_k
 
 Reference: [Linear GraphQL API](https://linear.app/developers/graphql).
 
+CA-52 added task-level Linear links alongside imported sources. The owner or
+assistant can validate an issue identifier or pasted Linear issue URL, or select
+a project UUID, through any configured lin account (defaulting to the project's
+connection). Fixed read-only queries store identifier/name, title and URL.
+Added issue links create an atomic import receipt, retained on removal so pick-up
+never imports the issue later. Imported sources stay read-only; added projects
+replace the previous project link, and tasks allow up to 50 added issue links.
+Nothing writes to Linear, and added links never enter team prompts.
+
 ## Slack
 
 Create a Slack app, enable Socket Mode, create an app-level token with `connections:write`, and grant its bot `chat:write`, `im:history`, and `im:write`. Subscribe to the `message.im` bot event, install the app in the intended workspace, then set the configured bot-token and app-token environment variables. Set `slack.owner_user_id` to the owner's Slack user ID. Reinstall the Slack app after adding scopes.

@@ -133,6 +133,12 @@ var toolActions = map[string]toolAction{
 	"unlink_tasks": with(func(a *App, ctx context.Context, in engine.UnlinkTasksArgs) (any, error) {
 		return a.Work.UnlinkTasks(ctx, core.Link{Project: in.ProjectID, Task: in.TaskID, Other: in.OtherTaskID, By: core.LinkedByAssistant})
 	}),
+	"link_task_linear": with(func(a *App, ctx context.Context, in engine.LinkTaskLinearArgs) (any, error) {
+		return a.LinkTaskLinear(ctx, in.ProjectID, in.TaskID, in.ConnectionID, in.Profile, in.Kind, in.Ref, core.LinkedByAssistant)
+	}),
+	"unlink_task_linear": with(func(a *App, ctx context.Context, in engine.LinkTaskLinearArgs) (any, error) {
+		return a.UnlinkTaskLinear(ctx, in.ProjectID, in.TaskID, in.Kind, in.Ref, core.LinkedByAssistant)
+	}),
 	"set_blocker": with(func(a *App, ctx context.Context, in engine.SetBlockerArgs) (any, error) {
 		if in.Holds != "" && in.Holds != "start" && in.Holds != "landing" {
 			return nil, errors.New("holds must be start or landing, or empty for start")

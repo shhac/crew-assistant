@@ -263,7 +263,7 @@ export interface LinearLink {
 }
 export interface LinearRef {
   description?: string;
-  kind: "issue";
+  kind: "issue" | "project";
   connection_id: string;
   profile: string;
   id: string;
@@ -606,6 +606,7 @@ export interface Task {
   blockers?: Blocker[];
   /** Original source issues and their context for the offline team. */
   linear?: LinearRef[];
+  linear_links?: LinearRef[];
   id: string;
   project_id: string;
   /** The task's readable ID, such as CA-12; empty before it has one. */
@@ -1529,3 +1530,29 @@ export const retryPMChat = (project: string, id: string) =>
     `${pmChatURL(project)}/messages/${encodeURIComponent(id)}/retry`,
     { method: "POST" },
   );
+
+export function linkTaskLinear(
+  project: string,
+  task: string,
+  input: {
+    connection_id: string;
+    profile: string;
+    kind: "issue" | "project";
+    ref: string;
+  },
+) {
+  return api<Task>(
+    `/api/projects/${encodeURIComponent(project)}/tasks/${encodeURIComponent(task)}/linear`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+export function unlinkTaskLinear(
+  project: string,
+  task: string,
+  link: LinearRef,
+) {
+  return api<Task>(
+    `/api/projects/${encodeURIComponent(project)}/tasks/${encodeURIComponent(task)}/linear/${link.kind}/${encodeURIComponent(link.id)}`,
+    { method: "DELETE" },
+  );
+}
