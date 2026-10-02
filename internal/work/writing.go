@@ -45,6 +45,7 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
 	defer cleanup()
+	spec.Loopback = checkLoopback(taskPlaybook(p, t), writer)
 	// The implementer carries on its member's conversation on this task,
 	// whichever of the member's seats had it, and never another task's or
 	// another member's. Starting afresh, whether asked to or because it

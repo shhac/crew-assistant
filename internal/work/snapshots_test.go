@@ -22,11 +22,15 @@ import (
 type checkRunner struct {
 	*codeRunner
 	onCheck func(spec roles.Spec)
+	onWrite func(spec roles.Spec)
 }
 
 func (r checkRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
 	if r.onCheck != nil && (strings.Contains(spec.Prompt, "Run exactly this") || strings.Contains(spec.Prompt, "Do not modify anything")) {
 		r.onCheck(spec)
+	}
+	if r.onWrite != nil && strings.Contains(spec.Prompt+spec.FreshPrompt, "Run the relevant tests yourself") {
+		r.onWrite(spec)
 	}
 	return r.codeRunner.Run(ctx, spec)
 }
@@ -669,8 +673,9 @@ func TestQACanRunTheCheckInAWritableCopy(t *testing.T) {
 
 // A library's tests may start a local server, which QA's sandbox refuses
 // unless the team lets the check use this machine's own addresses, on an
-// engine that can limit a network to them. Only QA is let, and saving the
-// team again without saying keeps the setting.
+// engine that can limit a network to them. QA, which runs the check, and the
+// implementer, which runs the tests before handing over, are let; the
+// reviewer isn't. Saving the team again without saying keeps the setting.
 func TestQAsCheckCanUseThisMachinesNetwork(t *testing.T) {
 	a, code, p, task := codeTask(t, pass, pass)
 	ctx := context.Background()
@@ -686,12 +691,18 @@ func TestQAsCheckCanUseThisMachinesNetwork(t *testing.T) {
 		t.Fatalf("saving the team without them dropped the check's settings: %+v, %v", saved.Playbook, err)
 	}
 	loopback := map[bool]bool{}
+	var writerLoopback []bool
 	a.runner = checkRunner{codeRunner: code, onCheck: func(spec roles.Spec) {
 		loopback[spec.Write] = spec.Loopback
+	}, onWrite: func(spec roles.Spec) {
+		writerLoopback = append(writerLoopback, spec.Loopback)
 	}}
 	task = settleCode(t, a, task.ID)
 	if task.Status != core.TaskWaiting || !loopback[true] || loopback[false] {
 		t.Fatalf("loopback by QA (true) and the reviewer (false): %v, task %s", loopback, task.Status)
+	}
+	if len(writerLoopback) == 0 || slices.Contains(writerLoopback, false) {
+		t.Fatalf("the implementer can't run tests that need a local server: %v", writerLoopback)
 	}
 	off, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", QA: quinn.ID, CheckLoopback: "no"})
 	if err != nil || off.Playbook.CheckLoopback || !off.Playbook.CheckInCopy {

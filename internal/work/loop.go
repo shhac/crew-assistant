@@ -231,6 +231,14 @@ func taskPlaybook(p core.Project, t core.Task) *core.Playbook {
 	return p.Playbook
 }
 
+// checkLoopback says whether r may bind and reach this machine's own
+// addresses, as the project's check may: QA runs the check, and the
+// implementer is asked to run the tests before handing over, so a check
+// that needs a local server would otherwise fail it every time.
+func checkLoopback(playbook *core.Playbook, r core.Role) bool {
+	return playbook != nil && playbook.CheckLoopback && config.Supports(r.Engine, config.UseLoopback)
+}
+
 // roleSpec is how a role runs for one turn. The files it reads its learnings
 // from last only as long as the turn: run it before cleanup.
 func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m medium, prompt string) (spec roles.Spec, cleanup func(), err error) {

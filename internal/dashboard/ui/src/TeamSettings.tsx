@@ -215,9 +215,10 @@ function TeamEditor({
               <span>Let the check use this machine's own network</span>
             </label>
             <p className="hint" id="team-loopback-hint">
-              For tests that start a local server. Nothing beyond this machine
-              is reachable. QA needs to be on Claude: Codex can't limit its
-              network to this machine.
+              For tests that start a local server. QA, which runs the check,
+              and the implementer, which runs the tests before handing over,
+              get it. Nothing beyond this machine is reachable. Both need to
+              be on Claude: Codex can't limit its network to this machine.
             </p>
           </>
         ) : (
