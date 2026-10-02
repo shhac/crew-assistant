@@ -109,7 +109,7 @@ func TestThePMLooksAgainWhenWorkIsPlannedOrFinishes(t *testing.T) {
 	b := ask(t, s, planned.ID, "b")
 	s.NextTask(testContext)
 	s.ApplyPM(testContext, planned.ID, PMAnswer{})
-	if _, err := s.RecordPlan(testContext, b.ID, Plan{Summary: "Do b"}, nil); err != nil {
+	if _, err := s.RecordPlan(testContext, b.ID, Plan{Summary: "Do b"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, project := queuedOrder(t, s, planned.ID); !project.PMDue {

@@ -285,6 +285,11 @@ func waitsLine(tasks []core.Task, t core.Task) string {
 		if j := slices.IndexFunc(tasks, func(o core.Task) bool { return o.ID == id }); j >= 0 {
 			parts[i] = tasks[j].Label()
 		}
+		for _, wait := range t.WaitingOn {
+			if wait.Task == id && wait.ProjectID != t.ProjectID {
+				parts[i] = wait.Ref + " (in " + wait.Project + "; stays)"
+			}
+		}
 		if t.HeldByOwner(core.RelationDependsOn, id) {
 			parts[i] += " (set by the owner)"
 		}

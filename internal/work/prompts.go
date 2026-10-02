@@ -659,6 +659,15 @@ func planText(t core.Task) string {
 	if t.Plan.NeedsDesigner != "" {
 		fmt.Fprintf(&b, "Needs visual design, but no designer is on the team: %s\n", t.Plan.NeedsDesigner)
 	}
+	var prerequisites []string
+	for _, pre := range t.Plan.Prerequisites {
+		outcome := pre.Outcome
+		if outcome == "" {
+			outcome = "waiting"
+		}
+		prerequisites = append(prerequisites, pre.What+" ("+outcome+")")
+	}
+	section("Prerequisites", prerequisites)
 	section("What already exists", t.Plan.Exists)
 	section("What will change", t.Plan.Changes)
 	section("What the record must say if a step stops part-way", t.Plan.FailurePaths)
@@ -694,7 +703,7 @@ func replanText(t core.Task) string {
 
 // researcherPrompt asks the researcher to work out what a task needs before
 // anything is written: it reads, and changes nothing.
-func researcherPrompt(p core.Project, t core.Task, others []core.Task) string {
+func researcherPrompt(p core.Project, t core.Task, others []core.Task, projects []core.Project) string {
 	code := isCode(p, t)
 	var b strings.Builder
 	b.WriteString(briefText(p, t))
@@ -722,18 +731,59 @@ Plan this task before anything is written. Read what you need to, and change not
 	}
 	b.WriteString(`- what is out of scope, so the implementer does not drift;
 - what is unclear enough that the owner must answer before work starts. Ask only what you cannot reasonably decide; the implementer uses judgment for the rest;
-- which of the project's other unfinished tasks, below, this one cannot start before, because it builds on what they will change;
+- which of the unfinished tasks below, from this or any other project, this one cannot start before, because it builds on what they will change;
 - whenever the plan narrows the task and leaves part of it for later, each part left over, under split_off with a title and requirements. Each is queued as a new task that waits for this one, so this task's implementer leaves it alone.
 If it needs more than about 10 changes or would touch more than about 30 files, it is too big to review well in one piece: ask the owner, in your questions, whether to split it, and say into what. Once the owner agrees, list the parts left over under split_off.
 `)
-	if len(others) > 0 {
-		b.WriteString("\nThe project's other unfinished tasks:\n")
-		for _, other := range others {
-			fmt.Fprintf(&b, "- %s (%s): %s\n", other.Label(), other.Status, text.Clip(other.Objective, 200))
+	var local, external strings.Builder
+	for _, other := range others {
+		if other.ProjectID == t.ProjectID {
+			fmt.Fprintf(&local, "- %s (%s): %s\n", other.Label(), other.Status, text.Clip(other.Objective, 200))
 		}
 	}
-	if len(t.DependsOn) > 0 {
-		fmt.Fprintf(&b, "\nThis task already waits for %s; that stays, so name only what it must also wait for.\n", waitsLine(others, t))
+	if local.Len() > 0 {
+		fmt.Fprintf(&b, "\nThe project's other unfinished tasks:\n%s", local.String())
+	}
+	for _, otherProject := range projects {
+		if otherProject.ID == t.ProjectID {
+			continue
+		}
+		var group strings.Builder
+		for _, other := range others {
+			if other.ProjectID == otherProject.ID {
+				fmt.Fprintf(&group, "- %s (%s): %s\n", other.Label(), other.Status, text.Clip(other.Objective, 200))
+			}
+		}
+		if group.Len() > 0 {
+			fmt.Fprintf(&external, "%s:\n%s", otherProject.Title, group.String())
+		}
+	}
+	if external.Len() > 0 {
+		fmt.Fprintf(&b, "\nUnfinished tasks in your other projects:\n%s", external.String())
+	}
+
+	pending := t
+	pending.DependsOn = nil
+	for _, id := range t.DependsOn {
+		if slices.ContainsFunc(others, func(other core.Task) bool { return other.ID == id && !other.Finished() }) {
+			pending.DependsOn = append(pending.DependsOn, id)
+		}
+	}
+	if len(pending.DependsOn) > 0 {
+		fmt.Fprintf(&b, "\nThis task already waits for %s; that stays, so name only what it must also wait for.\n", waitsLine(others, pending))
+	}
+	if local.Len() > 0 || external.Len() > 0 {
+		b.WriteString("\nA plan may depend on any task listed above.\n")
+	}
+	b.WriteString("\nPut conditions no task tracks under prerequisites. Implementation will wait for the owner's confirmation or decision to drop each condition.\n")
+	for _, blocker := range t.Blockers {
+		if blocker.Kind == core.BlockerPrerequisite {
+			outcome := blocker.Outcome
+			if outcome == "" {
+				outcome = "waiting for the owner"
+			}
+			fmt.Fprintf(&b, "Existing prerequisite: %s (%s). Do not ask again for a confirmed or dropped condition.\n", blocker.Description, outcome)
+		}
 	}
 	researcher, _ := t.Researcher()
 	if guide := designGuide(t, researcher, core.TaskResearching, "ask with the design reply below instead of a plan, and plan once the answer is back."); guide != "" {
@@ -749,7 +799,7 @@ If it needs more than about 10 changes or would touch more than about 30 files, 
 	if code {
 		changes += `"failure_paths": ["..."], "tests": ["..."], `
 	}
-	plan := `{"summary": "the plan in a few sentences", "exists": ["..."], ` + needsDesigner + changes + `"out_of_scope": ["..."], "questions": ["only what the owner must answer"], "depends_on": ["ids of tasks above this one must wait for, each readable (such as CA-3) or canonical"], "split_off": [{"title": "a part left for later", "requirements": ["..."]}]}`
+	plan := `{"summary": "the plan in a few sentences", "exists": ["..."], ` + needsDesigner + changes + `"out_of_scope": ["..."], "questions": ["only what the owner must answer"], "depends_on": ["ids of tasks above this one must wait for, each readable (such as CA-3) or canonical"], "prerequisites": ["a condition no task tracks, such as a library version being tagged"], "split_off": [{"title": "a part left for later", "requirements": ["..."]}]}`
 	// The reply can ask for design input only while the hand-off is offered,
 	// so the contract a role follows never contradicts the guide above it.
 	if designsFor(t, researcher) && t.DesignsAt(core.TaskResearching) < core.DesignLimit {

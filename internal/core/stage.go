@@ -47,7 +47,20 @@ func deriveWith(v *Snapshot, t *Task, index map[string][]string) {
 		}
 	}
 	t.PMDeciding = pmDeciding(v, *t)
+	for i := range t.Blockers {
+		b := &t.Blockers[i]
+		b.AnswerPending = false
+		if b.Kind == BlockerPrerequisite && b.ClearedAt == nil {
+			for _, d := range v.Decisions {
+				if d.TaskID == t.ID && d.BlockerID == b.ID && d.Kind == DecisionPrerequisite && d.Status == DecisionOpen {
+					b.AnswerPending = true
+					break
+				}
+			}
+		}
+	}
 	t.Blocks = index[t.ID]
+	t.WaitingOn = nil
 	t.Ref = ""
 	if p := project(v, t.ProjectID); p != nil {
 		t.Ref = p.TaskRef(t.Number)
@@ -55,6 +68,7 @@ func deriveWith(v *Snapshot, t *Task, index map[string][]string) {
 	// A task under way can be made to wait too: then it can't land yet.
 	if !t.Finished() {
 		t.WaitsFor = waitsFor(v, *t)
+		t.WaitingOn = waitingOn(v, *t)
 	}
 	if t.Status == TaskTriage {
 		if p := project(v, t.ProjectID); p != nil {

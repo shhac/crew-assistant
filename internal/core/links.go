@@ -115,7 +115,7 @@ type Link struct {
 func (s *Service) LinkTasks(ctx context.Context, l Link) (Task, error) {
 	var out Task
 	err := s.store.update(ctx, func(v *Snapshot) error {
-		t, other, err := pair(v, l)
+		t, other, err := pair(v, l, false)
 		if err != nil {
 			return err
 		}
@@ -132,7 +132,7 @@ func (s *Service) LinkTasks(ctx context.Context, l Link) (Task, error) {
 			if err := mayWait(*dependent, l.By); err != nil {
 				return err
 			}
-			deps, err := dependencies(v, *dependent, append(slices.Clone(dependent.DependsOn), dep.ID))
+			deps, err := dependencies(v, *dependent, append(slices.Clone(dependent.DependsOn), dep.ID), false)
 			if err != nil {
 				return err
 			}
@@ -162,7 +162,7 @@ func (s *Service) LinkTasks(ctx context.Context, l Link) (Task, error) {
 func (s *Service) UnlinkTasks(ctx context.Context, l Link) (Task, error) {
 	var out Task
 	err := s.store.update(ctx, func(v *Snapshot) error {
-		t, other, err := pair(v, l)
+		t, other, err := pair(v, l, true)
 		if err != nil {
 			return err
 		}
@@ -219,12 +219,12 @@ func orient(relation string, t, other *Task) (dependent, dep *Task) {
 
 // pair is the two tasks a link joins, both in l's project, provided the
 // asker may still change the first.
-func pair(v *Snapshot, l Link) (*Task, *Task, error) {
+func pair(v *Snapshot, l Link, unlink bool) (*Task, *Task, error) {
 	t, other := task(v, strings.TrimSpace(l.Task)), task(v, strings.TrimSpace(l.Other))
 	switch {
 	case t == nil || t.ProjectID != l.Project:
 		return nil, nil, ErrNotFound
-	case other == nil || other.ProjectID != t.ProjectID:
+	case other == nil || (other.ProjectID != t.ProjectID && !(unlink && overrules(l.By) && slices.Contains(t.DependsOn, other.ID))):
 		return nil, nil, fmt.Errorf("there is no task %q in this project: %w", l.Other, ErrNotFound)
 	case other.ID == t.ID:
 		return nil, nil, errors.New("a task cannot be linked to itself")
@@ -282,11 +282,18 @@ func relationWords(relation string) string {
 // dependencies away but not add any, as a role cannot.
 func pmSetsDepends(v *Snapshot, t *Task, proposed []string, now time.Time) bool {
 	team, owners := teamDependsOn(*t)
+	team = slices.DeleteFunc(team, func(id string) bool {
+		if dep := task(v, id); dep != nil && dep.ProjectID != t.ProjectID {
+			owners = append(owners, id)
+			return true
+		}
+		return false
+	})
 	proposed = slices.DeleteFunc(slices.Clone(proposed), func(dep string) bool { return slices.Contains(owners, dep) })
 	if mayWait(*t, LinkedByPM) != nil {
 		proposed = slices.DeleteFunc(proposed, func(dep string) bool { return !slices.Contains(team, dep) })
 	}
-	deps := possibleDependencies(v, Task{ID: t.ID, ProjectID: t.ProjectID}, proposed)
+	deps := possibleDependencies(v, Task{ID: t.ID, ProjectID: t.ProjectID}, proposed, false)
 	if (len(deps) == 0 && len(proposed) > 0) || slices.Equal(deps, team) {
 		return false
 	}
@@ -319,7 +326,9 @@ func blocking(v *Snapshot) map[string][]string {
 	out := map[string][]string{}
 	for _, t := range v.Tasks {
 		for _, id := range t.DependsOn {
-			out[id] = append(out[id], t.ID)
+			if dep := task(v, id); dep != nil && dep.ProjectID == t.ProjectID {
+				out[id] = append(out[id], t.ID)
+			}
 		}
 	}
 	return out

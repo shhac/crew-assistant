@@ -13,6 +13,12 @@ const foldAfter = 3;
 /** What the researcher worked out before anything was written. */
 export function RequestPlan({ plan }: { plan: Plan }) {
   const parts = [
+    {
+      label: "Prerequisites",
+      items: (plan.prerequisites ?? []).map(
+        (p) => `${p.what} (${p.outcome || "waiting"})`,
+      ),
+    },
     { label: "What exists", items: plan.exists ?? [] },
     { label: "What will change", items: plan.changes ?? [] },
     { label: "If a step stops part-way", items: plan.failure_paths ?? [] },

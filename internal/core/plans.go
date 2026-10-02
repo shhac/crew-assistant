@@ -11,10 +11,18 @@ import (
 	"github.com/shhac/crew-assistant/internal/text"
 )
 
+// Prerequisite records an external condition and the owner's outcome.
+type Prerequisite struct {
+	What    string `json:"what"`
+	Blocker string `json:"blocker"`
+	Outcome string `json:"outcome,omitempty"`
+}
+
 // Plan is what a researcher worked out about a task before anything was
 // written: what already exists, what will change, what the record must say
 // when a step stops part-way, how it will be tested, what stays out, and
 // what is unclear. What the task waits for is kept on the task itself.
+// Prerequisites record external conditions and outcomes copied from blockers.
 type Plan struct {
 	NeedsDesigner string   `json:"needs_designer,omitempty"`
 	Summary       string   `json:"summary"`
@@ -30,8 +38,9 @@ type Plan struct {
 	Role     string      `json:"role"`
 	// Answered marks a plan whose questions the owner answered: the
 	// researcher plans again with the answer rather than going on with it.
-	Answered bool      `json:"answered,omitempty"`
-	At       time.Time `json:"at"`
+	Answered      bool           `json:"answered,omitempty"`
+	At            time.Time      `json:"at"`
+	Prerequisites []Prerequisite `json:"prerequisites,omitempty"`
 }
 
 // SplitPart is one part of a task its plan leaves for later: its title and
@@ -49,7 +58,7 @@ const MaxSplitOff = 5
 // unfinished reports a task that has not landed, been delivered or stopped.
 func unfinished(v *Snapshot, id string) *Task {
 	t := task(v, id)
-	if t == nil || t.Finished() {
+	if t == nil || t.Finished() || project(v, t.ProjectID) == nil {
 		return nil
 	}
 	return t
@@ -62,17 +71,23 @@ func waitsFor(v *Snapshot, t Task) []string {
 	var out []string
 	for _, id := range t.DependsOn {
 		if dep := unfinished(v, id); dep != nil {
-			out = append(out, dep.Objective)
+			name := dep.Objective
+			if dep.ProjectID != t.ProjectID {
+				if p := project(v, dep.ProjectID); p != nil {
+					name = fmt.Sprintf("“%s” (%s in %s)", dep.Objective, p.TaskRef(dep.Number), p.Title)
+				}
+			}
+			out = append(out, name)
 		}
 	}
 	return out
 }
 
-// dependencies checks what a task says it depends on: tasks in its own
-// project, not itself, and never a loop, which would leave both waiting
+// dependencies checks what a task says it depends on: in its own project
+// unless anyProject is set, not itself, and never a loop, leaving both waiting
 // forever. Ids of tasks that have already finished are kept but hold nothing
 // back; a task may finish between being read and being named.
-func dependencies(v *Snapshot, t Task, ids []string) ([]string, error) {
+func dependencies(v *Snapshot, t Task, ids []string, anyProject bool) ([]string, error) {
 	var out []string
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
@@ -84,7 +99,9 @@ func dependencies(v *Snapshot, t Task, ids []string) ([]string, error) {
 		switch {
 		case id == t.ID || (dep != nil && dep.ID == t.ID):
 			return nil, errors.New("a task cannot wait for itself")
-		case dep == nil || dep.ProjectID != t.ProjectID:
+		// Editing same-project links keeps cross-project dependencies that
+		// research already recorded, without permitting new ones here.
+		case dep == nil || (dep.ProjectID != t.ProjectID && !anyProject && !slices.Contains(t.DependsOn, dep.ID)):
 			return nil, fmt.Errorf("there is no task %q in this project", id)
 		case slices.Contains(out, dep.ID):
 			continue
@@ -99,11 +116,23 @@ func dependencies(v *Snapshot, t Task, ids []string) ([]string, error) {
 // possibleDependencies is what a role says a task waits for, less any task
 // dependencies would refuse: a role naming one impossible task keeps the
 // rest of its list, so the task still waits for what it can.
-func possibleDependencies(v *Snapshot, t Task, ids []string) []string {
+func possibleDependencies(v *Snapshot, t Task, ids []string, anyProject bool) []string {
 	var out []string
 	for _, id := range ids {
-		if deps, err := dependencies(v, t, append(slices.Clone(out), id)); err == nil {
+		if deps, err := dependencies(v, t, append(slices.Clone(out), id), anyProject); err == nil {
 			out = deps
+		}
+	}
+	return out
+}
+
+// PlanDependencies returns validated unfinished dependencies and previously
+// recorded dependencies, including resolved ones, using RecordPlan's checks.
+func PlanDependencies(v Snapshot, t Task, ids []string) []string {
+	var out []string
+	for _, id := range possibleDependencies(&v, t, append(slices.Clone(t.DependsOn), ids...), true) {
+		if unfinished(&v, id) != nil || slices.Contains(t.DependsOn, id) {
+			out = append(out, id)
 		}
 	}
 	return out
@@ -139,7 +168,7 @@ func reaches(v *Snapshot, from, to string, seen map[string]bool) bool {
 // implementer starts. A task whose work has begun is never sent back to the
 // queue, nor made to wait for more: its drafts and branch stay. A plan kept
 // on the task queues the parts it splits off, in the same change.
-func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, dependsOn []string) (Task, error) {
+func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, dependsOn, prerequisites []string) (Task, error) {
 	var out Task
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		t := task(v, taskID)
@@ -154,12 +183,27 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 		if begun {
 			dependsOn = nil
 		}
-		deps := possibleDependencies(v, *t, append(slices.Clone(t.DependsOn), dependsOn...))
+		recordedDeps := possibleDependencies(v, *t, t.DependsOn, true)
+		deps := possibleDependencies(v, *t, append(slices.Clone(t.DependsOn), dependsOn...), true)
 		now := s.now().UTC()
 		t.DependsOn, t.UpdatedAt = deps, now
 		markAll(t, deps, researcherLinker(*t), now)
 		plan.At = now
+		if !begun {
+			s.planPrerequisites(v, t, prerequisites, now)
+		}
+		plan.Prerequisites = taskPrerequisites(*t)
 		waiting := append(waitsFor(v, *t), BlockerReasons(*t)...)
+		// Validate against the dependencies that survived this write, not the
+		// researcher's raw ids or a snapshot taken before it ran.
+		// Previously recorded dependencies are resolved declarations; newly
+		// proposed finished ids still do not establish a scheduling condition.
+		current := *t
+		current.DependsOn = recordedDeps
+		current.WaitsFor = waitsFor(v, *t)
+		if !begun && UndeclaredPlanWait(plan, nil, current) && !slices.Contains(plan.Questions, UndeclaredWaitQuestion) {
+			plan.Questions = append(plan.Questions, UndeclaredWaitQuestion)
+		}
 		request := t.OpenResearch()
 		switch {
 		case heldBack(v, *t) && !begun:
@@ -253,7 +297,7 @@ func splitOff(v *Snapshot, t *Task, now time.Time) *Task {
 			if slices.Contains(dep.DependsOn, n.ID) {
 				continue
 			}
-			deps, err := dependencies(v, *dep, append(slices.Clone(dep.DependsOn), n.ID))
+			deps, err := dependencies(v, *dep, append(slices.Clone(dep.DependsOn), n.ID), false)
 			if err != nil {
 				continue
 			}

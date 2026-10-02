@@ -271,6 +271,12 @@ func TestRenamingAProjectChangesOnlyItsTitle(t *testing.T) {
 		t.Fatalf("renamed %+v from %+v", renamed, p)
 	}
 	snap, _ := s.Snapshot(testContext)
+	// Wait pointers carry the current project title, rather than a stored copy.
+	for i := range before.Tasks {
+		for j := range before.Tasks[i].WaitingOn {
+			before.Tasks[i].WaitingOn[j].Project = renamed.Title
+		}
+	}
 	if !reflect.DeepEqual(snap.Tasks, before.Tasks) {
 		t.Fatalf("tasks changed: %+v", snap.Tasks)
 	}

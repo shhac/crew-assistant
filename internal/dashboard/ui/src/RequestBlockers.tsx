@@ -7,6 +7,7 @@ import {
   type Project,
   type Task,
 } from "./api";
+import { prerequisiteWait } from "./TaskWaits";
 import { ErrorNotice, useAction } from "./ui";
 import { kindWord } from "./members";
 
@@ -61,11 +62,14 @@ export function RequestBlockers({
       {(task.blockers ?? []).map((b) => (
         <div key={b.id} className="relation">
           <span className={b.cleared_at || finished ? "muted small" : ""}>
-            {b.description}
+            {b.kind === "prerequisite" && !b.cleared_at
+              ? prerequisiteWait(b)
+              : b.description}
             {b.landing_only ? " (landing only)" : ""}
           </span>
           <span className="muted small">
             Set by {who(b.by, members)}
+            {b.outcome ? ` · ${b.outcome}` : ""}
             {b.cleared_at
               ? ` · Cleared by ${who(b.cleared_by ?? "", members)}`
               : ""}

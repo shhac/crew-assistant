@@ -1,24 +1,9 @@
 import { useState, type DragEvent } from "react";
+import { TaskWaits, hasWaits } from "./TaskWaits";
 import { orderLine } from "./stages";
 import { BoardCard } from "./BoardCard";
 import { ErrorNotice, Icon, useAction } from "./ui";
 import { orderTasks, type Project, type Task } from "./api";
-
-/** What a queued request waits to land first, or "" when it waits for nothing. */
-const waitsLine = (task: Task) =>
-  [
-    task.waits_for?.length
-      ? `Waits for ${task.waits_for.map((w) => `“${w}”`).join(", ")}`
-      : "",
-    ...(task.blockers ?? [])
-      .filter((b) => !b.cleared_at)
-      .map(
-        (b) =>
-          `Held until: ${b.description}${b.landing_only ? " (landing only)" : ""}`,
-      ),
-  ]
-    .filter(Boolean)
-    .join("; ");
 
 /**
  * The to-do list in the order work starts in. The owner can reorder it by
@@ -112,7 +97,13 @@ function Place({
   move: (from: number, to: number) => void;
 }) {
   const place = index === 0 ? "Next" : `#${index + 1}`;
-  const hint = waitsLine(task) || (count > 1 ? place : "");
+  const hint = hasWaits(task) ? (
+    <TaskWaits task={task} />
+  ) : count > 1 ? (
+    place
+  ) : (
+    ""
+  );
   if (!hint) return null;
   return (
     <div className="reorder">

@@ -39,7 +39,7 @@ func TestResearchAskedForInReviewGoesBackToTheCheckerWithoutTouchingTheDraft(t *
 	// The researcher can't make a task whose work has begun wait, and its
 	// plan sends the task back to the checker that asked, on its branch.
 	other, _ := s.QueueTask(testContext, task.ProjectID, TaskInput{Objective: "Other"})
-	back, err := s.RecordPlan(testContext, task.ID, Plan{Summary: "Use v2", Role: "Researcher"}, []string{other.ID})
+	back, err := s.RecordPlan(testContext, task.ID, Plan{Summary: "Use v2", Role: "Researcher"}, []string{other.ID}, nil)
 	if err != nil || back.Status != TaskReviewing || back.Plan.Summary != "Use v2" || back.Branch != "b" || back.Base != "base" || len(back.DependsOn) != 0 {
 		t.Fatalf("back to the checker: %s %+v branch %q deps %v %v", back.Status, back.Plan, back.Branch, back.DependsOn, err)
 	}

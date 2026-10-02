@@ -194,7 +194,7 @@ func TestMarksStayWithWhoeverSetALinkFirst(t *testing.T) {
 		task.Status = TaskResearching
 		return "", nil
 	})
-	if _, err := s.RecordPlan(testContext, dashboard.ID, Plan{Summary: "Plan"}, []string{schema.ID, api.ID}); err != nil {
+	if _, err := s.RecordPlan(testContext, dashboard.ID, Plan{Summary: "Plan"}, []string{schema.ID, api.ID}, nil); err != nil {
 		t.Fatal(err)
 	}
 	got := taskByID(t, s, dashboard.ID)

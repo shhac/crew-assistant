@@ -196,7 +196,7 @@ func TestEveryRoleIsToldWhichDesignIsCurrent(t *testing.T) {
 	reviewer := core.Role{Name: "Rune", Kinds: []string{core.RoleReviewer}}
 	for name, prompt := range map[string]string{
 		"implementer":   writerPrompt(code, task, "", false),
-		"researcher":    researcherPrompt(code, task, nil),
+		"researcher":    researcherPrompt(code, task, nil, nil),
 		"code reviewer": checkerPrompt(code, task, rev, reviewer, code.Playbook),
 		"reviewer":      reviewerPrompt(docs, task, rev),
 		"designer":      designerPrompt(code, task, core.DesignRequest{From: "Writer", Step: core.TaskWriting, Question: "Spacing?"}, false),

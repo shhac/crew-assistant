@@ -36,7 +36,7 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	if err != nil {
 		return err
 	}
-	base := researcherPrompt(p, t, otherWork(snap, t)) + learnedGuide(researcher, true)
+	base := researcherPrompt(p, t, otherWork(snap, t), snap.Projects) + learnedGuide(researcher, true)
 	spec, cleanup, err := lp.roleSpec(t, researcher, m.workspace(t), false, m, base)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
@@ -45,9 +45,19 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	var plan core.Plan
 	var dependsOn []string
 	var design string
+	attempts := 0
+	inconsistent := false
 	_, hasDesigner := t.Designer()
 	reply, learned, _, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
+		attempts++
 		plan, dependsOn, design, err = parsePlan(reply, designsFor(t, researcher), !hasDesigner)
+		if err == nil && design == "" && core.UndeclaredPlanWait(plan, core.PlanDependencies(snap, t, dependsOn), t) {
+			inconsistent = true
+			if attempts == 1 {
+				return errors.New("the summary says implementation waits, but declares no depends_on or prerequisites; name the task or external condition it waits for, or reword the summary if implementation does not actually wait")
+			}
+			plan.Questions = append(plan.Questions, core.UndeclaredWaitQuestion)
+		}
 		return err
 	})
 	if err != nil {
@@ -61,9 +71,16 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	// the work: the implementer reads it either way.
 	if plan.Summary == "" {
 		plan, dependsOn = core.Plan{Summary: text.Clip(strings.TrimSpace(reply), 3000)}, nil
+		if inconsistent || core.UndeclaredPlanWait(plan, core.PlanDependencies(snap, t, dependsOn), t) {
+			plan.Questions = append(plan.Questions, core.UndeclaredWaitQuestion)
+		}
 	}
 	plan.Role = researcher.Name
-	planned, err := lp.Core.RecordPlan(ctx, t.ID, plan, dependsOn)
+	var prerequisites []string
+	for _, pre := range plan.Prerequisites {
+		prerequisites = append(prerequisites, pre.What)
+	}
+	planned, err := lp.Core.RecordPlan(ctx, t.ID, plan, dependsOn, prerequisites)
 	if errors.Is(err, core.ErrConflict) {
 		return nil
 	}
@@ -102,12 +119,12 @@ func (lp *Loop) askPlanQuestions(ctx context.Context, t core.Task) error {
 	return err
 }
 
-// otherWork is the project's other unfinished tasks, which a plan may say
+// otherWork is the owner's other unfinished tasks, which a plan may say
 // this one has to wait for.
 func otherWork(snap core.Snapshot, t core.Task) []core.Task {
 	var out []core.Task
 	for _, other := range snap.Tasks {
-		if other.ProjectID == t.ProjectID && other.ID != t.ID && !other.Finished() {
+		if other.ID != t.ID && !other.Finished() {
 			out = append(out, other)
 		}
 	}
@@ -139,6 +156,7 @@ func parsePlan(reply string, designs, noDesigner bool) (core.Plan, []string, str
 		OutOfScope    []string `json:"out_of_scope"`
 		Questions     []string `json:"questions"`
 		DependsOn     []string `json:"depends_on"`
+		Prerequisites []string `json:"prerequisites"`
 		SplitOff      []struct {
 			Title        string   `json:"title"`
 			Requirements []string `json:"requirements"`
@@ -184,6 +202,9 @@ func parsePlan(reply string, designs, noDesigner bool) (core.Plan, []string, str
 		if title := strings.TrimSpace(part.Title); title != "" && len(plan.SplitOff) < core.MaxSplitOff {
 			plan.SplitOff = append(plan.SplitOff, core.SplitPart{Objective: text.Clip(title, 500), Criteria: listed(part.Requirements, maxPlanItems)})
 		}
+	}
+	for _, what := range listed(in.Prerequisites, maxPlanItems) {
+		plan.Prerequisites = append(plan.Prerequisites, core.Prerequisite{What: text.Clip(what, 300)})
 	}
 	return plan, listed(in.DependsOn, maxPlanItems), design, nil
 }

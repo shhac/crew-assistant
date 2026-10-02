@@ -135,7 +135,7 @@ func TestTheResearchersReplyContractOffersDesignOnlyWhileItCanAsk(t *testing.T) 
 	researcher := core.Role{Name: "Researcher", Kinds: []string{core.RoleResearcher}}
 	dee := core.Role{Name: "Dee", Kinds: []string{core.RoleDesigner}}
 	contract := func(task core.Task) string {
-		prompt := researcherPrompt(p, task, nil)
+		prompt := researcherPrompt(p, task, nil, nil)
 		return prompt[strings.LastIndex(prompt, "Reply with only"):]
 	}
 	withDee := core.Task{Round: 1, Roles: []core.Role{researcher, dee}}
@@ -365,7 +365,7 @@ func TestVisualWorkGoesToTheDesignerBeforeBuilding(t *testing.T) {
 	writer := core.Role{Name: "Writer", Kinds: []string{core.RoleImplementer}}
 	designer := core.Role{Name: "Dee", Kinds: []string{core.RoleDesigner}}
 	task := core.Task{Round: 1, Roles: []core.Role{researcher, writer, designer}}
-	for _, prompt := range []string{researcherPrompt(core.Project{}, task, nil), writerPrompt(core.Project{}, task, "", true)} {
+	for _, prompt := range []string{researcherPrompt(core.Project{}, task, nil, nil), writerPrompt(core.Project{}, task, "", true)} {
 		for _, want := range []string{"icons", "illustrations", "images", "significant layout or styling", "must go to Dee for design input before you plan or build it as final", "do not draw or invent those assets yourself"} {
 			if !strings.Contains(prompt, want) {
 				t.Errorf("missing %q in %s", want, prompt)
@@ -390,14 +390,14 @@ func TestVisualWorkGoesToTheDesignerBeforeBuilding(t *testing.T) {
 func TestNoDesignerGuidanceOnlyWhenTheSeatIsMissing(t *testing.T) {
 	researcher := core.Role{Name: "Researcher", Kinds: []string{core.RoleResearcher}}
 	task := core.Task{Roles: []core.Role{researcher}}
-	prompt := researcherPrompt(core.Project{}, task, nil)
+	prompt := researcherPrompt(core.Project{}, task, nil, nil)
 	for _, want := range []string{"No designer is on this team", visualDesignWork, "say why in needs_designer", `"needs_designer":`} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("missing %q", want)
 		}
 	}
 	task.Roles[0].Kinds = append(task.Roles[0].Kinds, core.RoleDesigner)
-	prompt = researcherPrompt(core.Project{}, task, nil)
+	prompt = researcherPrompt(core.Project{}, task, nil, nil)
 	if designsFor(task, task.Roles[0]) || strings.Contains(prompt, "needs_designer") || strings.Contains(prompt, `{"design":`) {
 		t.Fatalf("same-seat designer: %s", prompt)
 	}

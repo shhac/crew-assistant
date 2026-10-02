@@ -62,6 +62,7 @@ it("shows ownership, check reason and clearing on the request", async () => {
   const refresh = vi.fn(async () => {});
   render(
     <RequestRelations
+      projects={[project, { ...project, id: "lib", title: "Library" }]}
       project={project}
       task={task}
       tasks={[task]}
@@ -92,6 +93,7 @@ it("adds manual and daemon conditions with the chosen gate", async () => {
   };
   render(
     <RequestRelations
+      projects={[project, { ...project, id: "lib", title: "Library" }]}
       project={project}
       task={{ ...task, blockers: [] }}
       tasks={[task, other]}
@@ -145,6 +147,7 @@ it("shows open conditions on cards and retains muted clearing history", () => {
   view.unmount();
   render(
     <RequestRelations
+      projects={[project, { ...project, id: "lib", title: "Library" }]}
       project={project}
       task={{
         ...task,

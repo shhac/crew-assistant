@@ -221,6 +221,7 @@ export function RequestPanel({
           <RequestEdits task={task} closed={finished(task)} refresh={refresh} />
           <RequestRelations
             project={project}
+            projects={state.projects}
             task={task}
             tasks={state.tasks}
             members={state.members}

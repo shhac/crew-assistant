@@ -227,7 +227,7 @@ func TestAPlanMovesTheTaskOnAndNeverMakesALoop(t *testing.T) {
 		t.Fatal(started)
 	}
 	// A cannot wait for B, which waits for A: that dependency is dropped.
-	planned, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", Questions: []string{"Which colour?"}}, []string{b.ID})
+	planned, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", Questions: []string{"Which colour?"}}, []string{b.ID}, nil)
 	if err != nil || len(planned.DependsOn) != 0 || planned.Status != TaskResearching || planned.Plan == nil {
 		t.Fatalf("questions keep the task in research with its plan: %+v %v", planned, err)
 	}
@@ -235,10 +235,10 @@ func TestAPlanMovesTheTaskOnAndNeverMakesALoop(t *testing.T) {
 		t.Status, t.Plan = TaskResearching, nil
 		return "", nil
 	})
-	if written, _ := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A"}, nil); written.Status != TaskWriting || written.Plan.Role != "" || written.Plan.At.IsZero() {
+	if written, _ := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A"}, nil, nil); written.Status != TaskWriting || written.Plan.Role != "" || written.Plan.At.IsZero() {
 		t.Fatalf("a clear plan starts the writer: %+v", written)
 	}
-	if _, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "again"}, nil); !errors.Is(err, ErrConflict) {
+	if _, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "again"}, nil, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("a task no longer researching took a plan: %v", err)
 	}
 	c, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "C"})
@@ -255,7 +255,7 @@ func TestAPlanMovesTheTaskOnAndNeverMakesALoop(t *testing.T) {
 		return "", nil
 	})
 	// One impossible id among the researcher's doesn't lose the rest.
-	back, _ := s.RecordPlan(testContext, c.ID, Plan{Summary: "C builds on A"}, []string{"not-a-task", c.ID, a.ID})
+	back, _ := s.RecordPlan(testContext, c.ID, Plan{Summary: "C builds on A"}, []string{"not-a-task", c.ID, a.ID}, nil)
 	if back.Status != TaskQueued || back.Plan != nil || back.Base != "" || back.Branch != "" || len(back.WaitsFor) != 1 {
 		t.Fatalf("a task that waits goes back to the queue to plan again later: %+v", back)
 	}
@@ -311,7 +311,7 @@ func TestAPlanQueuesWhatItSplitsOffAndWhatWaitedWaitsForItToo(t *testing.T) {
 	planned, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A, not the rest", SplitOff: []SplitPart{
 		{Objective: " Export as CSV ", Criteria: []string{"Every column", " "}},
 		{Objective: "Import CSV"},
-	}}, nil)
+	}}, nil, nil)
 	if err != nil || planned.Status != TaskWriting {
 		t.Fatalf("%+v %v", planned, err)
 	}
@@ -357,7 +357,7 @@ func TestPlanningAgainNeverQueuesAPartTwice(t *testing.T) {
 	p := plannedProject(t, s)
 	a, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "A"})
 	s.NextTask(testContext)
-	asked, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", Questions: []string{"Which?"}, SplitOff: []SplitPart{{Objective: "Export CSV"}, {Objective: "Import CSV"}, {Objective: "Print"}}}, nil)
+	asked, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", Questions: []string{"Which?"}, SplitOff: []SplitPart{{Objective: "Export CSV"}, {Objective: "Import CSV"}, {Objective: "Print"}}}, nil, nil)
 	if err != nil || asked.Status != TaskResearching || len(splitTasks(t, s, a.ID)) != 3 {
 		t.Fatalf("questions keep the plan and queue its parts: %+v %v", asked, err)
 	}
@@ -374,7 +374,7 @@ func TestPlanningAgainNeverQueuesAPartTwice(t *testing.T) {
 		return "", nil
 	})
 	// Spacing repeated or taken away, and case changed, name the same part.
-	again, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", SplitOff: []SplitPart{{Objective: "export  csv"}, {Objective: "ExportCSV"}, {Objective: "IMPORT CSV"}, {Objective: "print"}, {Objective: "Share"}, {Objective: "share "}}}, nil)
+	again, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", SplitOff: []SplitPart{{Objective: "export  csv"}, {Objective: "ExportCSV"}, {Objective: "IMPORT CSV"}, {Objective: "print"}, {Objective: "Share"}, {Objective: "share "}}}, nil, nil)
 	if err != nil || again.Status != TaskWriting {
 		t.Fatalf("%+v %v", again, err)
 	}
@@ -409,7 +409,7 @@ func TestPlanningAgainNeverQueuesAPartTwice(t *testing.T) {
 		t.Status, t.Plan.Answered = TaskResearching, true
 		return "", nil
 	})
-	reused, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", SplitOff: []SplitPart{{Objective: "Print"}, {Objective: "share"}}}, nil)
+	reused, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", SplitOff: []SplitPart{{Objective: "Print"}, {Objective: "share"}}}, nil, nil)
 	if err != nil || len(splitTasks(t, s, a.ID)) != 4 || len(reused.Plan.SplitOff) != 2 || reused.Plan.SplitOff[0].Task != split[2].ID || reused.Plan.SplitOff[1].Task != split[3].ID {
 		t.Fatalf("a plan of parts queued before: %+v %v", reused.Plan, err)
 	}
@@ -432,7 +432,7 @@ func TestOnlyAKeptPlanSplitsWorkOff(t *testing.T) {
 	}
 	// A task sent back to the queue to wait keeps no plan, and splits
 	// nothing off.
-	back, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "After B", SplitOff: parts}, []string{b.ID})
+	back, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "After B", SplitOff: parts}, []string{b.ID}, nil)
 	if err != nil || back.Status != TaskQueued || back.Plan != nil || len(splitTasks(t, s, a.ID)) != 0 {
 		t.Fatalf("%+v %v", back, err)
 	}
@@ -441,14 +441,14 @@ func TestOnlyAKeptPlanSplitsWorkOff(t *testing.T) {
 		t.DependsOn = nil
 		return "", nil
 	})
-	planned, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", SplitOff: parts}, nil)
+	planned, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "Do A", SplitOff: parts}, nil, nil)
 	split := splitTasks(t, s, a.ID)
 	if err != nil || len(split) != MaxSplitOff || split[0].Objective != "Part 0" || len(planned.Plan.SplitOff) != MaxSplitOff {
 		t.Fatalf("a blank part and those past the limit are left out: %+v %v", split, err)
 	}
 	snap, _ := s.Snapshot(testContext)
 	count := len(snap.Tasks)
-	if _, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "again", SplitOff: []SplitPart{{Objective: "Late"}}}, nil); !errors.Is(err, ErrConflict) {
+	if _, err := s.RecordPlan(testContext, a.ID, Plan{Summary: "again", SplitOff: []SplitPart{{Objective: "Late"}}}, nil, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("a task no longer researching took a plan: %v", err)
 	}
 	if snap, _ = s.Snapshot(testContext); len(snap.Tasks) != count {

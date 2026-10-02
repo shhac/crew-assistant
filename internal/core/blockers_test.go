@@ -185,7 +185,7 @@ func TestResearchReturnsToQueueForAStartConditionOnly(t *testing.T) {
 				t.Fatal(err)
 			}
 			addManual(t, s, p, tasks[0], LinkedByPM, landing)
-			got, err := s.RecordPlan(testContext, tasks[0].ID, Plan{Summary: "Build it"}, nil)
+			got, err := s.RecordPlan(testContext, tasks[0].ID, Plan{Summary: "Build it"}, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -148,12 +148,17 @@ func numberTask(p *Project, t *Task) {
 	t.Ref = p.TaskRef(t.Number)
 }
 
-// withoutRefs is tasks as they are stored: a copy with no readable IDs, so
-// the prefix and the number stay their only source.
+// withoutRefs is tasks as they are stored: a copy without derived readable
+// IDs, wait pointers or prerequisite decision status.
 func withoutRefs(tasks []Task) []Task {
 	out := slices.Clone(tasks)
 	for i := range out {
 		out[i].Ref = ""
+		out[i].WaitingOn = nil
+		out[i].Blockers = slices.Clone(out[i].Blockers)
+		for j := range out[i].Blockers {
+			out[i].Blockers[j].AnswerPending = false
+		}
 	}
 	return out
 }

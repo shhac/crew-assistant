@@ -153,6 +153,7 @@ type Decision struct {
 	OwnerStep  *OwnerStep `json:"owner_step,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
+	BlockerID  string     `json:"blocker_id,omitempty"`
 }
 
 // Approves reports a decision whose approval lets the task's change go out.

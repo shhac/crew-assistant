@@ -14,6 +14,7 @@ import (
 const (
 	BlockerManual         = "manual"
 	BlockerDaemonIncludes = "daemon_includes"
+	BlockerPrerequisite   = "prerequisite"
 )
 
 // Blocker keeps an external condition and its clearing history on the task.
@@ -28,6 +29,9 @@ type Blocker struct {
 	ClearedAt   *time.Time `json:"cleared_at,omitempty"`
 	ClearedBy   string     `json:"cleared_by,omitempty"`
 	Check       string     `json:"check,omitempty"`
+	Outcome     string     `json:"outcome,omitempty"`
+	// AnswerPending is derived from the prerequisite decision.
+	AnswerPending bool `json:"answer_pending,omitempty"`
 }
 
 type BlockerInput struct {
@@ -183,8 +187,20 @@ func (s *Service) ClearBlocker(ctx context.Context, projectID, taskID, id, by, w
 			if b.ClearedAt != nil {
 				return fmt.Errorf("the condition is already cleared: %w", ErrConflict)
 			}
-			if !overrules(by) && (overrules(b.By) || t.Finished()) {
+			if !overrules(by) && (b.Kind == BlockerPrerequisite || overrules(b.By) || t.Finished()) {
 				return fmt.Errorf("only the owner or assistant can clear this condition: %w", ErrConflict)
+			}
+			if b.Kind == BlockerPrerequisite {
+				if t.Finished() {
+					return nil
+				}
+				b.Outcome = "confirmed"
+				for i := range v.Decisions {
+					d := &v.Decisions[i]
+					if d.Kind == DecisionPrerequisite && d.BlockerID == b.ID && d.Status == DecisionOpen {
+						dismiss(v, d, s.now().UTC(), "Cleared on the task")
+					}
+				}
 			}
 			s.clearBlocker(v, t, b, by, why)
 			return nil

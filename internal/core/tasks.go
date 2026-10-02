@@ -49,6 +49,8 @@ type Task struct {
 	// WaitsFor names the unfinished tasks this one depends on, derived with
 	// Stage, so the board can say what it waits for.
 	WaitsFor []string `json:"waits_for,omitempty"`
+	// WaitingOn points to unfinished dependencies with their current project and ref.
+	WaitingOn []WaitOn `json:"waiting_on,omitempty"`
 	// PMDeciding is a signed-off change waiting only on the PM's decision
 	// to land, which the owner may take ahead of it. Derived with Stage.
 	PMDeciding bool   `json:"pm_deciding,omitempty"`
@@ -508,7 +510,7 @@ func queueTask(v *Snapshot, p *Project, out *Task, ids []string, by, activity st
 	if err := TaskQueueReady(*p); err != nil {
 		return err
 	}
-	deps, err := dependencies(v, *out, ids)
+	deps, err := dependencies(v, *out, ids, false)
 	if err != nil {
 		return err
 	}
@@ -634,6 +636,7 @@ func (s *Service) updateTask(ctx context.Context, id string, fn func(*Snapshot, 
 			t.Proposal.Answering = false
 		}
 		if t.Finished() {
+			dismissPrerequisites(v, t.ID, t.UpdatedAt, "The task was "+t.Status)
 			cancelTaskWakes(v, t.ID)
 			closeMessages(t, t.UpdatedAt)
 			if !wasFinished {

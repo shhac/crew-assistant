@@ -234,7 +234,7 @@ func TestTheResearcherPlansFailurePathsAndTestsAndFlagsASplit(t *testing.T) {
 	split := "If it needs more than about 10 changes or would touch more than about 30 files, it is too big to review well in one piece: ask the owner, in your questions, whether to split it, and say into what."
 	paths := "- the failure paths: stopping during each step, a restart between two writes, concurrent callers, a partial failure, and what the record must say after each;\n- the tests that will show it works, including on those paths;"
 	schema := `"changes": ["..."], "failure_paths": ["..."], "tests": ["..."], "out_of_scope"`
-	c, d := researcherPrompt(code, task, nil), researcherPrompt(docs, task, nil)
+	c, d := researcherPrompt(code, task, nil, nil), researcherPrompt(docs, task, nil, nil)
 	for _, want := range []string{split, paths, schema} {
 		if !strings.Contains(c, want) {
 			t.Fatalf("a code plan's prompt lacks %q: %s", want, c)
@@ -253,7 +253,7 @@ func TestAPlanListsWhatItSplitsOff(t *testing.T) {
 	task := core.Task{Objective: "Add Feature"}
 	narrows := "whenever the plan narrows the task and leaves part of it for later, each part left over, under split_off with a title and requirements. Each is queued as a new task that waits for this one"
 	contract := `"split_off": [{"title": "a part left for later", "requirements": ["..."]}]}`
-	for _, prompt := range []string{researcherPrompt(code, task, nil), researcherPrompt(docs, task, nil)} {
+	for _, prompt := range []string{researcherPrompt(code, task, nil, nil), researcherPrompt(docs, task, nil, nil)} {
 		if !strings.Contains(prompt, narrows) || !strings.Contains(prompt, contract) || !strings.Contains(prompt, "Once the owner agrees, list the parts left over under split_off.") {
 			t.Fatalf("the researcher is not asked for split parts: %s", prompt)
 		}

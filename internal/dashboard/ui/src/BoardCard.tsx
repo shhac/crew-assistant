@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { TaskWaits, hasWaits } from "./TaskWaits";
 import { LinearSources } from "./ProjectLinear";
 import { requestHref } from "./router";
 import { pmLandingLine } from "./landing";
@@ -104,15 +105,7 @@ export function BoardCard({
           )}
         </p>
       )}
-      {showBlockers &&
-        (task.blockers ?? [])
-          .filter((b) => !b.cleared_at)
-          .map((b) => (
-            <p key={b.id} className="board-card-meta muted small">
-              Held until: {b.description}
-              {b.landing_only ? " (landing only)" : ""}
-            </p>
-          ))}
+      {showBlockers && hasWaits(task) && <TaskWaits task={task} card />}
       {activity}
       <LinearSources links={task.linear} compact />
       {pm && <p className="board-card-meta muted small">{pm}</p>}

@@ -38,7 +38,7 @@ const isRelation = (value: string): value is Relation =>
 function setBy(
   task: Task,
   relation: Relation,
-  other: Task | undefined,
+  other: Pick<Task, "id" | "linked_by"> | undefined,
   members: Member[],
 ) {
   const mark =
@@ -69,12 +69,14 @@ function setBy(
  */
 export function RequestRelations({
   project,
+  projects,
   task,
   tasks,
   members,
   refresh,
 }: {
   project: Project;
+  projects: Project[];
   task: Task;
   tasks: Task[];
   members: Member[];
@@ -82,7 +84,7 @@ export function RequestRelations({
 }) {
   const { busy, error, run } = useAction();
   const others = projectTasks(project, tasks).filter((t) => t.id !== task.id);
-  const byId = new Map(others.map((t) => [t.id, t]));
+  const byId = new Map(tasks.map((t) => [t.id, t]));
   const groups = relations
     .map((r) => ({ ...r, ids: linked(task, r.relation) }))
     .filter((g) => g.ids.length > 0);
@@ -109,15 +111,33 @@ export function RequestRelations({
           <p className="label">{g.label}</p>
           <ul className="relations" aria-label={g.label}>
             {g.ids.map((id) => {
-              const other = byId.get(id);
+              const wait = task.waiting_on?.find((w) => w.task === id);
+              const other =
+                byId.get(id) ??
+                (wait
+                  ? {
+                      id: wait.task,
+                      project_id: wait.project_id,
+                      ref: wait.ref,
+                      objective: wait.objective,
+                    }
+                  : undefined);
               const name = other?.objective ?? "A request no longer here";
+              const otherProject =
+                other && other.project_id !== project.id
+                  ? (projects.find((p) => p.id === other.project_id)?.title ??
+                    wait?.project)
+                  : undefined;
               return (
                 <li key={id} className="relation">
                   <TaskRef task={other} />
                   {other ? (
-                    <a href={requestHref(project.id, id)}>{name}</a>
+                    <a href={requestHref(other.project_id, id)}>{name}</a>
                   ) : (
                     <span className="muted">{name}</span>
+                  )}
+                  {otherProject && (
+                    <span className="muted small">in {otherProject}</span>
                   )}
                   <span className="muted small">
                     {setBy(task, g.relation, other, members)}

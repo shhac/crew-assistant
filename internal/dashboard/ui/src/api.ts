@@ -504,6 +504,11 @@ export interface Plan {
   /** The seat that researched it. */
   role: string;
   at: string;
+  prerequisites?: {
+    what: string;
+    blocker: string;
+    outcome?: "confirmed" | "dropped";
+  }[];
 }
 /** One hand-off to the designer, and the input that came back. */
 export interface DesignRequest {
@@ -595,7 +600,8 @@ export interface Claim {
 
 export interface Blocker {
   id: string;
-  kind: "manual" | "daemon_includes";
+  kind: "manual" | "daemon_includes" | "prerequisite";
+  outcome?: "confirmed" | "dropped";
   description: string;
   task?: string;
   landing_only?: boolean;
@@ -604,6 +610,7 @@ export interface Blocker {
   cleared_at?: string;
   cleared_by?: string;
   check?: string;
+  answer_pending?: boolean;
 }
 export interface Task {
   blockers?: Blocker[];
@@ -656,6 +663,14 @@ export interface Task {
   attachments?: Attachment[];
   /** Ids of the tasks that must land before this one starts. */
   depends_on?: string[];
+  /** Unfinished dependencies with their current project and readable ID. */
+  waiting_on?: {
+    task: string;
+    ref: string;
+    project_id: string;
+    project: string;
+    objective: string;
+  }[];
   /** The objectives of its unfinished dependencies. */
   waits_for?: string[];
   /** Ids of the tasks that depend on this one. */

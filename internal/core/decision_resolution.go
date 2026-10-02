@@ -62,6 +62,20 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 		if d.Kind == DecisionPRFlow && disposition == DispositionChoice {
 			choosePRFlow(v, d.TaskID, answer == ChoiceKeepPR, "You", now)
 		}
+		if d.Kind == DecisionPrerequisite && disposition == DispositionChoice {
+			if t := task(v, d.TaskID); t != nil && !t.Finished() {
+				for i := range t.Blockers {
+					b := &t.Blockers[i]
+					if b.ID == d.BlockerID && b.ClearedAt == nil {
+						b.Outcome = "confirmed"
+						if answer == ChoiceDropPrerequisite {
+							b.Outcome = "dropped"
+						}
+						s.clearBlocker(v, t, b, LinkedByOwner, answer)
+					}
+				}
+			}
+		}
 		d.ResolvedAt = &now
 		d.Disposition = disposition
 		if disposition == DispositionDismissed {
