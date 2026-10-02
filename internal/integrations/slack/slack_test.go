@@ -71,15 +71,14 @@ func TestBotWorkspaceIsVerifiedBeforeAnyOutboundMessage(t *testing.T) {
 		{"provider error", `{"ok":false,"error":"private-fixture-secret"}`, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			slack := handlerTransport{http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/auth.test" {
 					t.Errorf("unexpected Slack call: %s", r.URL.Path)
 				}
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(test.body))
-			}))
-			defer server.Close()
-			c := &Client{cfg: Config{WorkspaceID: "workspace-one"}, api: slackapi.New("synthetic-token", slackapi.OptionAPIURL(server.URL+"/"))}
+			})}
+			c := &Client{cfg: Config{WorkspaceID: "workspace-one"}, api: slackapi.New("synthetic-token", slackapi.OptionAPIURL("http://slack.invalid/"), slackapi.OptionHTTPClient(&http.Client{Transport: slack}))}
 			err := c.VerifyWorkspace(context.Background())
 			if (err != nil) != test.wantError {
 				t.Fatal(err)
@@ -89,4 +88,15 @@ func TestBotWorkspaceIsVerifiedBeforeAnyOutboundMessage(t *testing.T) {
 			}
 		})
 	}
+}
+
+// handlerTransport answers requests with handler in memory. Tests use it
+// instead of a listening server: the team's sandbox refuses to bind any
+// socket.
+type handlerTransport struct{ handler http.Handler }
+
+func (h handlerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	rec := httptest.NewRecorder()
+	h.handler.ServeHTTP(rec, r)
+	return rec.Result(), nil
 }
