@@ -176,13 +176,19 @@ func TestAPIWorkbenchReferenceChangesOpenFreshWithoutInference(t *testing.T) {
 		t.Fatal(resumed, err)
 	}
 	ref := s.Ref()
-	s.Close()
+	// Close gives the conversation up only once its calls have returned;
+	// Release waits for that, as Native.Run does, before it is opened again.
+	if _, err := s.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	stored, _ := json.Marshal(ref)
 	s, resumed, err = open(context.Background(), o, stored)
 	if err != nil || !resumed || s.Ref().ConfigHash != ref.ConfigHash {
 		t.Fatal("unchanged workbench failed to resume", resumed, err)
 	}
-	s.Close()
+	if _, err := s.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	for _, change := range []string{"write", "model", "provider", "provider identity", "workspace"} {
 		t.Run(change, func(t *testing.T) {
 			changed := o
