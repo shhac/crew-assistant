@@ -1,6 +1,7 @@
 package config
 
 import (
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -22,6 +23,9 @@ func TestEnginesAreOfferedForWhatTheHarnessSupports(t *testing.T) {
 		UseBrowser:   {"codex", "claude"},
 		UseLoopback:  {"claude"},
 	} {
+		if (use == UseRoles && (runtime.GOOS == "darwin" || runtime.GOOS == "linux")) || (use == UseLoopback && runtime.GOOS == "darwin") {
+			want = append(want, "openai-compatible")
+		}
 		if got := EnginesFor(use); !slices.Equal(got, want) {
 			t.Errorf("%s: got %v, want %v", use, got, want)
 		}
@@ -34,45 +38,37 @@ func TestEnginesAreOfferedForWhatTheHarnessSupports(t *testing.T) {
 	}
 }
 
-// Team roles use an API provider only once the harness claims a sandboxed
-// session with the daemon's tools for it; until then, the owner is told why.
-func TestRolesOnAnAPIProviderWaitForTheHarness(t *testing.T) {
-	ok, reason := RoleSupport("openai-compatible")
-	if ok || !strings.Contains(reason, "An API provider can't run team roles yet") {
-		t.Fatalf("API provider: %v %q", ok, reason)
-	}
-	if err := CheckRoleEngine("openai-compatible"); err == nil || !strings.Contains(err.Error(), "engine must be codex or claude") || !strings.Contains(err.Error(), reason) {
-		t.Fatalf("check %v", err)
-	}
-	if ok, reason := RoleSupport("claude"); !ok || reason != "" {
-		t.Fatalf("claude %v %q", ok, reason)
-	}
-	if err := CheckRoleEngine("gemini"); err == nil || err.Error() != "engine must be codex or claude" {
-		t.Fatalf("unknown engine %v", err)
-	}
+func TestRolesOnAnAPIProviderFollowTheHarness(t *testing.T) {
 	real := roleSupport
 	t.Cleanup(func() { roleSupport = real })
-	roleSupport = func(e harness.Engine, op harness.Operation, f harness.Feature) harness.Capability {
-		if e == harness.OpenAICompatible && op == harness.Session && (f == harness.Sandbox || f == harness.Tools) {
-			return harness.Capability{Availability: harness.Composed}
+	for _, missing := range []harness.Feature{"", harness.Sandbox, harness.Tools, harness.WorkspaceRead, harness.WorkspaceWrite} {
+		for _, platform := range []string{"Linux needs a proved command sandbox", "Windows has no command sandbox."} {
+			roleSupport = func(e harness.Engine, op harness.Operation, f harness.Feature) harness.Capability {
+				if e == harness.OpenAICompatible && op == harness.Session {
+					if f == missing {
+						return harness.Capability{Availability: harness.Unsupported, Reason: platform}
+					}
+					return harness.Capability{Availability: harness.Composed}
+				}
+				return real(e, op, f)
+			}
+			ok, reason := RoleSupport("openai-compatible")
+			if missing == "" {
+				if !ok || reason != "" || CheckRoleEngine("openai-compatible") != nil {
+					t.Fatalf("offered: %v %q", ok, reason)
+				}
+			} else {
+				if strings.Contains(reason, "..") {
+					t.Fatal(reason)
+				}
+				if ok || !strings.Contains(reason, platform) || !strings.Contains(reason, "Another API can't run team roles on this computer") {
+					t.Fatalf("%s: %v %q", missing, ok, reason)
+				}
+				if err := CheckRoleEngine("openai-compatible"); err == nil || !strings.Contains(err.Error(), reason) {
+					t.Fatal(err)
+				}
+			}
 		}
-		return real(e, op, f)
-	}
-	if ok, reason := RoleSupport("openai-compatible"); !ok || reason != "" {
-		t.Fatalf("a harness that claims it: %v %q", ok, reason)
-	}
-	if !slices.Contains(EnginesFor(UseRoles), "openai-compatible") || CheckRoleEngine("openai-compatible") != nil {
-		t.Fatal("roles weren't offered the API once the harness claimed it")
-	}
-	// Tools alone aren't enough: every role works in a sandbox.
-	roleSupport = func(e harness.Engine, op harness.Operation, f harness.Feature) harness.Capability {
-		if e == harness.OpenAICompatible && f == harness.Tools {
-			return harness.Capability{Availability: harness.Composed}
-		}
-		return real(e, op, f)
-	}
-	if ok, _ := RoleSupport("openai-compatible"); ok {
-		t.Fatal("an API without a sandbox was offered to roles")
 	}
 }
 
@@ -87,5 +83,31 @@ func TestSavedEngineNamesStayValid(t *testing.T) {
 	}
 	if (Model{Engine: "gemini", Model: "m", MaxTokens: 4096}).Validate() == nil {
 		t.Fatal("an engine that can't run the assistant was accepted for it")
+	}
+}
+
+func TestTemplateRoleEnginesStayOnCLIs(t *testing.T) {
+	if slices.Contains(TemplateRoleEngines(), "openai-compatible") {
+		t.Fatal("API offered to engine-only seats")
+	}
+	if err := CheckTemplateRoleEngine("openai-compatible"); err == nil || !strings.Contains(err.Error(), "provider and model") {
+		t.Fatal(err)
+	}
+	for _, engine := range []string{"claude", "codex"} {
+		if err := CheckTemplateRoleEngine(engine); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRoleModelRequiresAnIDOnlyOnAnAPI(t *testing.T) {
+	for _, engine := range []string{"claude", "codex", "openai-compatible"} {
+		for _, model := range []string{"", " \t ", "unlisted-model"} {
+			err := CheckRoleModel(engine, model)
+			wantError := engine == "openai-compatible" && strings.TrimSpace(model) == ""
+			if (err != nil) != wantError {
+				t.Fatalf("%s %q: %v", engine, model, err)
+			}
+		}
 	}
 }

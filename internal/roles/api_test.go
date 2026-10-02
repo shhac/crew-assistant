@@ -1,0 +1,239 @@
+package roles
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/shhac/crew-assistant/internal/testutil"
+	harness "github.com/shhac/lib-agent-harness"
+	"github.com/shhac/lib-agent-harness/session"
+)
+
+// The harness keeps its HTTP transport private. Use its local fake-provider
+// pattern, refusing any address except this fixture's loopback listener.
+func TestAPIReviewerReadsAndCallsDaemonToolsAndResumesAfterSettingsChange(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	handled := 0
+	var names [][]string
+	server := testutil.NewModelServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("unexpected endpoint: %s", r.URL.Path)
+			w.WriteHeader(400)
+			return
+		}
+		var request struct {
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			w.WriteHeader(400)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		var offered []string
+		for _, tool := range request.Tools {
+			offered = append(offered, tool.Function.Name)
+		}
+		names = append(names, offered)
+		requests++
+		message := map[string]any{"role": "assistant", "content": "Reviewed."}
+		finish := "stop"
+		if requests == 1 || requests == 2 {
+			name, args := "read_file", `{"path":"artifact.txt"}`
+			if requests == 2 {
+				name, args = "read_task", `{}`
+				last := request.Messages[len(request.Messages)-1]
+				if last.Role != "tool" || !strings.Contains(string(last.Content), "synthetic artifact") {
+					t.Error("workbench read result missing", string(last.Content))
+				}
+			}
+			message["tool_calls"] = []any{map[string]any{"id": name, "type": "function", "function": map[string]any{"name": name, "arguments": args}}}
+			finish = "tool_calls"
+		}
+		if requests == 4 {
+			if len(request.Messages) != 1 || !strings.Contains(string(request.Messages[0].Content), "Fresh task context") {
+				t.Error("incompatible session retained its conversation", request.Messages)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"finish_reason": finish, "message": message}}})
+	}))
+	defer server.Close()
+	work, home := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "artifact.txt"), []byte("synthetic artifact"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	spec := Spec{Engine: "openai-compatible", Model: "fake-tools-model", WorkDir: work, RuntimeHome: home, Provider: harness.Provider{Engine: harness.OpenAICompatible, API: harness.API{BaseURL: server.URL + "/v1", Unauthenticated: true, Dialect: harness.OpenAIChatCompletions}}, Prompt: "Review the artifact", Tools: []session.ToolDefinition{{Name: "read_task", Schema: map[string]any{"type": "object"}}}, Handler: session.ToolHandlerFunc(func(_ context.Context, call session.ToolCall) (session.ToolResult, error) {
+		if call.Name != "read_task" {
+			t.Error("workbench call reached daemon handler", call.Name)
+		}
+		handled++
+		return session.ToolResult{Content: "task record"}, nil
+	})}
+	// Exercise the read workbench independently of the OS command proof, as
+	// the library's read-workbench tests do. Production never removes commands
+	// after a failed proof; TestAPICommandProof covers that path separately.
+	n := Native{open: func(ctx context.Context, o session.Options, ref json.RawMessage) (conversation, bool, error) {
+		o.Workbench.Commands = nil
+		return open(ctx, o, ref)
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	first, err := n.Run(ctx, spec)
+	if err != nil || first.Text != "Reviewed." || handled != 1 {
+		t.Fatalf("%+v %v handled=%d", first, err, handled)
+	}
+	var ref session.Ref
+	if json.Unmarshal(first.Session, &ref) != nil || ref.ConfigHash == "" || ref.WorkDir != work {
+		t.Fatal("stored reference lost workbench identity", string(first.Session))
+	}
+	spec.Resume, spec.Write, spec.FreshPrompt = first.Session, true, "Fresh task context"
+	second, err := n.Run(ctx, spec)
+	if err != nil || string(second.Session) == string(first.Session) {
+		t.Fatalf("changed settings did not open fresh: %+v %v", second, err)
+	}
+	for i, offered := range names {
+		for _, name := range []string{"read_file", "list_files", "search_files", "read_task"} {
+			if !slices.Contains(offered, name) {
+				t.Errorf("request %d missing %s", i, name)
+			}
+		}
+		if slices.Contains(offered, "write_file") != (i == 3) {
+			t.Errorf("request %d write surface: %v", i, offered)
+		}
+	}
+}
+
+func TestAPICommandProof(t *testing.T) {
+	if !harness.Support(harness.OpenAICompatible, harness.Session, harness.Sandbox).Usable() {
+		if options(Spec{Engine: "openai-compatible"}).Workbench.Commands != nil {
+			t.Fatal("commands on unsupported platform")
+		}
+		return
+	}
+	spec := Spec{Engine: "openai-compatible", Model: "fake", WorkDir: t.TempDir(), RuntimeHome: t.TempDir(), Provider: harness.Provider{Engine: harness.OpenAICompatible, API: harness.API{BaseURL: "http://127.0.0.1:1/v1", Unauthenticated: true, Dialect: harness.OpenAIChatCompletions}}}
+	spec.Env = []string{"GOCACHE=/cache/go", "GOMODCACHE=/modules", "GOPROXY=off", "GOTOOLCHAIN=local", "GOFLAGS=-mod=readonly", "npm_config_cache=/cache/npm", "XDG_CACHE_HOME=/cache/xdg", "npm_config_update_notifier=false", "CI=1", "PORT=41234", "TMPDIR=/private", "HOME=/private"}
+	spec.Tools = []session.ToolDefinition{{Name: "read_task", Schema: map[string]any{"type": "object"}}}
+	spec.Handler = session.ToolHandlerFunc(func(context.Context, session.ToolCall) (session.ToolResult, error) { return session.ToolResult{}, nil })
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := os.Chmod(spec.RuntimeHome, 0700); err != nil {
+		t.Fatal(err)
+	}
+	s, _, err := open(ctx, options(spec), nil)
+	if err == nil {
+		s.Close()
+		return
+	} // Proof passed; no inference is attempted.
+	var capability *session.CapabilityError
+	if !errors.As(err, &capability) || capability.Phase != session.BeforeLaunch || !Permanent(err) {
+		t.Fatalf("command proof did not produce a permanent prelaunch refusal: %v", err)
+	}
+	entries, readErr := os.ReadDir(spec.RuntimeHome)
+	if readErr != nil || len(entries) != 0 {
+		t.Fatalf("failed proof wrote a transcript: %v %v", entries, readErr)
+	}
+}
+
+// Opening an API read workbench uses no sockets or inference. This checks
+// the real library's stored digest and fresh fallback even in a sandbox
+// that refuses the local fake-provider fixture.
+func TestAPIWorkbenchReferenceChangesOpenFreshWithoutInference(t *testing.T) {
+	work, home := t.TempDir(), t.TempDir()
+	if err := os.Chmod(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	spec := Spec{Engine: "openai-compatible", Model: "fake", WorkDir: work, RuntimeHome: home, Provider: harness.Provider{Engine: harness.OpenAICompatible, API: harness.API{BaseURL: "http://127.0.0.1:1/v1", Unauthenticated: true, Dialect: harness.OpenAIChatCompletions}}, Tools: []session.ToolDefinition{{Name: "read_task", Schema: map[string]any{"type": "object"}}}, Handler: session.ToolHandlerFunc(func(context.Context, session.ToolCall) (session.ToolResult, error) { return session.ToolResult{}, nil })}
+	o := options(spec)
+	o.Workbench.Commands = nil // Read-only library fixture, never a production fallback.
+	s, resumed, err := open(context.Background(), o, nil)
+	if err != nil || resumed {
+		t.Fatal(resumed, err)
+	}
+	ref := s.Ref()
+	s.Close()
+	stored, _ := json.Marshal(ref)
+	s, resumed, err = open(context.Background(), o, stored)
+	if err != nil || !resumed || s.Ref().ConfigHash != ref.ConfigHash {
+		t.Fatal("unchanged workbench failed to resume", resumed, err)
+	}
+	s.Close()
+	for _, change := range []string{"write", "model", "provider", "provider identity", "workspace"} {
+		t.Run(change, func(t *testing.T) {
+			changed := o
+			wb := *o.Workbench
+			changed.Workbench = &wb
+			switch change {
+			case "write":
+				changed.Workbench.Write = true
+			case "model":
+				changed.Model = "other"
+			case "provider":
+				changed.Provider.API.BaseURL = "http://127.0.0.1:2/v1"
+			case "provider identity":
+				changed.AccountIdentity = "other-provider:OTHER_KEY_SOURCE"
+			case "workspace":
+				changed.WorkDir = t.TempDir()
+			}
+			if _, err := session.Resume(context.Background(), changed, ref); !errors.Is(err, session.ErrIncompatibleResume) {
+				t.Fatal("changed reference resumed", err)
+			}
+			// The harness Open itself may start fresh on a mismatch. Native.Run
+			// also handles an opener returning the refusal, tested separately.
+			s, resumed, err := open(context.Background(), changed, stored)
+			if err != nil || resumed {
+				t.Fatal("settings change did not start fresh", resumed, err)
+			}
+
+			defer s.Close()
+			if s.Ref().ID == ref.ID || (s.Ref().ConfigHash == ref.ConfigHash && s.Ref().AccountIdentity == ref.AccountIdentity) {
+				t.Fatal("old reference reused", s.Ref())
+			}
+		})
+	}
+}
+
+func TestAPIRefusedCallerEnvironmentStopsBeforeLaunch(t *testing.T) {
+	if !harness.Support(harness.OpenAICompatible, harness.Session, harness.Sandbox).Usable() {
+		if got := commandEnv([]string{"API_TOKEN=synthetic-value"}); !slices.Contains(got, "API_TOKEN=synthetic-value") {
+			t.Fatal("refused caller setting silently dropped")
+		}
+		return
+	}
+	for _, key := range []string{"API_TOKEN", "LD_PRELOAD", "BASH_ENV", "AGENT_HARNESS_MARKER"} {
+		t.Run(key, func(t *testing.T) {
+			spec := Spec{Engine: "openai-compatible", Model: "fake", WorkDir: t.TempDir(), RuntimeHome: t.TempDir(), Env: []string{"GOPROXY=off", key + "=synthetic-value"}, Provider: harness.Provider{Engine: harness.OpenAICompatible, API: harness.API{BaseURL: "http://127.0.0.1:1/v1", Unauthenticated: true, Dialect: harness.OpenAIChatCompletions}}, Tools: []session.ToolDefinition{{Name: "read_task", Schema: map[string]any{"type": "object"}}}, Handler: session.ToolHandlerFunc(func(context.Context, session.ToolCall) (session.ToolResult, error) {
+				t.Fatal("tool ran with refused environment")
+				return session.ToolResult{}, nil
+			})}
+			_, err := (Native{}).Run(context.Background(), spec)
+			var refused *session.UnsupportedError
+			if !errors.As(err, &refused) || refused.Code != session.RefusedConflict || !Permanent(err) || strings.Contains(err.Error(), "synthetic-value") {
+				t.Fatal(err)
+			}
+			entries, err := os.ReadDir(spec.RuntimeHome)
+			if err != nil || len(entries) != 0 {
+				t.Fatal("refused environment wrote transcript", entries, err)
+			}
+		})
+	}
+}

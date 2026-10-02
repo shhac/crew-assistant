@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
 
 	"github.com/shhac/crew-assistant/internal/config"
@@ -326,6 +327,12 @@ func (lp *Loop) baseSpec(r core.Role, workDir, prompt string) roles.Spec {
 	spec := roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Instructions: r.Instructions, Prompt: prompt}
 	spec.Binary, spec.Home = lp.Config().Engines.Binary(r.Engine)
 	spec.RuntimeHome = lp.runtimeHome(r.Engine)
+	if harness.Engine(r.Engine).Transport() == harness.APITransport {
+		h := lp.Config().HarnessOn(r.Engine, r.Provider, r.Model, r.Effort)
+		spec.Provider = h.Provider()
+		spec.AccountIdentity = h.APIProvider + ":" + h.APIKeyEnv
+		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\nRead files outside the workspace only through run_command. You have no web search.")
+	}
 	if b := lp.memberBrowser(r); b.On {
 		spec.Browser = true
 		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + browserGuide(b))

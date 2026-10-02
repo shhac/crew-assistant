@@ -215,10 +215,10 @@ function TeamEditor({
               <span>Let the check use this machine's own network</span>
             </label>
             <p className="hint" id="team-loopback-hint">
-              For tests that start a local server. QA, which runs the check,
-              and the implementer, which runs the tests before handing over,
-              get it. Nothing beyond this machine is reachable. Both need to
-              be on Claude: Codex can't limit its network to this machine.
+              For tests that start a local server. QA, which runs the check, and
+              the implementer, which runs the tests before handing over, get it.
+              Nothing beyond this machine is reachable. Each member must use an
+              engine that offers this setting on this computer.
             </p>
           </>
         ) : (
@@ -298,9 +298,14 @@ function EngineSlot({
   onChange: (value: string) => void;
 }) {
   const choices = useEngineChoices();
-  const offered = engineOptions(choices, "roles", value);
+  const cliChoices = choices.filter((choice) => choice.cli);
+  const offered = engineOptions(
+    cliChoices,
+    "roles",
+    value === "openai-compatible" ? "" : value,
+  );
   // The engines a role can't run on yet are shown, and why.
-  const unavailable = unavailableForRoles(choices, offered);
+  const unavailable = unavailableForRoles(cliChoices, offered);
   return (
     <fieldset className="team-slot">
       <legend>{label}</legend>
@@ -322,7 +327,7 @@ function EngineSlot({
           ))}
           {unavailable.map((item) => (
             <option key={item.id} value={item.id} disabled>
-              {item.label} (not for team roles yet)
+              {item.label} (unavailable here)
             </option>
           ))}
         </select>

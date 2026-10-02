@@ -1,5 +1,5 @@
-// Package roles runs one turn of a team role as a sandboxed native coding
-// session. Nothing here decides what a role is asked or what happens next.
+// Package roles runs one turn of a team role as a sandboxed CLI or API
+// workbench session. Nothing here decides what a role is asked or happens next.
 package roles
 
 import (
@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
@@ -17,10 +19,14 @@ import (
 // Spec is one turn for one role.
 type Spec struct {
 	Engine, Model, Effort string
+	Provider              harness.Provider
+	// AccountIdentity distinguishes API provider selections and credential
+	// source names, even when they share an endpoint. It never holds a key.
+	AccountIdentity string
 	// Binary and Home select the installed CLI and the login it uses.
 	Binary, Home string
-	// RuntimeHome is the private home a Codex session runs in, sharing only the
-	// login from Home. Another engine is given none.
+	// RuntimeHome is Codex's private home, or an API workbench's private
+	// transcript directory. Other engines are given none.
 	RuntimeHome string
 	WorkDir     string
 	// Write lets the role change files in WorkDir. Nothing a role runs reaches
@@ -110,8 +116,8 @@ type Runner interface {
 	Run(ctx context.Context, spec Spec) (Result, error)
 }
 
-// Native runs roles through lib-agent-harness sessions under the CLI's own
-// sandbox, which the harness proves before any credentialed launch.
+// Native runs roles through lib-agent-harness sessions whose command sandbox
+// the harness proves before launch.
 type Native struct {
 	// open starts or resumes a session; empty is the harness's own.
 	open func(ctx context.Context, o session.Options, resume json.RawMessage) (conversation, bool, error)
@@ -163,7 +169,15 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 	// The launch folder is kept while its harness can't be confirmed gone,
 	// so the next start finds it.
 	confirmed := false
-	if len(spec.Tools) > 0 {
+	if o.Workbench != nil {
+		if err := os.MkdirAll(o.RuntimeHome, 0o700); err != nil {
+			return Result{}, err
+		}
+		if err := os.Chmod(o.RuntimeHome, 0o700); err != nil {
+			return Result{}, err
+		}
+	}
+	if len(spec.Tools) > 0 && o.Workbench == nil {
 		host, cleanup, err := toolHost(spec)
 		if err != nil {
 			return Result{}, err
@@ -172,6 +186,10 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 		o.Sandbox.Tools = host
 	}
 	s, resumed, err := opener(ctx, o, spec.Resume)
+	// Changed settings start a fresh session for both API and CLI roles.
+	if len(spec.Resume) > 0 && errors.Is(err, session.ErrIncompatibleResume) {
+		s, resumed, err = opener(ctx, o, nil)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -239,10 +257,8 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 	return Result{Text: result.Text, Session: ref}, nil
 }
 
-// options is the session a role runs as. Every role runs sandboxed; only a
-// Codex role gets a private runtime home. A stored reference names the
-// runtime home, so giving one to an engine that doesn't read it would stop
-// its conversations resuming.
+// options preserves CLI settings and uses the API workbench for API roles.
+// Codex needs a private login home; the API needs a private transcript home.
 func options(spec Spec) session.Options {
 	o := session.Options{
 		Provider:    harness.Provider{Engine: harness.Engine(spec.Engine), CLI: harness.CLI{Binary: spec.Binary, Home: spec.Home}},
@@ -253,6 +269,22 @@ func options(spec Spec) session.Options {
 		Sandbox:     &session.Sandbox{Write: spec.Write, Read: spec.Read, Web: spec.Web, Loopback: spec.Loopback},
 		Env:         spec.Env,
 		Browser:     spec.Browser,
+	}
+	if o.Provider.Engine.Transport() == harness.APITransport {
+		o.Provider = spec.Provider
+		o.Provider.Engine = harness.Engine(spec.Engine)
+		o.AccountIdentity = spec.AccountIdentity
+		o.Sandbox, o.Env, o.Browser = nil, nil, false
+		o.Workbench = &session.Workbench{Write: spec.Write}
+		if harness.Support(o.Provider.Engine, harness.Session, harness.Sandbox).Usable() {
+			o.Workbench.Commands = &session.Commands{Read: spec.Read, Loopback: spec.Loopback, Env: commandEnv(spec.Env)}
+		}
+		o.Restriction = &session.Restriction{Tools: session.ToolHost{Server: "crew", Tools: spec.Tools, Handler: spec.Handler, MaxResultBytes: 128 << 10}}
+		o.Loop = session.Loop{MaxSteps: 1024, MaxRequestBytes: 64 << 20, RequestTimeout: 5 * time.Minute}
+		if spec.Instructions != "" {
+			o.Instructions = session.Instructions{Mode: session.Append, Text: spec.Instructions}
+		}
+		return o
 	}
 	if o.Provider.Engine != harness.Codex {
 		o.RuntimeHome = ""
@@ -351,7 +383,8 @@ func compact(ctx context.Context, s conversation) error {
 // cannot be put under the required sandbox, or has no login to use.
 func Permanent(err error) bool {
 	var capability *session.CapabilityError
-	return errors.As(err, &capability)
+	var unsupported *session.UnsupportedError
+	return errors.As(err, &capability) || errors.As(err, &unsupported)
 }
 
 // KeychainLocked says a role could not start because its engine's login is
@@ -366,4 +399,25 @@ func KeychainLocked(err error) bool {
 // without starting one or performing inference.
 func VerifySandbox(ctx context.Context, spec Spec) error {
 	return session.VerifySandbox(ctx, options(spec))
+}
+
+// commandEnv carries the medium's build settings and QA's port to API
+// commands. Only PATH and locale settings are inherited from the daemon;
+// HOME and TMPDIR belong to the harness's private scratch. Other caller
+// settings are passed whole so the harness refuses unsafe names before launch.
+func commandEnv(extra []string) []string {
+	var env []string
+	for _, entry := range os.Environ() {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && (key == "PATH" || key == "LANG" || strings.HasPrefix(key, "LC_")) {
+			env = append(env, entry)
+		}
+	}
+	for _, entry := range extra {
+		key, _, _ := strings.Cut(entry, "=")
+		if key != "HOME" && key != "TMPDIR" {
+			env = append(env, entry)
+		}
+	}
+	return env
 }

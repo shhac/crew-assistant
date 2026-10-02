@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { choicesFor, useEngineChoices } from "./engines";
+import { choiceFor, choicesFor, useEngineChoices } from "./engines";
 import { kindsProblem, memberKinds } from "./members";
-import { ModelFields } from "./ModelFields";
+import { ModelFields, type ModelChoice } from "./ModelFields";
 import { PersonalityField, SuggestedLook } from "./ProfileFields";
 import type { Suggestion } from "./SuggestIdentity";
 import { ErrorNotice, useAction } from "./ui";
@@ -35,20 +35,23 @@ export function MemberForm({
         .map((k) => k.id)
         .filter((k) => (k === kind ? on : current.includes(k))),
     );
-  const [picked, setChoice] = useState({
+  const [picked, setChoice] = useState<ModelChoice>({
     engine: member?.engine ?? "",
+    provider: member?.provider ?? "",
     model: member?.model ?? "",
     effort: member?.effort ?? "",
   });
   // A new member starts on Claude while it can run a role, and otherwise on
   // the first engine that can.
-  const roleEngines = choicesFor(useEngineChoices(), "roles").map(
-    (c) => c.engine,
-  );
+  const engineChoices = useEngineChoices();
+  const roleEngines = choicesFor(engineChoices, "roles").map((c) => c.engine);
   const firstEngine = roleEngines.includes("claude")
     ? "claude"
     : (roleEngines[0] ?? "");
   const choice = { ...picked, engine: picked.engine || firstEngine };
+  const modelProblem =
+    choiceFor(choice.engine, engineChoices)?.cli === false &&
+    !choice.model.trim();
   const [instructions, setInstructions] = useState(member?.instructions ?? "");
   const [description, setDescription] = useState(member?.description ?? "");
   const [personality, setPersonality] = useState(member?.personality ?? "");
@@ -66,12 +69,14 @@ export function MemberForm({
   const { busy, error, run } = useAction();
   async function save(e: FormEvent) {
     e.preventDefault();
-    if (problem) return;
+    if (problem || modelProblem) return;
     await run(async () => {
       const saved = await saveMember(member?.id ?? "", {
         name: name.trim(),
         kinds,
         engine: choice.engine,
+        provider:
+          choice.engine === "openai-compatible" ? choice.provider : undefined,
         model: choice.model.trim(),
         effort: choice.effort.trim(),
         instructions: instructions.trim(),
@@ -183,7 +188,8 @@ export function MemberForm({
             !name.trim() ||
             !!problem ||
             !choice.engine ||
-            browserProblem
+            browserProblem ||
+            modelProblem
           }
         >
           {member ? "Save" : "Add member"}

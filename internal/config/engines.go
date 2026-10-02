@@ -425,3 +425,8 @@ func validateEndpoint(raw string) error {
 	}
 	return errors.New("HTTPS is required except on loopback")
 }
+
+// CheckProvider validates a provider selection for a team member.
+func (e Engines) CheckProvider(engine, provider string) error {
+	return e.validateProvider(engine, provider)
+}

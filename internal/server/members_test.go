@@ -18,11 +18,11 @@ func TestTheOwnerKeepsATeamOfMembers(t *testing.T) {
 	if w := call("POST", "/api/members", `{"name":"ada","kind":"reviewer","engine":"codex"}`); w.Code != 400 || !strings.Contains(w.Body.String(), "already a member called Ada") {
 		t.Fatal("a second Ada", w.Code, w.Body.String())
 	}
-	// No role runs on an API provider until the harness gives it a sandbox,
-	// and the owner is told why.
-	if w := call("PUT", "/api/members/"+ada.ID, `{"name":"Ada","kind":"reviewer","engine":"openai-compatible","model":"deepseek/deepseek-r1:free"}`); w.Code != 400 || !strings.Contains(w.Body.String(), "can't run team roles yet") {
-		t.Fatal("a member on an API provider", w.Code, w.Body.String())
+	// A provider never applies to a CLI member.
+	if w := call("PUT", "/api/members/"+ada.ID, `{"name":"Ada","kind":"reviewer","engine":"claude","provider":"unknown"}`); w.Code != 400 || !strings.Contains(w.Body.String(), "Provider is only") {
+		t.Fatal(w.Code, w.Body.String())
 	}
+
 	if w := call("PUT", "/api/members/"+ada.ID, `{"name":"Ada","kind":"implementer","engine":"codex"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"engine":"codex"`) {
 		t.Fatal(w.Code, w.Body.String())
 	}

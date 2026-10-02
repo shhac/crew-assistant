@@ -12,6 +12,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 	"github.com/shhac/crew-assistant/internal/roles"
 	"github.com/shhac/crew-assistant/internal/text"
+	"github.com/shhac/lib-agent-harness/session"
 )
 
 // roleFailed retries a failing role a couple of times with growing waits,
@@ -27,6 +28,7 @@ func (lp *Loop) roleFailed(ctx context.Context, t core.Task, role string, cause 
 		t.Failures++
 		failures = t.Failures
 		if permanent || t.Failures > roleRetries {
+			t.RetryAt = time.Time{}
 			return "", nil
 		}
 		t.RetryAt, t.HeldFor = time.Now().Add(time.Duration(t.Failures*t.Failures)*time.Minute), ""
@@ -50,9 +52,14 @@ func (lp *Loop) roleFailed(ctx context.Context, t core.Task, role string, cause 
 	if errors.Is(cause, gitrepo.ErrConflictMarkers) {
 		title = fmt.Sprintf("“%s” couldn't resolve its conflict with what landed", t.Objective)
 	}
+	failureContext := text.Clip(cause.Error(), 600)
+	var capability *session.CapabilityError
+	if errors.As(cause, &capability) && capability.Phase == session.BeforeLaunch && sandboxProofCode(capability.Code) {
+		failureContext = fmt.Sprintf("The sandbox for %s’s commands couldn’t be proved on this computer (%s); nothing ran.\n\n%s", role, capability.Code, text.Clip(cause.Error(), 600))
+	}
 	_, err = lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionFailure, core.DecisionInput{
 		Title:          title,
-		Context:        text.Clip(cause.Error(), 600),
+		Context:        failureContext,
 		Recommendation: choiceTryAgain + " once the cause is fixed",
 		Choices:        []string{choiceTryAgain, choiceStop},
 	})
@@ -224,4 +231,13 @@ func (lp *Loop) StopTask(ctx context.Context, projectID, taskID string) (core.Ta
 	}
 	lp.Nudge()
 	return stopped, nil
+}
+
+// Only failed sandbox proofs warrant saying that the sandbox could not be proved.
+func sandboxProofCode(code string) bool {
+	switch code {
+	case session.CapabilitySandboxNotEnforced, session.CapabilitySandboxUnavailable, session.CapabilityProbeTimeout, session.CapabilitySandboxToolMissing:
+		return true
+	}
+	return false
 }

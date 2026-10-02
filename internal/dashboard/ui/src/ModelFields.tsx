@@ -101,7 +101,7 @@ export function ModelFields({
             ))}
             {unavailable.map((item) => (
               <option key={item.id} value={item.id} disabled>
-                {item.label} (not for team roles yet)
+                {item.label} (unavailable here)
               </option>
             ))}
           </select>
@@ -133,6 +133,7 @@ export function ModelFields({
               id={`${id}-model`}
               className="field"
               value={model}
+              required={use === "roles" && api}
               onChange={(e) => onChange({ ...value, model: e.target.value })}
               disabled={models.loading}
             >
@@ -167,6 +168,7 @@ export function ModelFields({
               id={`${id}-model`}
               className="field"
               value={model}
+              required={use === "roles" && api}
               maxLength={80}
               autoComplete="off"
               onChange={(e) => onChange({ ...value, model: e.target.value })}

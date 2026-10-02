@@ -57,7 +57,7 @@ func Supports(engine string, use Use) bool {
 	case UseBrowser:
 		// Every role runs sandboxed, so the browser is offered only where
 		// a sandboxed session admits it.
-		return Supports(engine, UseRoles) && harness.Support(e, harness.Session, harness.Browser).Usable() && harness.Support(e, harness.Session, harness.SandboxedBrowser).Usable()
+		return e.Transport() != harness.APITransport && Supports(engine, UseRoles) && harness.Support(e, harness.Session, harness.Browser).Usable() && harness.Support(e, harness.Session, harness.SandboxedBrowser).Usable()
 	case UseLoopback:
 		return Supports(engine, UseRoles) && harness.Support(e, harness.Session, harness.Loopback).Usable()
 	}
@@ -70,22 +70,33 @@ var roleSupport = harness.Support
 
 // RoleSupport says whether team roles can run on engine and, when they
 // can't, why in the owner's words. A role works in its own sandbox and
-// reaches the daemon's tools, so every role needs both, on a CLI or an API
-// provider alike, until the harness claims less is enough for a read-only
-// role.
+// reaches the daemon's tools. API roles also need the workspace read and
+// write tools the workbench supplies.
 func RoleSupport(engine string) (ok bool, reason string) {
 	e := harness.Engine(engine)
-	for _, feature := range []harness.Feature{harness.Sandbox, harness.Tools} {
+	features := []harness.Feature{harness.Sandbox, harness.Tools}
+	if e.Transport() == harness.APITransport {
+		features = append(features, harness.WorkspaceRead, harness.WorkspaceWrite)
+	}
+	for _, feature := range features {
 		c := roleSupport(e, harness.Session, feature)
 		if c.Usable() {
 			continue
 		}
 		if e.Transport() == harness.APITransport {
-			return false, "An API provider can't run team roles yet: it has no sandboxed workspace tools."
+			return false, fmt.Sprintf("%s can't run team roles on this computer: %s.", EngineLabel(engine), strings.TrimRight(strings.TrimSpace(c.Reason), "."))
 		}
-		return false, fmt.Sprintf("%s can't run team roles: %s.", EngineLabel(engine), c.Reason)
+		return false, fmt.Sprintf("%s can't run team roles: %s.", EngineLabel(engine), strings.TrimRight(strings.TrimSpace(c.Reason), "."))
 	}
 	return true, ""
+}
+
+// CheckRoleModel requires an explicit model where a team role has no default.
+func CheckRoleModel(engine, model string) error {
+	if harness.Engine(engine).Transport() == harness.APITransport && strings.TrimSpace(model) == "" {
+		return fmt.Errorf("choose a model for this member: another API has no default")
+	}
+	return nil
 }
 
 // CheckRoleEngine refuses an engine team roles can't run on, saying which
@@ -100,6 +111,26 @@ func CheckRoleEngine(engine string) error {
 		return err
 	}
 	return fmt.Errorf("%w. %s", err, reason)
+}
+
+// CheckTemplateRoleEngine keeps engine-only seats on CLIs. API members carry
+// the provider and explicit model their sessions need.
+func CheckTemplateRoleEngine(engine string) error {
+	if harness.Engine(engine).Transport() == harness.APITransport {
+		return fmt.Errorf("choose a team member with a provider and model to use another API; template roles need a CLI engine")
+	}
+	return CheckRoleEngine(engine)
+}
+
+// TemplateRoleEngines are the CLI engines usable by an engine-only seat.
+func TemplateRoleEngines() []string {
+	var engines []string
+	for _, engine := range EnginesFor(UseRoles) {
+		if harness.Engine(engine).Transport() == harness.CLITransport {
+			engines = append(engines, engine)
+		}
+	}
+	return engines
 }
 
 // EnginesFor lists the engines that can be chosen for use, in a stable

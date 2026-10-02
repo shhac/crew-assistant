@@ -3,10 +3,13 @@ package roles
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	harness "github.com/shhac/lib-agent-harness"
@@ -30,6 +33,63 @@ func TestEveryRoleRunsSandboxedWithOnlyWhatItWasGiven(t *testing.T) {
 	}
 	if codex.Sandbox.Loopback || codex.Sandbox.Web || codex.Browser || reviewer.Sandbox.Loopback || reviewer.Browser {
 		t.Fatalf("a role reached further than it was given: %+v %+v", codex, reviewer)
+	}
+}
+
+func TestAPIWorkbenchOptionsForEveryRoleKind(t *testing.T) {
+	t.Setenv("PATH", "/test/bin")
+	t.Setenv("LANG", "en_GB.UTF-8")
+	t.Setenv("LC_ALL", "C")
+	t.Setenv("SYNTHETIC_SECRET", "must-not-reach-commands")
+	for _, kind := range []string{"researcher", "reviewer", "implementer", "qa", "qa-app"} {
+		t.Run(kind, func(t *testing.T) {
+			spec := Spec{Engine: "openai-compatible", Provider: harness.Provider{Engine: harness.OpenAICompatible, API: harness.API{BaseURL: "http://127.0.0.1:1234/v1", Unauthenticated: true}}, WorkDir: "/work", RuntimeHome: "/transcripts", Read: []string{"/modules"}, Write: kind == "implementer" || kind == "qa-app", Loopback: kind == "qa" || kind == "qa-app", Browser: true, Web: true, Env: []string{"GOMODCACHE=/modules", "GOCACHE=/cache", "GOPROXY=off", "GOTOOLCHAIN=local", "npm_config_cache=/npm", "XDG_CACHE_HOME=/xdg", "npm_config_update_notifier=false", "CI=1", "GOFLAGS=-mod=readonly", "PORT=43210", "HOME=/private", "TMPDIR=/private"}, Tools: []session.ToolDefinition{{Name: "read_task"}}}
+			o := options(spec)
+			if o.Workbench == nil || o.Workbench.Write != spec.Write || o.Sandbox != nil || len(o.Env) != 0 || o.Browser || o.Background || o.RuntimeHome != spec.RuntimeHome || o.Provider.API.BaseURL != spec.Provider.API.BaseURL {
+				t.Fatalf("%s options: %+v", kind, o)
+			}
+			host := o.Restriction.Tools
+			if host.Dir != "" || host.Bridge.Path != "" || host.Server != "crew" || len(host.Tools) != 1 || host.MaxResultBytes != 128<<10 {
+				t.Fatalf("direct host: %+v", host)
+			}
+			commands := o.Workbench.Commands
+			if harness.Support(harness.OpenAICompatible, harness.Session, harness.Sandbox).Usable() {
+				if commands == nil || commands.Loopback != spec.Loopback || !slices.Equal(commands.Read, spec.Read) {
+					t.Fatalf("commands: %+v", commands)
+				}
+				for _, entry := range spec.Env {
+					key, _, _ := strings.Cut(entry, "=")
+					if key == "HOME" || key == "TMPDIR" {
+						continue
+					}
+					if !slices.Contains(commands.Env, entry) {
+						t.Fatalf("%s lost build setting %s", kind, key)
+					}
+				}
+				for _, entry := range commands.Env {
+					key, _, _ := strings.Cut(entry, "=")
+					if key == "HOME" || key == "TMPDIR" || key == "SYNTHETIC_SECRET" {
+						t.Fatalf("private or inherited secret environment: %s", key)
+					}
+				}
+				if !slices.Contains(commands.Env, "PATH="+os.Getenv("PATH")) || !slices.Contains(commands.Env, "LC_ALL=C") {
+					t.Fatal(commands.Env)
+				}
+			} else if commands != nil {
+				t.Fatal("commands offered without a sandbox claim")
+			}
+		})
+	}
+}
+
+func TestUnsupportedAPIOptionsArePermanent(t *testing.T) {
+	for _, code := range []string{session.RefusedModelWithoutTools, session.RefusedRuntimeHome, session.RefusedWorkDir, session.RefusedConflict} {
+		if !Permanent(fmt.Errorf("opening: %w", &session.UnsupportedError{Code: code})) {
+			t.Fatal(code)
+		}
+	}
+	if Permanent(errors.New("provider unavailable")) {
+		t.Fatal("provider failures still need bounded retry")
 	}
 }
 
@@ -64,7 +124,7 @@ func TestRolesRunAtBackgroundPriorityWhereTheHarnessCan(t *testing.T) {
 		t.Fatal("a Claude role should run at background priority here")
 	}
 	if options(Spec{Engine: "openai-compatible", WorkDir: "/work"}).Background {
-		t.Fatal("an API engine has no process to lower")
+		t.Fatal("API Background must stay unset: the harness lowers its commands itself")
 	}
 }
 

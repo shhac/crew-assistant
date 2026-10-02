@@ -77,6 +77,45 @@ const options = (label: RegExp | string) =>
     (o) => o.textContent,
   );
 
+it("saves a team member on OpenRouter where the server offers API roles", async () => {
+  rememberChoices(
+    testChoices.map((choice) =>
+      choice.engine === "openai-compatible"
+        ? { ...choice, roles: true, roles_reason: "", browser: false }
+        : choice,
+    ),
+  );
+  const onSaved = vi.fn();
+  render(<MemberForm onSaved={onSaved} onCancel={() => {}} />);
+  fireEvent.change(screen.getByLabelText("Name"), {
+    target: { value: "Rune" },
+  });
+  fireEvent.change(screen.getByLabelText("Engine"), {
+    target: { value: "openai-compatible" },
+  });
+  fireEvent.change(await screen.findByLabelText("Provider"), {
+    target: { value: "openrouter" },
+  });
+  await screen.findByRole("option", { name: "DeepSeek R1 (free)" });
+  expect(screen.getByLabelText(/^Model/)).toHaveProperty("required", true);
+  expect(screen.getByRole("button", { name: "Add member" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  fireEvent.change(screen.getByLabelText(/^Model/), {
+    target: { value: "deepseek/deepseek-r1:free" },
+  });
+  expect(screen.queryByLabelText("Allow browser use")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+  await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  const save = calls.find((call) => call.path === "/api/members")!;
+  expect(JSON.parse(String(save.options?.body))).toMatchObject({
+    engine: "openai-compatible",
+    provider: "openrouter",
+    model: "deepseek/deepseek-r1:free",
+  });
+});
+
 it("runs an assistant on a provider's model, free ones marked", async () => {
   const onSaved = vi.fn();
   render(<AssistantForm onSaved={onSaved} onCancel={() => {}} />);
@@ -214,9 +253,9 @@ it("writes suggestions on a provider's model", async () => {
   });
 });
 
-it("says why a team member can't run on an API provider yet", () => {
+it("says why a team member can't run on an API provider on this computer", () => {
   const reason =
-    "An API provider can't run team roles yet: it has no sandboxed workspace tools.";
+    "Another API can't run team roles on this computer: commands require a sandbox the harness can prove only on macOS.";
   rememberChoices(
     testChoices.map((choice) =>
       choice.engine === "openai-compatible"
@@ -229,7 +268,7 @@ it("says why a team member can't run on an API provider yet", () => {
   expect(options("Engine")).toEqual([
     "Codex",
     "Claude",
-    "Another API (not for team roles yet)",
+    "Another API (unavailable here)",
   ]);
   const api = Array.from(engine.options).find(
     (o) => o.value === "openai-compatible",
@@ -238,13 +277,11 @@ it("says why a team member can't run on an API provider yet", () => {
   expect(screen.getByText(reason)).toBeTruthy();
 });
 
-it("says why a template's role can't run on an API provider yet, on the Team settings", () => {
-  const reason =
-    "An API provider can't run team roles yet: it has no sandboxed workspace tools.";
+it("keeps template seats on CLIs even when API roles are offered", () => {
   rememberChoices(
     testChoices.map((choice) =>
       choice.engine === "openai-compatible"
-        ? { ...choice, roles_reason: reason }
+        ? { ...choice, roles: true, roles_reason: "" }
         : choice,
     ),
   );
@@ -272,13 +309,40 @@ it("says why a template's role can't run on an API provider yet, on the Team set
     expect(Array.from(engine.options, (o) => o.textContent)).toEqual([
       "Codex",
       "Claude",
-      "Another API (not for team roles yet)",
     ]);
     expect(
-      Array.from(engine.options).find((o) => o.value === "openai-compatible")!
-        .disabled,
-    ).toBe(true);
-    const hint = within(slot).getByText(reason);
-    expect(engine.getAttribute("aria-describedby")).toBe(hint.id);
+      Array.from(engine.options).some((o) => o.value === "openai-compatible"),
+    ).toBe(false);
   }
 });
+
+it.each(["", "   "])(
+  "refuses a blank typed API member model (%j)",
+  async (model) => {
+    rememberChoices(
+      testChoices.map((choice) =>
+        choice.engine === "openai-compatible"
+          ? { ...choice, roles: true, roles_reason: "" }
+          : choice,
+      ),
+    );
+    render(<MemberForm onSaved={vi.fn()} onCancel={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Rune" },
+    });
+    fireEvent.change(screen.getByLabelText("Engine"), {
+      target: { value: "openai-compatible" },
+    });
+    await screen.findByRole("option", { name: "gpt-5" });
+    fireEvent.click(screen.getByRole("button", { name: "Enter a model id" }));
+    const field = screen.getByLabelText(/^Model/);
+    expect(field).toHaveProperty("required", true);
+    fireEvent.change(field, { target: { value: model } });
+    expect(screen.getByRole("button", { name: "Add member" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    fireEvent.submit(field.closest("form")!);
+    expect(calls.some((call) => call.path === "/api/members")).toBe(false);
+  },
+);

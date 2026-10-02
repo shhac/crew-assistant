@@ -51,6 +51,53 @@ func TestAMemberHasANameOfItsOwnAndAFace(t *testing.T) {
 	}
 }
 
+func TestMemberProviderBelongsToItsAPIEngine(t *testing.T) {
+	s, cfg := fixture(t)
+	cfg.Engines.Providers = []config.Provider{{ID: "fixture-api", Name: "Fixture API", HTTPEngine: config.HTTPEngine{BaseURL: "http://127.0.0.1:1234/v1"}}}
+	if err := s.UpdateConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range []MemberInput{
+		{Name: "Rune", Kinds: []string{RoleReviewer}, Engine: "claude", Provider: "fixture-api"},
+		{Name: "Rune", Kinds: []string{RoleReviewer}, Engine: "openai-compatible", Provider: "missing"},
+	} {
+		if _, err := s.SaveMember(testContext, "", in); err == nil {
+			t.Fatal("invalid provider accepted", in)
+		}
+	}
+	m, err := s.SaveMember(testContext, "", MemberInput{Name: "Rune", Kinds: []string{RoleReviewer}, Engine: "openai-compatible", Provider: "fixture-api", Model: "tools-model"})
+	if offered, reason := config.RoleSupport("openai-compatible"); !offered {
+		if err == nil || !strings.Contains(err.Error(), reason) {
+			t.Fatal("unsupported platform accepted an API member", m, err)
+		}
+		return
+	}
+	if err != nil || m.Provider != "fixture-api" {
+		t.Fatal(m, err)
+	}
+	v, err := s.Snapshot(testContext)
+	if err != nil || len(v.Members) != 1 || v.Members[0].Provider != m.Provider {
+		t.Fatal(v.Members, err)
+	}
+}
+
+func TestPlaybookProviderMustBeConfiguredAndBelongToTheAPI(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	for _, engine := range []string{"claude", "openai-compatible"} {
+		pb := *p.Playbook
+		pb.Roles = slices.Clone(pb.Roles)
+		pb.Roles[0].Engine, pb.Roles[0].Provider = engine, "missing-provider"
+		if _, err := s.SetPlaybook(testContext, p.ID, pb); err == nil {
+			t.Fatal("invalid seat provider accepted", engine)
+		}
+	}
+	v, err := s.Snapshot(testContext)
+	if err != nil || v.Projects[0].Playbook.Roles[0].Provider != "" {
+		t.Fatal("failed playbook edit changed state", v.Projects, err)
+	}
+}
+
 func TestAnEmptyStateHasNoMembersRatherThanNull(t *testing.T) {
 	s, _ := fixture(t)
 	snap, _ := s.Snapshot(testContext)
@@ -286,5 +333,42 @@ func TestAMemberSavedBeforeDescriptionsLoadsUnchanged(t *testing.T) {
 	}
 	if m.Avatar.Image != "img1" || m.Avatar.Look != "Round glasses" || len(m.Learnings) != 1 || m.Learnings[0].Text != "Run the linter first." || m.CreatedAt.IsZero() {
 		t.Fatalf("an older member lost its picture, learnings or age: %+v", m)
+	}
+}
+
+func TestTemplateSeatsRefuseAPIEngines(t *testing.T) {
+	for _, index := range []int{0, 1} {
+		book := Templates["draft"]
+		book.Roles = slices.Clone(book.Roles)
+		book.Roles[index].Engine = "openai-compatible"
+		if err := book.Validate(); err == nil || !strings.Contains(err.Error(), "template roles need a CLI engine") {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestAPIMemberNeedsAnExplicitModelBeforeSaving(t *testing.T) {
+	s, _ := fixture(t)
+	existing, err := s.SaveMember(testContext, "", MemberInput{Name: "Rune", Kinds: []string{RoleReviewer}, Engine: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"", existing.ID} {
+		for _, model := range []string{"", "  \t "} {
+			_, err := s.SaveMember(testContext, id, MemberInput{Name: "Ash", Kinds: []string{RoleReviewer}, Engine: "openai-compatible", Model: model})
+			if err == nil || !strings.Contains(err.Error(), "choose a model for this member: another API has no default") {
+				t.Fatal(err)
+			}
+		}
+	}
+	snap, err := s.Snapshot(testContext)
+	if err != nil || len(snap.Members) != 1 || snap.Members[0].Name != "Rune" || snap.Members[0].Engine != "claude" {
+		t.Fatal(snap.Members, err)
+	}
+	book := Templates["draft"]
+	book.Roles = slices.Clone(book.Roles)
+	book.Roles[0].Member, book.Roles[0].Engine, book.Roles[0].Model = "fixture-member", "openai-compatible", "  "
+	if err := book.Validate(); err == nil {
+		t.Fatal("a filled seat with an empty API model was accepted")
 	}
 }

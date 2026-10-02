@@ -713,3 +713,11 @@ func seatOf(playbook core.Playbook, kind string) core.Role {
 	}
 	return playbook.Roles[i]
 }
+
+func TestEngineOnlyTeamChoicesRefuseAPI(t *testing.T) {
+	for _, choice := range []TeamChoice{{WriterEngine: "openai-compatible"}, {ReviewerEngine: "openai-compatible"}} {
+		if _, err := teamFrom(choice, core.Snapshot{}, nil); err == nil || !strings.Contains(err.Error(), "provider and model") {
+			t.Fatal(err)
+		}
+	}
+}

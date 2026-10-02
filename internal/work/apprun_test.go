@@ -15,8 +15,10 @@ import (
 
 	"github.com/shhac/lib-agent-harness/session"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/roles"
+	harness "github.com/shhac/lib-agent-harness"
 )
 
 // appRunner is a code team whose QA, while it checks, reports what its
@@ -545,6 +547,16 @@ func TestQASelectsABrowserOnlyWhenOneIsNamed(t *testing.T) {
 	}
 }
 
+func TestQAIsToldItsPortIsAlreadySet(t *testing.T) {
+	app := appRun{recipe: &testRecipe, port: 41234}
+	spec := roles.Spec{}
+	app.apply(&spec)
+	prompt := appPrompt(app)
+	if !slices.Contains(spec.Env, "PORT=41234") || !strings.Contains(prompt, "PORT=41234 set (it already is, in your environment)") || !strings.Contains(prompt, testRecipe.Start) || !strings.Contains(prompt, testRecipe.Address(app.port)) {
+		t.Fatalf("%+v %s", spec, prompt)
+	}
+}
+
 // Which engines run the app, and how, comes from what the harness says each
 // offers, never from the engine's name.
 func TestHowQARunsTheAppFollowsWhatTheHarnessOffers(t *testing.T) {
@@ -578,5 +590,32 @@ func TestHowQARunsTheAppFollowsWhatTheHarnessOffers(t *testing.T) {
 	app, _ := lp.planApp(core.Role{Kinds: []string{core.RoleQA}, Engine: "claude"}, &core.Playbook{Medium: core.MediumGit})
 	if app.running() || app.unavailable != "" || appPrompt(app) != "" {
 		t.Fatalf("no recipe: %+v", app)
+	}
+}
+
+func TestAPIQAAppRunFollowsLoopbackSupportAndCarriesPort(t *testing.T) {
+	lp := testLoop(t)
+	reserved := 0
+	lp.ports.find = func() (int, error) { reserved++; return 42000, nil }
+	app, err := lp.planApp(core.Role{Kinds: []string{core.RoleQA}, Engine: "openai-compatible"}, &core.Playbook{Run: &testRecipe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.release()
+	spec := roles.Spec{Env: []string{"GOCACHE=/cache", "GOPROXY=off"}}
+	app.apply(&spec)
+	if config.Supports("openai-compatible", config.UseLoopback) {
+		if !app.running() || reserved != 1 || !spec.Loopback || !slices.Equal(spec.Env, []string{"GOCACHE=/cache", "GOPROXY=off", "PORT=42000"}) {
+			t.Fatalf("%+v %+v", app, spec)
+		}
+		prompt := appPrompt(app)
+		if !strings.Contains(prompt, testRecipe.Address(42000)) || !strings.Contains(prompt, "PORT=42000 set (it already is, in your environment)") || spec.Browser {
+			t.Fatalf("%+v %s", spec, prompt)
+		}
+	} else {
+		reason := harness.Support(harness.OpenAICompatible, harness.Session, harness.Loopback).Reason
+		if app.running() || reserved != 0 || spec.Loopback || !strings.Contains(app.unavailable, reason) || appPrompt(app) != "" {
+			t.Fatalf("%+v %+v", app, spec)
+		}
 	}
 }

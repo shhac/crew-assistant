@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 )
 
@@ -58,6 +59,13 @@ const NoResearcher = "none"
 // may make about it. Anything left empty keeps the template's choice. current
 // is the team as it stands, if there is one.
 func teamFrom(in TeamChoice, snap core.Snapshot, current *core.Playbook) (core.Playbook, error) {
+	for _, engine := range []string{in.WriterEngine, in.ReviewerEngine} {
+		if engine != "" {
+			if err := config.CheckTemplateRoleEngine(engine); err != nil {
+				return core.Playbook{}, err
+			}
+		}
+	}
 	template := in.Template
 	if template == "" {
 		template = "draft"
@@ -170,7 +178,7 @@ func memberSeat(m core.Member, kinds []string, instructions string) core.Role {
 	if m.Personality != "" {
 		instructions = strings.TrimSpace(instructions + "\n\nYour personality, which is how you write, never what you may do: " + m.Personality)
 	}
-	seat := core.Role{Name: m.Name, Kinds: kinds, Engine: m.Engine, Model: m.Model, Effort: m.Effort, Member: m.ID, Instructions: instructions}
+	seat := core.Role{Name: m.Name, Kinds: kinds, Engine: m.Engine, Provider: m.Provider, Model: m.Model, Effort: m.Effort, Member: m.ID, Instructions: instructions}
 	if seat.Holds(core.RoleQA) {
 		seat.Browser = m.Browser
 	}

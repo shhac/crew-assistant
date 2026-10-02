@@ -141,7 +141,7 @@ func (lp *Loop) usageWait(ctx context.Context, r core.Role) (time.Time, string) 
 	if floors.Off() {
 		return time.Time{}, ""
 	}
-	h := cfg.Harness(r.Engine, r.Model, r.Effort)
+	h := cfg.HarnessOn(r.Engine, r.Provider, r.Model, r.Effort)
 	now := time.Now()
 	verdict := quota.Evaluate(lp.meter.Read(ctx, h), h, floors, now)
 	switch {

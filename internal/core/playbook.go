@@ -25,6 +25,7 @@ type Role struct {
 	// LegacyKind is the one kind a seat held before seats could hold several;
 	// it is read into Kinds and never written again.
 	LegacyKind   string `json:"kind,omitempty"`
+	Provider     string `json:"provider,omitempty"`
 	Engine       string `json:"engine"`
 	Model        string `json:"model,omitempty"`
 	Effort       string `json:"effort,omitempty"`
@@ -243,8 +244,18 @@ func (p Playbook) Validate() error {
 			return errors.New("each role needs a distinct name")
 		}
 		names[key] = true
-		if err := config.CheckRoleEngine(r.Engine); err != nil {
+		checkEngine := config.CheckRoleEngine
+		if r.Member == "" {
+			checkEngine = config.CheckTemplateRoleEngine
+		}
+		if err := checkEngine(r.Engine); err != nil {
 			return fmt.Errorf("role %s: %w", r.Name, err)
+		}
+		if err := config.CheckRoleModel(r.Engine, r.Model); err != nil {
+			return fmt.Errorf("role %s: %w", r.Name, err)
+		}
+		if r.Provider != "" && r.Engine != "openai-compatible" {
+			return fmt.Errorf("role %s: provider is only for a model on another API", r.Name)
 		}
 		if err := seatKinds(r); err != nil {
 			return err
@@ -343,6 +354,11 @@ func (s *Service) EditPlaybook(ctx context.Context, projectID string, change fun
 		}
 		if err := playbook.Validate(); err != nil {
 			return err
+		}
+		for _, r := range playbook.Roles {
+			if err := s.configuration().Engines.CheckProvider(r.Engine, r.Provider); err != nil {
+				return fmt.Errorf("role %s: %w", r.Name, err)
+			}
 		}
 		p.Playbook = &playbook
 		p.UpdatedAt = s.now().UTC()

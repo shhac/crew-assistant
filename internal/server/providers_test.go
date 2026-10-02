@@ -40,7 +40,8 @@ func TestEngineChoicesSayWhyRolesCantUseAnAPI(t *testing.T) {
 	for _, choice := range engineChoices() {
 		switch choice.Engine {
 		case "openai-compatible":
-			if choice.Roles || !strings.Contains(choice.RolesReason, "An API provider can't run team roles yet") || !choice.Assistant || !choice.Small {
+			ok, reason := config.RoleSupport(choice.Engine)
+			if choice.Roles != ok || choice.RolesReason != reason || !choice.Assistant || !choice.Small || choice.Browser {
 				t.Fatalf("%+v", choice)
 			}
 		case "claude", "codex":

@@ -12,17 +12,19 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/dashboard"
+	"github.com/shhac/lib-agent-harness/catalog"
 )
 
 func New(a *app.App, auth *Auth) http.Handler {
 	mux := http.NewServeMux()
 	registerFilesystem(mux, a)
-	registerModels(mux, a)
+	models := newModelLookup(catalog.Discover)
+	mux.Handle("GET /api/models", modelHandlerWithLookup(a, models))
 	registerChatQueue(mux, a)
 	registerPMChat(mux, a)
 	registerProjectWork(mux, a)
 	registerProjectTasks(mux, a)
-	registerMembers(mux, a)
+	registerMembers(mux, a, models)
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
 		s, err := a.Snapshot(r.Context())
 		reply(w, 200, struct {

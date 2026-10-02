@@ -20,6 +20,7 @@ import (
 // fakeSession stands in for a harness session and records, in order, what
 // was asked of it and when each turn finished.
 type fakeSession struct {
+	ref        *session.Ref
 	calls      []string
 	compactErr error
 	compacted  session.Result
@@ -70,7 +71,12 @@ func (s *fakeSession) StartTurn(_ context.Context, in session.Input) (turn, erro
 	return fakeTurn{s: s, name: "turn", result: session.Result{Status: "completed", Text: "Done."}, events: s.events}, nil
 }
 
-func (s *fakeSession) Ref() session.Ref { return session.Ref{Engine: harness.Codex, ID: "thread"} }
+func (s *fakeSession) Ref() session.Ref {
+	if s.ref != nil {
+		return *s.ref
+	}
+	return session.Ref{Engine: harness.Codex, ID: "thread"}
+}
 
 func (s *fakeSession) Release(context.Context) (session.Reclamation, error) {
 	s.calls = append(s.calls, "release")
@@ -87,6 +93,60 @@ func native(s *fakeSession, resumed bool) Native {
 }
 
 var codexRound = Spec{Engine: "codex", WorkDir: "/work", Write: true, Prompt: "Revise the draft", Resume: json.RawMessage(`{"engine":"codex","id":"thread"}`)}
+
+func TestChangedAPISettingsOpenFreshAndCarryTheFreshPrompt(t *testing.T) {
+	for _, problem := range []error{fmt.Errorf("changed workbench: %w", session.ErrIncompatibleResume), errors.New("provider unavailable")} {
+		s := &fakeSession{confirmed: true, ref: &session.Ref{Engine: harness.OpenAICompatible, ID: "fresh", ConfigHash: "new-workbench"}}
+		calls := 0
+		n := Native{open: func(_ context.Context, o session.Options, ref json.RawMessage) (conversation, bool, error) {
+			calls++
+			if calls == 1 {
+				if len(ref) == 0 || o.Workbench == nil {
+					t.Fatal("missing stored API reference or workbench")
+				}
+				return nil, false, problem
+			}
+			if len(ref) != 0 {
+				t.Fatal("fresh open retained the incompatible reference")
+			}
+			return s, false, nil
+		}}
+		spec := Spec{Engine: "openai-compatible", RuntimeHome: t.TempDir(), Resume: json.RawMessage(`{"engine":"openai-compatible","id":"old"}`), Prompt: "Continue", FreshPrompt: "The task and its latest revision", Compact: true}
+		result, err := n.Run(context.Background(), spec)
+		if errors.Is(problem, session.ErrIncompatibleResume) {
+			if err != nil || calls != 2 || len(result.Session) == 0 || !slices.Contains(s.calls, "turn: "+spec.FreshPrompt) || slices.Contains(s.calls, "compact") {
+				t.Fatalf("%+v %v %v", result, err, s.calls)
+			}
+		} else if err != problem || calls != 1 || len(s.calls) != 0 {
+			t.Fatalf("other error retried: %v %d", err, calls)
+		}
+	}
+}
+
+func TestAPIRuntimeHomeIsPrivateBecauseTheLibraryNeedsIt(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "transcripts")
+	if err := os.Mkdir(home, 0755); err != nil {
+		t.Fatal(err)
+	}
+	s := &fakeSession{confirmed: true}
+	n := Native{open: func(_ context.Context, o session.Options, _ json.RawMessage) (conversation, bool, error) {
+		info, err := os.Stat(o.RuntimeHome)
+		if err != nil || info.Mode().Perm() != 0700 || o.RuntimeHome != home {
+			t.Fatalf("API transcript home: %v %v", info, err)
+		}
+		if o.Sandbox != nil || o.Restriction.Tools.Dir != "" || o.Restriction.Tools.Bridge.Path != "" {
+			t.Fatal("API got CLI launch state", o)
+		}
+		return s, false, nil
+	}}
+	launch := filepath.Join(t.TempDir(), "must-not-be-created")
+	if _, err := n.Run(context.Background(), Spec{Engine: "openai-compatible", RuntimeHome: home, LaunchDir: launch, Tools: []session.ToolDefinition{{Name: "read_task"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(launch); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("API role created a CLI launch directory", err)
+	}
+}
 
 func TestAResumedSessionFinishesCompactingBeforeItsTurnStarts(t *testing.T) {
 	s := &fakeSession{compacted: session.Result{Status: "completed"}}

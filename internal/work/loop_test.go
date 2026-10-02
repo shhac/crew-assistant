@@ -423,6 +423,60 @@ func TestFailuresRetryQuietlyThenAskOnce(t *testing.T) {
 	}
 }
 
+func TestAPISandboxProofFailureBlocksOnceAcrossTicks(t *testing.T) {
+	problem := &session.CapabilityError{Engine: harness.OpenAICompatible, Code: session.CapabilityProbeTimeout, Phase: session.BeforeLaunch}
+	runner := &scriptedRunner{fail: []error{problem}}
+	lp, _, queued := loopApp(t, runner, "")
+	if _, err := lp.Core.UpdateTask(context.Background(), queued.ID, func(task *core.Task, project *core.Project) (string, error) {
+		// The queued task takes its seats from the project when it starts.
+		for i := range project.Playbook.Roles {
+			if project.Playbook.Roles[i].Holds(core.RoleImplementer) {
+				project.Playbook.Roles[i].Name = "Ash"
+				project.Playbook.Roles[i].Engine = "openai-compatible"
+				project.Playbook.Roles[i].Model = "fake-tools"
+			}
+		}
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task := settle(t, lp)
+	d := openDecision(t, lp, task)
+	if d.Kind != core.DecisionFailure || task.Failures != 1 || !task.RetryAt.IsZero() || !strings.HasPrefix(d.Context, "The sandbox for Ash’s commands") || !strings.Contains(d.Context, "nothing ran.") || !strings.Contains(d.Context, problem.Error()) {
+		t.Fatalf("task %+v decision %+v", task, d)
+	}
+	firstCalls := len(runner.seen)
+	settle(t, lp)
+	v, err := lp.Core.Snapshot(context.Background())
+	if err != nil || len(v.Decisions) != 1 || len(runner.seen) != firstCalls || runner.writes != 0 || firstCalls != 1 || runner.seen[0].Engine != "openai-compatible" {
+		t.Fatalf("retried or repeated decision: %d calls, %d writes, %+v %v", len(runner.seen), runner.writes, v.Decisions, err)
+	}
+}
+
+func TestAPIMemberSeatAndBaseSpecKeepProvider(t *testing.T) {
+	lp := testLoop(t)
+	cfg := lp.Config()
+	cfg.Engines.Providers = []config.Provider{{ID: "fixture-api", HTTPEngine: config.HTTPEngine{BaseURL: "http://127.0.0.1:1234/v1"}}}
+	lp.Config = func() config.Config { return cfg }
+	seat := memberSeat(core.Member{ID: "member", Name: "Rune", Engine: "openai-compatible", Provider: "fixture-api", Model: "tools-model"}, []string{core.RoleReviewer}, "Read carefully")
+	spec := lp.baseSpec(seat, "/work", "Review")
+	if spec.AccountIdentity != "fixture-api:" {
+		t.Fatal("provider identity missing", spec.AccountIdentity)
+	}
+	cfg.Engines.Providers[0].APIKeyEnv = "FIXTURE_API_KEY"
+	changed := lp.baseSpec(seat, "/work", "Review")
+	if changed.AccountIdentity == spec.AccountIdentity {
+		t.Fatal("changing a key source retained the old session identity")
+	}
+	if seat.Provider != "fixture-api" || spec.Provider.API.BaseURL != cfg.Engines.Providers[0].BaseURL || spec.RuntimeHome != lp.runtimeHome(seat.Engine) || spec.Browser || strings.Contains(spec.Instructions, "GOCACHE") || strings.Contains(spec.Instructions, "PORT=") || !strings.Contains(spec.Instructions, "no web search") {
+		t.Fatalf("seat %+v spec %+v", seat, spec)
+	}
+	cli := lp.baseSpec(core.Role{Engine: "codex", Instructions: "Keep it small"}, "/work", "Write")
+	if cli.Instructions != "Keep it small" || cli.RuntimeHome != lp.runtimeHome("codex") || cli.Provider.Engine != "" {
+		t.Fatalf("CLI changed: %+v", cli)
+	}
+}
+
 func TestAWriterTurnStartsFromTheLastRevision(t *testing.T) {
 	runner := &scriptedRunner{reviews: []string{revise, pass}}
 	runner.onWriter = func(dir string) {
@@ -689,5 +743,15 @@ func TestUsageSettingsBelongToTheirEngine(t *testing.T) {
 	cfg.Engines.Codex.UsageFloor = config.UsageFloor{}
 	if until, _ := a.UsageWait(ctx, "codex"); !until.IsZero() || reads[harness.Codex] != 1 {
 		t.Fatalf("codex allows unknown usage by default: %v, %d reads", until, reads[harness.Codex])
+	}
+}
+
+func TestNonSandboxCapabilityFailureKeepsItsOwnReason(t *testing.T) {
+	problem := &session.CapabilityError{Engine: harness.Claude, Code: session.CapabilityLoginUnavailable, Phase: session.BeforeLaunch}
+	lp, _, _ := loopApp(t, &scriptedRunner{fail: []error{problem}}, "")
+	task := settle(t, lp)
+	d := openDecision(t, lp, task)
+	if d.Context != problem.Error() || task.Failures != 1 || !task.RetryAt.IsZero() {
+		t.Fatalf("%+v %+v", task, d)
 	}
 }

@@ -89,6 +89,7 @@ it("chooses a new member's model from the models its engine offers", async () =>
   render(<MemberForm onSaved={onSaved} onCancel={() => {}} />);
   await screen.findByRole("option", { name: "Test Sonnet (recommended)" });
   expect(screen.getByLabelText(/^Model/).tagName).toBe("SELECT");
+  expect(screen.getByLabelText(/^Model/)).toHaveProperty("required", false);
   expect(choices()).toEqual([
     "The engine's default",
     "Test Sonnet (recommended)",

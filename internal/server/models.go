@@ -39,20 +39,51 @@ type modelSelection struct {
 }
 type modelDiscovery func(context.Context, harness.Provider) ([]catalog.Model, error)
 
-func registerModels(mux *http.ServeMux, a *app.App) {
-	mux.Handle("GET /api/models", modelHandler(a, catalog.Discover))
+func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
+	lookup := newModelLookup(discover)
+	return modelHandlerWithLookup(a, lookup)
 }
 
-func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
-	// Serialize discovery and cache each saved profile briefly: repeated renders
-	// must not create a fresh account-connected subprocess every time.
-	var mu sync.Mutex
-	type cached struct {
-		value   []catalog.Model
-		detail  string
-		expires time.Time
+type cachedModels struct {
+	value   []catalog.Model
+	detail  string
+	expires time.Time
+}
+type modelLookup struct {
+	mu       sync.Mutex
+	discover modelDiscovery
+	cache    map[config.Harness]cachedModels
+}
+
+func newModelLookup(discover modelDiscovery) *modelLookup {
+	return &modelLookup{discover: discover, cache: make(map[config.Harness]cachedModels)}
+}
+func (l *modelLookup) get(ctx context.Context, selected config.Harness) cachedModels {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	// Discovery depends on the endpoint/login, not the model being chosen.
+	key := selected
+	key.Model, key.Effort, key.MaxTokens = "", "", 0
+	entry, found := l.cache[key]
+	if found && time.Now().Before(entry.expires) {
+		return entry
 	}
-	cache := make(map[config.Harness]cached)
+	models, err := l.discover(ctx, selected.Provider())
+	entry = cachedModels{value: listed(models), expires: time.Now().Add(time.Minute)}
+	if err != nil {
+		entry.detail = "Could not list the endpoint's models. Check its address and key, then retry. Your saved selection is unchanged."
+		if harness.Engine(selected.Engine).Transport() == harness.CLITransport {
+			entry.detail = "Could not discover models. Check the selected CLI login and installation, then retry. Your saved selection is unchanged."
+		}
+		entry.expires = time.Now().Add(5 * time.Second)
+	}
+	if len(l.cache) >= 32 {
+		clear(l.cache)
+	}
+	l.cache[key] = entry
+	return entry
+}
+func modelHandlerWithLookup(a *app.App, lookup *modelLookup) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		profile := r.URL.Query().Get("profile")
 		if profile == "" {
@@ -96,27 +127,7 @@ func modelHandler(a *app.App, discover modelDiscovery) http.Handler {
 			return
 		}
 		cli := harness.Engine(selected.Engine).Transport() == harness.CLITransport
-		mu.Lock()
-		entry, found := cache[selected]
-		if !found || time.Now().After(entry.expires) {
-			// Only the CLI and its login, or the endpoint and its key,
-			// decide what is offered, which is also what the cache is keyed by.
-			options, err := discover(r.Context(), selected.Provider())
-			entry = cached{value: listed(options), expires: time.Now().Add(time.Minute)}
-			if err != nil {
-				entry.detail = "Could not discover models. Check the selected CLI login and installation, then retry. Your saved selection is unchanged."
-				if !cli {
-					entry.detail = "Could not list the endpoint's models. Check its address and key, then retry. Your saved selection is unchanged."
-				}
-				entry.expires = time.Now().Add(5 * time.Second)
-			}
-			// Bound the cache across per-worker profiles and configuration edits.
-			if len(cache) >= 32 {
-				clear(cache)
-			}
-			cache[selected] = entry
-		}
-		mu.Unlock()
+		entry := lookup.get(r.Context(), selected)
 		result.Available = entry.detail == ""
 		result.Detail = entry.detail
 		for _, m := range entry.value {

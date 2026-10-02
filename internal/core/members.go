@@ -22,6 +22,7 @@ type Member struct {
 	// LegacyKind is the one kind a member held before members could hold
 	// several; it is read into Kinds and never written again.
 	LegacyKind   string `json:"kind,omitempty"`
+	Provider     string `json:"provider,omitempty"`
 	Engine       string `json:"engine"`
 	Model        string `json:"model,omitempty"`
 	Effort       string `json:"effort,omitempty"`
@@ -46,6 +47,7 @@ type MemberInput struct {
 	Kinds []string `json:"kinds"`
 	// Kind is the one kind older clients send; it counts as Kinds.
 	Kind         string         `json:"kind,omitempty"`
+	Provider     string         `json:"provider,omitempty"`
 	Engine       string         `json:"engine"`
 	Model        string         `json:"model"`
 	Effort       string         `json:"effort"`
@@ -136,6 +138,9 @@ func (in MemberInput) validate(v *Snapshot, id string) error {
 			return fmt.Errorf("%s is listed twice", kind)
 		}
 	}
+	if err := config.CheckRoleModel(in.Engine, in.Model); err != nil {
+		return err
+	}
 	if err := config.CheckRoleEngine(in.Engine); err != nil {
 		return err
 	}
@@ -168,6 +173,9 @@ func (in MemberInput) validate(v *Snapshot, id string) error {
 func (s *Service) SaveMember(ctx context.Context, id string, in MemberInput) (Member, error) {
 	var out Member
 	err := s.store.update(ctx, func(v *Snapshot) error {
+		if err := s.configuration().Engines.CheckProvider(in.Engine, in.Provider); err != nil {
+			return err
+		}
 		if err := in.validate(v, id); err != nil {
 			return err
 		}
@@ -182,6 +190,7 @@ func (s *Service) SaveMember(ctx context.Context, id string, in MemberInput) (Me
 		m.Name, m.Kinds, m.Engine = strings.TrimSpace(in.Name), in.kinds(), in.Engine
 		m.Model, m.Effort, m.Instructions = strings.TrimSpace(in.Model), strings.TrimSpace(in.Effort), strings.TrimSpace(in.Instructions)
 		m.Description, m.Personality = strings.TrimSpace(in.Description), strings.TrimSpace(in.Personality)
+		m.Provider = in.Provider
 		m.Browser = in.Browser.Trimmed()
 		// A drawn picture is changed only by drawing again; a new member
 		// keeps the look it is to be drawn with.

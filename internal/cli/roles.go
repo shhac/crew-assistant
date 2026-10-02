@@ -9,6 +9,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/roles"
+	harness "github.com/shhac/lib-agent-harness"
 )
 
 // roleSandboxChecks reports, for each CLI team roles can run on, whether
@@ -21,7 +22,19 @@ func roleSandboxChecks(ctx context.Context, cfg config.Config, statePath string)
 		return checks
 	}
 	defer os.RemoveAll(work)
-	for _, engine := range config.EnginesFor(config.UseRoles) {
+	for _, e := range harness.Engines() {
+		engine := string(e)
+		if e.Transport() == harness.APITransport {
+			ok, reason := config.RoleSupport(engine)
+			if ok {
+				reason = "Offered; its sandbox is checked when each turn starts"
+			}
+			checks = append(checks, map[string]any{"name": "team roles on " + engine, "ok": ok, "hint": reason})
+			continue
+		}
+		if !config.Supports(engine, config.UseRoles) {
+			continue
+		}
 		spec := roles.Spec{Engine: engine, RuntimeHome: filepath.Join(filepath.Dir(statePath), "roles", engine), WorkDir: work, Write: true}
 		spec.Binary, spec.Home = cfg.Engines.Binary(engine)
 		name := "team roles on " + engine

@@ -41,6 +41,7 @@ export interface BriefInput {
   criteria: string[];
 }
 export interface Role {
+  provider?: string;
   name: string;
   /**
    * At most one of implementer, reviewer and QA, and perhaps researcher,
@@ -92,6 +93,7 @@ export interface LearningInput {
   project_id: string;
 }
 export interface Member extends Drawable {
+  provider?: string;
   id: string;
   name: string;
   kinds: MemberKind[];
@@ -107,6 +109,7 @@ export interface Member extends Drawable {
   created_at?: string;
 }
 export interface MemberInput {
+  provider?: string;
   name: string;
   kinds: MemberKind[];
   engine: string;

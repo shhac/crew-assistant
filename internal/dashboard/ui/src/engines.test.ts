@@ -29,7 +29,7 @@ it("filters engines by what they may be used for", () => {
 it("lists the engines roles can't run on yet, with the server's reason", () => {
   expect(unavailableForRoles(testChoices)).toEqual([]);
   const reason =
-    "An API provider can't run team roles yet: it has no sandboxed workspace tools.";
+    "Another API can't run team roles on this computer: commands require a sandbox the harness can prove only on macOS.";
   expect(
     unavailableForRoles(
       testChoices.map((choice) =>
