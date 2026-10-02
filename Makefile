@@ -6,18 +6,23 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/crew-assistant
 
+# internal/work takes minutes on its own, and the team's checks run at
+# background priority beside other work, where Go's ten-minute default for a
+# package is too tight.
+TEST_TIMEOUT ?= 30m
+
 dashboard:
 	npm --prefix internal/dashboard/ui run build
 
 test:
-	go test ./... -count=1
+	go test ./... -count=1 -timeout $(TEST_TIMEOUT)
 
 test-race:
-	go test -race ./... -count=1
+	go test -race ./... -count=1 -timeout $(TEST_TIMEOUT)
 
 check:
 	go vet ./...
-	go test ./... -count=1
+	go test ./... -count=1 -timeout $(TEST_TIMEOUT)
 	npm --prefix internal/dashboard/ui run check
 	npm --prefix internal/dashboard/ui test
 
