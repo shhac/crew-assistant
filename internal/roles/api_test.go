@@ -103,7 +103,13 @@ func TestAPIReviewerReadsAndCallsDaemonToolsAndResumesAfterSettingsChange(t *tes
 		t.Fatalf("%+v %v handled=%d", first, err, handled)
 	}
 	var ref session.Ref
-	if json.Unmarshal(first.Session, &ref) != nil || ref.ConfigHash == "" || ref.WorkDir != work {
+	// The library names the workspace by its canonical path, which differs
+	// from a temporary directory's on macOS (/var is /private/var).
+	canonical, err := filepath.EvalSymlinks(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if json.Unmarshal(first.Session, &ref) != nil || ref.ConfigHash == "" || ref.WorkDir != canonical {
 		t.Fatal("stored reference lost workbench identity", string(first.Session))
 	}
 	spec.Resume, spec.Write, spec.FreshPrompt = first.Session, true, "Fresh task context"
