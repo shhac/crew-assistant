@@ -55,6 +55,7 @@ func with[T any](act func(a *App, ctx context.Context, in T) (any, error)) toolA
 type none struct{}
 
 var toolActions = map[string]toolAction{
+	"lin": func(a *App, ctx context.Context, raw json.RawMessage) (any, error) { return a.runLinTool(ctx, raw) },
 	"list_connections": func(a *App, ctx context.Context, raw json.RawMessage) (any, error) {
 		return a.runConnectionTool(ctx, "list_connections", raw)
 	},

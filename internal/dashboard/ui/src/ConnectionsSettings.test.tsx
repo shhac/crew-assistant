@@ -169,7 +169,7 @@ it("keeps new Linear connections as resources until imports are explicitly enabl
   expect(
     document.getElementById(toggle.getAttribute("aria-describedby")!)
       ?.textContent,
-  ).toBe("Leave off to use Linear only for reading.");
+  ).toBe("Leave off to keep assignments from automatically becoming projects.");
   expect(toggle.checked).toBe(false);
   fireEvent.click(toggle);
   const enabled = changed.mock.calls.at(-1)![0] as Connection[];
@@ -232,6 +232,7 @@ it("clears import permission and profiles when switching services", async () => 
       tool: "agent-notion",
       profiles: [],
       import_assignments: false,
+      allow_writes: false,
     },
   ]);
   rerender(<ConnectionsSettings connections={updated} onChange={changed} />);
@@ -364,4 +365,64 @@ it("tells the owner how to sign in when a CLI has no accounts, and refreshes on 
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
   await screen.findByRole("button", { name: "Refresh" });
+});
+
+it("offers Linear changes only for lin, saves the opt-in and resets on service change", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        tool: "lin",
+        profiles: [],
+        available: true,
+        selectable: true,
+        detail: "CLI accounts",
+      }),
+    }),
+  );
+  const changed = vi.fn();
+  const connection: Connection = {
+    id: "linear",
+    name: "Linear",
+    tool: "lin",
+    profiles: ["home"],
+  };
+  const { rerender } = render(
+    <ConnectionsSettings connections={[connection]} onChange={changed} />,
+  );
+  const toggle = screen.getByRole("checkbox", {
+    name: "Allow changes",
+  }) as HTMLInputElement;
+  expect(toggle.checked).toBe(false);
+  fireEvent.click(toggle);
+  expect(changed).toHaveBeenLastCalledWith([
+    { ...connection, allow_writes: true },
+  ]);
+  rerender(
+    <ConnectionsSettings
+      connections={[{ ...connection, allow_writes: true }]}
+      onChange={changed}
+    />,
+  );
+  fireEvent.change(screen.getByRole("combobox", { name: "Service" }), {
+    target: { value: "agent-slack" },
+  });
+  expect(changed).toHaveBeenLastCalledWith([
+    {
+      ...connection,
+      tool: "agent-slack",
+      profiles: [],
+      import_assignments: false,
+      allow_writes: false,
+    },
+  ]);
+  rerender(
+    <ConnectionsSettings
+      connections={[{ ...connection, tool: "agent-slack", profiles: [] }]}
+      onChange={changed}
+    />,
+  );
+  expect(screen.queryByRole("checkbox", { name: "Allow changes" })).toBeNull();
+  await waitFor(() => expect(screen.queryByText("Looking…")).toBeNull());
 });

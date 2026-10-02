@@ -66,6 +66,7 @@ type Assistant struct {
 	Theme string `json:"theme"`
 }
 type Connection struct {
+	AllowWrites       bool     `json:"allow_writes"`
 	ImportAssignments bool     `json:"import_assignments"`
 	ID                string   `json:"id"`
 	Name              string   `json:"name"`
@@ -237,6 +238,9 @@ func validateConnections(cs []Connection) error {
 		case "lin", "agent-slack", "agent-notion", "agent-fathom":
 		default:
 			return errors.New("unsupported connection CLI")
+		}
+		if c.AllowWrites && c.Tool != "lin" {
+			return errors.New("allow_writes is only supported for Linear connections")
 		}
 		if c.ImportAssignments && c.Tool != "lin" {
 			return errors.New("assignment import is only supported for Linear connections")

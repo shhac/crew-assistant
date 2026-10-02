@@ -22,6 +22,7 @@ import (
 // store's lock; that holds only because no turn ever runs inside a store
 // update.
 type roleTools struct {
+	lin       *linBinding
 	lp        *Loop
 	projectID string
 	taskID    string
@@ -103,7 +104,9 @@ func relationsFor(kind string) []string {
 // and may tidy any unfinished task's title and requirements, link tasks,
 // queue a split or a sibling task, and leave notes.
 func (lp *Loop) managerTools(projectID string, seat core.Role) roleTools {
-	return roleTools{lp: lp, projectID: projectID, by: core.LinkedByPM, name: seatName(seat, core.RolePM), kind: core.RolePM, manages: true, queued: new(int)}
+	r := roleTools{lp: lp, projectID: projectID, by: core.LinkedByPM, name: seatName(seat, core.RolePM), kind: core.RolePM, manages: true, queued: new(int)}
+	r.lin = lp.linBinding(projectID)
+	return r
 }
 
 // answerTools are the PM's when the assistant asks it something: answering
@@ -140,6 +143,9 @@ func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (
 	return r.execute(ctx, name, raw)
 }
 func (r roleTools) execute(ctx context.Context, name string, raw json.RawMessage) (string, error) {
+	if name == "lin" {
+		return r.callLin(ctx, raw)
+	}
 	var in map[string]string
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return "", errors.New("arguments must be an object of strings")

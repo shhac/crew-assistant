@@ -8,11 +8,15 @@ import (
 	"github.com/shhac/lib-agent-harness/session"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/integrations/connections"
 )
 
 // guide tells the role what its tools are for.
 func (r roleTools) guide() string {
 	guide := r.guideTools()
+	if r.lin != nil {
+		guide += "\n\n" + connections.LinGuide(r.lin.writes && !r.notesOnly)
+	}
 	if r.proposes {
 		guide += " QA can also start this project's app and use it, on this machine only, when the project has a run recipe: "
 		if r.run != nil {
@@ -62,6 +66,9 @@ func (r roleTools) guideTools() string {
 
 func (r roleTools) Definitions() []session.ToolDefinition {
 	defs := r.definitions()
+	if r.lin != nil {
+		defs = append(defs, session.ToolDefinition{Name: "lin", Description: "Use this project’s linked Linear account. Give args or a shipped reference (commands or output).", Schema: map[string]any{"type": "object", "properties": map[string]any{"args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "reference": map[string]any{"type": "string"}}, "required": []string{"args", "reference"}, "additionalProperties": false}})
+	}
 	if r.chat != nil {
 		defs = append(defs, session.ToolDefinition{Name: "order_tasks", Description: "Set the entire queued to-do list in order. task_ids is every queued task id separated by commas. If the list changed, read it again and try again.", Schema: schema([]string{"task_ids"})})
 	}

@@ -14,7 +14,7 @@ Reference: [OpenAI function calling](https://developers.openai.com/api/docs/guid
 
 ## Existing CLI accounts
 
-The preferred connection path uses installed `lin`, `agent-slack`, `agent-notion` and `agent-fathom` tools. `connections` contains `{id, name, tool, profiles, import_assignments}` entries. Connections are optional resources; the local assistant database owns project records. Account access does not automatically enroll projects or establish relevance to personal work. Account discovery returns only known profile names. The PA receives `list_connections` and `query_connection`; each query names one approved connection/profile and a supported read operation. Arguments are assembled by Go, never interpreted by a shell. Output and duration are bounded; keys and auth defaults remain owned by the external CLI.
+The preferred connection path uses installed `lin`, `agent-slack`, `agent-notion` and `agent-fathom` tools. `connections` contains `{id, name, tool, profiles, import_assignments, allow_writes}` entries. Connections are optional resources; the local assistant database owns project records. Account access does not automatically enroll projects or establish relevance to personal work. Account discovery returns only known profile names. The PA receives `list_connections` and `query_connection`; each query names one approved connection/profile and a supported read operation. Arguments are assembled by Go, never interpreted by a shell. Output and duration are bounded; keys and auth defaults remain owned by the external CLI.
 
 `lin` supports assignments, issue search/details, and project listing; `agent-slack` supports message search and history; `agent-fathom` supports meetings, summaries, and open action items. Linear assignment import runs only for connections with `import_assignments: true` (default false), using their selected accounts and retaining connection/profile provenance. Read-only queries remain available when import is off and never create local projects. It imports at most 50 issues per account per sweep and does not claim exhaustive coverage.
 
@@ -23,6 +23,16 @@ Notion reads use the CLI's default account with an empty profile list. The daemo
 Slack Socket Mode below remains separate for owner messages and replies. The direct Linear API below is retained for legacy configurations.
 
 ## Linear
+
+The assistant has a `lin` tool when a Linear connection has selected accounts;
+a project's PM has it only through that project's Linear link. It runs approved
+CLI commands as argv on the daemon, with the selected account and no inherited
+credentials. Changes are off by default; **Allow changes** (`allow_writes`) opts
+in each connection. Writes record an Activity attempt and outcome without bodies.
+Deleting, archiving, removal, raw API, auth/config, files and MCP are unavailable.
+The embedded lin skill is filtered to permitted commands; references are fetched
+on demand. Output is clipped external data; failures return information and
+writes are never retried automatically. See the [decision](../../design-docs/decisions/2026-10-lin-tool.md).
 
 Project Config → Linear optionally links one local project to a team (board) or Linear project through a configured `lin` connection and account. Status names and assignee rules (anyone, unassigned, me, or selected users) define pick-up. The existing startup, five-minute and manual sweeps import matching issues as tasks, at most 50 new tasks and five pages per project per sweep. The source identifier, title, URL and bounded description snapshot remain on each task. Metadata pages contain ten issues; descriptions are fetched separately for new issues, truncated at 8KiB with a marker, or explicitly omitted if the individual read exceeds 128KiB. Other read failures abort the buffered import. The team's brief includes the description as external context; the URL is not an acceptance criterion. No writes to Linear occur. Unlinked projects and existing assignment-to-project imports are unchanged.
 

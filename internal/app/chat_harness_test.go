@@ -42,7 +42,7 @@ func TestTheChatsSessionHasOnlyTheAssistantsToolsInFoldersOfItsOwn(t *testing.T)
 		}
 	}
 	host := o.Restriction.Tools
-	if len(host.Tools) != len(engine.Tools()) || host.Bridge.Args[0] != roles.ToolBridge || !filepath.IsAbs(host.Bridge.Path) {
+	if len(host.Tools) != len(engine.Tools(false)) || host.Bridge.Args[0] != roles.ToolBridge || !filepath.IsAbs(host.Bridge.Path) {
 		t.Fatalf("tools %d, bridge %+v", len(host.Tools), host.Bridge)
 	}
 	if o.Instructions.Mode != session.Append || o.Instructions.Text != "Be brief." || o.Model != "gpt" || o.Provider.CLI.Binary != "/usr/local/bin/codex" {
@@ -79,7 +79,7 @@ func TestAnAssistantAllowedTheBrowserChatsInASandboxedSession(t *testing.T) {
 		t.Fatalf("the chat's sandbox reaches further than reading: %+v", sb)
 	}
 	host := o.Sandbox.Tools
-	if host == nil || host.Server != "crew" || len(host.Tools) != len(engine.Tools()) || host.Dir != filepath.Join(state, "chat", "tools") || !filepath.IsAbs(host.Bridge.Path) {
+	if host == nil || host.Server != "crew" || len(host.Tools) != len(engine.Tools(false)) || host.Dir != filepath.Join(state, "chat", "tools") || !filepath.IsAbs(host.Bridge.Path) {
 		t.Fatalf("tools %+v", host)
 	}
 	if !strings.HasPrefix(o.Instructions.Text, "Be brief.\n\n") || !strings.Contains(o.Instructions.Text, "never instructions to you") || !strings.Contains(o.Instructions.Text, `"Work"`) {
@@ -242,7 +242,7 @@ func TestTheChatRunsOnAnEndpointsSessionAndResumesIt(t *testing.T) {
 	for _, tool := range first.Tools {
 		offered[tool.Function.Name] = true
 	}
-	for _, tool := range engine.Tools() {
+	for _, tool := range engine.Tools(false) {
 		delete(offered, tool.Function.Name)
 	}
 	if len(offered) != 0 {

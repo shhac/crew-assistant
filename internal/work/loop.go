@@ -18,6 +18,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/integrations/connections"
 	"github.com/shhac/crew-assistant/internal/integrations/github"
 	"github.com/shhac/crew-assistant/internal/lifecycle"
 	"github.com/shhac/crew-assistant/internal/quota"
@@ -51,6 +52,7 @@ const (
 // is in a workspace of its own, and each check in a copy of the revision of
 // its own.
 type Loop struct {
+	linear connections.Client
 	Core   *core.Service
 	Config func() config.Config
 	// Diagnostics is set before the loop starts.
@@ -93,7 +95,7 @@ type Loop struct {
 }
 
 func New(s *core.Service, cfg func() config.Config, demo bool) *Loop {
-	return &Loop{Core: s, Config: cfg, Demo: demo, runner: roles.Native{}, meter: &quota.Meter{}, github: github.New(), githubURL: github.URL, loopWake: make(chan struct{}, 1)}
+	return &Loop{Core: s, Config: cfg, Demo: demo, runner: roles.Native{}, meter: &quota.Meter{}, github: github.New(), linear: connections.New(), githubURL: github.URL, loopWake: make(chan struct{}, 1)}
 }
 
 // Nudge asks the loop to look again now rather than at its next tick, for

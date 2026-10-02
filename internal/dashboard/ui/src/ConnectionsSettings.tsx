@@ -7,6 +7,7 @@ export interface Connection {
   tool: "lin" | "agent-slack" | "agent-notion" | "agent-fathom";
   profiles: string[];
   import_assignments?: boolean;
+  allow_writes?: boolean;
 }
 interface ProfileDiscovery {
   tool: string;
@@ -72,6 +73,7 @@ export function ConnectionsSettings({
                 tool: "lin",
                 profiles: [],
                 import_assignments: false,
+                allow_writes: false,
               },
             ])
           }
@@ -171,6 +173,7 @@ function ConnectionEditor({
                 tool: picked.id,
                 profiles: [],
                 import_assignments: false,
+                allow_writes: false,
               });
             }}
           >
@@ -199,7 +202,22 @@ function ConnectionEditor({
             <span>Add issues assigned to you as projects</span>
           </label>
           <p className="hint" id={`connection-${index}-import-hint`}>
-            Leave off to use Linear only for reading.
+            Leave off to keep assignments from automatically becoming projects.
+          </p>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={connection.allow_writes ?? false}
+              onChange={(e) =>
+                onChange({ ...connection, allow_writes: e.target.checked })
+              }
+              aria-describedby={`connection-${index}-writes-hint`}
+            />
+            <span>Allow changes</span>
+          </label>
+          <p className="hint" id={`connection-${index}-writes-hint`}>
+            Let the PM and assistant change Linear (issues, comments, projects).
+            Off: they only read.
           </p>
         </>
       )}

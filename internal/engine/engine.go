@@ -17,6 +17,8 @@ import (
 // Config contains references to credentials, never their values: an API
 // provider's credential source reads the key only when a request is made.
 type Config struct {
+	Lin         bool
+	LinGuidance string
 	// Provider is the engine and how it is reached.
 	Provider harness.Provider
 	// APIProvider is the id of the named API provider an API model is reached
@@ -181,7 +183,7 @@ func (e *Engine) Chat(ctx context.Context, req Request) (Result, error) {
 		mergeContextUsage(&result.Usage, used, !usageObserved)
 		usageObserved = true
 	}
-	toolSchema, _ := json.Marshal(Tools())
+	toolSchema, _ := json.Marshal(Tools(e.cfg.Lin))
 	messageBudget := e.cfg.MaxContextBytes - len(toolSchema) - 2048
 	for turn := 0; turn < e.cfg.MaxTurns; turn++ {
 		if err := ctx.Err(); err != nil {
@@ -215,7 +217,7 @@ func (e *Engine) Chat(ctx context.Context, req Request) (Result, error) {
 			return result, errors.New("model returned too many tool calls")
 		}
 		for _, call := range m.ToolCalls {
-			args, err := validToolCall(call, seen)
+			args, err := validToolCall(call, seen, e.cfg.Lin)
 			if err != nil {
 				return result, err
 			}
@@ -293,7 +295,7 @@ func Complete(ctx context.Context, cfg Config, messages []Message, tools []Tool)
 }
 
 func (e *Engine) complete(ctx context.Context, messages []Message) (Message, Usage, error) {
-	return e.completeWithTools(ctx, messages, Tools())
+	return e.completeWithTools(ctx, messages, Tools(e.cfg.Lin))
 }
 
 // completeAttemptWithTools is one request through the harness, whichever
@@ -325,7 +327,9 @@ func outputCap(e harness.Engine, tokens int) int {
 	return tokens
 }
 
-func (e *Engine) systemPrompt() string { return Instructions(e.cfg.AssistantName, e.cfg.Personality) }
+func (e *Engine) systemPrompt() string {
+	return Instructions(e.cfg.AssistantName, e.cfg.Personality) + e.cfg.LinGuidance
+}
 
 // Instructions are the assistant's standing instructions. They name who it is
 // and change only when that does, so a model session started with them can be
@@ -381,8 +385,8 @@ func RunTool(ctx context.Context, executor ToolExecutor, onTool func(context.Con
 
 // CheckToolCall admits a call to a tool the assistant was offered, with
 // arguments that are a JSON object.
-func CheckToolCall(name string, args json.RawMessage) error {
-	if !knownTool(name) {
+func CheckToolCall(name string, args json.RawMessage, lin bool) error {
+	if !knownTool(name, lin) {
 		return errors.New("model requested an unavailable coordination tool")
 	}
 	var object map[string]json.RawMessage
@@ -395,12 +399,12 @@ func CheckToolCall(name string, args json.RawMessage) error {
 // validToolCall admits a tool call only if it names a tool the assistant was
 // offered, as a function, with a fresh ID and arguments that are JSON. It
 // records the ID in seen.
-func validToolCall(call ToolCall, seen map[string]bool) (json.RawMessage, error) {
+func validToolCall(call ToolCall, seen map[string]bool, lin bool) (json.RawMessage, error) {
 	if call.ID == "" || seen[call.ID] {
 		return nil, errors.New("model returned missing or duplicate tool-call ID")
 	}
 	seen[call.ID] = true
-	if !knownTool(call.Function.Name) || call.Type != "function" {
+	if !knownTool(call.Function.Name, lin) || call.Type != "function" {
 		return nil, errors.New("model requested an unavailable coordination tool")
 	}
 	args := json.RawMessage(call.Function.Arguments)

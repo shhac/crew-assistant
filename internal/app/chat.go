@@ -306,6 +306,7 @@ func (a *App) chatOnce(ctx context.Context, ec engine.Config, req engine.Request
 // request counted against the daily allowance and sized to the model's window.
 func (a *App) assistantConfig(ctx context.Context, cfg config.Config) engine.Config {
 	ec := EngineConfig(cfg.AssistantHarness())
+	ec.Lin, ec.LinGuidance = assistantLinGuidance(cfg.Connections)
 	ec.WorkDirRoot = a.Core.StateDirectory()
 	ec.BeforeRequest = func(ctx context.Context) error {
 		return a.Core.ReserveModelCall(ctx, a.Config().Limits.MaxModelCallsPerDay)

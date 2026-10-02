@@ -132,7 +132,7 @@ func TestRejectsCredentialBearingEndpointsAndRedirect(t *testing.T) {
 }
 func TestToolSchemaContainsOnlyCoordinationSurface(t *testing.T) {
 	required := map[string]bool{"read_state": true, "read_task": true, "ask_pm": true, "create_project": true, "update_brief": true, "rename_project": true, "set_team": true, "queue_task": true, "resolve_decision": true, "stop_task": true, "ask_decision": true, "remember_preference": true, "report_status": true, "list_connections": true, "query_connection": true, "set_landing": true, "set_run_recipe": true, "add_team_seat": true, "remove_team_seat": true, "set_parallel": true, "pause_landing": true, "land_task": true, "wake_me_when": true, "list_wakes": true, "cancel_wake": true, "order_tasks": true, "link_tasks": true, "unlink_tasks": true, "link_task_linear": true, "unlink_task_linear": true, "set_blocker": true, "clear_blocker": true, "message_team": true, "record_learning": true, "draw_member": true, "manage_conversation": true}
-	for _, tool := range Tools() {
+	for _, tool := range Tools(false) {
 		if !required[tool.Function.Name] {
 			t.Errorf("unexpected tool: %s", tool.Function.Name)
 		}
@@ -153,7 +153,7 @@ func TestAToolCallIsAdmittedOnlyWhenItIsWellFormedAndOffered(t *testing.T) {
 		return c
 	}
 	seen := map[string]bool{}
-	if _, err := validToolCall(call("1", "function", "read_state", "{}"), seen); err != nil {
+	if _, err := validToolCall(call("1", "function", "read_state", "{}"), seen, false); err != nil {
 		t.Fatal(err)
 	}
 	for name, c := range map[string]ToolCall{
@@ -163,7 +163,7 @@ func TestAToolCallIsAdmittedOnlyWhenItIsWellFormedAndOffered(t *testing.T) {
 		"not a function":    call("3", "code", "read_state", "{}"),
 		"broken arguments":  call("4", "function", "read_state", "{"),
 	} {
-		if _, err := validToolCall(c, seen); err == nil {
+		if _, err := validToolCall(c, seen, false); err == nil {
 			t.Errorf("admitted %s", name)
 		}
 	}

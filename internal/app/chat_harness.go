@@ -82,8 +82,8 @@ func chatSessionOptions(spec chatSpec) (session.Options, error) {
 	if err := os.MkdirAll(runtime, 0o700); err != nil {
 		return session.Options{}, err
 	}
-	defs := make([]session.ToolDefinition, 0, len(engine.Tools()))
-	for _, t := range engine.Tools() {
+	defs := make([]session.ToolDefinition, 0, len(engine.Tools(spec.Config.Lin)))
+	for _, t := range engine.Tools(spec.Config.Lin) {
 		defs = append(defs, session.ToolDefinition{Name: t.Function.Name, Description: t.Function.Description, Schema: t.Function.Parameters})
 	}
 	handler := session.ToolHandlerFunc(func(ctx context.Context, call session.ToolCall) (session.ToolResult, error) {

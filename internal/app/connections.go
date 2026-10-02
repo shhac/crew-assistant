@@ -36,6 +36,12 @@ func (a *App) runConnectionTool(ctx context.Context, name string, raw json.RawMe
 		result := []entry{}
 		for _, c := range a.Config().Connections {
 			detail := "Read-only; select an explicit configured profile on every query"
+			if c.Tool == "lin" {
+				detail = "Linear changes are off; lin only reads"
+				if c.AllowWrites {
+					detail = "Linear changes are allowed through lin"
+				}
+			}
 			if c.Tool == "agent-notion" {
 				detail = "Uses the CLI default account; pass an empty profile on every query"
 			}

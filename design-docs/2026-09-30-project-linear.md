@@ -21,3 +21,7 @@ The editor caches account options and states and loads only the chosen project's
 Tests cover realistic and oversized descriptions, rules/argv, pagination failure, atomic/concurrent receipts, readiness, removed connections/accounts, stale reads, 751-issue progress, unchanged writes, activity visibility, scoped cached options and board-link stacking. Generated assets are rebuilt from merged source. CA-52 remains the queued follow-up for editing arbitrary task issue/project links. Source writes, global enrollment, webhooks, extra filters and assistant tools are out of scope.
 
 Storage trade-off: bounded descriptions remained in task source records in the whole-state document so offline roles retained their original context. At the 8KiB limit, 50 imports could add roughly 400KiB to state writes and dashboard snapshots, even though the dashboard only displayed identifiers, titles and URLs. This kept persistence and context retrieval simple, but large backlogs would merit separating cold source context from the hot state document; this change did not introduce a second storage system.
+
+The assistant and PM lin tool, with per-connection permission for changes, was
+added in [the 2026-10-02 decision](decisions/2026-10-lin-tool.md). The intake and
+task-link reads described here remained read-only.

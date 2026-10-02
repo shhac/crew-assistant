@@ -13,7 +13,7 @@ import (
 )
 
 func TestEveryAssistantToolHasALabelTheOwnerCanRead(t *testing.T) {
-	for _, tool := range engine.Tools() {
+	for _, tool := range engine.Tools(true) {
 		if label, ok := engine.ToolLabel(tool.Function.Name); !ok || label == "" {
 			t.Errorf("%s has no label, so any turn that uses it fails", tool.Function.Name)
 		}
@@ -22,7 +22,7 @@ func TestEveryAssistantToolHasALabelTheOwnerCanRead(t *testing.T) {
 
 func TestEveryToolTheAssistantIsOfferedHasAnActionAndNoMore(t *testing.T) {
 	offered := map[string]bool{}
-	for _, tool := range engine.Tools() {
+	for _, tool := range engine.Tools(true) {
 		offered[tool.Function.Name] = true
 		if toolActions[tool.Function.Name] == nil {
 			t.Errorf("%s is offered to the assistant but does nothing", tool.Function.Name)

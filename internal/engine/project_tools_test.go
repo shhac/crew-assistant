@@ -3,7 +3,7 @@ package engine
 import "testing"
 
 func TestProjectDirectoryToolsRemainStrictWithNullableLinks(t *testing.T) {
-	for _, tool := range Tools() {
+	for _, tool := range Tools(false) {
 		if tool.Function.Name != "create_project" && tool.Function.Name != "update_project" {
 			continue
 		}

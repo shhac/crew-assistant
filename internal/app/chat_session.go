@@ -114,7 +114,7 @@ func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.
 	if err != nil {
 		return engine.Result{}, err
 	}
-	instructions := engine.Instructions(ec.AssistantName, ec.Personality) + sessionNote
+	instructions := engine.Instructions(ec.AssistantName, ec.Personality) + ec.LinGuidance + sessionNote
 	spec := chatSpec{Config: ec, Browser: browser, Instructions: instructions, StateDir: a.Core.StateDirectory(), Tool: a.sessionTool, Context: a.sessionContext}
 	key := chatKey(conversation, ec, instructions, browser)
 	if err := a.foldBeforeNewSession(ctx, turn.UserMessageID, ec, key, record); err != nil {
@@ -352,11 +352,12 @@ func chatKey(conversation string, ec engine.Config, instructions string, browser
 // model is never told an error's own words: they can carry remote data.
 func (a *App) sessionTool(ctx context.Context, name string, args json.RawMessage) session.ToolResult {
 	declined := session.ToolResult{Content: engine.ToolDeclined, IsError: true}
-	if err := engine.CheckToolCall(name, args); err != nil {
-		return session.ToolResult{Content: err.Error(), IsError: true}
-	}
 	a.sessions.mu.Lock()
 	turn := a.sessions.live.currentTurn()
+	if err := engine.CheckToolCall(name, args, turn != nil && turn.cfg.Lin); err != nil {
+		a.sessions.mu.Unlock()
+		return session.ToolResult{Content: err.Error(), IsError: true}
+	}
 	allowed := turn != nil && turn.calls < turn.limit
 	if turn != nil {
 		turn.calls++

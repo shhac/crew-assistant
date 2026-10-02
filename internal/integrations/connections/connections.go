@@ -1,5 +1,6 @@
-// Package connections invokes a fixed read-only surface of the owner's existing
-// CLIs. Credentials stay with those CLIs; models never supply commands or flags.
+// Package connections invokes approved surfaces of the owner's existing CLIs.
+// Credentials stay with those CLIs. Fixed queries are read-only; lin commands
+// pass an explicit allowlist and require a per-connection opt-in for changes.
 package connections
 
 import (
@@ -21,7 +22,10 @@ import (
 )
 
 type Runner func(context.Context, string, []string) ([]byte, error)
-type Client struct{ Run Runner }
+type Client struct {
+	Run        Runner
+	RunClipped ClippedRunner
+}
 type Profile struct {
 	Name   string `json:"name"`
 	Detail string `json:"detail,omitempty"`
