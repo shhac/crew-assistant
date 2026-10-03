@@ -775,7 +775,7 @@ If it needs more than about 10 changes or would touch more than about 30 files, 
 	if local.Len() > 0 || external.Len() > 0 {
 		b.WriteString("\nA plan may depend on any task listed above.\n")
 	}
-	b.WriteString("\nPut conditions no task tracks under prerequisites. Implementation will wait for the owner's confirmation or decision to drop each condition.\n")
+	b.WriteString("\nPut conditions no task tracks under prerequisites. Implementation will wait for the owner's confirmation or decision to drop each condition, so a prerequisite is only something that must exist before this task's work can start. What can only happen after this task lands, such as CI passing on it, tagging or publishing its release, or a manual check by the owner, is not a prerequisite: leave it out, and the implementer can hand it over as an owner step.\n")
 	for _, blocker := range t.Blockers {
 		if blocker.Kind == core.BlockerPrerequisite {
 			outcome := blocker.Outcome

@@ -137,6 +137,11 @@ func TestOtherProjectsAreShownAndPrerequisiteOutcomesCarried(t *testing.T) {
 	if !strings.Contains(prompt, "Unfinished tasks in your other projects:\nLibrary:\n- LIB-1") || strings.Contains(prompt, "Done") || !strings.Contains(prompt, `"prerequisites"`) {
 		t.Fatal(prompt)
 	}
+	// A researcher once held a task back on tagging its own release, which
+	// can only follow the task landing.
+	if !strings.Contains(prompt, "What can only happen after this task lands") || !strings.Contains(prompt, "is not a prerequisite") {
+		t.Fatal("prerequisites are not told apart from steps after landing:", prompt)
+	}
 	own.Plan = &core.Plan{Summary: "Go", Exists: []string{"Existing library"}, Prerequisites: []core.Prerequisite{{What: "Library tagged", Outcome: "confirmed"}, {What: "Owner check", Outcome: "dropped"}}}
 	shown := planText(own)
 	if strings.Index(shown, "Prerequisites:") > strings.Index(shown, "What already exists:") {
