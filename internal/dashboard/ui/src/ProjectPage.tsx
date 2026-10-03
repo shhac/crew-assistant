@@ -1,3 +1,4 @@
+import { ReleasedMeta } from "./ReleaseSettings";
 import { PMChat, NoPM } from "./PMChat";
 import { pmSeat } from "./members";
 import { Board } from "./Board";
@@ -125,6 +126,7 @@ export function ProjectPage({
               <span>{landsBy(project.playbook)}</span>
             </>
           )}
+          <ReleasedMeta release={project.releases?.[0]} />
         </p>
         <nav className="tabs" aria-label="Project">
           {projectTabs

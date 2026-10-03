@@ -10,6 +10,7 @@ require (
 	github.com/shhac/lib-agent-output v0.12.0
 	github.com/slack-go/slack v0.29.0
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/mod v0.38.0
 	modernc.org/sqlite v1.58.0
 )
 

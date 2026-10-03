@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Folders } from "./ProjectFolders";
 import { RunRecipeSettings } from "./RunRecipe";
+import { ReleaseSettings } from "./ReleaseSettings";
 import { LandingSettings } from "./ProjectLanding";
 import { TeamSettings } from "./TeamSettings";
 import { ProjectLinear } from "./ProjectLinear";
@@ -58,6 +59,13 @@ export function ConfigTab({
             playbook={playbook}
             refresh={refresh}
           />
+          {(playbook.land?.pull_requests || playbook.land?.via === "push") && (
+            <ReleaseSettings
+              project={project}
+              playbook={playbook}
+              refresh={refresh}
+            />
+          )}
         </section>
       )}
       <section className="config-group">

@@ -71,6 +71,10 @@ func (lp *Loop) pass(ctx context.Context, waited bool) (bool, []<-chan any, erro
 	if err := lp.settleDeliveries(ctx, snap); err != nil {
 		return false, nil, err
 	}
+	releases, releaseErr := lp.manageReleases(ctx, snap, waited)
+	if releaseErr != nil || len(releases) > 0 {
+		return len(releases) > 0, releases, releaseErr
+	}
 	if err := lp.checkBlockers(ctx, snap); err != nil {
 		return false, nil, err
 	}

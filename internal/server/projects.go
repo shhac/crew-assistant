@@ -112,6 +112,14 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		v, err := a.Work.SetSeatBrowser(r.Context(), r.PathValue("id"), in)
 		reply(w, 200, v, err)
 	})
+	mux.HandleFunc("PUT /api/projects/{id}/release", func(w http.ResponseWriter, r *http.Request) {
+		var in *core.ReleasePolicy
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.SetRelease(r.Context(), r.PathValue("id"), in)
+		reply(w, 200, v, err)
+	})
 	mux.HandleFunc("PUT /api/projects/{id}/run", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Run *core.RunRecipe `json:"run"`

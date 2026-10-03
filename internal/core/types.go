@@ -49,13 +49,16 @@ type Project struct {
 	Paused   bool   `json:"paused,omitempty"`
 	// LandingPaused holds the project's changes from landing, as for a
 	// code freeze, while the rest of its work goes on.
-	LandingPaused     *LandingPause `json:"landing_paused,omitempty"`
-	Brief             Brief         `json:"brief"`
-	Playbook          *Playbook     `json:"playbook,omitempty"`
-	Directories       []string      `json:"directories"`
-	ScratchDirectory  string        `json:"scratch_directory"`
-	SourceID          string        `json:"source_id,omitempty"`
-	SourceDescription string        `json:"source_description,omitempty"`
+	LandingPaused *LandingPause `json:"landing_paused,omitempty"`
+	// Release holds the pending release; Releases keeps the latest successful releases.
+	Release           *ReleaseRun     `json:"release,omitempty"`
+	Releases          []ReleaseRecord `json:"releases,omitempty"`
+	Brief             Brief           `json:"brief"`
+	Playbook          *Playbook       `json:"playbook,omitempty"`
+	Directories       []string        `json:"directories"`
+	ScratchDirectory  string          `json:"scratch_directory"`
+	SourceID          string          `json:"source_id,omitempty"`
+	SourceDescription string          `json:"source_description,omitempty"`
 	// Linear is optional intake through the owner's configured CLI account.
 	Linear *LinearLink `json:"linear,omitempty"`
 	// LinearVersion invalidates pending reads, including after unlink/relink.

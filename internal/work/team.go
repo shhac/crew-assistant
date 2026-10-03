@@ -236,6 +236,7 @@ func chosenTeam(in TeamChoice, snap core.Snapshot, p core.Project) (core.Playboo
 	if p.Playbook != nil {
 		playbook.MaxActive = p.Playbook.MaxActive
 		playbook.StageLimits = maps.Clone(p.Playbook.StageLimits)
+		playbook.Release = p.Playbook.Release
 	}
 	if playbook.Medium == core.MediumGit {
 		if playbook.Repo, err = teamRepo(p, playbook.Repo); err != nil {

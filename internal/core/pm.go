@@ -18,10 +18,12 @@ const DecisionPMQuestion = "pm-question"
 // task in triage goes, the queued tasks in order, and the full list of what
 // a task waits for, for any task it changes.
 type PMAnswer struct {
-	Triage  []TriageRelease
-	Order   []string
-	Depends map[string][]string
-	Note    string
+	Release        *ReleaseProposal
+	ReleaseContext ReleaseContext
+	Triage         []TriageRelease
+	Order          []string
+	Depends        map[string][]string
+	Note           string
 	// PRFlow is the PM's choice for tasks that started with pull requests,
 	// since turned off: whether each carries on with them.
 	PRFlow []PRFlowChoice
@@ -61,6 +63,11 @@ func (s *Service) ApplyPM(ctx context.Context, projectID string, in PMAnswer) (s
 		}
 		p.PMDue, p.PMDirection = false, ""
 		now := s.now().UTC()
+		if in.Release != nil {
+			if err := proposeRelease(v, p, *in.Release, in.ReleaseContext, now); err != nil {
+				record(v, now, p.ID, "release.refused", "Release proposal refused: "+err.Error())
+			}
+		}
 		for _, c := range in.PRFlow {
 			id := canonicalID(v, c.Task)
 			if !slices.Contains(p.PRChoices, id) {

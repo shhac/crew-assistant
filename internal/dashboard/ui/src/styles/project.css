@@ -175,3 +175,13 @@ button.activity-row {
     gap: 2px;
   }
 }
+
+.release-notes {
+  white-space: pre-wrap;
+}
+.release-notes-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

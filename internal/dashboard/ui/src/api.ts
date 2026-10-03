@@ -147,7 +147,23 @@ export interface AssistantInput {
   /** A new assistant's stand-in face and the look to draw, from a suggestion. */
   avatar?: AvatarSpec;
 }
+export interface ReleasePolicy {
+  when: string;
+  check?: string;
+  github?: string;
+  approve?: string;
+}
+export interface ReleaseRecord {
+  version: string;
+  commit: string;
+  notes: string;
+  at: string;
+  approved_by?: string;
+  published?: string;
+  note?: string;
+}
 export interface Playbook {
+  release?: ReleasePolicy;
   template: string;
   medium: string;
   roles: Role[];
@@ -277,6 +293,7 @@ export interface LinearRef {
   at: string;
 }
 export interface Project {
+  releases?: ReleaseRecord[];
   paused?: boolean;
   /** Landing held, as for a code freeze, while other work goes on. */
   landing_paused?: { reason?: string; at: string };
@@ -717,7 +734,9 @@ export type DecisionKind =
   | "question"
   | "escalation"
   | "failure"
-  | "pm-question";
+  | "pm-question"
+  | "release"
+  | "release-failed";
 export interface Decision {
   answer?: string;
   disposition?: "choice" | "custom" | "dismissed";
@@ -1583,4 +1602,11 @@ export function unlinkTaskLinear(
     `/api/projects/${encodeURIComponent(project)}/tasks/${encodeURIComponent(task)}/linear/${link.kind}/${encodeURIComponent(link.id)}`,
     { method: "DELETE" },
   );
+}
+
+export function setRelease(projectID: string, release: ReleasePolicy | null) {
+  return api<Project>(`/api/projects/${projectID}/release`, {
+    method: "PUT",
+    body: JSON.stringify(release),
+  });
 }

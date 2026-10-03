@@ -58,10 +58,12 @@ type Loop struct {
 	Config func() config.Config
 	// Diagnostics is set before the loop starts.
 	Diagnostics *diagnostics.Logger
-	Demo        bool
-	runner      roles.Runner
-	meter       *quota.Meter
-	keptUsage   usageStore
+	// Now is the clock used for release guidance; tests can pin it.
+	Now       func() time.Time
+	Demo      bool
+	runner    roles.Runner
+	meter     *quota.Meter
+	keptUsage usageStore
 	// github reads and merges pull requests; githubURL is where git pushes.
 	// Both are replaced in tests.
 	github    github.Client
@@ -407,4 +409,11 @@ func (lp *Loop) takeDirection(ctx context.Context, t core.Task) error {
 		return fmt.Sprintf("Revising %s with your note", t.Objective), nil
 	})
 	return err
+}
+
+func (lp *Loop) now() time.Time {
+	if lp.Now != nil {
+		return lp.Now().UTC()
+	}
+	return time.Now().UTC()
 }

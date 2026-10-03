@@ -33,6 +33,7 @@ func (s *Service) AnswerDecision(ctx context.Context, id, answer string) (Decisi
 // DismissDecision closes an obsolete question with an audit reason. It is not an
 // answer, approval or instruction: it never changes or resumes an assignment.
 // A worker waiting on this question stays waiting until explicitly instructed.
+// Release decisions instead abandon the pending release, as Not now / Leave it.
 func (s *Service) DismissDecision(ctx context.Context, id, reason string) (Decision, error) {
 	reason = strings.TrimSpace(reason)
 	if reason == "" || len(reason) > 4096 {
@@ -59,6 +60,13 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 			}
 		}
 		now := s.now().UTC()
+		if d.Kind == DecisionRelease || d.Kind == DecisionReleaseFailed {
+			choice := answer
+			if disposition != DispositionChoice {
+				choice = ""
+			}
+			resolveRelease(v, d, choice, now)
+		}
 		if d.Kind == DecisionPRFlow && disposition == DispositionChoice {
 			choosePRFlow(v, d.TaskID, answer == ChoiceKeepPR, "You", now)
 		}

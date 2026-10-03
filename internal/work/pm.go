@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/text"
@@ -87,6 +88,25 @@ func (lp *Loop) pmTurn(ctx context.Context, projectID string, seat core.Role) er
 		return err
 	}
 	base := pmPrompt(snap, p)
+	var releaseSeen core.ReleaseContext
+	if p.Playbook != nil && p.Playbook.Release != nil {
+		releaseSeen, err = lp.releaseContext(ctx, p)
+		if err != nil {
+			releaseSeen.Error = err.Error()
+		}
+		base += pmReleasePrompt(p, releaseSeen, lp.now())
+		for i := len(snap.Decisions) - 1; i >= 0; i-- {
+			d := snap.Decisions[i]
+			if d.ProjectID == p.ID && d.Kind == core.DecisionRelease && d.Status == core.DecisionResolved && d.Answer == "Not now" {
+				resolved := "unknown time"
+				if d.ResolvedAt != nil {
+					resolved = d.ResolvedAt.UTC().Format(time.RFC3339)
+				}
+				base += fmt.Sprintf("\nPreviously declined: %s at %s\n", d.Title, resolved)
+				break
+			}
+		}
+	}
 	// The PM reads only what its prompt carries: no repository, no writing.
 	// Its tools tidy tasks, link them and queue new ones.
 	spec := lp.baseSpec(seat, dir, base)
@@ -103,6 +123,7 @@ func (lp *Loop) pmTurn(ctx context.Context, projectID string, seat core.Role) er
 	if parseErr != nil {
 		return lp.skipPM(ctx, p.ID, "its reply could not be read")
 	}
+	answer.ReleaseContext = releaseSeen
 	answer.SeenOrderedBy, answer.SeenOrderedAt = p.OrderedBy, p.OrderedAt
 	if _, err := lp.Core.ApplyPM(ctx, p.ID, answer); err != nil {
 		return err
@@ -364,7 +385,8 @@ func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (string, 
 // parsePM reads the PM's JSON answer, tolerating a fenced block or prose.
 func parsePM(reply string) (core.PMAnswer, []string, error) {
 	var in struct {
-		Triage []struct {
+		Release *core.ReleaseProposal `json:"release"`
+		Triage  []struct {
 			Task     string `json:"task"`
 			To       string `json:"to"`
 			Question string `json:"question"`
@@ -384,7 +406,7 @@ func parsePM(reply string) (core.PMAnswer, []string, error) {
 	if err := decodeReply(reply, &in); err != nil {
 		return core.PMAnswer{}, nil, errors.New("the reply was not valid JSON")
 	}
-	answer := core.PMAnswer{Order: in.Order, Depends: map[string][]string{}, Note: text.Clip(strings.TrimSpace(in.Note), 300)}
+	answer := core.PMAnswer{Release: in.Release, Order: in.Order, Depends: map[string][]string{}, Note: text.Clip(strings.TrimSpace(in.Note), 300)}
 	for _, d := range in.Depends {
 		answer.Depends[strings.TrimSpace(d.Task)] = d.On
 	}

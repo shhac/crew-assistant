@@ -6,6 +6,13 @@ import { recordedTime } from "./ui";
  * a readable phrase rather than leaking the internal identifier.
  */
 const labels: Record<string, string> = {
+  "release.proposed": "Release proposed",
+  "release.refused": "Release deferred",
+  "release.waiting": "Release waiting",
+  "release.checked": "Release check",
+  "release.published": "Release published",
+  "release.failed": "Release stopped",
+  "release.recorded": "Released",
   "assistant.review": "Assistant",
   "assistant.theme": "Appearance",
   "assistant.update": "Assistant",

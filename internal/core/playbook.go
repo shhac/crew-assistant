@@ -128,6 +128,8 @@ type Playbook struct {
 	// Land says what landing an approved change means for this project. Only
 	// the owner or the assistant sets it; nothing inside the project can.
 	Land LandPolicy `json:"land,omitzero"`
+	// Release is set only by the owner and enables checked version tagging.
+	Release *ReleasePolicy `json:"release,omitempty"`
 	// MaxActive is how many of the project's tasks may be under way at once;
 	// 0 means no overall limit. See ActiveCap.
 	MaxActive int `json:"max_active,omitempty"`
@@ -191,6 +193,11 @@ var Templates = map[string]Playbook{
 }
 
 func (p Playbook) Validate() error {
+	if p.Release != nil {
+		if err := p.Release.validate(p); err != nil {
+			return err
+		}
+	}
 	switch p.Medium {
 	case MediumDocuments:
 		if p.Land != (LandPolicy{}) {

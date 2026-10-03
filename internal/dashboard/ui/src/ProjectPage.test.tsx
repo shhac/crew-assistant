@@ -2210,7 +2210,7 @@ describe("Config groups", () => {
     ]);
     const cards = [
       ["Column capacity", "Team settings", "Linear"],
-      ["Landing"],
+      ["Landing", "Releases"],
       ["Folders", "Workspace", "Running the app"],
       ["Name", "Request IDs"],
     ];

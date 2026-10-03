@@ -32,10 +32,6 @@ github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qq
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/shhac/lib-agent-cli v0.27.0 h1:dqrNn5QlXB5i3i8ScZ/Qf0ZxVhh6max9U3XUqLKsZOI=
 github.com/shhac/lib-agent-cli v0.27.0/go.mod h1:+f4RsI2kX5rkh/BQW2Sr5KFXeZud/vL9RmwsUjeH7Fc=
-github.com/shhac/lib-agent-harness v0.18.0 h1:g6M+EXUWHSUgN9BZArw8qAUsfRSv3YhXgy3T2VYtTz0=
-github.com/shhac/lib-agent-harness v0.18.0/go.mod h1:M5i63Tc8wvQfEcxmaYUrgaDqFq0aV5nSAdvIkDiM9OU=
-github.com/shhac/lib-agent-harness v0.19.0 h1:36/8RRh0MeU8GEpOUIWg4XWa5VaCdYQENbRT22/vt/M=
-github.com/shhac/lib-agent-harness v0.19.0/go.mod h1:M5i63Tc8wvQfEcxmaYUrgaDqFq0aV5nSAdvIkDiM9OU=
 github.com/shhac/lib-agent-harness v0.20.0 h1:zaiHReLIDTMdzLTiE7ItFEDLsFKVf40SoCyMIy3dqZ8=
 github.com/shhac/lib-agent-harness v0.20.0/go.mod h1:M5i63Tc8wvQfEcxmaYUrgaDqFq0aV5nSAdvIkDiM9OU=
 github.com/shhac/lib-agent-keyring v0.2.0 h1:GHiApF03bDg8YMYEGI8uAFfLllqW0eA90sWppgMVoJc=
