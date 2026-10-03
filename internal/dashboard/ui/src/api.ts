@@ -785,6 +785,7 @@ export interface ChatTurn {
   error?: string;
   loading_phrase?: string;
   model_status?: string;
+  browser_note?: string;
   retry_at?: string;
   revision: number;
   events: ChatToolEvent[];

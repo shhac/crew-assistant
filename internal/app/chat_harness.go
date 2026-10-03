@@ -26,10 +26,37 @@ import (
 // not as long as any one turn.
 func harnessChatOpener(life context.Context) chatOpener {
 	return func(ctx context.Context, spec chatSpec, ref *session.Ref) (chatModel, session.Opened, error) {
+		if ctx.Err() != nil {
+			return nil, session.Opened{}, ctx.Err()
+		}
 		h := &harnessChat{life: life, spec: spec, ref: ref}
 		opened, err := h.open()
-		if spec.Browser.On && roles.BrowserUnreachable(err) {
+		if ctx.Err() != nil {
+			if h.session() != nil {
+				h.Close()
+			}
+			return nil, session.Opened{}, ctx.Err()
+		}
+		if reason, unusable := roles.BrowserUnusable(err, spec.BridgeHome); spec.Browser.On && unusable {
+			browserErr := err
 			opened, err = h.withoutBrowser()
+			if ctx.Err() != nil {
+				if h.session() != nil {
+					h.Close()
+				}
+				return nil, session.Opened{}, ctx.Err()
+			}
+			if err == nil {
+				h.reason = reason
+			} else {
+				var capability *session.CapabilityError
+				if errors.As(err, &capability) {
+					err = errors.Join(errNoChatSession, browserErr, err)
+				} else {
+					err = errors.Join(browserErr, err)
+				}
+				return nil, session.Opened{}, err
+			}
 		}
 		var capability *session.CapabilityError
 		if errors.As(err, &capability) {
@@ -45,7 +72,9 @@ func harnessChatOpener(life context.Context) chatOpener {
 }
 
 // openChatSession opens the session spec describes, resuming ref when it can.
-func openChatSession(life context.Context, spec chatSpec, ref *session.Ref) (*session.Session, session.Opened, error) {
+var openChatSession = realOpenChatSession
+
+func realOpenChatSession(life context.Context, spec chatSpec, ref *session.Ref) (*session.Session, session.Opened, error) {
 	o, err := chatSessionOptions(spec)
 	if err != nil {
 		return nil, session.Opened{}, err
@@ -61,10 +90,11 @@ func openChatSession(life context.Context, spec chatSpec, ref *session.Ref) (*se
 	return s, opened, err
 }
 
-// withoutBrowser is spec for a chat whose browser isn't connected: it goes on
+// withoutBrowser is spec for a chat whose browser can't be used: it goes on
 // limited to the assistant's tools until the chat next opens a session.
 func withoutBrowser(spec chatSpec) chatSpec {
 	spec.Browser = config.Browser{}
+	spec.BridgeHome = ""
 	return spec
 }
 
@@ -117,6 +147,9 @@ func chatSessionOptions(spec chatSpec) (session.Options, error) {
 		// is sandboxed, reading but never writing, its shell reaching no
 		// network, rather than restricted to the assistant's tools.
 		o.Sandbox, o.Browser = &session.Sandbox{Tools: &host}, true
+		if o.Provider.Engine == harness.Codex {
+			o.BrowserBridgeHome = spec.BridgeHome
+		}
 		o.Instructions.Text = strings.TrimSpace(o.Instructions.Text + "\n\n" + roles.BrowserGuide(assistantBrowserOpening, b.Name))
 	} else {
 		o.Restriction = &session.Restriction{Tools: host}
@@ -183,11 +216,15 @@ func chatLoop(ec engine.Config) session.Loop {
 // harnessChat is a chat session held by lib-agent-harness, with what it was
 // opened from, so it can open again without the browser.
 type harnessChat struct {
-	life context.Context
-	ref  *session.Ref
-	mu   sync.Mutex
-	s    *session.Session
-	spec chatSpec
+	life   context.Context
+	ref    *session.Ref
+	mu     sync.Mutex
+	s      *session.Session
+	spec   chatSpec
+	reason string
+	told   bool
+	// turner substitutes a turn in offline fallback tests.
+	turner func(context.Context, string, func(session.Event)) (session.Result, error)
 }
 
 func (h *harnessChat) session() *session.Session {
@@ -231,21 +268,55 @@ func (h *harnessChat) browsing() bool {
 	return h.spec.Browser.On
 }
 
+func noChatBrowserNote(reason string) string {
+	return "You have no browser in this conversation, whatever your instructions say. " + reason + " Tell the owner if their request needs the browser."
+}
+
+func (h *harnessChat) BrowserReason() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.reason
+}
+
+func (h *harnessChat) browserText(text string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.reason != "" && !h.told {
+		h.told = true
+		return noChatBrowserNote(h.reason) + "\n\n" + text
+	}
+	return text
+}
+
 func (h *harnessChat) Turn(ctx context.Context, text string, onEvent func(session.Event)) (session.Result, error) {
-	result, err := h.turn(ctx, text, onEvent)
-	if !h.browsing() || !roles.BrowserUnreachable(err) {
+	result, err := h.turn(ctx, h.browserText(text), onEvent)
+	if ctx.Err() != nil {
+		return result, ctx.Err()
+	}
+	h.mu.Lock()
+	home := h.spec.BridgeHome
+	h.mu.Unlock()
+	reason, unusable := roles.BrowserUnusable(err, home)
+	if !h.browsing() || !unusable {
 		return result, err
 	}
-	// Claude says whether the browser is connected only once its first
-	// turn starts, before the model sees it, so that turn runs again on a
-	// session without the browser.
+	// Browser failures precede the model seeing the turn.
 	if _, reopenErr := h.withoutBrowser(); reopenErr != nil {
 		return result, errors.Join(err, reopenErr)
 	}
-	return h.turn(ctx, text, onEvent)
+	if ctx.Err() != nil {
+		return result, ctx.Err()
+	}
+	h.mu.Lock()
+	h.reason = reason
+	h.mu.Unlock()
+	return h.turn(ctx, h.browserText(text), onEvent)
 }
 
 func (h *harnessChat) turn(ctx context.Context, text string, onEvent func(session.Event)) (session.Result, error) {
+	if h.turner != nil {
+		return h.turner(ctx, text, onEvent)
+	}
 	s := h.session()
 	// The turn is bound to the session's life, not the request's: cancelling
 	// the context a turn started with ends the whole session.

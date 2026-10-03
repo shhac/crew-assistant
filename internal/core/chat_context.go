@@ -61,3 +61,20 @@ func (s *Service) SetChatModelStatus(ctx context.Context, id, status string, ret
 		return nil
 	})
 }
+
+// SetChatBrowserNote keeps the browser fallback visible after the reply finishes.
+func (s *Service) SetChatBrowserNote(ctx context.Context, id, note string) error {
+	if len(note) > 4096 {
+		return errors.New("browser note too long")
+	}
+	return s.store.update(ctx, func(v *Snapshot) error {
+		t := chatTurn(v, id)
+		if t == nil {
+			return ErrNotFound
+		}
+		if t.Status == "running" {
+			t.BrowserNote = note
+		}
+		return nil
+	})
+}

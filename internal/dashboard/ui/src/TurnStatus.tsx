@@ -48,6 +48,7 @@ export function TurnStatus({
           )}
         </p>
       )}
+      {turn.browser_note && <p className="muted small">{turn.browser_note}</p>}
       {turn.error && (
         <p className="error" role="alert">
           {turn.error}

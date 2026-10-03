@@ -21,13 +21,13 @@ func TestAssistantLinExposureGuidanceAndSessionKey(t *testing.T) {
 	if ec.Lin || ec.LinGuidance != "" || engine.CheckToolCall("lin", json.RawMessage(`{}`), ec.Lin) == nil {
 		t.Fatal("unconnected assistant offered lin")
 	}
-	key := chatKey("conversation", ec, ec.LinGuidance, config.Browser{})
+	key := chatKey("conversation", ec, ec.LinGuidance, config.Browser{}, "")
 	cfg.Connections = []config.Connection{{ID: "linear", Name: "Linear", Tool: "lin", Profiles: []string{"home"}}}
 	if err := a.UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
 	ec = a.assistantConfig(ctx, cfg)
-	if !ec.Lin || !strings.Contains(ec.LinGuidance, "Use the lin tool") || engine.CheckToolCall("lin", json.RawMessage(`{}`), ec.Lin) != nil || key == chatKey("conversation", ec, ec.LinGuidance, config.Browser{}) {
+	if !ec.Lin || !strings.Contains(ec.LinGuidance, "Use the lin tool") || engine.CheckToolCall("lin", json.RawMessage(`{}`), ec.Lin) != nil || key == chatKey("conversation", ec, ec.LinGuidance, config.Browser{}, "") {
 		t.Fatal("connected assistant missing capability or changed key")
 	}
 	for _, enabled := range []bool{false, true} {

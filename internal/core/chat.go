@@ -11,6 +11,7 @@ import (
 // ChatTurn is a durable owner message. Queued content is kept out of the model
 // conversation until its turn starts; the client ID makes acceptance retryable.
 type ChatTurn struct {
+	BrowserNote        string     `json:"browser_note,omitempty"`
 	ModelStatus        string     `json:"model_status,omitempty"`
 	RetryAt            time.Time  `json:"retry_at,omitempty"`
 	ID                 string     `json:"id"`

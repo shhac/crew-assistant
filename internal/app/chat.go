@@ -12,6 +12,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/lifecycle"
+	"github.com/shhac/crew-assistant/internal/roles"
 )
 
 var ErrChatQueueUnavailable = errors.New("the chat has stopped; restart crew-assistant to pick up waiting messages")
@@ -257,17 +258,28 @@ func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Resul
 	}
 	// The config is read once for the turn: a rate limit rests the provider
 	// the turn's requests went to, whatever Settings say by the time it ends.
-	result, err := a.runChatTurnOn(ctx, turn, ec, seated.Browser)
+	result, err := a.runChatTurnOn(ctx, turn, ec, seated.Browser, cfg.Engines.BridgeHome(ec.Engine()))
 	return result, a.restRateLimited(cfg, ec, err)
 }
 
 // runChatTurnOn runs a chat turn on the model ec reaches, with the owner's
 // browser where the assistant may use it and the turn runs on a session.
-func (a *App) runChatTurnOn(ctx context.Context, turn core.ChatTurn, ec engine.Config, browser config.Browser) (engine.Result, error) {
+func (a *App) runChatTurnOn(ctx context.Context, turn core.ChatTurn, ec engine.Config, browser config.Browser, bridgeHome string) (engine.Result, error) {
 	// On a model session the CLI keeps the conversation and compacts it
 	// itself; the turn-by-turn way below sends everything each time.
-	if result, err := a.runSessionTurn(ctx, turn, ec, browser); !errors.Is(err, errNoChatSession) {
-		return result, err
+	result, sessionErr := a.runSessionTurn(ctx, turn, ec, browser, bridgeHome)
+	if !errors.Is(sessionErr, errNoChatSession) {
+		return result, sessionErr
+	}
+	reason := ""
+	if browser.On {
+		reason, _ = roles.BrowserUnusable(sessionErr, bridgeHome)
+		if reason == "" {
+			reason = "This engine cannot hold a browser session here."
+		}
+		if err := a.Core.SetChatBrowserNote(ctx, turn.ID, "Running without the browser. "+reason); err != nil {
+			return engine.Result{}, err
+		}
 	}
 	if err := a.compactChatHistory(ctx, turn.UserMessageID, ec); err != nil {
 		return engine.Result{}, err
@@ -277,8 +289,12 @@ func (a *App) runChatTurnOn(ctx context.Context, turn core.ChatTurn, ec engine.C
 		return engine.Result{}, err
 	}
 	go a.startChatLoading(ctx, turn.ID, turn.Message, history)
-	req := engine.Request{Message: turn.Message, History: history, Context: raw}
-	result, err := a.chatOnce(ctx, ec, req)
+	message := turn.Message
+	if reason != "" {
+		message = noChatBrowserNote(reason) + "\n\n" + message
+	}
+	req := engine.Request{Message: message, History: history, Context: raw}
+	result, err = a.chatOnce(ctx, ec, req)
 	a.recordWindow(ctx, ec, result.Usage)
 	// A model can turn out to have a smaller window than the turn was sized
 	// for, such as one just chosen in Settings. Its refusal says so; the turn

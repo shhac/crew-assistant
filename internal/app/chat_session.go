@@ -48,6 +48,8 @@ type chatModel interface {
 type chatSpec struct {
 	// Config names the engine and the CLI and login it runs on.
 	Config engine.Config
+	// BridgeHome selects only the Codex browser declaration, separately from login.
+	BridgeHome string
 	// Browser is the owner's browser the assistant may use.
 	Browser      config.Browser
 	Instructions string
@@ -101,7 +103,7 @@ type chatSessions struct {
 // or resuming it first. errNoChatSession means it can't, and the turn should
 // run the stateless way: the engine can't hold a session whose only tools
 // are the assistant's.
-func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.Config, browser config.Browser) (engine.Result, error) {
+func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.Config, browser config.Browser, bridgeHome string) (engine.Result, error) {
 	if a.sessions.open == nil || !harness.Support(ec.Provider.Engine, harness.Session, harness.RestrictTools).Usable() {
 		return engine.Result{}, errNoChatSession
 	}
@@ -115,14 +117,24 @@ func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.
 		return engine.Result{}, err
 	}
 	instructions := engine.Instructions(ec.AssistantName, ec.Personality) + ec.LinGuidance + sessionNote
-	spec := chatSpec{Config: ec, Browser: browser, Instructions: instructions, StateDir: a.Core.StateDirectory(), Tool: a.sessionTool, Context: a.sessionContext}
-	key := chatKey(conversation, ec, instructions, browser)
+	if !browser.On || ec.Provider.Engine != harness.Codex {
+		bridgeHome = ""
+	}
+	spec := chatSpec{BridgeHome: bridgeHome, Config: ec, Browser: browser, Instructions: instructions, StateDir: a.Core.StateDirectory(), Tool: a.sessionTool, Context: a.sessionContext}
+	key := chatKey(conversation, ec, instructions, browser, bridgeHome)
 	if err := a.foldBeforeNewSession(ctx, turn.UserMessageID, ec, key, record); err != nil {
 		return engine.Result{}, err
 	}
 	live, rec, fresh, err := a.openChat(ctx, key, record, spec)
 	if err != nil {
 		return engine.Result{}, err
+	}
+	if browser.On {
+		if reporter, ok := live.model.(interface{ BrowserReason() string }); ok && reporter.BrowserReason() != "" {
+			if err := a.Core.SetChatBrowserNote(ctx, turn.ID, "Running without the browser. "+reporter.BrowserReason()); err != nil {
+				return engine.Result{}, err
+			}
+		}
 	}
 	text := turn.Message
 	// A conversation just started in the CLI is given the whole overview; any
@@ -146,6 +158,11 @@ func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.
 	live.turn = state
 	a.sessions.mu.Unlock()
 	result, runErr := live.model.Turn(ctx, text, func(e session.Event) { observe(&rec, e) })
+	if browser.On {
+		if reporter, ok := live.model.(interface{ BrowserReason() string }); ok && reporter.BrowserReason() != "" {
+			runErr = errors.Join(runErr, a.Core.SetChatBrowserNote(context.WithoutCancel(ctx), turn.ID, "Running without the browser. "+reporter.BrowserReason()))
+		}
+	}
 	a.sessions.mu.Lock()
 	live.turn, live.used = nil, time.Now()
 	a.sessions.mu.Unlock()
@@ -342,9 +359,9 @@ func (a *App) closeIdleChat(now time.Time) {
 
 // chatKey names what a session was opened for: a change to any of it means
 // a different session.
-func chatKey(conversation string, ec engine.Config, instructions string, browser config.Browser) string {
+func chatKey(conversation string, ec engine.Config, instructions string, browser config.Browser, bridgeHome string) string {
 	sum := sha256.Sum256([]byte(instructions))
-	return strings.Join([]string{conversation, modelHome(ec), ec.Model, ec.Effort, hex.EncodeToString(sum[:8]), strconv.FormatBool(browser.On), browser.Name}, "|")
+	return strings.Join([]string{conversation, modelHome(ec), ec.Model, ec.Effort, hex.EncodeToString(sum[:8]), strconv.FormatBool(browser.On), browser.Name, bridgeHome}, "|")
 }
 
 // sessionTool runs a tool the model called, with the same checks and the
