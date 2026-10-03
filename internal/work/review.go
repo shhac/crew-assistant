@@ -38,7 +38,7 @@ func (lp *Loop) check(ctx context.Context, p core.Project, t core.Task, m medium
 	if held, err := lp.holdForUsage(ctx, t, checker); held || err != nil {
 		return err
 	}
-	verdict, shots, err := lp.runCheckerAwake(ctx, p, t, r, checker, m)
+	verdict, shots, end, err := lp.runCheckerAwake(ctx, p, t, r, checker, m)
 	if err != nil {
 		return lp.roleFailed(ctx, t, checker.Name, err)
 	}
@@ -59,7 +59,7 @@ func (lp *Loop) check(ctx context.Context, p core.Project, t core.Task, m medium
 		t.Verdicts = append(t.Verdicts, verdict)
 		t.Failures, t.RetryAt = 0, time.Time{}
 		return fmt.Sprintf("%s checked version %d of %s: %s", checker.Name, r.N, t.Objective, outcomeWords[verdict.Outcome]), nil
-	})
+	}, end)
 	return err
 }
 
@@ -71,11 +71,11 @@ const sleepAllowance = time.Minute
 // and it failed: a test's timeout keeps counting while a laptop's lid is
 // shut, so the failure may be the sleep's. A pass stands, since a sleep
 // fails checks and never passes them, as does a second run that slept too.
-func (lp *Loop) runCheckerAwake(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium) (core.Verdict, core.Screenshots, error) {
+func (lp *Loop) runCheckerAwake(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium) (core.Verdict, core.Screenshots, core.TurnEnd, error) {
 	start := time.Now()
-	verdict, shots, err := lp.runChecker(ctx, p, t, r, checker, m, "")
+	verdict, shots, end, err := lp.runChecker(ctx, p, t, r, checker, m, "")
 	if err != nil || verdict.Outcome == core.VerdictPass || lp.sleptSince(start) < sleepAllowance {
-		return verdict, shots, err
+		return verdict, shots, end, err
 	}
 	return lp.runChecker(ctx, p, t, r, checker, m, "")
 }
@@ -97,16 +97,16 @@ func (lp *Loop) sleptSince(start time.Time) time.Duration {
 // Where the project has a run recipe, QA also starts the app and uses it, on
 // a port of its own, and gives the screenshots it took, to keep with its
 // verdict when that is recorded.
-func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium, note string) (core.Verdict, core.Screenshots, error) {
+func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium, note string) (core.Verdict, core.Screenshots, core.TurnEnd, error) {
 	playbook := taskPlaybook(p, t)
 	app, err := lp.planApp(checker, playbook)
 	if err != nil {
-		return core.Verdict{}, core.Screenshots{}, err
+		return core.Verdict{}, core.Screenshots{}, core.TurnEnd{}, err
 	}
 	c, err := m.check(ctx, t, r, checker.Holds(core.RoleQA), app.running())
 	if err != nil {
 		app.release()
-		return core.Verdict{}, core.Screenshots{}, err
+		return core.Verdict{}, core.Screenshots{}, core.TurnEnd{}, err
 	}
 	app.tree = c.tree
 	// The port is held until the copy the app ran from is gone.
@@ -114,10 +114,10 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 		c.remove()
 		app.release()
 	}()
-	base := checkerPrompt(p, t, r, checker, playbook) + c.note + appPrompt(app) + note + learnedGuide(checker, true)
+	base := checkerPrompt(p, t, r, checker, playbook) + c.note + appPrompt(app) + note + learnedGuide(checker, true) + handOnGuide(t, checker.Working(), t.CheckerGroup(checker.Name))
 	spec, cleanupLearnings, err := lp.roleSpec(t, checker, c.workDir, c.write, m, base)
 	if err != nil {
-		return core.Verdict{}, core.Screenshots{}, err
+		return core.Verdict{}, core.Screenshots{}, core.TurnEnd{}, err
 	}
 	defer cleanupLearnings()
 	if c.env != nil {
@@ -134,19 +134,22 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 		spec.Observer = shots
 	}
 	var verdict core.Verdict
+	var end core.TurnEnd
 	_, researches := t.Researcher()
 	_, learned, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
-		verdict, err = parseVerdict(reply, researches)
+		clean, block := splitHandOn(reply)
+		verdict, err = parseVerdict(clean, researches)
+		end.HandOnWhy, end.Problems = parseHandOn(block)
 		return err
 	})
 	if err != nil {
-		return core.Verdict{}, core.Screenshots{}, err
+		return core.Verdict{}, core.Screenshots{}, core.TurnEnd{}, err
 	}
 	if parseErr != nil {
-		return core.Verdict{}, core.Screenshots{}, parseErr
+		return core.Verdict{}, core.Screenshots{}, core.TurnEnd{}, parseErr
 	}
 	if err = c.verify(ctx); err != nil {
-		return core.Verdict{}, core.Screenshots{}, fmt.Errorf("its verdict was discarded: %w", err)
+		return core.Verdict{}, core.Screenshots{}, core.TurnEnd{}, fmt.Errorf("its verdict was discarded: %w", err)
 	}
 	lp.recordLearned(ctx, p, t, checker, m, learned)
 	verdict.Ref = c.ref
@@ -157,7 +160,7 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 	if shots != nil {
 		taken = shots.files(checker.Name)
 	}
-	return verdict, taken, nil
+	return verdict, taken, end, nil
 }
 
 // askForJSON runs a role and reads its reply with parse, asking once more,

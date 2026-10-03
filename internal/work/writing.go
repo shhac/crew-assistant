@@ -39,7 +39,7 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 		return err
 	}
 	seen := len(t.Direction)
-	guide := learnedGuide(writer, false)
+	guide := learnedGuide(writer, false) + handOnGuide(t, core.RoleImplementer, "")
 	spec, cleanup, err := lp.roleSpec(t, writer, m.workspace(t), true, m, writerPrompt(p, t, caughtUp, false)+prompt+guide)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
@@ -97,7 +97,9 @@ func (lp *Loop) prepareWorkspace(ctx context.Context, t core.Task, m medium) (co
 func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m medium, writer string, result roles.Result, seen int, integration *core.DraftCatchUp) error {
 	r, ok := t.Role(writer)
 	in := parseWriterReply(result.Text, ok && designsFor(t, r))
+	why, handProblems := parseHandOn(in.handOn)
 	wakeErrors := lp.applyWakeBlock(ctx, p, t, in.wake)
+	wakeErrors = append(wakeErrors, handProblems...)
 	prText, problem := parsePRText(in.pr)
 	if problem != "" {
 		wakeErrors = append(wakeErrors, problem)
@@ -115,7 +117,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	if ok {
 		lp.recordLearned(ctx, p, t, r, m, in.learned)
 	}
-	h := core.Handoff{DraftCatchUp: integration, Writer: writer, Session: result.Session, Seen: seen, Reply: in.reply, Request: t.WriterRequest, WakeErrors: wakeErrors, PR: prText, Posts: posts}
+	h := core.Handoff{HandOnWhy: why, DraftCatchUp: integration, Writer: writer, Session: result.Session, Seen: seen, Reply: in.reply, Request: t.WriterRequest, WakeErrors: wakeErrors, PR: prText, Posts: posts}
 	if ok {
 		r.Learnings = nil
 		h.Seat = &r
@@ -126,6 +128,9 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	if in.question != "" {
 		return lp.askDesign(ctx, t, writer, in.question, func(t *core.Task) {
 			t.WakeErrors = wakeErrors
+			if why != "" {
+				t.WakeErrors = append(t.WakeErrors, "hand-on ignored during a design question; ask again when this round finishes")
+			}
 			if t.WriterRequest == h.Request {
 				t.WriterNext = ""
 			}
@@ -163,13 +168,14 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 // writerReply is an implementer's reply taken apart: its words, and the
 // blocks it may end with.
 type writerReply struct {
-	reply, learned, wake, unmet, prReply, pr, question string
+	reply, learned, wake, unmet, prReply, pr, question, handOn string
 }
 
 // parseWriterReply takes an implementer's reply apart; designs is whether
 // it may ask the designer, with a design block.
 func parseWriterReply(text string, designs bool) writerReply {
 	var in writerReply
+	text, in.handOn = splitHandOn(text)
 	in.reply, in.learned = splitBlock(text, "learned")
 	in.reply, in.wake = splitBlock(in.reply, "wake")
 	in.reply, in.unmet = splitBlock(in.reply, "owner-step")

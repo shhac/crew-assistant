@@ -23,7 +23,7 @@ func designsFor(t core.Task, asker core.Role) bool {
 // the limit brings the question to the owner. also changes the task in the
 // same change. A task that moved on meanwhile, such as one stopped, is left
 // as it is.
-func (lp *Loop) askDesign(ctx context.Context, t core.Task, from, question string, also func(*core.Task)) error {
+func (lp *Loop) askDesign(ctx context.Context, t core.Task, from, question string, also func(*core.Task), ends ...core.TurnEnd) error {
 	_, err := lp.Core.AskDesign(ctx, t.ID, core.DesignAsk{
 		From:     from,
 		Question: question,
@@ -34,7 +34,7 @@ func (lp *Loop) askDesign(ctx context.Context, t core.Task, from, question strin
 			Choices:        []string{"Use your judgment", choiceStop},
 		},
 		Also: also,
-	})
+	}, ends...)
 	if errors.Is(err, core.ErrConflict) {
 		return nil
 	}

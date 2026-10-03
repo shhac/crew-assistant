@@ -223,6 +223,7 @@ func TestAMemberNeverChecksADraftTwiceAtOnce(t *testing.T) {
 		t.Fatalf("a check was claimed beside the member's message: %v", got)
 	}
 	s.ReleaseClaim(testContext, a.ID, answering.Claim.Token)
+	// No verdict was recorded, so the retry keeps its original claimant.
 	if got := claimed(t, s); !slices.Equal(got, []string{"A: reviewing by Reviewer"}) {
 		t.Fatalf("once the message was answered: %v", got)
 	}

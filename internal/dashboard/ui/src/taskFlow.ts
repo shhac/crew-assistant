@@ -137,26 +137,42 @@ export function stageFlow(
     const atWork = roleAtWork({ ...task, roles: team });
     const historicalSeats = [...seats, ...pinned.filter((r) => holds(r, kind))];
     const lastName =
-      kind === "researcher"
-        ? task.plan?.role
-        : kind === "designer"
-          ? design?.designer
-          : kind === "reviewer" || kind === "qa"
-            ? verdicts.find((v) =>
-                historicalSeats.some((r) => r.name === v.role),
-              )?.role
-            : undefined;
+      kind === "implementer"
+        ? latest?.seat
+        : kind === "researcher"
+          ? task.plan?.role
+          : kind === "designer"
+            ? design?.designer
+            : kind === "reviewer" || kind === "qa"
+              ? verdicts.find((v) =>
+                  historicalSeats.some((r) => r.name === v.role),
+                )?.role
+              : undefined;
+    const takes = finished(task)
+      ? []
+      : (task.takes?.filter((t) => t.kind === kind) ?? []);
+    const takingSeats = takes.flatMap((t) => {
+      const candidates = [t.preferred, ...(t.others ?? [])];
+      const waitingSeat =
+        currentKind === kind && candidates.includes(task.waiting?.seat)
+          ? task.waiting?.seat
+          : undefined;
+      const name = waitingSeat ?? t.preferred ?? t.others?.[0];
+      return name ? [lookup(name, kind)] : [];
+    });
     const selected = working.length
-      ? working
-      : [
-          (currentKind === kind || (stopped && heldSeat)
-            ? heldSeat
-              ? lookup(heldSeat, kind)
-              : atWork && holds(atWork, kind)
-                ? atWork
-                : undefined
-            : undefined) ?? (lastName ? lookup(lastName, kind) : seats[0]),
-        ].filter((r): r is Role => !!r);
+      ? [...working, ...takingSeats]
+      : takingSeats.length
+        ? takingSeats
+        : [
+            (currentKind === kind || (stopped && heldSeat)
+              ? heldSeat
+                ? lookup(heldSeat, kind)
+                : atWork && holds(atWork, kind)
+                  ? atWork
+                  : undefined
+              : undefined) ?? (lastName ? lookup(lastName, kind) : seats[0]),
+          ].filter((r): r is Role => !!r);
     // A message recipient must remain reachable alongside the selected seat.
     for (const seat of seats) {
       if (
@@ -312,7 +328,58 @@ export function stageFlow(
         row.state = "not-started";
         row.support = `${who} will start when this request begins`;
       }
-      if (kind === "implementer" && row.state === "done" && seats.length > 1)
+      const take = takes.find(
+        (t) =>
+          (t.preferred ?? t.others?.[0]) === who ||
+          (currentKind === kind &&
+            task.waiting?.seat === who &&
+            t.others?.includes(who)),
+      );
+      const claimed = task.claims?.some(
+        (c) => c.seat === who && c.step === step,
+      );
+      if (
+        take &&
+        (take.others?.length ?? 0) + (take.preferred ? 1 : 0) > 1 &&
+        !(kind === "designer" && !design && (latest || finished(task))) &&
+        !claimed &&
+        !working.some((r) => r.name === who) &&
+        (row.state === "not-started" || row.state === "working") &&
+        !asking
+      ) {
+        const names = take.preferred
+          ? [take.preferred, ...(take.others ?? [])]
+          : (take.others ?? []);
+        const others = take.others ?? [];
+        const choice =
+          names.length <= 1
+            ? who
+            : take.preferred
+              ? `${take.preferred}${take.did ? ` (${take.did.startsWith("checked ") ? take.did.replace("checked draft ", `checked ${artifact} `) : `did ${take.did}`})` : ""}, or ${others.join(" or ")} if ${take.preferred} is busy`
+              : `${names.join(" or ")}, whoever is free first`;
+        const action = queued
+          ? "start when this request begins"
+          : kind === "implementer"
+            ? n > 1
+              ? `${build.toLowerCase()} round ${n} when needed`
+              : `${build.toLowerCase()} when ${team.some((r) => holds(r, "researcher")) ? "research is done" : "this request begins"}`
+            : kind === "reviewer" || kind === "qa"
+              ? `check ${artifact} ${n} ${latest?.n === n ? "when a seat is free" : "when it is ready"}`
+              : kind === "designer"
+                ? "give design input if asked"
+                : "start when this request begins";
+        if (row.state === "working") {
+          if (names.length > 1) row.support += ` · ${choice}`;
+        } else {
+          row.support = `${choice}${names.length > 1 ? "," : ""} will ${action}`;
+        }
+      }
+      if (
+        kind === "implementer" &&
+        row.state === "done" &&
+        seats.length > 1 &&
+        !latest?.seat
+      )
         row.support += " · Builder not recorded";
       if (
         stopped &&

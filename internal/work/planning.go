@@ -36,13 +36,14 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	if err != nil {
 		return err
 	}
-	base := researcherPrompt(p, t, otherWork(snap, t), snap.Projects) + learnedGuide(researcher, true)
+	base := researcherPrompt(p, t, otherWork(snap, t), snap.Projects) + learnedGuide(researcher, true) + handOnGuide(t, core.RoleResearcher, "")
 	spec, cleanup, err := lp.roleSpec(t, researcher, m.workspace(t), false, m, base)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
 	defer cleanup()
 	var plan core.Plan
+	var end core.TurnEnd
 	var dependsOn []string
 	var design string
 	attempts := 0
@@ -50,7 +51,9 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	_, hasDesigner := t.Designer()
 	reply, learned, _, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
 		attempts++
-		plan, dependsOn, design, err = parsePlan(reply, designsFor(t, researcher), !hasDesigner)
+		clean, block := splitHandOn(reply)
+		plan, dependsOn, design, err = parsePlan(clean, designsFor(t, researcher), !hasDesigner)
+		end.HandOnWhy, end.Problems = parseHandOn(block)
 		if err == nil && design == "" && core.UndeclaredPlanWait(plan, core.PlanDependencies(snap, t, dependsOn), t) {
 			inconsistent = true
 			if attempts == 1 {
@@ -65,12 +68,13 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	}
 	lp.recordLearned(ctx, p, t, researcher, m, learned)
 	if design != "" {
-		return lp.askDesign(ctx, t, researcher.Name, design, nil)
+		return lp.askDesign(ctx, t, researcher.Name, design, nil, end)
 	}
 	// A plan that still cannot be read is kept as written rather than stopping
 	// the work: the implementer reads it either way.
 	if plan.Summary == "" {
-		plan, dependsOn = core.Plan{Summary: text.Clip(strings.TrimSpace(reply), 3000)}, nil
+		clean, _ := splitHandOn(reply)
+		plan, dependsOn = core.Plan{Summary: text.Clip(strings.TrimSpace(clean), 3000)}, nil
 		if inconsistent || core.UndeclaredPlanWait(plan, core.PlanDependencies(snap, t, dependsOn), t) {
 			plan.Questions = append(plan.Questions, core.UndeclaredWaitQuestion)
 		}
@@ -80,7 +84,7 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	for _, pre := range plan.Prerequisites {
 		prerequisites = append(prerequisites, pre.What)
 	}
-	planned, err := lp.Core.RecordPlan(ctx, t.ID, plan, dependsOn, prerequisites)
+	planned, err := lp.Core.RecordPlan(ctx, t.ID, plan, dependsOn, prerequisites, end)
 	if errors.Is(err, core.ErrConflict) {
 		return nil
 	}

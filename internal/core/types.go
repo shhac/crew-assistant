@@ -73,6 +73,9 @@ type Project struct {
 	// PMDue asks the team's PM to look at the to-do list again, after
 	// something that changes it: work queued, planned or finished.
 	PMDue bool `json:"pm_due,omitempty"`
+	// SeatRotation remembers the last first-round claimant per role (and
+	// checker group). Schedule advances it only when a claim is taken.
+	SeatRotation map[string]string `json:"seat_rotation,omitempty"`
 	// PMDirection is what the owner told the PM, for its next look.
 	PMDirection string `json:"pm_direction,omitempty"`
 	// PRChoices are tasks that started with pull requests, since turned off,

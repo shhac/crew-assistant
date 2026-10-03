@@ -374,7 +374,7 @@ func TestAReviewerAnsweringAPullRequestLearnsNothing(t *testing.T) {
 	}
 	reviewer := task.Checkers()[0]
 	task.Proposal = &core.Proposal{Number: 7}
-	if _, _, err := a.runChecker(ctx, p, task, task.Revisions[0], reviewer, m, ""); err != nil {
+	if _, _, _, err := a.runChecker(ctx, p, task, task.Revisions[0], reviewer, m, ""); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ = a.Core.Snapshot(ctx)
@@ -382,7 +382,7 @@ func TestAReviewerAnsweringAPullRequestLearnsNothing(t *testing.T) {
 		t.Fatalf("a reviewer's learning from a pull request turn was kept: %+v", snap.Members[0].Learnings)
 	}
 	task.Proposal = nil
-	if _, _, err := a.runChecker(ctx, p, task, task.Revisions[0], reviewer, m, ""); err != nil {
+	if _, _, _, err := a.runChecker(ctx, p, task, task.Revisions[0], reviewer, m, ""); err != nil {
 		t.Fatal(err)
 	}
 	if snap, _ = a.Core.Snapshot(ctx); len(snap.Members[0].Learnings) != 1 {

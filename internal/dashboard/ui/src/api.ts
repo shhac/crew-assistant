@@ -369,6 +369,7 @@ export type Stage =
   | "done"
   | "stopped";
 export interface Revision {
+  seat?: string;
   n: number;
   brief_version: number;
   files: string[] | null;
@@ -612,7 +613,15 @@ export interface Blocker {
   check?: string;
   answer_pending?: boolean;
 }
+export interface NextTaker {
+  kind: string;
+  group?: string;
+  preferred?: string;
+  did?: string;
+  others?: string[];
+}
 export interface Task {
+  takes?: NextTaker[];
   blockers?: Blocker[];
   /** Original source issues and their context for the offline team. */
   linear?: LinearRef[];

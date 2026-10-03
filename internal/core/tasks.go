@@ -39,6 +39,8 @@ type Task struct {
 	// researched, the designer while it is with the designer, the PM while
 	// it is in triage. Derived with Stage.
 	Checking string `json:"checking,omitempty"`
+	// Takes describes the seat choices for unclaimed steps still ahead. Derived.
+	Takes []NextTaker `json:"takes,omitempty"`
 	// WithDesigner is a task handed to the designer for design input, which
 	// stays in the stage of the role that handed it over. Derived with Stage.
 	WithDesigner bool `json:"with_designer,omitempty"`
@@ -74,10 +76,14 @@ type Task struct {
 	// the team, with their replies.
 	Messages  []TeamMessage `json:"messages,omitempty"`
 	Revisions []Revision    `json:"revisions"`
+	// HandOn is a turn's request for someone else to take its next step.
+	HandOn []HandOn `json:"hand_on,omitempty"`
 	// Handoff is a revision on its way to being recorded; see handoff.go.
 	// Attempt counts the handoffs the task has started, and only goes up.
 	Handoff *Handoff `json:"handoff,omitempty"`
 	Attempt int      `json:"attempt,omitempty"`
+	// FirstSeats preserves first claimants across retries without advancing rotation.
+	FirstSeats map[string]string `json:"first_seats,omitempty"`
 	// Claims are the steps of the task seats have taken and not yet
 	// finished; see claims.go.
 	Claims []Claim `json:"claims,omitempty"`
@@ -364,6 +370,8 @@ type Revision struct {
 	// By is who made the revision when the team didn't: DraftByOwner for a
 	// change the owner made by hand.
 	By string `json:"by,omitempty"`
+	// Seat names the teammate who made this draft, when recorded.
+	Seat string `json:"seat,omitempty"`
 }
 
 // Verdict is one reviewer's judgement of one revision.
@@ -597,16 +605,26 @@ func (s *Service) UpdateTask(ctx context.Context, id string, fn func(*Task, *Pro
 // kept in the same update, and only if the verdict fn was given is among
 // the task's verdicts afterwards; otherwise, or if the update fails, the
 // files written for them are removed.
-func (s *Service) UpdateTaskWithVerdict(ctx context.Context, id string, verdict Verdict, shots Screenshots, fn func(t *Task, p *Project, verdict Verdict) (activity string, err error)) (Task, error) {
+// Optional reply metadata is recorded only when fn appends a verdict.
+func (s *Service) UpdateTaskWithVerdict(ctx context.Context, id string, verdict Verdict, shots Screenshots, fn func(t *Task, p *Project, verdict Verdict) (activity string, err error), ends ...TurnEnd) (Task, error) {
 	pending := s.writeScreenshots(ctx, id, shots)
 	out, err := s.updateTask(ctx, id, func(v *Snapshot, t *Task, p *Project) (string, error) {
 		now := s.now().UTC()
 		recorded := verdict
 		recorded.Evidence = slices.Clone(verdict.Evidence)
 		pending.evidence(t, &recorded, now)
+		before := len(t.Verdicts)
 		activity, err := fn(t, p, recorded)
 		if err != nil {
 			return "", err
+		}
+		if len(t.Verdicts) > before {
+			role := t.Verdicts[len(t.Verdicts)-1].Role
+			if seat, ok := t.Role(role); ok {
+				for _, end := range ends {
+					recordTurnEnd(v, t, seat.Working(), t.CheckerGroup(role), seat, end, now)
+				}
+			}
 		}
 		pending.keep(v, t, recorded.ID, now)
 		return activity, nil
@@ -627,6 +645,7 @@ func (s *Service) updateTask(ctx context.Context, id string, fn func(*Snapshot, 
 			return ErrNotFound
 		}
 		wasFinished := t.Finished()
+		beforeHandOn := slices.Clone(t.HandOn)
 		activity, err := fn(v, t, p)
 		if err != nil {
 			return err
@@ -655,6 +674,12 @@ func (s *Service) updateTask(ctx context.Context, id string, fn func(*Snapshot, 
 		if t.Status == TaskStopped {
 			t.Claims = nil
 		}
+		for i := range t.HandOn {
+			if !slices.Contains(beforeHandOn, t.HandOn[i]) {
+				t.HandOn[i].At = t.UpdatedAt
+			}
+		}
+		logHandOn(v, t, beforeHandOn)
 		if activity != "" {
 			recordTask(v, t.UpdatedAt, t, "task."+t.Status, activity)
 		}

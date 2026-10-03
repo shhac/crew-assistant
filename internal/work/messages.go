@@ -79,7 +79,7 @@ func (lp *Loop) answerCheck(ctx context.Context, p core.Project, t core.Task, s 
 		return failed(err)
 	}
 	r := t.Revisions[len(t.Revisions)-1]
-	verdict, shots, err := lp.runChecker(ctx, p, t, r, s.Seat, medium, messageNote(m))
+	verdict, shots, end, err := lp.runChecker(ctx, p, t, r, s.Seat, medium, messageNote(m))
 	if err != nil {
 		return failed(err)
 	}
@@ -88,7 +88,7 @@ func (lp *Loop) answerCheck(ctx context.Context, p core.Project, t core.Task, s 
 	// The verdict judged the text the checker was shown, not whatever it
 	// became while the checker worked.
 	verdict.TextVersion = t.TextVersion
-	return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, &verdict, shots, "")
+	return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, &verdict, shots, "", end)
 }
 
 type openMessage struct {

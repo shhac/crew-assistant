@@ -35,6 +35,49 @@ func derive(v *Snapshot, t *Task) { deriveWith(v, t, blocking(v)) }
 // deriveWith derives t's place, with index saying which tasks depend on
 // which, worked out once when deriving the whole snapshot.
 func deriveWith(v *Snapshot, t *Task, index map[string][]string) {
+	view := *t
+	if len(view.Roles) == 0 && (t.Status == TaskQueued || t.Status == TaskTriage) {
+		if p := project(v, t.ProjectID); p != nil {
+			view.Roles = playbookRoles(p)
+		}
+	}
+	t.Takes = view.nextTakers(briefVersion(v, *t))
+	defer func() {
+		for _, take := range t.Takes {
+			kind := stepKinds[t.Status]
+			group := ""
+			if t.Status == TaskReviewing {
+				if seat, ok := t.Role(t.Checking); ok {
+					kind = seat.Working()
+					group = t.CheckerGroup(seat.Name)
+				}
+			}
+			if take.Kind == kind && take.Group == group && take.Preferred == "" && len(take.Others) > 1 && slices.Contains(take.Others, t.Checking) {
+				t.Checking = ""
+			}
+		}
+		claimed, count := "", 0
+		for _, c := range t.Claims {
+			if c.Step != t.Status {
+				continue
+			}
+			if c.Step == TaskReviewing {
+				r, ok := t.Role(c.Seat)
+				if !ok || (t.Stage == StageQA) != (r.Working() == RoleQA) {
+					continue
+				}
+			} else if c.Step != TaskResearching && c.Step != TaskDesigning {
+				continue
+			}
+			claimed = c.Seat
+			count++
+		}
+		if count == 1 {
+			t.Checking = claimed
+		} else if count > 1 {
+			t.Checking = ""
+		}
+	}()
 	t.Stage, t.Checking, t.WithDesigner, t.Answered, t.WaitsFor = stageOf(v, *t), "", false, false, nil
 	// A task shows in the stage it holds: one waiting for room in the next stays in the one it finished;
 	// one waiting for a teammate holds the column it entered. See stage_limits.go.
@@ -149,7 +192,7 @@ func (t Task) RolesOf(kind string) []Role {
 // Researcher is the seat that researches the task before anything is
 // written, if its team has one.
 func (t Task) Researcher() (Role, bool) {
-	researchers := t.RolesOf(RoleResearcher)
+	researchers, _ := t.preferredSeats(RoleResearcher, "")
 	if len(researchers) == 0 {
 		return Role{}, false
 	}
@@ -172,7 +215,8 @@ func (t Task) Role(name string) (Role, bool) {
 func (t Task) Checkers() []Role {
 	var out []Role
 	for _, g := range t.CheckerGroups() {
-		out = append(out, g.Seats[0])
+		seats, _ := t.preferredSeats(g.Seats[0].Working(), g.Key)
+		out = append(out, seats[0])
 	}
 	return out
 }

@@ -62,6 +62,235 @@ const row = (kind: string, overrides: Partial<Task> = {}, extra = {}) =>
   flow(overrides, extra).find((r) => r.kind === kind)!;
 
 describe("task stage progress", () => {
+  it("shows the seat named in the current step's wait despite neutral rotation order", () => {
+    const team = [...roles, { ...roles[0], name: "Thea" }];
+    for (const kind of ["implementer", "researcher"]) {
+      const status = kind === "implementer" ? "writing" : "researching";
+      const stage = kind === "implementer" ? "implementing" : "researching";
+      const r = row(kind, {
+        roles: team,
+        status,
+        stage,
+        takes: [{ kind, others: ["Ash", "Thea"] }],
+        waiting: { kind: "member", seat: "Thea", objective: "Other task" },
+      });
+      expect(r.role?.name).toBe("Thea");
+      expect(r.state).toBe("working");
+      expect(r.support).toContain("Thea");
+      expect(r.support).toContain("Other task");
+    }
+  });
+
+  it("preserves queued single-seat copy with realistic takes", () => {
+    const takes = roles.flatMap((r) =>
+      r.kinds
+        .filter((k) => k !== "pm")
+        .map((kind) => ({ kind, others: [r.name] })),
+    );
+    const before = flow();
+    const after = flow({ takes });
+    expect(after.map((r) => r.support)).toEqual(before.map((r) => r.support));
+  });
+  it("preserves the designer not-asked row with one or several seats", () => {
+    for (const names of [["Dee"], ["Dee", "Dee 2"]]) {
+      const base: Partial<Task> = {
+        status: "writing",
+        stage: "implementing",
+        revisions: [revision(1)],
+        roles: [
+          ...roles,
+          ...(names.length > 1 ? [{ ...roles[1], name: "Dee 2" }] : []),
+        ],
+      };
+      expect(
+        row("designer", {
+          ...base,
+          takes: [{ kind: "designer", others: names }],
+        }).support,
+      ).toBe(row("designer", base).support);
+    }
+  });
+  it("keeps a single unclaimed checker's current-stage wording", () => {
+    const base: Partial<Task> = {
+      status: "reviewing",
+      stage: "reviewing",
+      revisions: [revision(1)],
+    };
+    expect(
+      row("reviewer", {
+        ...base,
+        takes: [{ kind: "reviewer", others: ["Rune"] }],
+      }).support,
+    ).toBe(row("reviewer", base).support);
+  });
+
+  it("preserves the working row and busy explanation while build 2 awaits a claim", () => {
+    const team = [...roles, { ...roles[0], name: "Thea" }];
+    const build = row("implementer", {
+      status: "writing",
+      stage: "implementing",
+      round: 2,
+      roles: team,
+      revisions: [{ ...revision(1), seat: "Ash" }],
+      waiting: {
+        kind: "member",
+        seat: "Ash",
+        on: "EX-4",
+        objective: "Another task",
+      },
+      takes: [
+        {
+          kind: "implementer",
+          preferred: "Ash",
+          did: "build 1",
+          others: ["Thea"],
+        },
+      ],
+    });
+    expect(build.state).toBe("working");
+    expect(build.support).toContain("Another task");
+    expect(build.support).toContain("Thea if Ash is busy");
+    expect(build.support).not.toContain("research is done");
+  });
+  it("keeps completed task wording even if stale Takes is present", () => {
+    const done = flow({
+      status: "landed",
+      stage: "done",
+      revisions: [revision(1)],
+      takes: [{ kind: "designer", others: ["Dee"] }],
+    }).find((r) => r.kind === "designer")!;
+    expect(done.support).toBe(
+      "Dee wasn't asked for design input on this request",
+    );
+  });
+  it("uses later-round wording for a future build and preserves an unclaimed checker row", () => {
+    expect(
+      row("implementer", {
+        status: "researching",
+        stage: "researching",
+        round: 2,
+        revisions: [revision(1)],
+        takes: [
+          {
+            kind: "implementer",
+            preferred: "Ash",
+            did: "build 1",
+            others: ["Thea"],
+          },
+        ],
+      }).support,
+    ).toContain("build round 2 when needed");
+    const check = row("reviewer", {
+      status: "reviewing",
+      stage: "reviewing",
+      round: 2,
+      revisions: [revision(2)],
+      takes: [{ kind: "reviewer", others: ["Rune"] }],
+    });
+    expect(check.state).toBe("working");
+    expect(check.support).not.toContain("when it is ready");
+  });
+  it("shows a choice for every unclaimed checker group", () => {
+    const team = [
+      ...roles,
+      { ...roles[2], name: "Rune 2", member: "rune" },
+    ].map((r) => (r.name === "Rune" ? { ...r, member: "rune" } : r));
+    const rows = flow({
+      status: "writing",
+      stage: "implementing",
+      round: 2,
+      roles: team,
+      takes: [
+        {
+          kind: "reviewer",
+          group: "reviewer/member/rune",
+          preferred: "Rune 2",
+          did: "checked draft 1",
+          others: ["Rune"],
+        },
+      ],
+    });
+    expect(rows.find((r) => r.kind === "reviewer")).toMatchObject({
+      role: { name: "Rune 2" },
+      support:
+        "Rune 2 (checked build 1), or Rune if Rune 2 is busy, will check build 2 when it is ready",
+    });
+  });
+  it("uses the recorded builder for a completed draft", () => {
+    expect(
+      row("implementer", {
+        status: "reviewing",
+        stage: "reviewing",
+        roles: [...roles, { ...roles[0], name: "Thea" }],
+        revisions: [{ ...revision(1), seat: "Thea" }],
+      }),
+    ).toMatchObject({
+      role: { name: "Thea" },
+      support: expect.not.stringContaining("Builder not recorded"),
+    });
+  });
+  it("names every possible builder before a claim and the claimant afterwards", () => {
+    const team = [
+      ...roles,
+      { ...roles[0], name: "Thea" },
+      { ...roles[0], name: "Caspian" },
+    ];
+    const before: Partial<Task> = {
+      roles: team,
+      status: "researching",
+      stage: "researching",
+      takes: [{ kind: "implementer", others: ["Ash", "Thea", "Caspian"] }],
+    };
+    expect(row("implementer", before).support).toBe(
+      "Ash or Thea or Caspian, whoever is free first, will build when research is done",
+    );
+    expect(
+      row("implementer", {
+        ...before,
+        takes: [
+          {
+            kind: "implementer",
+            preferred: "Caspian",
+            did: "build 1",
+            others: ["Ash", "Thea"],
+          },
+        ],
+      }),
+    ).toMatchObject({
+      role: { name: "Caspian" },
+      support:
+        "Caspian (did build 1), or Ash or Thea if Caspian is busy, will build when research is done",
+    });
+    const claimed = row("implementer", {
+      ...before,
+      status: "writing",
+      stage: "implementing",
+      takes: [],
+      claims: [{ step: "writing", seat: "Thea" }],
+    });
+    expect(claimed.role?.name).toBe("Thea");
+    expect(claimed.support).not.toContain("Caspian");
+    expect(claimed.support).not.toContain("Ash");
+  });
+  it("keeps one-seat wording and lists two free seats", () => {
+    expect(
+      row("implementer", {
+        status: "researching",
+        stage: "researching",
+        takes: [{ kind: "implementer", others: ["Ash"] }],
+      }).support,
+    ).toBe("Ash will build when research is done");
+    expect(
+      row("implementer", {
+        status: "researching",
+        stage: "researching",
+        roles: [...roles, { ...roles[0], name: "Thea" }],
+        takes: [{ kind: "implementer", others: ["Ash", "Thea"] }],
+      }).support,
+    ).toBe(
+      "Ash or Thea, whoever is free first, will build when research is done",
+    );
+  });
   it("makes every unstarted stage terminal when stopped before starting", () => {
     const rows = flow({ status: "stopped", stage: "stopped" });
     expect(

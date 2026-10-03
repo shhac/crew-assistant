@@ -25,6 +25,8 @@ type Handoff struct {
 	Reply      string          `json:"reply,omitempty"`
 	Request    int             `json:"request,omitempty"`
 	WakeErrors []string        `json:"wake_errors,omitempty"`
+	// HandOnWhy is the writer's request recorded when this handoff commits.
+	HandOnWhy string `json:"hand_on_why,omitempty"`
 	// PR is the pull request text the implementer wrote with the draft, and
 	// Posts its replies on the pull request, posted once the draft is.
 	PR    *PRText  `json:"pr,omitempty"`

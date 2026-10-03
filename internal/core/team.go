@@ -253,7 +253,7 @@ func (t *Task) ReviseWithDirection() {
 // a check that did not pass is added to the approval the owner is looking at.
 // The check's screenshots are kept, in the same change, only with a verdict
 // that counts; otherwise the files written for them are removed.
-func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID string, verdict *Verdict, shots Screenshots, failure string) error {
+func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID string, verdict *Verdict, shots Screenshots, failure string, ends ...TurnEnd) error {
 	pending := s.writeScreenshots(ctx, taskID, shots)
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		t := task(v, taskID)
@@ -273,6 +273,11 @@ func (s *Service) AnswerTeamMessage(ctx context.Context, taskID, messageID strin
 			m.Status, m.Reply = MessageFailed, text.Clip(failure, 1000)
 			recordTask(v, now, t, "task.message_failed", fmt.Sprintf("%s could not answer about %s", m.To, t.Objective))
 			return nil
+		}
+		if seat, ok := t.Role(verdict.Role); ok {
+			for _, end := range ends {
+				recordTurnEndLogged(v, t, seat.Working(), t.CheckerGroup(seat.Name), seat, end, now)
+			}
 		}
 		m.Status, m.Reply, m.Outcome, m.Revision = MessageAnswered, verdict.Summary, verdict.Outcome, verdict.Revision
 		if m.ForPR {

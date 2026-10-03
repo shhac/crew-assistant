@@ -168,7 +168,8 @@ func reaches(v *Snapshot, from, to string, seen map[string]bool) bool {
 // implementer starts. A task whose work has begun is never sent back to the
 // queue, nor made to wait for more: its drafts and branch stay. A plan kept
 // on the task queues the parts it splits off, in the same change.
-func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, dependsOn, prerequisites []string) (Task, error) {
+// ends records optional reply metadata with the plan under the same fence.
+func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, dependsOn, prerequisites []string, ends ...TurnEnd) (Task, error) {
 	var out Task
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		t := task(v, taskID)
@@ -189,6 +190,11 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 		t.DependsOn, t.UpdatedAt = deps, now
 		markAll(t, deps, researcherLinker(*t), now)
 		plan.At = now
+		if seat, ok := t.Role(plan.Role); ok {
+			for _, end := range ends {
+				recordTurnEndLogged(v, t, RoleResearcher, "", seat, end, now)
+			}
+		}
 		if !begun {
 			s.planPrerequisites(v, t, prerequisites, now)
 		}

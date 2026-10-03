@@ -87,6 +87,7 @@ func tookTurn(t *core.Task, h core.Handoff) {
 	}
 	if h.Seat != nil {
 		t.KeepThread(core.RoleImplementer, *h.Seat, h.Session)
+		t.AskHandOn(core.RoleImplementer, "", *h.Seat, h.HandOnWhy, time.Time{})
 	}
 	if h.PR != nil {
 		t.Describe(*h.PR)
@@ -98,6 +99,9 @@ func tookTurn(t *core.Task, h core.Handoff) {
 // made it changes on the task, and says what happened.
 func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 	r := h.Revision
+	if h.Seat != nil {
+		r.Seat = h.Seat.Name
+	}
 	r.BriefVersion, r.At = p.Brief.Version, time.Now().UTC()
 	if c := h.CatchUp; c != nil {
 		prev := t.Revisions[len(t.Revisions)-1]

@@ -117,6 +117,18 @@ func (t *Task) claim(token string) *Claim {
 
 // newClaim records a claim on t, on an attempt of its own.
 func newClaim(t *Task, c Claim, now time.Time) Claim {
+	kind := stepKinds[c.Step]
+	if c.Step == TaskReviewing {
+		if r, ok := t.Role(c.Seat); ok {
+			kind = r.Working()
+		}
+	}
+	if kind != "" && c.Seat != "" && !t.workedBefore(kind, c.Group) {
+		if t.FirstSeats == nil {
+			t.FirstSeats = map[string]string{}
+		}
+		t.FirstSeats[seatKey(kind, c.Group)] = c.Seat
+	}
 	t.Attempt++
 	c.Token, c.At = fmt.Sprintf("%s/%d", t.ID, t.Attempt), now
 	t.Claims = append(t.Claims, c)
@@ -433,6 +445,9 @@ func offer(v *Snapshot, t *Task, busy map[string]busyWork, admit Admit, now time
 		return nil, nil
 	}
 	whole := func(step string, seat Role) ([]Scheduled, *Wait) {
+		if kind := stepKinds[step]; kind != "" {
+			useHandOn(v, t, kind, "", seat, now)
+		}
 		c := newClaim(t, Claim{Step: step, Seat: seat.Name}, now)
 		return []Scheduled{{Task: *t, Claim: c, Seat: seat}}, nil
 	}
@@ -440,12 +455,12 @@ func offer(v *Snapshot, t *Task, busy map[string]busyWork, admit Admit, now time
 		if len(t.Claims) > 0 {
 			return nil, nil
 		}
-		seats := t.RolesOf(kind)
+		seats, _ := t.preferredSeats(kind, "")
 		// With no seat for it, the step itself says what happens instead.
 		if len(seats) == 0 {
 			return whole(t.Status, Role{})
 		}
-		seat, wait := freeSeat(v, t.ProjectID, t.Roles, seats, busy, admit, onTask(v, *t))
+		seat, wait := firstRoundSeat(v, *t, kind, "", seats, busy, admit)
 		if wait == nil {
 			return whole(t.Status, seat)
 		}
@@ -471,11 +486,13 @@ func offer(v *Snapshot, t *Task, busy map[string]busyWork, admit Admit, now time
 			if slices.ContainsFunc(t.Claims, func(c Claim) bool { return c.Group == g.Key }) {
 				continue
 			}
-			seat, wait := freeSeat(v, t.ProjectID, t.Roles, g.Seats, busy, admit, onTask(v, *t))
+			seats, _ := t.preferredSeats(g.Seats[0].Working(), g.Key)
+			seat, wait := firstRoundSeat(v, *t, g.Seats[0].Working(), g.Key, seats, busy, admit)
 			if wait != nil {
 				waiting = cmp.Or(waiting, wait)
 				continue
 			}
+			useHandOn(v, t, seat.Working(), g.Key, seat, now)
 			c := newClaim(t, Claim{Step: TaskReviewing, Seat: seat.Name, Group: g.Key, Revision: latest, Shared: true}, now)
 			out = append(out, Scheduled{Task: *t, Claim: c, Seat: seat})
 		}
@@ -551,7 +568,10 @@ func startQueued(v *Snapshot, p *Project, busy map[string]busyWork, admit Admit,
 		var seat Role
 		if seats := rolesOf(p.Playbook.Roles, stepKinds[status]); len(seats) > 0 {
 			var wait *Wait
-			if seat, wait = freeSeat(v, p.ID, p.Playbook.Roles, seats, busy, admit, onTask(v, *t)); wait != nil {
+			candidate := *t
+			candidate.Roles = p.Playbook.Roles
+			ordered, _ := candidate.preferredSeats(stepKinds[status], "")
+			if seat, wait = firstRoundSeat(v, candidate, stepKinds[status], "", ordered, busy, admit); wait != nil {
 				waits[t.ID] = wait
 				break
 			}
@@ -564,6 +584,7 @@ func startQueued(v *Snapshot, p *Project, busy map[string]busyWork, admit Admit,
 		if pinned, ok := t.Role(seat.Name); ok {
 			seat = pinned
 		}
+		useHandOn(v, t, stepKinds[t.Status], "", seat, now)
 		c := newClaim(t, Claim{Step: t.Status, Seat: seat.Name}, now)
 		out = append(out, Scheduled{Task: *t, Claim: c, Seat: seat})
 	}

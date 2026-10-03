@@ -134,7 +134,7 @@ func (t *Task) DesignDecision(decisionID string) *DesignRequest {
 // who asked and what, in one change. Past DesignLimit the question goes to
 // the owner as a decision instead. A task no longer at a step that can ask,
 // such as one stopped meanwhile, is left as it is.
-func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk) (Task, error) {
+func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk, ends ...TurnEnd) (Task, error) {
 	if err := ask.Owner.validTaskDecision(); err != nil {
 		return Task{}, err
 	}
@@ -150,6 +150,15 @@ func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk) (
 		r := DesignRequest{ID: uid(), From: ask.From, Step: t.Status, Round: t.Round, Question: text.Clip(ask.Question, 4000), At: now}
 		if ask.Also != nil {
 			ask.Also(t)
+		}
+		if seat, ok := t.Role(ask.From); ok {
+			for _, end := range ends {
+				if end.HandOnWhy != "" {
+					end.HandOnWhy = ""
+					end.Problems = append(end.Problems, "hand-on ignored during a design question; ask again when this round finishes")
+				}
+				recordTurnEnd(v, t, stepKinds[r.Step], "", seat, end, now)
+			}
 		}
 		t.Failures, t.RetryAt = 0, time.Time{}
 		if t.DesignsAt(r.Step) >= DesignLimit {
