@@ -26,7 +26,14 @@ it("sends owner checks separately from team criteria", async () => {
     brief: { goal: "Build" },
     playbook: {},
   } as Project;
-  render(<AskForm project={project} refresh={async () => {}} />);
+  render(
+    <AskForm
+      project={project}
+      tasks={[]}
+      projects={[project]}
+      refresh={async () => {}}
+    />,
+  );
   fireEvent.change(screen.getByLabelText("What do you want?"), {
     target: { value: "Build" },
   });

@@ -62,7 +62,12 @@ export function Board({
   const cap = capLine(project, state.tasks);
   return (
     <div className="board-page">
-      <AskForm project={project} refresh={refresh} />
+      <AskForm
+        project={project}
+        tasks={state.tasks}
+        projects={state.projects}
+        refresh={refresh}
+      />
       {project.landing_paused && (
         <p className="board-cap muted small">
           {landingPausedLine(project)} ·{" "}

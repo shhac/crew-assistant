@@ -190,7 +190,7 @@ func TestATaskStartsOnlyOnceWhatItDependsOnHasFinished(t *testing.T) {
 	}
 	other := newProject(t, s)
 	elsewhere, _ := s.QueueTask(testContext, other.ID, TaskInput{Objective: "Elsewhere"})
-	if _, err := s.QueueTask(testContext, p.ID, TaskInput{Objective: "Third", DependsOn: []string{elsewhere.ID}}); err == nil {
+	if _, err := s.QueueTaskAs(testContext, p.ID, TaskInput{Objective: "Third", DependsOn: []string{elsewhere.ID}}, LinkedByPM); err == nil {
 		t.Fatal("a dependency in another project was accepted")
 	}
 	// Move Second ahead of First: it still waits.

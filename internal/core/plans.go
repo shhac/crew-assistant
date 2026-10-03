@@ -103,6 +103,9 @@ func dependencies(v *Snapshot, t Task, ids []string, anyProject bool) ([]string,
 		// Editing same-project links keeps cross-project dependencies that
 		// research already recorded, without permitting new ones here.
 		case dep == nil || (dep.ProjectID != t.ProjectID && !anyProject && !slices.Contains(t.DependsOn, dep.ID)):
+			if anyProject {
+				return nil, fmt.Errorf("there is no task %q", id)
+			}
 			return nil, fmt.Errorf("there is no task %q in this project", id)
 		case slices.Contains(out, dep.ID):
 			continue
@@ -112,6 +115,25 @@ func dependencies(v *Snapshot, t Task, ids []string, anyProject bool) ([]string,
 		out = append(out, dep.ID)
 	}
 	return out, nil
+}
+
+// requestedDependencies validates the whole request before creating a task.
+func requestedDependencies(v *Snapshot, t Task, ids []string, anyProject bool) ([]string, error) {
+	deps, err := dependencies(v, t, ids, anyProject)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range deps {
+		dep := task(v, id)
+		if anyProject && dep.ProjectID != t.ProjectID && unfinished(v, id) == nil {
+			p := project(v, dep.ProjectID)
+			if p == nil {
+				return nil, fmt.Errorf("there is no task %q", id)
+			}
+			return nil, fmt.Errorf("“%s” (%s in %s) has finished, so there is nothing to wait for", dep.Objective, p.TaskRef(dep.Number), p.Title)
+		}
+	}
+	return deps, nil
 }
 
 // possibleDependencies is what a role says a task waits for, less any task

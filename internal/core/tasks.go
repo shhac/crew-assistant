@@ -128,7 +128,7 @@ type Task struct {
 	// Attachments are the files kept with the task: the owner's, with a
 	// note, and the designer's, with a design; see attachments.go.
 	Attachments []Attachment `json:"attachments,omitempty"`
-	// DependsOn names tasks in the same project that must have landed before
+	// DependsOn names tasks in any project that must have landed before
 	// this one starts. Without stacking, a task never builds on work that has
 	// not landed.
 	DependsOn []string `json:"depends_on,omitempty"`
@@ -534,7 +534,7 @@ func queueTask(v *Snapshot, p *Project, out *Task, ids []string, by, activity st
 	if err := TaskQueueReady(*p); err != nil {
 		return err
 	}
-	deps, err := dependencies(v, *out, ids, false)
+	deps, err := requestedDependencies(v, *out, ids, overrules(by))
 	if err != nil {
 		return err
 	}
@@ -550,6 +550,7 @@ func queueTask(v *Snapshot, p *Project, out *Task, ids []string, by, activity st
 		activity = "task." + out.Status
 	}
 	recordTask(v, now, out, activity, out.Objective)
+	derive(v, out)
 	return nil
 }
 

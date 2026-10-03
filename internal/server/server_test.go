@@ -633,3 +633,28 @@ func TestATasksPlaceAndDraftsByHand(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
+
+func TestCreateTaskWithCrossProjectDependency(t *testing.T) {
+	s, call := ownerServer(t)
+	ctx := context.Background()
+	a, _ := s.CreateProject(ctx, core.ProjectInput{Title: "App", Template: "draft", Brief: core.BriefInput{Goal: "Build"}})
+	b, _ := s.CreateProject(ctx, core.ProjectInput{Title: "Library", Template: "draft", Brief: core.BriefInput{Goal: "Publish"}})
+	dep, _ := s.QueueTask(ctx, b.ID, core.TaskInput{Objective: "Publish library"})
+	post := func(id string) *httptest.ResponseRecorder {
+		return call("POST", "/api/projects/"+a.ID+"/tasks", fmt.Sprintf(`{"objective":"Use library","depends_on":[%q]}`, id))
+	}
+	w := post(dep.Ref)
+	var got core.Task
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != 201 || len(got.DependsOn) != 1 || got.DependsOn[0] != dep.ID || len(got.WaitingOn) != 1 || got.WaitingOn[0].Project != "Library" {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	w = post("UNKNOWN-999")
+	if w.Code < 400 || w.Code >= 500 || !strings.Contains(w.Body.String(), "UNKNOWN-999") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	s.UpdateTask(ctx, dep.ID, func(t *core.Task, _ *core.Project) (string, error) { t.Status = core.TaskLanded; return "", nil })
+	w = post(dep.Ref)
+	if w.Code < 400 || w.Code >= 500 || !strings.Contains(w.Body.String(), "has finished") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}

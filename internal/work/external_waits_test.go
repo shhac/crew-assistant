@@ -477,3 +477,49 @@ func TestAnsweredWaitQuestionIsNotAskedAgain(t *testing.T) {
 		}
 	}
 }
+
+func TestOwnerCrossProjectWaitStartsAfterLanding(t *testing.T) {
+	t.Parallel()
+	a, runner, p := plannedCode(t, 6)
+	ctx := context.Background()
+	other, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Library", Template: "draft", Brief: core.BriefInput{Goal: "Publish", Criteria: []string{"Ready"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Core.SetProjectPaused(ctx, other.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	dep, err := a.Core.QueueTask(ctx, other.ID, core.TaskInput{Objective: "Publish library"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.plans = []string{plainPlan}
+	own, err := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Use library", DependsOn: []string{dep.Ref}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := a.loopStep(ctx, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snap, _ := a.Core.Snapshot(ctx)
+	held, _ := findTask(snap, p.ID, own.ID)
+	if held.Status != core.TaskQueued || runner.edits != 0 || len(turns(&runner.scriptedRunner, "Plan this task before anything is written")) != 0 {
+		t.Fatalf("started before landing: %+v", held)
+	}
+	if _, err := a.Core.UpdateTask(ctx, dep.ID, func(t *core.Task, _ *core.Project) (string, error) { t.Status = core.TaskLanded; return "", nil }); err != nil {
+		t.Fatal(err)
+	}
+	got := taskNow(t, a, own.ID)
+	plans := turns(&runner.scriptedRunner, "Plan this task before anything is written")
+	if len(plans) != 1 || runner.edits != 1 || got.Plan == nil || len(got.Plan.Questions) != 0 {
+		t.Fatalf("replan turns %d edits %d task %+v", len(plans), runner.edits, got)
+	}
+	if strings.Contains(plans[0].Prompt, "This task already waits for") {
+		t.Fatalf("finished wait left in prompt: %s", plans[0].Prompt)
+	}
+	if d := openDecision(t, a, got); d.Kind != core.DecisionDelivery {
+		t.Fatalf("unexpected owner question: %+v", d)
+	}
+}

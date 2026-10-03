@@ -355,6 +355,7 @@ export interface WorkspaceInput {
   sign: string;
 }
 export interface TaskInput {
+  depends_on?: string[];
   owner_checks?: string[];
   objective: string;
   criteria: string[];
