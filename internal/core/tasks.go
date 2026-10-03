@@ -199,7 +199,10 @@ type Task struct {
 	// owner to judge; OwnerSteps are those the owner took on, to check once
 	// the change lands. See owner_steps.go.
 	Unreachable []Unreachable `json:"unreachable,omitempty"`
-	OwnerSteps  []string      `json:"owner_steps,omitempty"`
+	// TeamKept holds the exact requirements the owner left with the team
+	// after an escalation. Changed wording needs a new owner answer.
+	TeamKept   []string `json:"team_kept,omitempty"`
+	OwnerSteps []string `json:"owner_steps,omitempty"`
 	// OwnerTook is each requirement the owner took on as one of those
 	// steps, as the task or its brief states it. One of the brief's stays
 	// in the brief, and is the owner's for this task alone.

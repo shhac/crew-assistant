@@ -34,6 +34,7 @@ const (
 	// choiceAcceptFollowUp accepts the draft and queues what the checks
 	// still raise as a follow-up task.
 	choiceAcceptFollowUp = "Accept and follow up"
+	choiceSplit          = core.ChoiceSplit
 	// choiceOwnerStep leaves a requirement the team can't meet from its
 	// sandbox to the owner after the change lands; choiceKeepForTeam keeps
 	// it the team's.

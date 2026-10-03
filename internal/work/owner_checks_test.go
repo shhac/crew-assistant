@@ -27,7 +27,7 @@ func TestOwnerChecksNeverEnterTeamPromptsOrEscalations(t *testing.T) {
 			t.Fatal("researcher lacks moving instructions")
 		}
 		block := `[{"requirement":"` + marker + `","why":"Only after landing"}]`
-		if got := parseOwnerSteps(block, 1, append(task.Criteria, marker), task.OwnersAlready()); len(got) != 0 {
+		if got, _ := parseOwnerSteps(block, 1, append(task.Criteria, marker), task.OwnersAlready(), task.TeamKept); len(got) != 0 {
 			t.Fatalf("escalated owner's check: %+v", got)
 		}
 		activity := landedOn(&task, &p, core.Revision{}, "main", "")

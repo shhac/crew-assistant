@@ -750,7 +750,13 @@ export type DecisionKind =
   | "pm-question"
   | "release"
   | "release-failed";
+export interface OwnerSplit {
+  team: string;
+  owner: string;
+}
 export interface Decision {
+  owner_step?: { criterion: string; step: string };
+  split?: OwnerSplit;
   answer?: string;
   disposition?: "choice" | "custom" | "dismissed" | "completed" | "superseded";
   resolution_reason?: string;
@@ -1216,7 +1222,7 @@ export function getConfigDefaults() {
 }
 export function resolveDecision(
   id: string,
-  body: { choice: string } | { answer: string },
+  body: { choice: string; split?: OwnerSplit } | { answer: string },
 ) {
   return api(`/api/decisions/${encodeURIComponent(id)}/resolve`, {
     method: "POST",

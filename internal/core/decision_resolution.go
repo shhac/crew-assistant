@@ -7,17 +7,20 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // ChooseDecision records the owner picking one of a decision's own choices.
 // Only a choice made this way can approve, stop or retry; the loop reads any
 // other answer as the owner's words.
-func (s *Service) ChooseDecision(ctx context.Context, id, choice string, by string) (Decision, error) {
+// Split it also needs the team and owner parts, stored with the answer.
+func (s *Service) ChooseDecision(ctx context.Context, id, choice string, by string, split ...*OwnerSplit) (Decision, error) {
 	choice = strings.TrimSpace(choice)
 	if choice == "" {
 		return Decision{}, errors.New("choose one of the decision's choices")
 	}
-	return s.finishDecision(ctx, id, choice, DispositionChoice, "", by)
+	return s.finishDecision(ctx, id, choice, DispositionChoice, "", by, split...)
 }
 
 // AnswerDecision records the owner's own words, even when they happen to
@@ -41,7 +44,7 @@ func (s *Service) DismissDecision(ctx context.Context, id, reason string) (Decis
 	}
 	return s.finishDecision(ctx, id, "", DispositionDismissed, reason, "")
 }
-func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, reason string, by string) (Decision, error) {
+func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, reason string, by string, splits ...*OwnerSplit) (Decision, error) {
 	var out Decision
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		d := decision(v, id)
@@ -53,6 +56,28 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 		}
 		if disposition == DispositionChoice && !slices.Contains(d.Choices, answer) {
 			return fmt.Errorf("%q is not one of this decision's choices: %w", answer, ErrConflict)
+		}
+		var split *OwnerSplit
+		if len(splits) > 0 {
+			split = splits[0]
+		}
+		if disposition == DispositionChoice && answer == ChoiceSplit {
+			if d.OwnerStep == nil || split == nil {
+				return errors.New("splitting needs an owner step and both parts; choose Split it on the dashboard to edit them")
+			}
+			cleaned := OwnerSplit{Team: text.Clip(strings.TrimSpace(split.Team), maxCriterion), Owner: text.Clip(strings.TrimSpace(split.Owner), maxCriterion)}
+			if cleaned.Team == "" || cleaned.Owner == "" {
+				return errors.New("both split parts are required")
+			}
+			if cleaned.Team == cleaned.Owner {
+				return errors.New("team and owner parts must be different")
+			}
+			if t := task(v, d.TaskID); t != nil && slices.Contains(t.OwnerChecks, cleaned.Team) {
+				return errors.New("the team part is already an owner check")
+			}
+			d.Split = &cleaned
+		} else if split != nil {
+			return errors.New("a split requires the Split it choice")
 		}
 		if d.Kind == DecisionRunRecipe && disposition == DispositionChoice && answer == ChoiceUseRecipe {
 			if err := acceptRunRecipe(v, d); err != nil {

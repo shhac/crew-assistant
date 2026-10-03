@@ -30,7 +30,16 @@ func briefText(p core.Project, t core.Task) string {
 	}
 	// A brief's requirement the owner took on for this task stays in the
 	// brief, and is listed with the owner's steps instead.
-	criteria := slices.DeleteFunc(append(slices.Clone(p.Brief.Criteria), t.Criteria...), func(c string) bool { return slices.Contains(t.OwnerTook, c) || slices.Contains(t.OwnerChecks, c) })
+	criteria := slices.DeleteFunc(append(slices.Clone(p.Brief.Criteria), t.Criteria...), func(c string) bool {
+		return (slices.Contains(t.OwnerTook, c) && !slices.Contains(t.Criteria, c)) || slices.Contains(t.OwnerChecks, c)
+	})
+	unique := make([]string, 0, len(criteria))
+	for _, c := range criteria {
+		if !slices.Contains(unique, c) {
+			unique = append(unique, c)
+		}
+	}
+	criteria = unique
 	if len(criteria) > 0 {
 		b.WriteString("\nThe result must meet every one of these criteria:\n")
 		b.WriteString(numbered(criteria))
@@ -157,6 +166,19 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string, fresh bool) stri
 		if guide := designGuide(t, writers[0], core.TaskWriting, "ask before you change anything: reply with only a ```design block holding your question. Whatever you change in a turn that asks is set aside."); guide != "" {
 			b.WriteString("\n" + strings.TrimSpace(guide) + "\n")
 		}
+	}
+	var kept []string
+	for _, c := range t.TeamKept {
+		if slices.Contains(t.Criteria, c) || (slices.Contains(p.Brief.Criteria, c) && !slices.Contains(t.OwnerTook, c)) {
+			kept = append(kept, c)
+		}
+	}
+	if len(kept) > 0 {
+		b.WriteString("\nThe owner kept these requirements for the team:\n")
+		for _, c := range kept {
+			b.WriteString("- " + c + "\n")
+		}
+		b.WriteString("\nIf kept requirements still can't be met from your sandbox, report them too. Keep quoting them in the owner-step block with why; the loop reports them in your hand-over instead of opening another escalation.\n")
 	}
 	if playbook := taskPlaybook(p, t); isCode(p, t) && playbook != nil && playbook.Check != "" {
 		b.WriteString("\nUse run_check for the project's check before handing over; repeat while it says still running. The project's check, including tests that start local servers when the project allows localhost, is within reach through run_check and is never an owner step.")

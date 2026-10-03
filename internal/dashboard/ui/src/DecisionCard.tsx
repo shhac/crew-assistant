@@ -65,6 +65,29 @@ export function DecisionCard({
   const { busy, error, run } = useAction();
   const [mode, setMode] = useState<Mode | "">(alwaysOpen ? "answer" : "");
   const [draft, setDraft] = useState("");
+  const [splitting, setSplitting] = useState(false);
+  const [team, setTeam] = useState(decision.owner_step?.criterion ?? "");
+  const [owner, setOwner] = useState(decision.owner_step?.step ?? "");
+  function pick(choice: string) {
+    if (choice === "Split it" && decision.owner_step) {
+      setSplitting(true);
+      return;
+    }
+    if (withWords.has(choice)) setMode("answer");
+    else void send(choice, "choice");
+  }
+  function submitSplit(e: FormEvent) {
+    e.preventDefault();
+    if (!team.trim() || !owner.trim() || team.trim() === owner.trim() || busy)
+      return;
+    void run(async () => {
+      await resolveDecision(decision.id, {
+        choice: "Split it",
+        split: { team: team.trim(), owner: owner.trim() },
+      });
+      await refresh();
+    });
+  }
   const playbook = taskPlaybook(task, project);
   const closable = !task;
   const asking = alwaysOpen && mode === "answer";
@@ -139,7 +162,56 @@ export function DecisionCard({
           <span className="label">Recommended</span> {decision.recommendation}
         </p>
       )}
-      {mode ? (
+      {splitting ? (
+        <form className="decision-answer" onSubmit={submitSplit}>
+          <label className="control">
+            Stays with the team
+            <textarea
+              className="field"
+              value={team}
+              onChange={(e) => setTeam(e.target.value)}
+              maxLength={500}
+              disabled={busy}
+              rows={2}
+              required
+            />
+          </label>
+          <label className="control">
+            You check after it lands
+            <textarea
+              className="field"
+              value={owner}
+              onChange={(e) => setOwner(e.target.value)}
+              maxLength={500}
+              disabled={busy}
+              rows={2}
+              required
+            />
+          </label>
+          <div className="actions">
+            <button
+              className="btn btn-primary"
+              type="submit"
+              disabled={
+                busy ||
+                !team.trim() ||
+                !owner.trim() ||
+                team.trim() === owner.trim()
+              }
+            >
+              Split it
+            </button>
+            <button
+              className="btn btn-quiet"
+              type="button"
+              disabled={busy}
+              onClick={() => setSplitting(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : mode ? (
         <form className="decision-answer" onSubmit={submit}>
           <label className="control">
             {forms[mode].prompt}
@@ -170,7 +242,7 @@ export function DecisionCard({
                     type="button"
                     className="btn btn-quiet"
                     disabled={busy}
-                    onClick={() => void send(choice, "choice")}
+                    onClick={() => pick(choice)}
                   >
                     {label(choice)}
                   </button>
@@ -197,11 +269,7 @@ export function DecisionCard({
               type="button"
               className={`btn${i === 0 ? " btn-primary" : ""}`}
               disabled={busy}
-              onClick={() =>
-                withWords.has(choice)
-                  ? setMode("answer")
-                  : void send(choice, "choice")
-              }
+              onClick={() => pick(choice)}
             >
               {label(choice)}
             </button>

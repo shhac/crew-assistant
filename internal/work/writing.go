@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -159,10 +160,29 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	}
 	// The draft counts only once the project's records hold it; the handoff
 	// carries the round's whole outcome until then.
-	revision.Summary = text.Clip(in.reply, 2000)
+	var kept []core.Unreachable
+	h.Unreachable, kept = parseOwnerSteps(in.unmet, n, append(slices.Clone(t.Criteria), p.Brief.Criteria...), t.OwnersAlready(), t.TeamKept)
+	revision.Summary = draftSummary(in.reply, kept)
 	h.Revision = revision
-	h.Unreachable = parseOwnerSteps(in.unmet, n, t.Criteria, t.OwnersAlready())
 	return lp.handOff(ctx, t, m, h)
+}
+
+// draftSummary leads with compact unmet requirements so even the delivery's
+// 600-byte view can show a complete entry. Ordinary replies keep their limit.
+func draftSummary(reply string, kept []core.Unreachable) string {
+	if len(kept) == 0 {
+		return text.Clip(reply, 2000)
+	}
+	summary := "Kept for the team, still not met from the sandbox:"
+	for _, u := range kept {
+		summary += "\n- " + text.Clip(u.Criterion, 300) + ": " + text.Clip(u.Why, 200)
+	}
+	summary += "\n\n" + reply
+	limit := 2000
+	if len(summary) > limit {
+		limit -= len("…")
+	}
+	return text.Clip(summary, limit)
 }
 
 // writerReply is an implementer's reply taken apart: its words, and the

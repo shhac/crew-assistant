@@ -104,3 +104,36 @@ func TestEachOpenDecisionIsSentToTheOwnerOnce(t *testing.T) {
 		t.Fatal("the failed send should be noted for inspection")
 	}
 }
+
+func TestAssistantSplitChoicePointsToDashboard(t *testing.T) {
+	a := testApp(t)
+	ctx := context.Background()
+	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Docs", Template: "draft", Brief: core.BriefInput{Goal: "Docs"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Docs", Criteria: []string{"README; CI"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := a.Core.OpenTaskDecision(ctx, task.ID, core.DecisionEscalation, core.DecisionInput{Title: "Split?", Context: "Blocked", Recommendation: "Split", Choices: []string{core.ChoiceSplit, "Stop"}, OwnerStep: &core.OwnerStep{Criterion: task.Criteria[0], Step: "Check CI"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(map[string]string{"decision_id": d.ID, "choice": core.ChoiceSplit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Execute(ctx, "resolve_decision", raw); err == nil || !strings.Contains(err.Error(), "dashboard") {
+		t.Fatalf("no actionable split guidance: %v", err)
+	}
+	snap, err := a.Core.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(snap.Decisions, func(got core.Decision) bool {
+		return got.ID == d.ID && got.Status == core.DecisionOpen && got.Split == nil
+	}) {
+		t.Fatal("assistant closed split decision")
+	}
+}

@@ -294,7 +294,7 @@ func sandboxRequirementBecomesAnOwnerStep(t *testing.T, first string) {
 		t.Fatal("the implementer was never told how to say it can't meet a requirement")
 	}
 	d := openDecision(t, a, task)
-	if d.OwnerStep == nil || d.OwnerStep.Step != "Open the page in your browser and check it shows" || !slices.Equal(d.Choices, []string{choiceOwnerStep, choiceKeepForTeam, choiceStop}) {
+	if d.OwnerStep == nil || d.OwnerStep.Step != "Open the page in your browser and check it shows" || !slices.Equal(d.Choices, []string{choiceOwnerStep, choiceSplit, choiceKeepForTeam, choiceStop}) {
 		t.Fatalf("owner step decision %+v", d)
 	}
 	if d.Recommendation != choiceOwnerStep+": only the owner has a browser" || !strings.Contains(d.Context, "There is no browser in my sandbox.") || !strings.Contains(d.Context, "- [ ] Open the page in your browser") {
@@ -372,7 +372,7 @@ func TestAnOwnerStepIsNotRaisedAgain(t *testing.T) {
 	t.Parallel()
 	steps := []string{"After it lands, ask the designer on a real task to generate one image and check it shows up attached to the task."}
 	block := `[{"requirement": "ask the designer on a real task to generate one image", "why": "no network"}, {"requirement": "It opens in the owner's browser", "why": "no browser"}]`
-	got := parseOwnerSteps(block, 2, []string{"It opens in the owner's browser"}, steps)
+	got, _ := parseOwnerSteps(block, 2, []string{"It opens in the owner's browser"}, steps, nil)
 	if len(got) != 1 || got[0].Criterion != "It opens in the owner's browser" {
 		t.Fatalf("raised: %+v", got)
 	}
@@ -388,7 +388,7 @@ func TestABriefRequirementTheOwnerTookIsNotTheTeams(t *testing.T) {
 	if strings.Contains(brief, "1. CI is green") || !strings.Contains(brief, "The README says how") || !strings.Contains(brief, "Check the CI run") {
 		t.Fatalf("brief:\n%s", brief)
 	}
-	if got := parseOwnerSteps(`[{"requirement": "CI is green on every platform", "why": "no CI here"}]`, 2, task.Criteria, task.OwnersAlready()); len(got) != 0 {
+	if got, _ := parseOwnerSteps(`[{"requirement": "CI is green on every platform", "why": "no CI here"}]`, 2, task.Criteria, task.OwnersAlready(), task.TeamKept); len(got) != 0 {
 		t.Fatalf("raised again: %+v", got)
 	}
 }

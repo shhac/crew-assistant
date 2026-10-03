@@ -159,11 +159,12 @@ type Decision struct {
 	// draft and follows up, exactly as the owner was shown it; OwnerStep is
 	// the requirement a decision proposes leaving to the owner after the
 	// change lands. See owner_steps.go.
-	FollowUp   *TaskInput `json:"follow_up,omitempty"`
-	OwnerStep  *OwnerStep `json:"owner_step,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
-	BlockerID  string     `json:"blocker_id,omitempty"`
+	FollowUp   *TaskInput  `json:"follow_up,omitempty"`
+	Split      *OwnerSplit `json:"split,omitempty"`
+	OwnerStep  *OwnerStep  `json:"owner_step,omitempty"`
+	CreatedAt  time.Time   `json:"created_at"`
+	ResolvedAt *time.Time  `json:"resolved_at,omitempty"`
+	BlockerID  string      `json:"blocker_id,omitempty"`
 }
 
 // Approves reports a decision whose approval lets the task's change go out.

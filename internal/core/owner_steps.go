@@ -175,3 +175,88 @@ func (s *Service) MakeOwnerStep(ctx context.Context, taskID, decisionID string) 
 	})
 	return out, err
 }
+
+// ChoiceSplit asks the owner for the team and after-landing parts of a requirement.
+const ChoiceSplit = "Split it"
+
+// OwnerSplit keeps part of a requirement with the team and part with the owner.
+type OwnerSplit struct {
+	Team  string `json:"team"`
+	Owner string `json:"owner"`
+}
+
+// SplitOwnerStep applies a resolved split as one undoable owner edit.
+func (s *Service) SplitOwnerStep(ctx context.Context, taskID, decisionID string) (Task, error) {
+	var out Task
+	err := s.store.update(ctx, func(v *Snapshot) error {
+		t, d := task(v, taskID), decision(v, decisionID)
+		if t == nil {
+			return ErrNotFound
+		}
+		if t.Finished() {
+			out = *t
+			return nil
+		}
+		if d == nil || d.TaskID != taskID || d.OwnerStep == nil || d.Split == nil {
+			return ErrNotFound
+		}
+		if t.DecisionID != decisionID {
+			out = *t
+			return nil
+		}
+		// The owner can add a check while a resolved split awaits this pass.
+		// Keep that newer choice and settle the rest without blocking the loop.
+		ownerAlready := d.Split.Team == d.Split.Owner || slices.Contains(t.OwnerChecks, d.Split.Team)
+		original := d.OwnerStep.Criterion
+		after := t.text()
+		if i := slices.Index(after.Criteria, original); i >= 0 {
+			if ownerAlready {
+				after.Criteria = slices.Delete(after.Criteria, i, i+1)
+			} else {
+				after.Criteria[i] = d.Split.Team
+			}
+		} else {
+			if !ownerAlready && !slices.Contains(after.Criteria, d.Split.Team) {
+				after.Criteria = append(after.Criteria, d.Split.Team)
+			}
+		}
+		unique := make([]string, 0, len(after.Criteria))
+		for _, c := range after.Criteria {
+			if !slices.Contains(unique, c) {
+				unique = append(unique, c)
+			}
+		}
+		after.Criteria = unique
+		if !slices.Contains(t.OwnerTook, original) {
+			t.OwnerTook = append(t.OwnerTook, original)
+		}
+		if !slices.Contains(after.OwnerChecks, d.Split.Owner) {
+			after.OwnerChecks = append(after.OwnerChecks, d.Split.Owner)
+		}
+		if ownerAlready {
+			t.TeamKept = slices.DeleteFunc(t.TeamKept, func(c string) bool { return c == d.Split.Team })
+			if len(t.TeamKept) == 0 {
+				t.TeamKept = nil
+			}
+		} else if !slices.Contains(t.TeamKept, d.Split.Team) {
+			t.TeamKept = append(t.TeamKept, d.Split.Team)
+		}
+		t.SettleUnreachable(original)
+		t.DecisionID, t.Status, t.Detail = "", TaskReviewing, "Checking again with the split requirement"
+		t.UpdatedAt = s.now().UTC()
+		after.Criteria = slices.DeleteFunc(after.Criteria, func(c string) bool { return slices.Contains(after.OwnerChecks, c) })
+		activity := fmt.Sprintf("%s: split: %s stays with the team; %s after it lands", t.Objective, d.Split.Team, d.Split.Owner)
+		if ownerAlready {
+			activity = fmt.Sprintf("%s: split: %s is already an owner check; %s after it lands", t.Objective, d.Split.Team, d.Split.Owner)
+		}
+		recordTask(v, t.UpdatedAt, t, "task.owner_split", activity)
+		if t.text().same(after) {
+			t.Status, t.Detail = TaskDeciding, "Going on with the split requirement"
+			derive(v, t)
+			out = *t
+			return nil
+		}
+		return s.applyEdit(v, t, TaskEdit{By: FromOwner, Kind: FromOwner, After: after}, &out)
+	})
+	return out, err
+}

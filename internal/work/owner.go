@@ -43,15 +43,20 @@ func (lp *Loop) UpdateBrief(ctx context.Context, projectID string, in core.Brief
 
 // ResolveDecision answers a decision with one of its choices, or with the
 // owner's own words; never both, since words that spell a choice are not one.
-func (lp *Loop) ResolveDecision(ctx context.Context, id, choice, answer string, by string) (core.Decision, error) {
+func (lp *Loop) ResolveDecision(ctx context.Context, id, choice, answer string, by string, split ...*core.OwnerSplit) (core.Decision, error) {
 	if (strings.TrimSpace(choice) == "") == (strings.TrimSpace(answer) == "") {
 		return core.Decision{}, errors.New("give either a choice or an answer")
 	}
-	resolve, with := lp.Core.ChooseDecision, choice
+	var d core.Decision
+	var err error
 	if strings.TrimSpace(answer) != "" {
-		resolve, with = lp.Core.AnswerDecision, answer
+		if len(split) > 0 && split[0] != nil {
+			return d, errors.New("a split requires a choice")
+		}
+		d, err = lp.Core.AnswerDecision(ctx, id, answer, by)
+	} else {
+		d, err = lp.Core.ChooseDecision(ctx, id, choice, by, split...)
 	}
-	d, err := resolve(ctx, id, with, by)
 	lp.nudgeUnless(err)
 	return d, err
 }

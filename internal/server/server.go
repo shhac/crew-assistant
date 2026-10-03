@@ -104,13 +104,14 @@ func New(a *app.App, auth *Auth) http.Handler {
 	})
 	mux.HandleFunc("POST /api/decisions/{id}/resolve", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Choice string `json:"choice"`
-			Answer string `json:"answer"`
+			Split  *core.OwnerSplit `json:"split"`
+			Choice string           `json:"choice"`
+			Answer string           `json:"answer"`
 		}
 		if decode(w, r, &in) != nil {
 			return
 		}
-		v, err := a.Work.ResolveDecision(r.Context(), r.PathValue("id"), in.Choice, in.Answer, core.FromOwner)
+		v, err := a.Work.ResolveDecision(r.Context(), r.PathValue("id"), in.Choice, in.Answer, core.FromOwner, in.Split)
 		reply(w, 200, v, err)
 	})
 	mux.HandleFunc("POST /api/decisions/{id}/dismiss", func(w http.ResponseWriter, r *http.Request) {

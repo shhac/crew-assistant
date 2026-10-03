@@ -355,34 +355,43 @@ type ownerStepEntry struct {
 
 // parseOwnerSteps reads the implementer's owner-step block: the
 // requirements it can't meet from its sandbox on draft n, each matched to
-// the task's own criterion where it quotes one. A block that can't be read
-// says nothing.
-func parseOwnerSteps(block string, n int, criteria, owners []string) []core.Unreachable {
+// the task or brief's current criterion where it quotes one. A block that can't be read
+// says nothing. The second result is what the owner already kept for the
+// team: it belongs in this draft's hand-over rather than another decision.
+func parseOwnerSteps(block string, n int, criteria, owners, kept []string) ([]core.Unreachable, []core.Unreachable) {
 	if block == "" {
-		return nil
+		return nil, nil
 	}
 	var entries []ownerStepEntry
 	if err := json.Unmarshal([]byte(block), &entries); err != nil {
 		var one ownerStepEntry
 		if json.Unmarshal([]byte(block), &one) != nil {
-			return nil
+			return nil, nil
 		}
 		entries = []ownerStepEntry{one}
 	}
-	var out []core.Unreachable
+	var out, retained []core.Unreachable
 	for _, e := range entries {
-		// A step already the owner's would come back reworded, round
-		// after round.
-		if slices.Contains(owners, matchCriterion(owners, e.Requirement)) {
+		c := matchCriterion(criteria, e.Requirement)
+		if slices.Contains(kept, c) {
+			if !slices.ContainsFunc(retained, func(u core.Unreachable) bool { return u.Criterion == c }) {
+				retained = append(retained, core.Unreachable{Criterion: c, Why: text.Clip(strings.TrimSpace(e.Why), 600), Revision: n})
+			}
 			continue
 		}
-		c := matchCriterion(criteria, e.Requirement)
+		// A step already the owner's would come back reworded, round
+		// after round.
+		// A current team criterion can be an edited part of a split brief
+		// requirement. Its new text must not disappear into the old quote.
+		if slices.Contains(owners, matchCriterion(owners, e.Requirement)) && (slices.Contains(owners, c) || !slices.Contains(criteria, c)) {
+			continue
+		}
 		if c == "" || slices.ContainsFunc(out, func(u core.Unreachable) bool { return u.Criterion == c }) {
 			continue
 		}
 		out = append(out, core.Unreachable{Criterion: c, Why: text.Clip(strings.TrimSpace(e.Why), 600), Revision: n})
 	}
-	return out
+	return out, retained
 }
 
 // matchCriterion is the task's criterion quoted: the one it equals, or the
@@ -439,7 +448,7 @@ func (lp *Loop) proposeOwnerStep(ctx context.Context, p core.Project, t core.Tas
 			if _, err := lp.Core.AddNote(ctx, core.NoteInput{Project: t.ProjectID, Task: t.ID, By: seat.Name, Kind: core.RolePM, While: core.TaskDeciding, Text: said}); err != nil && !errors.Is(err, core.ErrConflict) {
 				return err
 			}
-			return lp.keepForTeam(ctx, t, u.Criterion, seat.Name+": "+said)
+			return lp.keepForTeam(ctx, t, u.Criterion, seat.Name+": "+said, false)
 		}
 		if judged != nil {
 			if s := strings.TrimSpace(judged.Step); s != "" {
@@ -450,11 +459,12 @@ func (lp *Loop) proposeOwnerStep(ctx context.Context, p core.Project, t core.Tas
 		}
 	}
 	fmt.Fprintf(&b, "\n\nAs an owner step, it leaves the team's requirements and the delivery carries:\nAfter it lands, check:\n- [ ] %s", step.Step)
+	b.WriteString("\n\nYou can split it: keep part with the team and check the rest after it lands.")
 	_, err := lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionEscalation, core.DecisionInput{
 		Title:          fmt.Sprintf("“%s” has a requirement the team can't meet from its sandbox", t.Objective),
 		Context:        b.String(),
 		Recommendation: rec,
-		Choices:        []string{choiceOwnerStep, choiceKeepForTeam, choiceStop},
+		Choices:        []string{choiceOwnerStep, choiceSplit, choiceKeepForTeam, choiceStop},
 		OwnerStep:      &step,
 	})
 	return err
@@ -462,8 +472,11 @@ func (lp *Loop) proposeOwnerStep(ctx context.Context, p core.Project, t core.Tas
 
 // keepForTeam leaves a requirement the implementer said it can't meet with
 // the team, and has the task decided again from its checks.
-func (lp *Loop) keepForTeam(ctx context.Context, t core.Task, criterion, activity string) error {
+func (lp *Loop) keepForTeam(ctx context.Context, t core.Task, criterion, activity string, owner bool) error {
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if owner && !slices.Contains(t.TeamKept, criterion) {
+			t.TeamKept = append(t.TeamKept, criterion)
+		}
 		t.SettleUnreachable(criterion)
 		t.Status, t.DecisionID, t.Detail = core.TaskDeciding, "", "Kept for the team"
 		return activity, nil
