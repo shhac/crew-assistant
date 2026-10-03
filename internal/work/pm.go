@@ -194,6 +194,8 @@ func pmToldText(snap core.Snapshot, p core.Project) string {
 func pmPrompt(snap core.Snapshot, p core.Project) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You keep the to-do list for the project %s. Goal: %s\n", p.Title, p.Brief.Goal)
+	b.WriteString(pmTeamLine(p))
+	b.WriteString("For work needing raster illustrations, name a designer who can generate images in the requirements you tidy with edit_task.\n")
 	b.WriteString(`
 The order is yours to set directly. Never ask the owner to approve or confirm an order. Ask only for decisions only the owner can make, such as conflicting priorities in the brief or their words. Decide the order the queued tasks start in, and what each unfinished task has to wait for. A task waits for another when it builds on what the other will change; without stacking, a task never starts before what it waits for has landed. Put first what unblocks the most, then what the owner most needs. Keep the tasks themselves in order too: where a title or requirements are messy, tidy them; where a task should be split or needs a sibling, queue it; where one task depends on another, link them. Do not plan or build anything yourself, and do not direct, stop or land anyone's work.
 `)

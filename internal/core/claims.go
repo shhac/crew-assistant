@@ -117,6 +117,9 @@ func (t *Task) claim(token string) *Claim {
 
 // newClaim records a claim on t, on an attempt of its own.
 func newClaim(t *Task, c Claim, now time.Time) Claim {
+	if c.Step == TaskDesigning && c.Seat != "" {
+		t.Detail = "With " + c.Seat + " for design input"
+	}
 	kind := stepKinds[c.Step]
 	if c.Step == TaskReviewing {
 		if r, ok := t.Role(c.Seat); ok {

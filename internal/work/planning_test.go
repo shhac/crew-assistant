@@ -267,13 +267,13 @@ func TestMissingDesignerIsRecordedWithThePlanAndVisible(t *testing.T) {
 
 func TestMissingDesignerFlagIsOptionalBoundedAndIndependentOfHandOff(t *testing.T) {
 	t.Parallel()
-	plan, _, design, err := parsePlan(`{"summary":"Add a command.", "design":"ignored"}`, false, true)
+	plan, _, design, _, err := parsePlan(`{"summary":"Add a command.", "design":"ignored"}`, false, true, nil)
 	if err != nil || design != "" || plan.NeedsDesigner != "" {
 		t.Fatalf("%+v %q %v", plan, design, err)
 	}
 	reply := `{"summary":"Add icons.", "needs_designer":"` + strings.Repeat("x", maxPlanItem+100) + `"}`
 	for _, tc := range []struct{ designs, missing bool }{{false, true}, {true, false}, {false, false}} {
-		plan, _, _, err := parsePlan(reply, tc.designs, tc.missing)
+		plan, _, _, _, err := parsePlan(reply, tc.designs, tc.missing, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

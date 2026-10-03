@@ -144,7 +144,7 @@ func TestTheResearchersReplyContractOffersDesignOnlyWhileItCanAsk(t *testing.T) 
 	if got := contract(withDee); !strings.Contains(got, `{"design": "your question for the designer"}`) || !strings.Contains(got, `"summary"`) {
 		t.Fatalf("with a designer, the contract should offer a plan or a design question: %s", got)
 	}
-	if _, _, got, err := parsePlan(`{"design": "your question for the designer"}`, true, false); err != nil || got != "your question for the designer" {
+	if _, _, got, _, err := parsePlan(`{"design": "your question for the designer"}`, true, false, nil); err != nil || got != "your question for the designer" {
 		t.Fatalf("the contract's design form should be read as a hand-off: %q %v", got, err)
 	}
 	used := withDee

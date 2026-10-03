@@ -11,6 +11,7 @@ import (
 
 	"github.com/shhac/lib-agent-harness/session"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 )
 
@@ -49,6 +50,7 @@ type roleTools struct {
 	// only: attach_file keeps files with it, reading any it names from
 	// workDir.
 	design, workDir string
+	engine          string
 	// generated is where a Codex designer's generated images are found this
 	// turn, which attach_file may keep too; nil on an engine that can't
 	// generate images.
@@ -71,7 +73,7 @@ func (r roleTools) proposing(playbook *core.Playbook) roleTools {
 const maxPMQueued = 3
 
 func (lp *Loop) toolsFor(t core.Task, kind string, r core.Role) roleTools {
-	tools := roleTools{lp: lp, projectID: t.ProjectID, taskID: t.ID, status: t.Status, by: core.TeamLinker(r.Member, kind), name: seatName(r, kind), kind: kind, relations: relationsFor(kind)}
+	tools := roleTools{engine: r.Engine, lp: lp, projectID: t.ProjectID, taskID: t.ID, status: t.Status, by: core.TeamLinker(r.Member, kind), name: seatName(r, kind), kind: kind, relations: relationsFor(kind)}
 	if open := t.OpenDesign(); kind == core.RoleDesigner && t.Status == core.TaskDesigning && open != nil {
 		tools.design = open.ID
 		if generatesImages(r) {
@@ -257,6 +259,7 @@ func (r roleTools) queue(ctx context.Context, title, requirements, dependsOn str
 // image it generated in this turn.
 func (r roleTools) attach(ctx context.Context, name, content, path, generated string) (string, error) {
 	var data []byte
+	made := "from the workspace"
 	given := 0
 	for _, s := range []string{content, strings.TrimSpace(path), strings.TrimSpace(generated)} {
 		if s != "" {
@@ -270,7 +273,9 @@ func (r roleTools) attach(ctx context.Context, name, content, path, generated st
 		return "", errors.New("give either content or path, not both")
 	case content != "":
 		data = []byte(content)
+		made = "written out by " + r.name
 	case strings.TrimSpace(generated) != "":
+		made = "image generation (" + config.EngineLabel(r.engine) + ")"
 		var file string
 		var err error
 		if data, file, err = r.generated.read(generated); err != nil {
@@ -288,7 +293,7 @@ func (r roleTools) attach(ctx context.Context, name, content, path, generated st
 			name = filepath.Base(path)
 		}
 	}
-	kept, err := r.lp.Core.AttachToDesign(ctx, core.DesignFiles{Project: r.projectID, Task: r.taskID, By: r.name, Kind: r.kind, While: r.status, Design: r.design, Files: []core.NewFile{{Name: name, Data: data}}})
+	kept, err := r.lp.Core.AttachToDesign(ctx, core.DesignFiles{Project: r.projectID, Task: r.taskID, By: r.name, Kind: r.kind, While: r.status, Design: r.design, Files: []core.NewFile{{Name: name, Made: made, Data: data}}})
 	if err != nil {
 		return "", hideProjects(err)
 	}

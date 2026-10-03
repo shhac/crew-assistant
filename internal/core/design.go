@@ -28,6 +28,8 @@ type DesignRequest struct {
 	Step     string `json:"step"`
 	Round    int    `json:"round"`
 	Question string `json:"question"`
+	// For is the designer seat the researcher named; empty for any designer.
+	For string `json:"for,omitempty"`
 	// Designer is the seat that gave Input. A request past DesignLimit goes
 	// to the owner instead, and has neither.
 	Designer string `json:"designer,omitempty"`
@@ -81,6 +83,7 @@ func (t Task) nextDesignNumber() int {
 // DesignAsk is a hand-off the loop asks for.
 type DesignAsk struct {
 	From     string
+	For      string
 	Question string
 	// Owner is the decision the question becomes past DesignLimit.
 	Owner DecisionInput
@@ -95,6 +98,13 @@ func (t Task) Designer() (Role, bool) {
 	designers := t.RolesOf(RoleDesigner)
 	if len(designers) == 0 {
 		return Role{}, false
+	}
+	if r := t.OpenDesign(); r != nil {
+		for _, seat := range designers {
+			if seat.Name == r.For {
+				return seat, true
+			}
+		}
 	}
 	return designers[0], true
 }
@@ -146,8 +156,13 @@ func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk, e
 		if !ok {
 			return errors.New("this task's team has no designer")
 		}
+		for _, seat := range t.RolesOf(RoleDesigner) {
+			if seat.Name == ask.For {
+				designer = seat
+			}
+		}
 		now := s.now().UTC()
-		r := DesignRequest{ID: uid(), From: ask.From, Step: t.Status, Round: t.Round, Question: text.Clip(ask.Question, 4000), At: now}
+		r := DesignRequest{ID: uid(), From: ask.From, For: ask.For, Step: t.Status, Round: t.Round, Question: text.Clip(ask.Question, 4000), At: now}
 		if ask.Also != nil {
 			ask.Also(t)
 		}

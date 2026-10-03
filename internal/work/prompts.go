@@ -792,6 +792,7 @@ If it needs more than about 10 changes or would touch more than about 30 files, 
 	_, hasDesigner := t.Designer()
 	needsDesigner := ""
 	if !hasDesigner {
+		b.WriteString(imageGenerators(t.Roles) + "\n")
 		fmt.Fprintf(&b, "\nNo designer is on this team. If the task needs %s, say why in needs_designer instead of silently going ahead; otherwise leave it empty.\n", visualDesignWork)
 		needsDesigner = `"needs_designer": "why this task needs visual design, or empty", `
 	}
@@ -803,7 +804,11 @@ If it needs more than about 10 changes or would touch more than about 30 files, 
 	// The reply can ask for design input only while the hand-off is offered,
 	// so the contract a role follows never contradicts the guide above it.
 	if designsFor(t, researcher) && t.DesignsAt(core.TaskResearching) < core.DesignLimit {
-		b.WriteString("\nReply with only one of these JSON objects: the plan,\n" + plan + "\nor, to ask for design input first,\n" + `{"design": "your question for the designer"}`)
+		reply := `{"design": "your question for the designer"}`
+		if len(t.RolesOf(core.RoleDesigner)) > 1 {
+			reply = `{"design": "your question for the designer", "designer": "name of a designer seat, or empty"}`
+		}
+		b.WriteString("\nReply with only one of these JSON objects: the plan,\n" + plan + "\nor, to ask for design input first,\n" + reply)
 		return b.String()
 	}
 	b.WriteString("\nReply with only this JSON object:\n" + plan)

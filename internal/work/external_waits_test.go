@@ -105,7 +105,7 @@ func TestResearchWaitSummaryIsSentBackOnce(t *testing.T) {
 
 func TestParsePrerequisitesAndWaitSummaryGuard(t *testing.T) {
 	t.Parallel()
-	plan, _, _, err := parsePlan(`{"summary":"Use library", "prerequisites":[" lib tagged ","", "Owner ready"]}`, false, false)
+	plan, _, _, _, err := parsePlan(`{"summary":"Use library", "prerequisites":[" lib tagged ","", "Owner ready"]}`, false, false, nil)
 	if err != nil || len(plan.Prerequisites) != 2 || plan.Prerequisites[0].What != "lib tagged" {
 		t.Fatalf("parse %+v %v", plan, err)
 	}

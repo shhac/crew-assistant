@@ -89,8 +89,11 @@ func TestACodexDesignerAttachesAnImageItGeneratedInItsTurn(t *testing.T) {
 	if !strings.Contains(results[0].Content, "Attached ig_b.png") || !results[1].IsError || !results[2].IsError || !strings.Contains(results[3].Content, "Attached ig_c.png") {
 		t.Fatalf("attach results %+v", results)
 	}
-	if len(task.Attachments) != 2 || task.Attachments[1].Name != "ig_c.png" || task.Attachments[1].Type != "image/png" || task.Attachments[1].Design != task.Design[0].ID {
+	if len(task.Attachments) != 2 || task.Attachments[1].Made != "image generation (Codex)" || task.Attachments[1].Name != "ig_c.png" || task.Attachments[1].Type != "image/png" || task.Attachments[1].Design != task.Design[0].ID {
 		t.Fatalf("attachments %+v", task.Attachments)
+	}
+	if entry := designEntry(task, task.Design[0]); !strings.Contains(entry, "ig_c.png (image generation (Codex))") {
+		t.Fatal(entry)
 	}
 	for _, thread := range []string{firstThread, secondThread} {
 		if _, err := os.Stat(filepath.Join(homes[0], "generated_images", thread)); !os.IsNotExist(err) {
@@ -98,7 +101,7 @@ func TestACodexDesignerAttachesAnImageItGeneratedInItsTurn(t *testing.T) {
 		}
 	}
 	designers := turns(runner, "asks for your design input")
-	if len(designers) != 2 || !strings.Contains(designers[0].Prompt, "raster image, such as an icon, an illustration or a mockup, you can make one with your image generation tool") {
+	if len(designers) != 2 || !strings.Contains(designers[0].Prompt, "Generate raster art with your image generation tool") {
 		t.Fatalf("the designer was not told it can generate images: %d turns", len(designers))
 	}
 	if !strings.Contains(designers[0].Instructions, "an image you generated in this turn") {

@@ -45,14 +45,14 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	var plan core.Plan
 	var end core.TurnEnd
 	var dependsOn []string
-	var design string
+	var design, designer string
 	attempts := 0
 	inconsistent := false
 	_, hasDesigner := t.Designer()
 	reply, learned, _, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
 		attempts++
 		clean, block := splitHandOn(reply)
-		plan, dependsOn, design, err = parsePlan(clean, designsFor(t, researcher), !hasDesigner)
+		plan, dependsOn, design, designer, err = parsePlan(clean, designsFor(t, researcher), !hasDesigner, t.RolesOf(core.RoleDesigner))
 		end.HandOnWhy, end.Problems = parseHandOn(block)
 		if err == nil && design == "" && core.UndeclaredPlanWait(plan, core.PlanDependencies(snap, t, dependsOn), t) {
 			inconsistent = true
@@ -68,7 +68,7 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	}
 	lp.recordLearned(ctx, p, t, researcher, m, learned)
 	if design != "" {
-		return lp.askDesign(ctx, t, researcher.Name, design, nil, end)
+		return lp.askDesignFor(ctx, t, researcher.Name, design, designer, nil, end)
 	}
 	// A plan that still cannot be read is kept as written rather than stopping
 	// the work: the implementer reads it either way.
@@ -156,7 +156,7 @@ const (
 // surrounding prose, and bounds what it keeps. Where the researcher can ask
 // for design input, a reply that asks needs no plan yet: the researcher plans
 // once the input is back.
-func parsePlan(reply string, designs, noDesigner bool) (core.Plan, []string, string, error) {
+func parsePlan(reply string, designs, noDesigner bool, seats []core.Role) (core.Plan, []string, string, string, error) {
 	var in struct {
 		OwnerChecks   []string `json:"owner_checks"`
 		NeedsDesigner string   `json:"needs_designer"`
@@ -173,17 +173,32 @@ func parsePlan(reply string, designs, noDesigner bool) (core.Plan, []string, str
 			Title        string   `json:"title"`
 			Requirements []string `json:"requirements"`
 		} `json:"split_off"`
-		Design string `json:"design"`
+		Design   string `json:"design"`
+		Designer string `json:"designer"`
 	}
 	if err := decodeReply(reply, &in); err != nil {
-		return core.Plan{}, nil, "", errors.New("the plan was not valid JSON")
+		return core.Plan{}, nil, "", "", errors.New("the plan was not valid JSON")
 	}
 	var design string
 	if designs {
 		design = strings.TrimSpace(in.Design)
 	}
+	designer := strings.TrimSpace(in.Designer)
+	if design != "" && designer != "" {
+		valid := false
+		for _, seat := range seats {
+			if seat.Name == designer {
+				valid = true
+			}
+		}
+		if !valid {
+			return core.Plan{}, nil, "", "", fmt.Errorf("designer %q is not a designer seat on this task", designer)
+		}
+	} else {
+		designer = ""
+	}
 	if strings.TrimSpace(in.Summary) == "" && design == "" {
-		return core.Plan{}, nil, "", errors.New("the plan had no summary")
+		return core.Plan{}, nil, "", "", errors.New("the plan had no summary")
 	}
 	// What will change is kept first, so a plan over budget loses its least
 	// needed lists instead.
@@ -219,5 +234,5 @@ func parsePlan(reply string, designs, noDesigner bool) (core.Plan, []string, str
 	for _, what := range listed(in.Prerequisites, maxPlanItems) {
 		plan.Prerequisites = append(plan.Prerequisites, core.Prerequisite{What: text.Clip(what, 300)})
 	}
-	return plan, listed(in.DependsOn, maxPlanItems), design, nil
+	return plan, listed(in.DependsOn, maxPlanItems), design, designer, nil
 }

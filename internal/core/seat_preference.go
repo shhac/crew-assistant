@@ -104,6 +104,14 @@ func (t Task) preferredSeats(kind, group string) ([]Role, NextTaker) {
 	next := NextTaker{Kind: kind, Group: group}
 	preferred, did := "", ""
 	switch kind {
+	case RoleDesigner:
+		if request := t.OpenDesign(); request != nil {
+			for _, seat := range seats {
+				if seat.Name == request.For {
+					return []Role{seat}, NextTaker{Kind: kind, Preferred: seat.Name}
+				}
+			}
+		}
 	case RoleImplementer:
 		if r, ok := t.Writer(); ok {
 			preferred = r.Name

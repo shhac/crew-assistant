@@ -32,6 +32,7 @@ import (
 type Attachment struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	Made string `json:"made,omitempty"`
 	// Type is the media type judged from the file's bytes and its name,
 	// never from what the sender claimed.
 	Type string `json:"type"`
@@ -51,6 +52,7 @@ type Attachment struct {
 // NewFile is a file to attach, as it arrived.
 type NewFile struct {
 	Name string
+	Made string
 	Data []byte
 }
 
@@ -126,7 +128,7 @@ func checkFile(f NewFile) (Attachment, error) {
 			return Attachment{}, refuse("it contains binary data")
 		}
 	}
-	return Attachment{Name: name, Type: kind, Size: int64(len(f.Data))}, nil
+	return Attachment{Name: name, Made: f.Made, Type: kind, Size: int64(len(f.Data))}, nil
 }
 
 // attachmentName is a file's name as kept, which is only ever shown: it

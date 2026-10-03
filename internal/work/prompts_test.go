@@ -180,7 +180,7 @@ func TestAPlanKeepsItsStepsWholeWithinABound(t *testing.T) {
 		"tests":         []string{"A crash between the two writes leaves one record"},
 		"questions":     []string{strings.Repeat("q", 900), strings.Repeat("r", maxPlanItem+500)},
 	})
-	plan, _, _, err := parsePlan(string(reply), false, true)
+	plan, _, _, _, err := parsePlan(string(reply), false, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestAPlanKeepsItsStepsWholeWithinABound(t *testing.T) {
 		many[i] = strings.Repeat("c", maxPlanItem)
 	}
 	reply, _ = json.Marshal(map[string]any{"summary": "Big.", "changes": many, "failure_paths": many, "tests": many, "exists": many, "out_of_scope": many})
-	plan, _, _, _ = parsePlan(string(reply), false, true)
+	plan, _, _, _, _ = parsePlan(string(reply), false, true, nil)
 	total := 0
 	for _, list := range [][]string{plan.Changes, plan.FailurePaths, plan.Tests, plan.Exists, plan.OutOfScope} {
 		for _, item := range list {
@@ -273,7 +273,7 @@ func TestAPlanListsWhatItSplitsOff(t *testing.T) {
 		parts = append(parts, map[string]any{"title": fmt.Sprintf("Part %d", i)})
 	}
 	reply, _ := json.Marshal(map[string]any{"summary": "Only the core.", "split_off": parts})
-	plan, _, _, err := parsePlan(string(reply), false, true)
+	plan, _, _, _, err := parsePlan(string(reply), false, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

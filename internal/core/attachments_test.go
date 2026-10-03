@@ -106,21 +106,21 @@ func TestAttachmentsAreJudgedByTheirBytesAndASetIsNeverPartlyKept(t *testing.T) 
 		file NewFile
 		says string
 	}{
-		"text posing as a PNG": {NewFile{"mock.png", []byte("not a picture")}, "mock.png can't be attached: it is not a PNG image"},
-		"a PNG posing as JPEG": {NewFile{"mock.jpg", pngBytes(t)}, "it is not a JPEG image"},
-		"text with a NUL":      {NewFile{"notes.txt", []byte("a\x00b")}, "notes.txt can't be attached: it contains binary data"},
-		"not UTF-8":            {NewFile{"notes.txt", []byte{0xff, 0xfe, 'a'}}, "it is not UTF-8 text"},
-		"a PDF that isn't":     {NewFile{"spec.pdf", []byte("hello")}, "it is not a PDF"},
-		"a program":            {NewFile{"run.sh", []byte("echo hi")}, "only images (PNG, JPEG, GIF, WebP), PDF, and text files"},
-		"no extension":         {NewFile{"README", []byte("hi")}, "only images"},
-		"empty":                {NewFile{"empty.md", nil}, "empty.md can't be attached: it is empty"},
-		"too large":            {NewFile{"big.txt", bytes.Repeat([]byte("a"), MaxAttachmentBytes+1)}, "it is 5,242,881 bytes, and a file can be at most 5,242,880 bytes"},
-		"a path for a name":    {NewFile{"../../state.db.md", []byte("x")}, "a name can't be a path or start with a dot"},
-		"a backslashed path":   {NewFile{`..\up.md`, []byte("x")}, "a name can't be a path"},
-		"a hidden name":        {NewFile{".env.txt", []byte("x")}, "start with a dot"},
-		"a control character":  {NewFile{"a\nb.md", []byte("x")}, "characters a name can't hold"},
-		"no name":              {NewFile{"  ", []byte("x")}, "an attachment needs a name"},
-		"an overlong name":     {NewFile{strings.Repeat("a", 130) + ".md", []byte("x")}, "a name can be at most 120 bytes"},
+		"text posing as a PNG": {NewFile{Name: "mock.png", Data: []byte("not a picture")}, "mock.png can't be attached: it is not a PNG image"},
+		"a PNG posing as JPEG": {NewFile{Name: "mock.jpg", Data: pngBytes(t)}, "it is not a JPEG image"},
+		"text with a NUL":      {NewFile{Name: "notes.txt", Data: []byte("a\x00b")}, "notes.txt can't be attached: it contains binary data"},
+		"not UTF-8":            {NewFile{Name: "notes.txt", Data: []byte{0xff, 0xfe, 'a'}}, "it is not UTF-8 text"},
+		"a PDF that isn't":     {NewFile{Name: "spec.pdf", Data: []byte("hello")}, "it is not a PDF"},
+		"a program":            {NewFile{Name: "run.sh", Data: []byte("echo hi")}, "only images (PNG, JPEG, GIF, WebP), PDF, and text files"},
+		"no extension":         {NewFile{Name: "README", Data: []byte("hi")}, "only images"},
+		"empty":                {NewFile{Name: "empty.md", Data: nil}, "empty.md can't be attached: it is empty"},
+		"too large":            {NewFile{Name: "big.txt", Data: bytes.Repeat([]byte("a"), MaxAttachmentBytes+1)}, "it is 5,242,881 bytes, and a file can be at most 5,242,880 bytes"},
+		"a path for a name":    {NewFile{Name: "../../state.db.md", Data: []byte("x")}, "a name can't be a path or start with a dot"},
+		"a backslashed path":   {NewFile{Name: `..\up.md`, Data: []byte("x")}, "a name can't be a path"},
+		"a hidden name":        {NewFile{Name: ".env.txt", Data: []byte("x")}, "start with a dot"},
+		"a control character":  {NewFile{Name: "a\nb.md", Data: []byte("x")}, "characters a name can't hold"},
+		"no name":              {NewFile{Name: "  ", Data: []byte("x")}, "an attachment needs a name"},
+		"an overlong name":     {NewFile{Name: strings.Repeat("a", 130) + ".md", Data: []byte("x")}, "a name can be at most 120 bytes"},
 	} {
 		_, err := s.AddNote(testContext, NoteInput{Project: p.ID, Task: queued.ID, By: FromOwner, Kind: FromOwner, Text: "See these", Files: []NewFile{good, c.file}})
 		if err == nil || !strings.Contains(err.Error(), c.says) {
@@ -145,7 +145,7 @@ func TestAttachmentsAreJudgedByTheirBytesAndASetIsNeverPartlyKept(t *testing.T) 
 		t.Fatalf("a refused set left notes %d, records %d, files %v", len(task.Notes), len(task.Attachments), keptFiles(t, s, queued.ID))
 	}
 	// Every other kind named is taken.
-	for _, f := range []NewFile{{"a.svg", []byte("<svg/>")}, {"a.html", []byte("<p>")}, {"a.json", []byte("{}")}, {"a.csv", []byte("a,b")}, {"a.PDF", []byte("%PDF-1.7")}, {"a.png", pngBytes(t)}} {
+	for _, f := range []NewFile{{Name: "a.svg", Data: []byte("<svg/>")}, {Name: "a.html", Data: []byte("<p>")}, {Name: "a.json", Data: []byte("{}")}, {Name: "a.csv", Data: []byte("a,b")}, {Name: "a.PDF", Data: []byte("%PDF-1.7")}, {Name: "a.png", Data: pngBytes(t)}} {
 		if _, err := checkFile(f); err != nil {
 			t.Errorf("%s: %v", f.Name, err)
 		}

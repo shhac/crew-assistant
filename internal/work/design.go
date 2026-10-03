@@ -24,8 +24,14 @@ func designsFor(t core.Task, asker core.Role) bool {
 // same change. A task that moved on meanwhile, such as one stopped, is left
 // as it is.
 func (lp *Loop) askDesign(ctx context.Context, t core.Task, from, question string, also func(*core.Task), ends ...core.TurnEnd) error {
+	return lp.askDesignFor(ctx, t, from, question, "", also, ends...)
+}
+
+// askDesignFor pins a researcher's request to the named designer, when given.
+func (lp *Loop) askDesignFor(ctx context.Context, t core.Task, from, question, designer string, also func(*core.Task), ends ...core.TurnEnd) error {
 	_, err := lp.Core.AskDesign(ctx, t.ID, core.DesignAsk{
 		From:     from,
+		For:      designer,
 		Question: question,
 		Owner: core.DecisionInput{
 			Title:          fmt.Sprintf("%s wants more design input on “%s”", from, t.Objective),
@@ -210,9 +216,17 @@ Give design input only: read what you need, change nothing, and do not commit, d
 While you work, attach_file keeps a mockup with your input: an SVG, HTML or Markdown sketch you write out as its content, or an image or other file already in the current directory, named by its path. Everyone who works on the task afterwards can open it.
 `)
 	if generates {
-		b.WriteString("When the task needs a raster image, such as an icon, an illustration or a mockup, you can make one with your image generation tool, then attach it with attach_file by giving the generated image's file name as generated, within the same limits. If image generation isn't available to you, say so in your input and sketch in SVG, HTML or Markdown instead.\n")
+		b.WriteString("When the work needs new illustrations (characters, props, scene art), first look for the project's existing illustrated assets in the same area. Generate raster art with your image generation tool matching their style, format (such as .webp or .png) and scale. Attach it with attach_file using generated for the image's file name, within the same limits. Hand-written SVG is for mockups, icons, diagrams, simple shapes, or when image generation is unavailable or fails. Say in your input why you chose SVG.\n")
 	} else {
-		b.WriteString("Image generation isn't available to you here, so where the task needs an icon, an illustration or a mockup, sketch it in SVG, HTML or Markdown instead.\n")
+		b.WriteString("Image generation isn't available to you here. Draw vector illustrations (SVG), and where the work moves (characters, ambient motion), use animated SVG or CSS. Look first for the project's existing illustrated assets in the same area, matching their style, format and scale.\n")
+	}
+	b.WriteString(imageGenerators(t.Roles) + "\n")
+	if !generates {
+		if names := generatingMembers(t.Roles); len(names) > 0 {
+			b.WriteString("If the project style calls for raster art, say so in your input and recommend " + strings.Join(names, ", ") + " to generate it.\n")
+		} else {
+			b.WriteString("No member on this team can generate raster art.\n")
+		}
 	}
 	b.WriteString(`If answering well needs more than design input, such as a choice only the owner can make or work beyond this task, escalate instead: give the evidence, the alternatives, the consequences of each and your recommendation. The owner decides, and the task goes back to whoever asked.
 `)
@@ -282,7 +296,11 @@ func designEntry(t core.Task, r core.DesignRequest) string {
 	var names []string
 	for _, a := range t.Attachments {
 		if a.Design == r.ID {
-			names = append(names, a.Name)
+			name := a.Name
+			if a.Made != "" {
+				name += " (" + a.Made + ")"
+			}
+			names = append(names, name)
 		}
 	}
 	if len(names) > 0 {
@@ -300,8 +318,25 @@ func designGuide(t core.Task, asker core.Role, step string, how string) string {
 		return ""
 	}
 	designer, _ := t.Designer()
-	if n := t.DesignsAt(step); n >= core.DesignLimit {
-		return fmt.Sprintf("\n\nYou have had design input from %s %d times at this step, the most it allows. Go on with what you have; asking again brings the question to the owner instead.", designer.Name, n)
+	abilities := "\n" + imageGenerators(t.Roles)
+	if names := generatingDesigners(t); len(names) > 0 && step == core.TaskResearching && len(t.RolesOf(core.RoleDesigner)) > 1 {
+		abilities += "\nWhen work needs raster illustrations, name a designer who can generate images: " + strings.Join(names, ", ") + "."
+	} else if len(generatingDesigners(t)) == 0 {
+		note := "your reply"
+		if step == core.TaskResearching {
+			note = "the plan questions"
+		}
+		abilities += "\nNo designer on this team can generate raster art; if it is needed, note that in " + note + "."
 	}
-	return fmt.Sprintf("\n\n%s is the team's designer. Work needing %s must go to %s for design input before you plan or build it as final; do not draw or invent those assets yourself. For that work, or if you need other design input before you can go on well, %s The task goes to %s and comes back to you with the answer.", designer.Name, visualDesignWork, designer.Name, how, designer.Name)
+	if n := t.DesignsAt(step); n >= core.DesignLimit {
+		return abilities + fmt.Sprintf("\n\nYou have had design input from %s %d times at this step, the most it allows. Go on with what you have; asking again brings the question to the owner instead.", designer.Name, n)
+	}
+	if step == core.TaskResearching && len(t.RolesOf(core.RoleDesigner)) > 1 {
+		var names []string
+		for _, seat := range t.RolesOf(core.RoleDesigner) {
+			names = append(names, seat.Name)
+		}
+		return abilities + fmt.Sprintf("\n\nThe team's designers are %s. Work needing %s must go to a designer for design input before you plan or build it as final; do not draw or invent those assets yourself. Name the designer in your design reply to send it only to that seat; leave designer empty to ask any designer. For that work, or if you need other design input before you can go on well, %s The task comes back to you with the answer.", strings.Join(names, ", "), visualDesignWork, how)
+	}
+	return abilities + fmt.Sprintf("\n\n%s is the team's designer. Work needing %s must go to %s for design input before you plan or build it as final; do not draw or invent those assets yourself. For that work, or if you need other design input before you can go on well, %s The task goes to %s and comes back to you with the answer.", designer.Name, visualDesignWork, designer.Name, how, designer.Name)
 }

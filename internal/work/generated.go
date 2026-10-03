@@ -13,6 +13,7 @@ import (
 	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 )
 
@@ -20,6 +21,33 @@ import (
 // can, and the role sandbox leaves it on.
 func generatesImages(r core.Role) bool {
 	return harness.Engine(r.Engine) == harness.Codex
+}
+
+// imageGenerators tells the team which engines can generate raster art.
+func imageGenerators(roles []core.Role) string {
+	var members []string
+	for _, r := range roles {
+		ability := "cannot generate images"
+		if generatesImages(r) {
+			ability = "can generate raster art"
+		}
+		members = append(members, fmt.Sprintf("%s (%s): %s", r.Name, config.EngineLabel(r.Engine), ability))
+	}
+	return "Team image generation: " + strings.Join(members, "; ") + "."
+}
+
+func generatingMembers(roles []core.Role) []string {
+	var names []string
+	for _, r := range roles {
+		if generatesImages(r) {
+			names = append(names, r.Name)
+		}
+	}
+	return names
+}
+
+func generatingDesigners(t core.Task) []string {
+	return generatingMembers(t.RolesOf(core.RoleDesigner))
 }
 
 // generatedRoot is where Codex saves the images every role's session

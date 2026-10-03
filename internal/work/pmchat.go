@@ -113,7 +113,11 @@ func pmTeamLine(p core.Project) string {
 			names = append(names, r.Name+" ("+strings.Join(r.Kinds, ", ")+")")
 		}
 	}
-	return "\nTeam: " + strings.Join(names, "; ") + "\n"
+	line := "\nTeam: " + strings.Join(names, "; ") + "\n"
+	if p.Playbook != nil {
+		line += imageGenerators(p.Playbook.Roles) + "\n"
+	}
+	return line
 }
 func (lp *Loop) pmChatTurn(ctx context.Context, projectID string, m core.PMChatMessage, seat core.Role) error {
 	snap, err := lp.Core.Snapshot(ctx)
