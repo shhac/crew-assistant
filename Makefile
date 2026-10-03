@@ -24,6 +24,7 @@ check:
 	go vet ./...
 	go test ./... -count=1 -timeout $(TEST_TIMEOUT)
 	npm --prefix internal/dashboard/ui run check
+	npm --prefix internal/dashboard/ui run check:bundle
 	npm --prefix internal/dashboard/ui test
 
 dev:
