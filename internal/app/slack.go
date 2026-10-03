@@ -95,6 +95,30 @@ func (a *App) waitSlackPM(ctx context.Context, m slackapi.Message, projectID, id
 				if msg.Status == "waiting" && a.Stopping() {
 					return a.finishSlack(ctx, m, "I'm stopping for now. Your message is queued for the project manager; its answer will appear in the project's conversation when I'm running again.")
 				}
+				if msg.Status == "waiting" {
+					snap, err := a.Core.Snapshot(ctx)
+					if err != nil {
+						return "", err
+					}
+					for _, p := range snap.Projects {
+						if p.ID != projectID {
+							continue
+						}
+						if seat, ok := p.PMSeat(); ok {
+							pause, paused, err := a.Work.EnginePause(ctx, seat.Engine)
+							if err != nil {
+								return "", err
+							}
+							if paused {
+								end := "until you resume"
+								if pause.Until != nil {
+									end = "until " + pause.Until.Local().Format("Mon 15:04")
+								}
+								return a.finishSlack(ctx, m, "Your message is queued for the project manager. "+config.EngineLabel(seat.Engine)+" is paused "+end+"; its answer will appear in the project's conversation after it resumes.")
+							}
+						}
+					}
+				}
 				if msg.Status == "waiting" && a.dispatchDisabled.Load() {
 					return a.finishSlack(ctx, m, "Your message is queued for the project manager. Work dispatch is paused; its answer will appear in the project's conversation after dispatch resumes.")
 				}

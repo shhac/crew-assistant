@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
-import { getUsage, type EngineCredits, type EngineUsage } from "./api";
+import {
+  getUsage,
+  setEnginePaused,
+  enginePaused,
+  errorText,
+  type EnginePause,
+  type EngineCredits,
+  type EngineUsage,
+} from "./api";
 import { engineLabel } from "./engines";
-import { recordedTime } from "./ui";
+import { recordedTime, Icon, ErrorNotice } from "./ui";
 
 /**
  * How often usage is looked at: reading a login spends no usage, but an
@@ -136,7 +144,41 @@ function describe(u: EngineUsage) {
  * focus, so a look never disturbs the chat or an open request, and a failed
  * one only says so here.
  */
-export function UsageStatus() {
+const noPauses: Record<string, EnginePause> = {};
+
+export function UsageStatus({
+  pauses = noPauses,
+}: {
+  pauses?: Record<string, EnginePause>;
+}) {
+  const [localPauses, setLocalPauses] = useState(pauses);
+  const [choosing, setChoosing] = useState<string>();
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  useEffect(() => setLocalPauses(pauses), [pauses]);
+  const change = async (
+    engine: string,
+    rowKey: string,
+    paused: boolean,
+    until?: string,
+  ) => {
+    setBusy((b) => ({ ...b, [rowKey]: true }));
+    setErrors((e) => ({ ...e, [rowKey]: "" }));
+    try {
+      await setEnginePaused(engine, paused, until);
+      setLocalPauses((previous) => {
+        const next = { ...previous };
+        if (paused) next[engine] = { at: new Date().toISOString(), until };
+        else delete next[engine];
+        return next;
+      });
+      setChoosing((row) => (row === rowKey ? undefined : row));
+    } catch (error) {
+      setErrors((e) => ({ ...e, [rowKey]: errorText(error) }));
+    } finally {
+      setBusy((b) => ({ ...b, [rowKey]: false }));
+    }
+  };
   const [usage, setUsage] = useState<EngineUsage[] | null>(null);
   const [readAt, setReadAt] = useState<string>();
   const [failed, setFailed] = useState(false);
@@ -185,21 +227,84 @@ export function UsageStatus() {
               resets_at: resetStillAhead(w.resets_at),
             })),
           });
+          const rowKey = u.provider ? `${u.engine}/${u.provider}` : u.engine;
+          const controlName = engineLabel(u.engine);
+          const pause = enginePaused(localPauses, u.engine);
+          const pauseWords = pause
+            ? `Paused ${pause.until ? "until " + resetLabel(pause.until) : "until you resume"}`
+            : "";
           const age = asOfLabel(asOf);
           const reason =
             asOf || (u.windows.length === 0 && hasFigures) ? u.missing : "";
           return (
             <li
-              key={u.provider ? `${u.engine}/${u.provider}` : u.engine}
-              className={`usage-row ${row.tone}`.trim()}
-              aria-label={`${row.name}: ${[row.summary, age].filter(Boolean).join(", ")}`}
+              key={rowKey}
+              className={`usage-row ${pause ? "tone-wait usage-paused" : row.tone}`.trim()}
+              aria-label={`${row.name}: ${[row.summary, pauseWords, age].filter(Boolean).join(", ")}`}
             >
               <p className="usage-line">
                 <span className="usage-name">{row.name}</span>
                 <span className="usage-figure">
-                  {[row.shown ?? row.summary, age].filter(Boolean).join(" · ")}
+                  {[row.shown ?? row.summary, pauseWords, age]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </span>
+                <button
+                  type="button"
+                  className="btn btn-sm usage-action"
+                  aria-label={`${pause ? "Resume" : "Pause"} ${controlName}`}
+                  title={`${pause ? "Resume" : "Pause"} ${controlName}`}
+                  disabled={!!busy[rowKey]}
+                  onClick={() =>
+                    pause
+                      ? void change(u.engine, rowKey, false)
+                      : setChoosing(rowKey)
+                  }
+                >
+                  <Icon name={pause ? "Play" : "Pause"} size={14} />
+                </button>
               </p>
+              {choosing === rowKey && !pause && (
+                <div
+                  className="usage-chooser"
+                  aria-label={`Pause ${controlName} for`}
+                >
+                  {[
+                    "Until I resume",
+                    "1 hour",
+                    "4 hours",
+                    "Until tomorrow 9:00",
+                    "Cancel",
+                  ].map((choice, i) => (
+                    <button
+                      type="button"
+                      key={choice}
+                      className="btn btn-sm"
+                      disabled={!!busy[rowKey]}
+                      onClick={() => {
+                        if (i === 4) {
+                          setChoosing(undefined);
+                          return;
+                        }
+                        let end: Date | undefined;
+                        if (i === 1 || i === 2)
+                          end = new Date(
+                            Date.now() + (i === 1 ? 1 : 4) * 3600000,
+                          );
+                        if (i === 3) {
+                          end = new Date();
+                          end.setDate(end.getDate() + 1);
+                          end.setHours(9, 0, 0, 0);
+                        }
+                        void change(u.engine, rowKey, true, end?.toISOString());
+                      }}
+                    >
+                      {choice}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <ErrorNotice error={errors[rowKey] || ""} />
               {row.left !== undefined && (
                 <div
                   className="usage-bar"

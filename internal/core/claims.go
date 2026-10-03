@@ -154,7 +154,7 @@ type Scheduled struct {
 // Admit lets a seat's turn start now, taking what it needs to run, such as
 // a slot on its engine. It returns "" when it does; otherwise the step is
 // left for a later look, and it returns what holds the turn back:
-// WaitEngineCap or WaitOwner.
+// WaitEngineCap, WaitEnginePaused or WaitOwner.
 type Admit func(Role) string
 
 // Kinds of Wait: a person busy with other work, the project's cap on tasks
@@ -162,18 +162,20 @@ type Admit func(Role) string
 // use, which no new role turn starts during, and a stage of the board full
 // to its limit.
 const (
-	WaitMember     = "member"
-	WaitProjectCap = "project_cap"
-	WaitEngineCap  = "engine_cap"
-	WaitOwner      = "owner"
-	WaitStage      = "stage"
+	WaitMember       = "member"
+	WaitProjectCap   = "project_cap"
+	WaitEnginePaused = "engine_paused"
+	WaitEngineCap    = "engine_cap"
+	WaitOwner        = "owner"
+	WaitStage        = "stage"
 )
 
 // Wait is who or what a task's next step waits for while it is ready to
 // start and can't: recorded by each look at the work, and cleared once the
 // step is claimed.
 type Wait struct {
-	Kind string `json:"kind"`
+	Kind  string     `json:"kind"`
+	Until *time.Time `json:"until,omitempty"`
 	// Seat is the busy person's seat, and Member the team member it is
 	// filled from, if any.
 	Seat   string `json:"seat,omitempty"`
@@ -425,8 +427,11 @@ func freeSeat(v *Snapshot, projectID string, team, seats []Role, busy map[string
 		}
 		if why := admit(r); why != "" {
 			wait = &Wait{Kind: why}
-			if why == WaitEngineCap {
+			if why == WaitEngineCap || why == WaitEnginePaused {
 				wait.Engine = r.Engine
+				if why == WaitEnginePaused {
+					wait.Until = v.EnginePauses[r.Engine].Until
+				}
 			}
 			continue
 		}

@@ -77,12 +77,12 @@ func TestAssistantWakesArriveTogetherWithTheirOwnTimes(t *testing.T) {
 	if _, err := s.EditChatMessage(testContext, wakeTurns[0].ID, "not a wake", wakeTurns[0].Revision); !errors.Is(err, ErrConflict) {
 		t.Fatalf("a wake-up was edited as if the owner wrote it: %v", err)
 	}
-	if turn, _ := s.StartNextChat(testContext); turn.ID != "owner" {
+	if turn, _ := s.StartNextChat(testContext, "claude"); turn.ID != "owner" {
 		t.Fatalf("the wake-up jumped the owner's message: %+v", turn)
 	}
 	s.FinishChat(testContext, "owner", "completed", "hi", "")
 	clock = clock.Add(10 * time.Minute)
-	turn, err := s.StartNextChat(testContext)
+	turn, err := s.StartNextChat(testContext, "claude")
 	if err != nil || turn.Origin != OriginWake {
 		t.Fatalf("turn %+v err %v", turn, err)
 	}
@@ -100,7 +100,7 @@ func TestAssistantWakesArriveTogetherWithTheirOwnTimes(t *testing.T) {
 	if err = s.FinishChat(testContext, turn.ID, "failed", "", "model unavailable"); err != nil {
 		t.Fatal(err)
 	}
-	again, err := s.StartNextChat(testContext)
+	again, err := s.StartNextChat(testContext, "claude")
 	if err != nil || again.Origin != OriginWake || len(again.WakeIDs) != 2 {
 		t.Fatalf("the wakes were lost with the failed turn: %+v %v", again, err)
 	}
@@ -202,7 +202,7 @@ func TestAWakeUpTurnIsRetriedTwiceThenGivenUpAndCanBeCancelled(t *testing.T) {
 	w, _ := s.RegisterWake(testContext, WakeInput{Owner: WakeAssistant, On: WakeOnTime, Target: "x", Baseline: "not yet"})
 	s.FireWake(testContext, w.ID, "reached", "", false)
 	for attempt := 1; attempt <= maxWakeAttempts; attempt++ {
-		turn, err := s.StartNextChat(testContext)
+		turn, err := s.StartNextChat(testContext, "claude")
 		if err != nil || turn.Origin != OriginWake {
 			t.Fatalf("attempt %d: %+v %v", attempt, turn, err)
 		}
@@ -215,7 +215,7 @@ func TestAWakeUpTurnIsRetriedTwiceThenGivenUpAndCanBeCancelled(t *testing.T) {
 		}
 		s.FinishChat(testContext, turn.ID, "failed", "", "model unavailable")
 	}
-	if _, err := s.StartNextChat(testContext); !errors.Is(err, ErrNotFound) {
+	if _, err := s.StartNextChat(testContext, "claude"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a wake that failed %d times was offered again: %v", maxWakeAttempts, err)
 	}
 	snap, _ := s.Snapshot(testContext)

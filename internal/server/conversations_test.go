@@ -20,7 +20,7 @@ func TestPastConversationsCanBeListedReadAndPickedUpAgain(t *testing.T) {
 		if w := call("POST", "/api/chat/messages", `{"id":"`+m.id+`","message":"`+m.text+`"}`); w.Code != 202 {
 			t.Fatal(w.Code, w.Body.String())
 		}
-		turn, err := s.StartNextChat(ctx)
+		turn, err := s.StartNextChat(ctx, "claude")
 		if err != nil {
 			t.Fatal(err)
 		}

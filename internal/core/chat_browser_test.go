@@ -19,7 +19,7 @@ func TestBrowserNoteOnlyChangesRunningTurnAndSurvivesCompletion(t *testing.T) {
 	if snap.ChatTurns[0].BrowserNote != "" {
 		t.Fatal("changed waiting turn")
 	}
-	s.StartNextChat(ctx)
+	s.StartNextChat(ctx, "claude")
 	if err := s.SetChatBrowserNote(ctx, "turn", strings.Repeat("x", 4097)); err == nil {
 		t.Fatal("accepted long note")
 	}

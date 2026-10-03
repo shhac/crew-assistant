@@ -172,7 +172,7 @@ func (a *App) processNextChat(stop lifecycle.Stop) (bool, error) {
 		return false, nil
 	}
 	ctx := stop.Force
-	turn, err := a.Core.StartNextChat(ctx)
+	turn, err := a.Core.StartNextChat(ctx, a.Config().AssistantHarness().Engine)
 	if errors.Is(err, core.ErrChatHeld) {
 		// The owner is changing the queue. Nothing is wrong and nothing starts.
 		return false, nil

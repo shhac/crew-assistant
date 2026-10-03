@@ -123,7 +123,7 @@ func conversationTurns(v *Snapshot) []ChatTurn {
 
 // StartNextChat atomically claims the oldest pending turn and appends its user
 // message. Cancellation and concurrent consumers cannot race that transition.
-func (s *Service) StartNextChat(ctx context.Context) (ChatTurn, error) {
+func (s *Service) StartNextChat(ctx context.Context, assistantEngine string) (ChatTurn, error) {
 	var out ChatTurn
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		for _, t := range v.ChatTurns {
@@ -134,11 +134,16 @@ func (s *Service) StartNextChat(ctx context.Context) (ChatTurn, error) {
 		now := s.now().UTC()
 		for i := range v.ChatTurns {
 			t := &v.ChatTurns[i]
+			if t.Origin == OriginWake {
+				if _, paused := v.EnginePaused(assistantEngine, now); paused {
+					continue
+				}
+			}
 			if t.Status != "queued" {
 				continue
 			}
-			// Only the head of the queue is ever started, so holding it holds
-			// everything behind it. Comparing against a turn already known to
+			// The first eligible queued turn starts; owner-paused wakes are
+			// skipped above. Comparing against a turn already known to
 			// be queued also means a hold naming a started or cancelled turn
 			// blocks nothing.
 			if live := liveHold(v, now); live != nil && live.TurnID == t.ID {

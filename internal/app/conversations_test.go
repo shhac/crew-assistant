@@ -472,7 +472,7 @@ func TestAFreshConversationStillGetsSuggestions(t *testing.T) {
 	if _, err := a.Core.EnqueueChat(ctx, "new", "/new"); err != nil {
 		t.Fatal(err)
 	}
-	turn, _ := a.Core.StartNextChat(ctx)
+	turn, _ := a.Core.StartNextChat(ctx, "claude")
 	if err := a.Core.FinishChatCommand(ctx, turn.ID, "", ""); err != nil {
 		t.Fatal(err)
 	}

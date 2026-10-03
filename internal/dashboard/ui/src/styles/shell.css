@@ -172,6 +172,7 @@
 }
 
 .usage-line {
+  align-items: center;
   display: flex;
   justify-content: space-between;
   gap: 8px;
@@ -197,6 +198,28 @@
 .usage-row.tone-needs .usage-bar > span,
 .usage-row.tone-block .usage-bar > span {
   background: currentColor;
+}
+
+.usage-figure {
+  flex: 1;
+  text-align: right;
+}
+.usage-action {
+  flex-shrink: 0;
+  padding: 3px;
+}
+.usage-paused .usage-bar > span {
+  background: var(--muted);
+  opacity: 0.5;
+}
+.usage-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.usage-chooser button {
+  font-size: 12px;
+  padding: 3px 6px;
 }
 
 .workspace {

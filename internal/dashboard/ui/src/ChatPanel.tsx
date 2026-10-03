@@ -3,11 +3,13 @@ import {
   api,
   APIError,
   errorText,
+  enginePaused,
   type ChatSession,
   type ChatTurn,
   type State,
 } from "./api";
 import { ConversationMarkdown } from "./ConversationMarkdown";
+import { engineLabel } from "./engines";
 import { Avatar } from "./Avatar";
 import { dateLabel, Icon } from "./ui";
 import { ChatQueue, type QueueHold } from "./ChatQueue";
@@ -677,6 +679,13 @@ export function ChatPanel({
           one on screen. The draft and attachments wait for the return. */}
       {!history && (
         <div className="chat-foot">
+          {state.assistant.engine &&
+            enginePaused(state.engine_pauses, state.assistant.engine) && (
+              <p className="muted small">
+                {engineLabel(state.assistant.engine)} is paused. Your messages
+                still send.
+              </p>
+            )}
           {error && (
             <p className="error" role="alert">
               {error}

@@ -2103,3 +2103,26 @@ describe("larger message editor", () => {
     expect(server.posts()).toHaveLength(0);
   });
 });
+
+it("explains a paused assistant engine while owner Send stays enabled", () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => reply({})),
+  );
+  const state = initial();
+  state.assistant.engine = "claude";
+  state.engine_pauses = { claude: { at: new Date().toISOString() } };
+  const view = render(panel(state));
+  expect(
+    screen.getByText("Claude is paused. Your messages still send."),
+  ).toBeTruthy();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "Hello" } });
+  expect(
+    (screen.getByRole("button", { name: "Send" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(false);
+  view.rerender(panel({ ...state, engine_pauses: {} }));
+  expect(
+    screen.queryByText("Claude is paused. Your messages still send."),
+  ).toBeNull();
+});

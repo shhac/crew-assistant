@@ -42,7 +42,7 @@ func TestAnUnknownCommandIsRefusedAndAKnownOneNeverReachesTheConversation(t *tes
 	if err != nil || turn.Command != CommandCompact {
 		t.Fatal(turn, err)
 	}
-	started, err := s.StartNextChat(ctx)
+	started, err := s.StartNextChat(ctx, "claude")
 	if err != nil || started.Command != CommandCompact || started.UserMessageID != "" {
 		t.Fatal(started, err)
 	}
@@ -79,7 +79,7 @@ func exchange(t *testing.T, s *Service, id, message, reply string) {
 	if _, err := s.EnqueueChat(ctx, id, message); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := s.StartNextChat(ctx)
+	turn, err := s.StartNextChat(ctx, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestANewConversationArchivesTheOldOneAndOpensWithAnOverview(t *testing.T) {
 			if _, err := s.EnqueueChat(ctx, "fresh", command); err != nil {
 				t.Fatal(err)
 			}
-			turn, err := s.StartNextChat(ctx)
+			turn, err := s.StartNextChat(ctx, "claude")
 			if err != nil || turn.Command == "" {
 				t.Fatal(turn, err)
 			}
@@ -161,7 +161,7 @@ func TestSwitchingBackPicksUpTheArchivedConversationWhereItWasLeft(t *testing.T)
 	if _, err := s.EnqueueChat(ctx, "new", "/new"); err != nil {
 		t.Fatal(err)
 	}
-	turn, _ := s.StartNextChat(ctx)
+	turn, _ := s.StartNextChat(ctx, "claude")
 	if err := s.FinishChatCommand(ctx, turn.ID, "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestSwitchingBackPicksUpTheArchivedConversationWhereItWasLeft(t *testing.T)
 	if _, err := s.EnqueueChat(ctx, "busy", "Still going"); err != nil {
 		t.Fatal(err)
 	}
-	busy, _ := s.StartNextChat(ctx)
+	busy, _ := s.StartNextChat(ctx, "claude")
 	if err := s.ResumeConversation(ctx, list[0].ID); !errors.Is(err, ErrConflict) {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestTheQueueNamesTheConversationItsTurnsBelongTo(t *testing.T) {
 	if _, err := s.EnqueueChat(ctx, "waiting", "Next"); err != nil {
 		t.Fatal(err)
 	}
-	turn, _ := s.StartNextChat(ctx)
+	turn, _ := s.StartNextChat(ctx, "claude")
 	if err := s.FinishChatCommand(ctx, turn.ID, "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestSwitchingWaitsForEverythingQueuedInTheCurrentConversation(t *testing.T)
 	if _, err := s.EnqueueChat(ctx, "to-b", "/new"); err != nil {
 		t.Fatal(err)
 	}
-	turn, _ := s.StartNextChat(ctx)
+	turn, _ := s.StartNextChat(ctx, "claude")
 	if err := s.FinishChatCommand(ctx, turn.ID, "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestSwitchingWaitsForEverythingQueuedInTheCurrentConversation(t *testing.T)
 	if _, err := s.EnqueueChat(ctx, "ask", "Start over"); err != nil {
 		t.Fatal(err)
 	}
-	busy, _ := s.StartNextChat(ctx)
+	busy, _ := s.StartNextChat(ctx, "claude")
 	asked, err := s.QueueChatCommand(ctx, CommandNew)
 	if err != nil {
 		t.Fatal(err)
@@ -283,7 +283,7 @@ func TestSwitchingWaitsForEverythingQueuedInTheCurrentConversation(t *testing.T)
 	if err := s.ReleaseChatHold(ctx, asked.ID); err != nil {
 		t.Fatal(err)
 	}
-	started, err := s.StartNextChat(ctx)
+	started, err := s.StartNextChat(ctx, "claude")
 	if err != nil || started.ID != asked.ID || started.Conversation != convB {
 		t.Fatal(started, err)
 	}
@@ -336,7 +336,7 @@ func TestACompactionIsShownWhereItWasMade(t *testing.T) {
 	if _, err := s.EnqueueChat(ctx, "compact", "/compact"); err != nil {
 		t.Fatal(err)
 	}
-	turn, _ := s.StartNextChat(ctx)
+	turn, _ := s.StartNextChat(ctx, "claude")
 	if err := s.FinishChatCommand(ctx, turn.ID, "The owner said hello.", "Summarized 2 earlier messages."); err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +360,7 @@ func TestACommandTheAssistantAsksForRunsNextAndOnce(t *testing.T) {
 	if _, err := s.EnqueueChat(ctx, "running", "Tidy up"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.StartNextChat(ctx); err != nil {
+	if _, err := s.StartNextChat(ctx, "claude"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.EnqueueChat(ctx, "later", "Something else"); err != nil {

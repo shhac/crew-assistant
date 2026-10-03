@@ -53,12 +53,13 @@ const (
 // is in a workspace of its own, and each check in a copy of the revision of
 // its own.
 type Loop struct {
-	linear connections.Client
-	Core   *core.Service
-	Config func() config.Config
+	enginePauseMu sync.Mutex
+	linear        connections.Client
+	Core          *core.Service
+	Config        func() config.Config
 	// Diagnostics is set before the loop starts.
 	Diagnostics *diagnostics.Logger
-	// Now is the clock used for release guidance; tests can pin it.
+	// Now is the clock used for release guidance and engine pauses; tests can pin it.
 	Now       func() time.Time
 	Demo      bool
 	runner    roles.Runner
@@ -100,7 +101,11 @@ type Loop struct {
 }
 
 func New(s *core.Service, cfg func() config.Config, demo bool) *Loop {
-	return &Loop{Core: s, Config: cfg, Demo: demo, runner: roles.Native{}, meter: &quota.Meter{}, github: github.New(), linear: connections.New(), githubURL: github.URL, loopWake: make(chan struct{}, 1)}
+	lp := &Loop{Core: s, Config: cfg, Demo: demo, runner: roles.Native{}, meter: &quota.Meter{}, github: github.New(), linear: connections.New(), githubURL: github.URL, loopWake: make(chan struct{}, 1)}
+	// Seed admission before chat and drawing can ask for an engine. A failed
+	// read stays uninitialized; Run and EnginePause retry it before use.
+	_ = lp.loadEnginePauses(context.Background(), false)
+	return lp
 }
 
 // Nudge asks the loop to look again now rather than at its next tick, for
@@ -122,16 +127,32 @@ func (lp *Loop) Run(stop lifecycle.Stop, noDispatch bool) {
 	// Learnings are copied out only while a turn runs; any left here were
 	// left by a daemon that stopped mid-turn.
 	os.RemoveAll(lp.learningsRoot())
-	if !lp.Demo && !noDispatch {
-		if err := lp.resume(stop.Force); err != nil {
-			lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_resume"}, err)
-		}
-	}
+	ready := lp.Demo || noDispatch
 	defer lp.jobs.wg.Wait()
 	tick := time.NewTicker(15 * time.Second)
 	defer tick.Stop()
 	for {
-		for !stop.Stopping() && !lp.Demo && !noDispatch {
+		if noDispatch && !lp.Demo && !stop.Stopping() {
+			lp.enginePauseMu.Lock()
+			err := lp.loadEnginePauses(stop.Force, false)
+			lp.enginePauseMu.Unlock()
+			if err != nil {
+				lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "engine_pauses"}, err)
+			}
+		}
+		if !ready && !stop.Stopping() {
+			if err := lp.refreshEnginePauses(stop.Force); err != nil {
+				lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "engine_pauses"}, err)
+			} else {
+				if err := lp.resume(stop.Force); err != nil {
+					lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_resume"}, err)
+				}
+				// Recovery errors belong to the affected work. Once pauses
+				// are known, unrelated work can dispatch as before.
+				ready = true
+			}
+		}
+		for ready && !stop.Stopping() && !lp.Demo && !noDispatch {
 			progressed, _, err := lp.pass(stop.Force, false)
 			if err != nil && stop.Force.Err() == nil {
 				lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_loop"}, err)
@@ -141,7 +162,7 @@ func (lp *Loop) Run(stop lifecycle.Stop, noDispatch bool) {
 			}
 		}
 		// With nothing more to start, what finished tasks kept goes.
-		if !lp.Demo && !noDispatch && !stop.Stopping() {
+		if ready && !lp.Demo && !noDispatch && !stop.Stopping() {
 			if err := lp.tidy(stop.Force, false); err != nil {
 				lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_cleanup"}, err)
 			}

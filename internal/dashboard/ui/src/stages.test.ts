@@ -815,3 +815,13 @@ describe("a task landing through a pull request", () => {
     );
   });
 });
+
+it("names the owner pause in engine waits", () => {
+  expect(
+    waitingWords(task({}), { kind: "engine_paused", engine: "claude" }),
+  ).toBe("Waiting because you paused Claude");
+  const until = new Date(Date.now() + 3600000).toISOString();
+  expect(
+    waitingWords(task({}), { kind: "engine_paused", engine: "claude", until }),
+  ).toContain("Waiting because you paused Claude until ");
+});

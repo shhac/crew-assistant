@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { Sidebar } from "./Sidebar";
 import { normalizeState, type Project } from "./api";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const sidebar = (stopping: boolean, paused = false, projects: Project[] = []) =>
   render(
@@ -71,4 +74,35 @@ describe("Sidebar projects", () => {
       "lib-agent-harness",
     ]);
   });
+});
+
+it("shows engine resume and global resume independently in the sidebar", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => [{ engine: "claude", level: "ok", windows: [] }],
+    })),
+  );
+  render(
+    <Sidebar
+      state={normalizeState({
+        paused: true,
+        engine_pauses: { claude: { at: new Date().toISOString() } },
+      })}
+      route={{ page: "inbox" }}
+      needs={0}
+      offline={false}
+      chatOpen={false}
+      onChat={() => {}}
+      pausing={false}
+      pauseError=""
+      onPause={() => {}}
+    />,
+  );
+  expect(
+    await screen.findByRole("button", { name: "Resume Claude" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Resume teams" })).toBeTruthy();
+  expect(screen.getByText(/Paused until you resume/)).toBeTruthy();
 });

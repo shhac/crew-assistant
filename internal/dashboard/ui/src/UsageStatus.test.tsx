@@ -436,3 +436,214 @@ it("omits a past reset when retaining a row after a fetch failure", async () => 
     vi.useRealTimers();
   }
 });
+
+describe("engine pause controls", () => {
+  it("offers every preset, cancels, and pauses for one hour", async () => {
+    usage = [measured("claude", 42, "ok")];
+    render(<UsageStatus />);
+    const button = await screen.findByRole("button", { name: "Pause Claude" });
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.click(button);
+    for (const name of [
+      "Until I resume",
+      "1 hour",
+      "4 hours",
+      "Until tomorrow 9:00",
+      "Cancel",
+    ])
+      expect(screen.getByRole("button", { name })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("button", { name: "1 hour" })).toBeNull();
+    fireEvent.click(button);
+    const before = Date.now();
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "1 hour" })),
+    );
+    const calls = vi.mocked(fetch).mock.calls;
+    const request = calls.find(([path]) =>
+      String(path).includes("/engines/claude/paused"),
+    )!;
+    expect(request[1]?.method).toBe("PUT");
+    const sent = JSON.parse(request[1]?.body as string);
+    expect(sent.paused).toBe(true);
+    expect(Date.parse(sent.until) - before).toBeGreaterThanOrEqual(3600000);
+    expect(Date.parse(sent.until) - before).toBeLessThan(3601000);
+    expect(screen.getByRole("button", { name: "Resume Claude" })).toBeTruthy();
+  });
+
+  it("shows timed pauses neutrally beside usage and resumes in one click", async () => {
+    usage = [measured("claude", 42, "low")];
+    render(
+      <UsageStatus
+        pauses={{ claude: { at: new Date().toISOString(), until: inAnHour } }}
+      />,
+    );
+    await screen.findByRole("button", { name: "Resume Claude" });
+    expect(
+      within(row("Claude")).getByText(
+        `42% left · Paused until ${resetLabel(inAnHour)}`,
+      ),
+    ).toBeTruthy();
+    expect(row("Claude").classList.contains("tone-wait")).toBe(true);
+    expect(row("Claude").classList.contains("tone-needs")).toBe(false);
+    const { fireEvent } = await import("@testing-library/react");
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Resume Claude" })),
+    );
+    const request = vi
+      .mocked(fetch)
+      .mock.calls.find(([path]) =>
+        String(path).includes("/engines/claude/paused"),
+      )!;
+    expect(JSON.parse(request[1]?.body as string)).toEqual({ paused: false });
+    expect(screen.getByRole("button", { name: "Pause Claude" })).toBeTruthy();
+  });
+
+  it("retains out-of-usage wording with an open pause and controls API rows", async () => {
+    usage = [
+      measured("claude", 0, "exhausted"),
+      {
+        engine: "openai-compatible",
+        provider: "api",
+        label: "My API",
+        level: "exhausted",
+        windows: [],
+        rate_limited_until: inAnHour,
+      },
+    ];
+    render(
+      <UsageStatus pauses={{ claude: { at: new Date().toISOString() } }} />,
+    );
+    await screen.findByRole("button", { name: "Resume Claude" });
+    expect(
+      within(row("Claude")).getByText("Out of usage · Paused until you resume"),
+    ).toBeTruthy();
+    expect(row("Claude").classList.contains("tone-block")).toBe(false);
+    expect(
+      screen.getByRole("button", { name: "Pause Openai-compatible" }),
+    ).toBeTruthy();
+  });
+
+  it("keeps the chooser and shows a failed write", async () => {
+    usage = [measured("claude", 42, "ok")];
+    render(<UsageStatus />);
+    const button = await screen.findByRole("button", { name: "Pause Claude" });
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.click(button);
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("Store unavailable"));
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Until I resume" })),
+    );
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Store unavailable",
+    );
+    expect(screen.getByRole("button", { name: "Pause Claude" })).toBeTruthy();
+  });
+
+  it("names the whole API engine and opens the chooser only under the selected row", async () => {
+    usage = ["First API", "Second API"].map((label, i) => ({
+      engine: "openai-compatible",
+      provider: `api-${i}`,
+      label,
+      level: "exhausted",
+      windows: [],
+      rate_limited_until: inAnHour,
+    }));
+    render(<UsageStatus />);
+    const buttons = await screen.findAllByRole("button", {
+      name: "Pause Openai-compatible",
+    });
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.click(buttons[0]);
+    expect(screen.getAllByRole("button", { name: "1 hour" })).toHaveLength(1);
+    expect(
+      within(row("First API"))
+        .getByRole("button", { name: "1 hour" })
+        .classList.contains("btn"),
+    ).toBe(true);
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "Until I resume" })),
+    );
+    expect(
+      screen.getAllByRole("button", { name: "Resume Openai-compatible" }),
+    ).toHaveLength(2);
+    const request = vi
+      .mocked(fetch)
+      .mock.calls.find(([path]) =>
+        String(path).includes("/engines/openai-compatible/paused"),
+      )!;
+    expect(JSON.parse(request[1]?.body as string)).toEqual({ paused: true });
+  });
+});
+
+it("keeps pending controls and a failed pause under the selected API row", async () => {
+  usage = ["First API", "Second API"].map((label, i) => ({
+    engine: "openai-compatible",
+    provider: `api-${i}`,
+    label,
+    level: "exhausted",
+    windows: [],
+    rate_limited_until: inAnHour,
+  }));
+  render(<UsageStatus />);
+  const buttons = await screen.findAllByRole("button", {
+    name: "Pause Openai-compatible",
+  });
+  const { fireEvent } = await import("@testing-library/react");
+  fireEvent.click(buttons[0]);
+  let reject!: (error: Error) => void;
+  vi.mocked(fetch).mockReturnValueOnce(
+    new Promise((_, fail) => {
+      reject = fail;
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Until I resume" }));
+  expect((buttons[0] as HTMLButtonElement).disabled).toBe(true);
+  expect((buttons[1] as HTMLButtonElement).disabled).toBe(false);
+  await act(async () => reject(new Error("Store unavailable")));
+  expect(within(row("First API")).getByRole("alert").textContent).toContain(
+    "Store unavailable",
+  );
+  expect(within(row("Second API")).queryByRole("alert")).toBeNull();
+  expect((buttons[0] as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("retains the age of a paused engine's last usage reading", async () => {
+  const asOf = new Date(Date.now() - 3600000).toISOString();
+  usage = [measured("claude", 42, "ok", { as_of: asOf })];
+  render(<UsageStatus pauses={{ claude: { at: new Date().toISOString() } }} />);
+  await screen.findByRole("button", { name: "Resume Claude" });
+  expect(
+    within(row("Claude")).getByText(
+      `42% left · Paused until you resume · ${asOfLabel(asOf)}`,
+    ),
+  ).toBeTruthy();
+});
+
+it("leaves another row's chooser open when a pending pause finishes", async () => {
+  usage = [measured("claude", 42, "ok"), measured("codex", 42, "ok")];
+  render(<UsageStatus />);
+  const claude = await screen.findByRole("button", { name: "Pause Claude" });
+  const { fireEvent } = await import("@testing-library/react");
+  fireEvent.click(claude);
+  let finish!: (response: Response) => void;
+  vi.mocked(fetch).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Until I resume" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pause Codex" }));
+  await act(async () =>
+    finish({
+      ok: true,
+      json: async () => ({ engine: "claude", state: "paused" }),
+    } as Response),
+  );
+  expect(
+    within(row("Codex")).getByRole("button", { name: "1 hour" }),
+  ).toBeTruthy();
+  expect(
+    within(row("Claude")).getByRole("button", { name: "Resume Claude" }),
+  ).toBeTruthy();
+});

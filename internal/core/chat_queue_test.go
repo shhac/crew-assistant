@@ -38,7 +38,7 @@ func TestHoldBlocksItsTurnAndEverythingAfterIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The turn ahead of the hold is unaffected.
-	started, err := s.StartNextChat(testContext)
+	started, err := s.StartNextChat(testContext, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestHoldBlocksItsTurnAndEverythingAfterIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The held turn, and the one behind it, do not start.
-	if _, err := s.StartNextChat(testContext); !errors.Is(err, ErrChatHeld) {
+	if _, err := s.StartNextChat(testContext, "claude"); !errors.Is(err, ErrChatHeld) {
 		t.Fatalf("started a held turn: %v", err)
 	}
 }
@@ -59,12 +59,12 @@ func TestHoldLapsesAndTheQueueResumesOnItsOwn(t *testing.T) {
 	if _, err := s.HoldChat(testContext, "a", "editing", time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.StartNextChat(testContext); !errors.Is(err, ErrChatHeld) {
+	if _, err := s.StartNextChat(testContext, "claude"); !errors.Is(err, ErrChatHeld) {
 		t.Fatal("a live hold did not block the queue")
 	}
 	// A client that stops refreshing cannot hold the queue indefinitely.
 	s.now = func() time.Time { return time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC).Add(MaxChatHold * 2) }
-	started, err := s.StartNextChat(testContext)
+	started, err := s.StartNextChat(testContext, "claude")
 	if err != nil {
 		t.Fatalf("the queue did not resume after the lease lapsed: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestStaleHoldBlocksNothing(t *testing.T) {
 	if _, err := s.CancelChat(testContext, "a"); err != nil {
 		t.Fatal(err)
 	}
-	started, err := s.StartNextChat(testContext)
+	started, err := s.StartNextChat(testContext, "claude")
 	if err != nil {
 		t.Fatalf("a hold on a cancelled turn stranded the queue: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestEditLosingTheRaceIsRefused(t *testing.T) {
 	s := queueFixture(t, "a")
 	turns, _ := s.ChatTurns(testContext)
 	revision := turns[0].Revision
-	if _, err := s.StartNextChat(testContext); err != nil {
+	if _, err := s.StartNextChat(testContext, "claude"); err != nil {
 		t.Fatal(err)
 	}
 	_, err := s.EditChatMessage(testContext, "a", "too late", revision)
@@ -163,7 +163,7 @@ func TestReorderSetsTheWholeOrderAtOnce(t *testing.T) {
 	if got := queuedIDs(t, s); got[0] != "a" || got[1] != "c" || got[2] != "b" {
 		t.Fatalf("order = %v", got)
 	}
-	started, err := s.StartNextChat(testContext)
+	started, err := s.StartNextChat(testContext, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestReorderSetsTheWholeOrderAtOnce(t *testing.T) {
 	if err := s.FinishChat(testContext, "a", "completed", "reply", ""); err != nil {
 		t.Fatal(err)
 	}
-	next, err := s.StartNextChat(testContext)
+	next, err := s.StartNextChat(testContext, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestReorderAgainstAStaleQueueIsRefused(t *testing.T) {
 // A turn that has already started keeps its place; only queued turns move.
 func TestReorderLeavesStartedTurnsAlone(t *testing.T) {
 	s := queueFixture(t, "a", "b", "c")
-	if _, err := s.StartNextChat(testContext); err != nil {
+	if _, err := s.StartNextChat(testContext, "claude"); err != nil {
 		t.Fatal(err)
 	}
 	v, _ := s.store.Snapshot(testContext)

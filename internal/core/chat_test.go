@@ -34,14 +34,14 @@ func TestChatQueueIdempotencyContextAndAtomicMessages(t *testing.T) {
 	if len(snap.Messages) != 0 || strings.Contains(string(raw), "PRIVATE FUTURE PROMPT") {
 		t.Fatal("queued message entered model snapshot", string(raw))
 	}
-	turn, err := s.StartNextChat(ctx)
+	turn, err := s.StartNextChat(ctx, "claude")
 	if err != nil || turn.ID != "first" || turn.UserMessageID == "" {
 		t.Fatal(turn, err)
 	}
 	if _, err = s.CancelChat(ctx, "first"); !errors.Is(err, ErrConflict) {
 		t.Fatal(err)
 	}
-	if _, err = s.StartNextChat(ctx); !errors.Is(err, ErrConflict) {
+	if _, err = s.StartNextChat(ctx, "claude"); !errors.Is(err, ErrConflict) {
 		t.Fatal(err)
 	}
 	if err = s.RecordChatTool(ctx, turn.ID, "event-1", "set_team", "Choose the project's team", "running"); err != nil {
@@ -64,7 +64,7 @@ func TestChatQueueIdempotencyContextAndAtomicMessages(t *testing.T) {
 	if _, err = s.CancelChat(ctx, "second"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.StartNextChat(ctx); !errors.Is(err, ErrNotFound) {
+	if _, err = s.StartNextChat(ctx, "claude"); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 }
@@ -83,7 +83,7 @@ func TestChatQueueBoundsAndSafeToolVocabulary(t *testing.T) {
 	if _, err := s.EnqueueChat(ctx, "msg-0", "same repeated owner words"); err != nil {
 		t.Fatal("idempotent retry must work even when full", err)
 	}
-	turn, _ := s.StartNextChat(ctx)
+	turn, _ := s.StartNextChat(ctx, "claude")
 	if err := s.RecordChatTool(ctx, turn.ID, "event", "set_team", "", "running"); err == nil {
 		t.Fatal("a tool event without a label was recorded")
 	}
@@ -116,7 +116,7 @@ func TestChatRestartInterruptsOnlyStartedTurn(t *testing.T) {
 	s := NewService(st, cfg)
 	s.EnqueueChat(ctx, "started", "Act once")
 	s.EnqueueChat(ctx, "pending", "Act later")
-	t1, err := s.StartNextChat(ctx)
+	t1, err := s.StartNextChat(ctx, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestChatRestartInterruptsOnlyStartedTurn(t *testing.T) {
 	if len(turns) != 2 || turns[0].Status != "interrupted" || turns[1].Status != "queued" || turns[0].Events[0].Status != "interrupted" {
 		t.Fatal(turns)
 	}
-	next, err := s.StartNextChat(ctx)
+	next, err := s.StartNextChat(ctx, "claude")
 	if err != nil || next.ID != "pending" {
 		t.Fatal(next, err)
 	}

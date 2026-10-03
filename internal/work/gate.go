@@ -23,9 +23,11 @@ const interactiveGrace = 5 * time.Second
 // queued or being answered, a composer request. That use never takes a slot
 // or waits on one; turns already running go on.
 type gate struct {
-	mu          sync.Mutex
-	running     map[string]int
-	interactive int
+	mu           sync.Mutex
+	pauses       map[string]core.EnginePause
+	pausesLoaded bool
+	running      map[string]int
+	interactive  int
 	// chat is a chat message queued or being answered, as the record last
 	// said; it clears only once a look at the record finds none.
 	chat      bool
@@ -59,6 +61,14 @@ func (lp *Loop) try(engine string, forOwner bool) string {
 	defer g.mu.Unlock()
 	if !forOwner && g.busy() {
 		return core.WaitOwner
+	}
+	// Claims hold the store transaction here, so admission must never try
+	// a store read. Startup/pass or the caller's usage check loads the cache.
+	if !g.pausesLoaded {
+		return core.WaitEnginePaused
+	}
+	if _, paused := (core.Snapshot{EnginePauses: g.pauses}).EnginePaused(engine, lp.now()); paused {
+		return core.WaitEnginePaused
 	}
 	if g.running == nil {
 		g.running = map[string]int{}
@@ -157,8 +167,15 @@ func (lp *Loop) noteChat(pending bool) {
 }
 
 // chatPending reports a chat message queued or being answered.
-func chatPending(snap core.Snapshot) bool {
-	return slices.ContainsFunc(snap.ChatTurns, func(t core.ChatTurn) bool { return t.Status == "queued" || t.Status == "running" })
+func chatPending(snap core.Snapshot, engine string, now time.Time) bool {
+	return slices.ContainsFunc(snap.ChatTurns, func(t core.ChatTurn) bool {
+		if t.Origin == core.OriginWake && t.Status == "queued" {
+			if _, paused := snap.EnginePaused(engine, now); paused {
+				return false
+			}
+		}
+		return t.Status == "queued" || t.Status == "running"
+	})
 }
 
 // wake looks again at the work, and has turns waiting for the owner to
@@ -179,7 +196,7 @@ func (lp *Loop) waitQuiet(ctx context.Context) error {
 	for {
 		// The record says whether chat is still queued or answered.
 		if snap, err := lp.Core.Snapshot(ctx); err == nil {
-			lp.noteChat(chatPending(snap))
+			lp.noteChat(chatPending(snap, lp.Config().AssistantHarness().Engine, lp.now()))
 		}
 		g.mu.Lock()
 		if !g.busy() {

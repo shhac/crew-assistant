@@ -305,6 +305,8 @@ export function waitingWords(task: Task, wait: Wait, project?: Project) {
     }
     case "project_cap":
       return `Waiting for this project's cap (${wait.active} of ${wait.cap} active)`;
+    case "engine_paused":
+      return `Waiting because you paused ${engineLabel(wait.engine ?? "")}${wait.until ? " until " + new Date(wait.until).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }) : ""}`;
     case "engine_cap":
       return `Waiting for the ${engineLabel(wait.engine ?? "")} safety cap`;
     case "blocker":

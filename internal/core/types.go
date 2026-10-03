@@ -10,6 +10,7 @@ import (
 // Assistant is the assistant in the seat. With no one seated it has no id,
 // and the default name and face.
 type Assistant struct {
+	Engine string `json:"engine,omitempty"`
 	// ID is the seated assistant's profile.
 	ID          string        `json:"id,omitempty"`
 	Name        string        `json:"name"`
@@ -227,8 +228,9 @@ type PendingOperation struct {
 }
 
 type Snapshot struct {
-	Update         UpdateStatus   `json:"update,omitzero"`
-	ChatCheckpoint ChatCheckpoint `json:"-"`
+	EnginePauses   map[string]EnginePause `json:"engine_pauses,omitempty"`
+	Update         UpdateStatus           `json:"update,omitzero"`
+	ChatCheckpoint ChatCheckpoint         `json:"-"`
 	// ChatSession is the current conversation's model session.
 	ChatSession *ChatSession `json:"-"`
 	// ConversationID names the conversation Messages holds; Conversations

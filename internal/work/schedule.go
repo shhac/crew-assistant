@@ -58,6 +58,9 @@ func (j *jobs) cancelTask(taskID string) {
 // caller can wait for those steps to end; with waited, a step that panics
 // hands its panic to whoever waits for it.
 func (lp *Loop) pass(ctx context.Context, waited bool) (bool, []<-chan any, error) {
+	if err := lp.refreshEnginePauses(ctx); err != nil {
+		return false, nil, err
+	}
 	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
 		return false, nil, err
@@ -67,7 +70,7 @@ func (lp *Loop) pass(ctx context.Context, waited bool) (bool, []<-chan any, erro
 		return len(chats) > 0, chats, err
 	}
 	// No new role turn is claimed while a chat message waits or is answered.
-	lp.noteChat(chatPending(snap))
+	lp.noteChat(chatPending(snap, lp.Config().AssistantHarness().Engine, lp.now()))
 	if err := lp.settleDeliveries(ctx, snap); err != nil {
 		return false, nil, err
 	}

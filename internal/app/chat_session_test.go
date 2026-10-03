@@ -92,7 +92,7 @@ func runTurn(t *testing.T, a *App, message string) engine.Result {
 	if _, err := a.Core.EnqueueChat(ctx, chatID(), message); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := a.Core.StartNextChat(ctx)
+	turn, err := a.Core.StartNextChat(ctx, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestAnEmptySeatAnswersNothing(t *testing.T) {
 	if _, err := a.Core.EnqueueChat(ctx, chatID(), "Anyone?"); err != nil {
 		t.Fatal(err)
 	}
-	turn, _ := a.Core.StartNextChat(ctx)
+	turn, _ := a.Core.StartNextChat(ctx, "claude")
 	if _, err := a.runChatTurn(ctx, turn); !errors.Is(err, ErrNoAssistant) || len(o.chats) != 0 {
 		t.Fatalf("%v, %d sessions", err, len(o.chats))
 	}
@@ -345,7 +345,7 @@ func TestASessionThatOutgrowsItsModelIsSetAsideOnlyWhenItCantCompact(t *testing.
 		if _, err := a.Core.EnqueueChat(ctx, chatID(), "Too much"); err != nil {
 			t.Fatal(err)
 		}
-		turn, _ := a.Core.StartNextChat(ctx)
+		turn, _ := a.Core.StartNextChat(ctx, "claude")
 		if _, err := a.runChatTurn(ctx, turn); err == nil {
 			t.Fatal("the failed turn succeeded")
 		}

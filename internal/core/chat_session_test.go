@@ -22,7 +22,7 @@ func TestAConversationKeepsItsSessionWhenArchivedAndPickedUpAgain(t *testing.T) 
 	}
 	// /new archives the conversation with its session and starts without one.
 	s.EnqueueChat(ctx, "fresh", "/new")
-	turn, _ := s.StartNextChat(ctx)
+	turn, _ := s.StartNextChat(ctx, "claude")
 	s.FinishChatCommand(ctx, turn.ID, "", "Started afresh.")
 	if session, second, _ := s.ChatSession(ctx); session != nil || second == first {
 		t.Fatalf("a fresh conversation carried a session: %+v", session)

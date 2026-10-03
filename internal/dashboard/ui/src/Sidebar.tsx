@@ -197,7 +197,7 @@ export function Sidebar({
         {state.update?.unavailable && (
           <p className="hint">{state.update.unavailable}</p>
         )}
-        <UsageStatus />
+        <UsageStatus pauses={state.engine_pauses} />
         <button
           type="button"
           className="btn btn-sm"

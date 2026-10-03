@@ -232,6 +232,7 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 		return s, err
 	}
 	cfg := a.Config()
+	s.Assistant.Engine = cfg.AssistantHarness().Engine
 	s.Update.Running, s.Update.Mode = a.version, cfg.Upgrade.Mode
 	s.Update.Unavailable = upgrade.Unavailable(a.version, a.Demo)
 	s.Stopping = a.Stopping()

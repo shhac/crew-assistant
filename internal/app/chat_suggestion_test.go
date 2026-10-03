@@ -19,7 +19,7 @@ func settledReply(t *testing.T, a *App, id, message, reply string) string {
 	if _, err := a.Core.EnqueueChat(ctx, id, message); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Core.StartNextChat(ctx); err != nil {
+	if _, err := a.Core.StartNextChat(ctx, "claude"); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.Core.FinishChat(ctx, id, "completed", reply, ""); err != nil {
@@ -130,7 +130,7 @@ func TestSuggestionEscalatesWhenALoadingCaptionFoundNoApprovedModelFirst(t *test
 	if _, err := a.Core.EnqueueChat(ctx, "one", "Plan the garden"); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := a.Core.StartNextChat(ctx)
+	turn, err := a.Core.StartNextChat(ctx, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestSuggestionOnlyWhenTheConversationHasSettled(t *testing.T) {
 		t.Fatal("queued", err)
 	}
 	// A reply being written (streaming): the owner's message is the newest.
-	if _, err := a.Core.StartNextChat(ctx); err != nil {
+	if _, err := a.Core.StartNextChat(ctx, "claude"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.SuggestNextMessage(ctx, after); !errors.Is(err, core.ErrConflict) {

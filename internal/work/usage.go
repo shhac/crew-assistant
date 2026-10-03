@@ -32,7 +32,7 @@ func (lp *Loop) holdForUsage(ctx context.Context, t core.Task, r core.Role) (boo
 // read through the shared meter, so looking costs no more than a minute's
 // cached reading.
 func (lp *Loop) releaseUsageHolds(ctx context.Context, snap core.Snapshot) error {
-	now := time.Now()
+	now := lp.now()
 	for _, t := range snap.Tasks {
 		if snap.ProjectPaused(t.ProjectID) {
 			continue
@@ -133,8 +133,24 @@ func engineWide(h config.Harness) config.Harness {
 }
 
 // usageWait is when the role may run again, and why, while its subscription
-// has less left than the owner's floor; zero when it may run now.
+// has less left than the owner's floor, or the owner paused its engine;
+// zero when it may run now.
 func (lp *Loop) usageWait(ctx context.Context, r core.Role) (time.Time, string) {
+	p, paused, err := lp.EnginePause(ctx, r.Engine)
+	if err != nil {
+		return lp.now().Add(time.Minute), "Waiting until " + engineName(r.Engine) + "'s pause state can be checked"
+	}
+	if paused {
+		detail := "Waiting because you paused " + engineName(r.Engine)
+		if p.Until != nil {
+			return *p.Until, detail + " until " + p.Until.Local().Format("Mon 15:04")
+		}
+		return lp.now().Add(time.Hour), detail
+	}
+	return lp.floorWait(ctx, r)
+}
+
+func (lp *Loop) floorWait(ctx context.Context, r core.Role) (time.Time, string) {
 	cfg := lp.Config()
 	fiveHour, week := cfg.Engines.Floors(r.Engine)
 	floors := quota.Floors{FiveHour: fiveHour, Week: week}

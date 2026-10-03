@@ -341,8 +341,8 @@ func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (string, 
 	if !ok {
 		return "", fmt.Errorf("%s has no PM; read_task looks at a task directly: %w", p.Title, core.ErrConflict)
 	}
-	if wait, _ := lp.usageWait(ctx, seat); !wait.IsZero() {
-		return "", fmt.Errorf("%s is holding back for its usage allowance until %s: %w", seat.Name, wait.Format("15:04"), core.ErrConflict)
+	if wait, detail := lp.usageWait(ctx, seat); !wait.IsZero() {
+		return "", fmt.Errorf("%s: %w", detail, core.ErrConflict)
 	}
 	dir, err := lp.pmWorkDir()
 	if err != nil {

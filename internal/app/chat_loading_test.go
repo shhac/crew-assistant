@@ -93,7 +93,7 @@ func TestLoadingCaptionWithBothCLIsFailingLeavesTheTurnAlone(t *testing.T) {
 	if _, err := a.Core.EnqueueChat(ctx, "one", "Plan the garden"); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := a.Core.StartNextChat(ctx)
+	turn, err := a.Core.StartNextChat(ctx, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}

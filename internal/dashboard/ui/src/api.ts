@@ -582,7 +582,15 @@ export interface Observed {
 }
 /** Who or what a task's ready step waits for. */
 export interface Wait {
-  kind: "member" | "project_cap" | "engine_cap" | "owner" | "stage" | "blocker";
+  kind:
+    | "member"
+    | "project_cap"
+    | "engine_cap"
+    | "engine_paused"
+    | "owner"
+    | "stage"
+    | "blocker";
+  until?: string;
   /** The busy person's seat, and the member it is filled from, if any. */
   seat?: string;
   member?: string;
@@ -918,6 +926,34 @@ export interface TurnStep {
   /** Some of it was cut to keep it to a sensible size. */
   clipped?: boolean;
 }
+export interface EnginePause {
+  at: string;
+  until?: string;
+}
+export function enginePaused(
+  pauses: Record<string, EnginePause> | undefined,
+  engine: string,
+) {
+  const pause = pauses?.[engine];
+  return pause && (!pause.until || Date.parse(pause.until) > Date.now())
+    ? pause
+    : undefined;
+}
+export function setEnginePaused(
+  engine: string,
+  paused: boolean,
+  until?: string,
+) {
+  return api<{
+    engine: string;
+    state: "running" | "paused" | "held";
+    until?: string;
+    reason?: string;
+  }>(`/api/engines/${encodeURIComponent(engine)}/paused`, {
+    method: "PUT",
+    body: JSON.stringify({ paused, until }),
+  });
+}
 export interface UpdateStatus {
   running?: string;
   available?: string;
@@ -931,10 +967,12 @@ export interface UpdateStatus {
   unavailable?: string;
 }
 export interface State {
+  engine_pauses?: Record<string, EnginePause>;
   update?: UpdateStatus;
   pending_operations: PendingOperation[];
   /** The assistant in the seat; with no one there it has no id. */
   assistant: Drawable & {
+    engine?: string;
     id?: string;
     name: string;
     personality: string;
@@ -1054,6 +1092,7 @@ export function normalizeState(raw: Partial<State>): State {
     integrations: raw.integrations ?? [],
     turns: raw.turns ?? [],
     paused: raw.paused ?? false,
+    engine_pauses: raw.engine_pauses ?? {},
     stopping: raw.stopping ?? false,
     demo: raw.demo ?? false,
   };

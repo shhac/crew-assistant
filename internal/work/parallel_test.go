@@ -568,7 +568,7 @@ func TestAQueuedChatHoldsRoleTurnsUntilItIsAnswered(t *testing.T) {
 	if err := a.Core.ReleaseChatHold(ctx, "c1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Core.StartNextChat(ctx); err != nil {
+	if _, err := a.Core.StartNextChat(ctx, "claude"); err != nil {
 		t.Fatal(err)
 	}
 	quiet(a)

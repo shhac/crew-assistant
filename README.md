@@ -70,10 +70,13 @@ A file from an earlier version still loads, and is rewritten in the current layo
 ./crew-assistant status
 ./crew-assistant pause
 ./crew-assistant resume
+./crew-assistant engine pause claude --for 1h
+./crew-assistant engine resume claude
+./crew-assistant engine status
 ./crew-assistant dashboard open
 ```
 
-Only one daemon can own a state file. `serve --no-dispatch` observes without running any team work. **Pause** stops new team turns; a turn already running finishes.
+Only one daemon can own a state file. `serve --no-dispatch` observes without running any team work. **Pause** stops new team turns; a turn already running finishes. Use the pause control beside an engine's sidebar usage, or `engine pause <engine>`, to reserve that engine for your own work. Choose an open pause, `--for 4h`, or `--until 18:00` (the next local time; RFC 3339 also works). Timed pauses lift automatically, including after a restart. Other engines carry on, and your own assistant messages still send.
 
 ## How work gets done
 
