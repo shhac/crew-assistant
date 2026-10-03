@@ -98,6 +98,8 @@ func (l *liveTurn) Started() {
 	}
 }
 
+func (l *liveTurn) Note(text string) { l.steps.note(text) }
+
 func (l *liveTurn) Asked(prompt string) { l.steps.asked(prompt) }
 
 func (l *liveTurn) Saw(e session.Event) {

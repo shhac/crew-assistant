@@ -4,6 +4,8 @@ import { ProviderIcon } from "./ProviderIcon";
 import { useModelCatalog } from "./modelCatalog";
 import { ConfirmAction, ErrorNotice, Icon, Pill, useAction } from "./ui";
 import {
+  getCodexBrowserBridge,
+  type BrowserBridgeStatus,
   legacyProvider,
   section,
   withEngine,
@@ -631,11 +633,33 @@ function CLISettings({
   change,
 }: {
   choice: EngineChoice;
-  defaults?: { bin?: string; home?: string };
+  defaults?: { bin?: string; home?: string; browser_bridge_home?: string };
   setting: (key: string) => string;
   change: (key: string, next: string) => void;
 }) {
   const { engine, label } = choice;
+  const [bridge, setBridge] = useState<BrowserBridgeStatus>();
+  useEffect(() => {
+    if (engine !== "codex") return;
+    let current = true;
+    getCodexBrowserBridge().then(
+      (status) => {
+        if (current) setBridge(status);
+      },
+      () => {
+        if (current)
+          setBridge({
+            usable: false,
+            reason: "The browser bridge check could not complete.",
+            home: "",
+          });
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [engine]);
+
   const folder = folders[engine] ?? {
     label: `${label} folder`,
     hint: `${label} keeps its settings and login here. Blank uses its own.`,
@@ -663,6 +687,38 @@ function CLISettings({
         />
         <span className="hint">{folder.hint}</span>
       </label>
+      {engine === "codex" && (
+        <>
+          <label htmlFor="engines-codex-browser_bridge_home">
+            Browser bridge folder
+            <input
+              id="engines-codex-browser_bridge_home"
+              value={setting("browser_bridge_home")}
+              onChange={(e) => change("browser_bridge_home", e.target.value)}
+              placeholder={defaults?.browser_bridge_home}
+              autoComplete="off"
+            />
+            <span className="hint">
+              Only the ChatGPT browser bridge is read from this folder. Save
+              changes, then reopen Codex settings to check the new setting.
+            </span>
+          </label>
+          <p className="hint">
+            Browser bridge:{" "}
+            {bridge
+              ? bridge.usable
+                ? "usable"
+                : `not usable — ${bridge.reason}`
+              : "checking…"}
+            {bridge?.home && (
+              <>
+                {" "}
+                Reads from <code>{bridge.home}</code>.
+              </>
+            )}
+          </p>
+        </>
+      )}
     </>
   );
 }

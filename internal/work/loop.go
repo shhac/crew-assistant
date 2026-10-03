@@ -337,6 +337,7 @@ func (lp *Loop) baseSpec(r core.Role, workDir, prompt string) roles.Spec {
 	}
 	if b := lp.memberBrowser(r); b.On {
 		spec.Browser = true
+		spec.BridgeHome = lp.Config().Engines.BridgeHome(r.Engine)
 		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + browserGuide(b))
 	}
 	return spec

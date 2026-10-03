@@ -32,8 +32,8 @@ github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qq
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/shhac/lib-agent-cli v0.27.0 h1:dqrNn5QlXB5i3i8ScZ/Qf0ZxVhh6max9U3XUqLKsZOI=
 github.com/shhac/lib-agent-cli v0.27.0/go.mod h1:+f4RsI2kX5rkh/BQW2Sr5KFXeZud/vL9RmwsUjeH7Fc=
-github.com/shhac/lib-agent-harness v0.20.0 h1:zaiHReLIDTMdzLTiE7ItFEDLsFKVf40SoCyMIy3dqZ8=
-github.com/shhac/lib-agent-harness v0.20.0/go.mod h1:M5i63Tc8wvQfEcxmaYUrgaDqFq0aV5nSAdvIkDiM9OU=
+github.com/shhac/lib-agent-harness v0.21.0 h1:/jN8blZ3/wX4HvDTNHfu7eN/aay7p8Pu/FGzS97P5s8=
+github.com/shhac/lib-agent-harness v0.21.0/go.mod h1:M5i63Tc8wvQfEcxmaYUrgaDqFq0aV5nSAdvIkDiM9OU=
 github.com/shhac/lib-agent-keyring v0.2.0 h1:GHiApF03bDg8YMYEGI8uAFfLllqW0eA90sWppgMVoJc=
 github.com/shhac/lib-agent-keyring v0.2.0/go.mod h1:Q2f8HpDLb1tJkTgfWvqWHIdqRsCN5OcHmcgY3Upyh4A=
 github.com/shhac/lib-agent-mcp v0.23.1 h1:7VSbZcLPtOUUeef95Wanv7hL0rZAPxerqfwoF8vcSQ0=

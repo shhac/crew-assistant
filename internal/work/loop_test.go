@@ -143,6 +143,11 @@ func (r *scriptedRunner) Run(_ context.Context, spec roles.Spec) (roles.Result, 
 			return roles.Result{}, err
 		}
 	}
+	if spec.Observer != nil {
+		spec.Observer.Started()
+		defer spec.Observer.Ended()
+		spec.Observer.Asked(spec.Prompt)
+	}
 	if script, ok := r.script(spec); ok {
 		if script.before != nil {
 			if err := script.before(spec); err != nil {

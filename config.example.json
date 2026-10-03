@@ -34,9 +34,10 @@
   "engines": {
     "//": "How to reach each engine, shared by the assistant, team roles, small models and the usage meter.",
     "codex": {
-      "//": "bin and home are empty for codex on PATH and crew-assistant's own Codex login home.",
+      "//": "bin and home are empty for codex on PATH and crew-assistant's own Codex login home. browser_bridge_home is empty for the owner's ~/.codex; only the ChatGPT browser bridge is read there.",
       "bin": "",
       "home": "",
+      "browser_bridge_home": "",
       "usage_floor": {
         "//": "The share of each usage window team roles leave unused, in percent. 0 turns a window's floor off.",
         "5h_percent": 10,

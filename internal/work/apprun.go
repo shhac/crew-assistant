@@ -147,6 +147,13 @@ func (s *screenshots) Started() {
 	}
 }
 
+// Note forwards turn notes through QA's screenshot observer.
+func (s *screenshots) Note(text string) {
+	if next, ok := s.next.(interface{ Note(string) }); ok {
+		next.Note(text)
+	}
+}
+
 func (s *screenshots) Asked(prompt string) {
 	if s.next != nil {
 		s.next.Asked(prompt)

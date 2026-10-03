@@ -59,6 +59,8 @@ export function Timeline({
 
 function StepView({ step, seat }: { step: TurnStep; seat: string }) {
   const when = sinceLabel(step.at);
+  if (step.kind === "note")
+    return <li className="step muted small">{step.text}</li>;
   if (step.kind === "prompt")
     return (
       <li className="step step-prompt">

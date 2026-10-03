@@ -168,3 +168,15 @@ func (s *stepLog) write(step *openStep, now bool) {
 	}
 	step.changed, step.kept = false, time.Now()
 }
+
+func (s *stepLog) note(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.open == nil {
+		return
+	}
+	step := s.opened("browser-fallback", core.StepNote)
+	step.Text = text
+	s.write(step, true)
+	delete(s.open, step.Item)
+}

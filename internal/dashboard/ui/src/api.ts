@@ -900,7 +900,7 @@ export interface TurnStep {
   turn: string;
   item: string;
   at: string;
-  kind: "prompt" | "reply" | "tool";
+  kind: "prompt" | "reply" | "tool" | "note";
   text?: string;
   tool?: string;
   /** The tool's arguments, as JSON when they weren't cut. */
@@ -1135,7 +1135,10 @@ export interface EngineChoice {
 /** What a blank engine setting falls back to, for showing in its place. */
 export interface ConfigDefaults {
   /** An empty home is the CLI's own. */
-  engines?: Record<string, { bin?: string; home?: string }>;
+  engines?: Record<
+    string,
+    { bin?: string; home?: string; browser_bridge_home?: string }
+  >;
   choices?: EngineChoice[];
   usage_floor?: number;
   on_unknown_usage?: "allow" | "pause";
@@ -1602,6 +1605,15 @@ export function unlinkTaskLinear(
     `/api/projects/${encodeURIComponent(project)}/tasks/${encodeURIComponent(task)}/linear/${link.kind}/${encodeURIComponent(link.id)}`,
     { method: "DELETE" },
   );
+}
+
+export interface BrowserBridgeStatus {
+  usable: boolean;
+  reason: string;
+  home: string;
+}
+export function getCodexBrowserBridge() {
+  return api<BrowserBridgeStatus>("/api/engines/codex/browser-bridge");
 }
 
 export function setRelease(projectID: string, release: ReleasePolicy | null) {

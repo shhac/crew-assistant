@@ -39,6 +39,7 @@ func TestConfigKeysCoverTheFile(t *testing.T) {
 	for _, engine := range []*config.CLIEngine{&c.Engines.Codex, &c.Engines.Claude} {
 		*engine = config.CLIEngine{Bin: "x", Home: "/x", UsageFloor: config.UsageFloor{FiveHourPercent: &floor, WeekPercent: &floor}, OnUnknownUsage: "pause", RoleRuns: &runs}
 	}
+	c.Engines.Codex.BrowserBridgeHome = "/bridge"
 	// Grok reports no usage windows, so it has no floors to set.
 	c.Engines.Grok = config.CLIEngine{Bin: "x", Home: "/x"}
 	c.Engines.OpenAICompatible.EffortParameter = "reasoning.effort"

@@ -25,6 +25,8 @@ type Spec struct {
 	AccountIdentity string
 	// Binary and Home select the installed CLI and the login it uses.
 	Binary, Home string
+	// BridgeHome selects only the ChatGPT browser bridge, separately from Home.
+	BridgeHome string
 	// RuntimeHome is Codex's private home, or an API workbench's private
 	// transcript directory. Other engines are given none.
 	RuntimeHome string
@@ -285,6 +287,9 @@ func options(spec Spec) session.Options {
 			o.Instructions = session.Instructions{Mode: session.Append, Text: spec.Instructions}
 		}
 		return o
+	}
+	if o.Browser && o.Provider.Engine == harness.Codex && o.Sandbox != nil {
+		o.BrowserBridgeHome = spec.BridgeHome
 	}
 	if o.Provider.Engine != harness.Codex {
 		o.RuntimeHome = ""

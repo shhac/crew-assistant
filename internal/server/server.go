@@ -18,6 +18,7 @@ import (
 func New(a *app.App, auth *Auth) http.Handler {
 	mux := http.NewServeMux()
 	registerFilesystem(mux, a)
+	mux.HandleFunc("GET /api/engines/codex/browser-bridge", browserBridgeHandler(a))
 	models := newModelLookup(catalog.Discover)
 	mux.Handle("GET /api/models", modelHandlerWithLookup(a, models))
 	registerChatQueue(mux, a)

@@ -27,7 +27,7 @@ type TurnStep struct {
 	Turn string    `json:"turn"`
 	Item string    `json:"item"`
 	At   time.Time `json:"at"`
-	// Kind is StepPrompt, StepReply or StepTool.
+	// Kind is StepPrompt, StepReply, StepTool or StepNote.
 	Kind string `json:"kind"`
 	Text string `json:"text,omitempty"`
 	Tool string `json:"tool,omitempty"`
@@ -42,6 +42,7 @@ type TurnStep struct {
 }
 
 const (
+	StepNote   = "note"
 	StepPrompt = "prompt"
 	StepReply  = "reply"
 	StepTool   = "tool"

@@ -113,6 +113,9 @@ func configKeys(o *options) []libcli.ConfigKey {
 			libcli.StringKey(b, prefix+"bin", "The "+name+" executable; empty is "+name+" on PATH", func(c *config.Config) *string { return &engine(c).Bin }, nil),
 			libcli.PathKey(b, prefix+"home", "The "+name+" login home; empty is the default", func(c *config.Config) *string { return &engine(c).Home }),
 		)
+		if name == "codex" {
+			keys = append(keys, libcli.PathKey(b, prefix+"browser_bridge_home", "The ChatGPT browser bridge home; empty uses the owner's ~/.codex without copying other settings", func(c *config.Config) *string { return &c.Engines.Codex.BrowserBridgeHome }))
+		}
 		if config.Supports(name, config.UseRoles) {
 			keys = append(keys, libcli.OptionalIntKey(b, prefix+"role_runs", "An optional safety cap on team role turns running on "+name+" at once, across every project; off by default", func(c *config.Config) **int { return &engine(c).RoleRuns }, 1, config.MaxRoleRuns))
 		}

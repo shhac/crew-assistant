@@ -670,3 +670,65 @@ it("leaves Escape in an open dialog to the dialog while chat is open", () => {
   fireEvent.keyDown(screen.getByText("Chat"), { key: "Escape" });
   expect(screen.getByText("Drawer closed")).toBeTruthy();
 });
+
+it.each([true, false])(
+  "shows Codex browser bridge status (%s)",
+  async (usable) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          usable,
+          reason: "No bridge is declared.",
+          home: "/owner/.codex",
+        }),
+      })),
+    );
+    setup();
+    open("Codex");
+    expect(
+      await screen.findByText(
+        usable
+          ? /Browser bridge: usable/
+          : /Browser bridge: not usable.*No bridge is declared/,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("/owner/.codex")).toBeTruthy();
+  },
+);
+
+it("checks the saved bridge folder again when Codex settings reopen", async () => {
+  let home = "/owner/.codex";
+  vi.mocked(fetch).mockImplementation(
+    async () =>
+      ({
+        ok: true,
+        json: async () => ({ usable: true, reason: "", home }),
+      }) as Response,
+  );
+  const onSave = setup(
+    config,
+    vi.fn().mockImplementation(async () => {
+      home = "/other/.codex";
+    }),
+  );
+  open("Codex");
+  await screen.findByText("/owner/.codex");
+  expect(screen.getByText(/reopen Codex settings to check/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/Browser bridge folder/), {
+    target: { value: "/other/.codex" },
+  });
+  save();
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(onSave).toHaveBeenCalledWith({
+    ...config.engines,
+    codex: {
+      home: "/test/login",
+      usage_floor: { "5h_percent": 20 },
+      browser_bridge_home: "/other/.codex",
+    },
+  });
+  open("Codex");
+  await screen.findByText("/other/.codex");
+});

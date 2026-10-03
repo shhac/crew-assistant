@@ -6,8 +6,9 @@ import (
 )
 
 type engineDefaults struct {
-	Bin  string `json:"bin"`
-	Home string `json:"home"`
+	Bin        string `json:"bin"`
+	Home       string `json:"home"`
+	BridgeHome string `json:"browser_bridge_home,omitempty"`
 }
 
 // configDefaults are what a blank engine setting means, for the dashboard to
@@ -16,7 +17,7 @@ func configDefaults() map[string]any {
 	engines := map[string]engineDefaults{}
 	for _, name := range config.CLIEngineNames {
 		bin, home := config.DefaultBinary(name)
-		engines[name] = engineDefaults{bin, home}
+		engines[name] = engineDefaults{Bin: bin, Home: home, BridgeHome: config.Engines{}.BridgeHome(name)}
 	}
 	baseURL, _ := config.Engines{}.Endpoint()
 	return map[string]any{

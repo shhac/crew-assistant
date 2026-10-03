@@ -271,16 +271,55 @@ func (lp *Loop) runRole(ctx context.Context, spec roles.Spec) (roles.Result, err
 			return roles.Result{}, err
 		}
 	}
+	if spec.Browser && spec.Engine == "codex" && spec.BridgeHome == "" {
+		spec.BridgeHome = lp.Config().Engines.BridgeHome(spec.Engine)
+	}
 	result, err := lp.runner.Run(ctx, spec)
-	if err == nil || !spec.Browser || !roles.BrowserUnreachable(err) {
+	reason, unusable := roles.BrowserUnusable(err, spec.BridgeHome)
+	if err == nil || !spec.Browser || !unusable {
 		return result, err
 	}
-	// Chrome isn't connected, as when the owner is away: the turn goes on
-	// without the browser rather than stopping the task.
+	if ctx.Err() != nil {
+		return result, ctx.Err()
+	}
+	// An unavailable browser or bridge does not stop the task. The retry
+	// keeps every sandbox setting and drops only browser access.
 	spec.Browser = false
-	spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + noBrowserNote)
+	spec.BridgeHome = ""
+	spec.Observer = browserFallbackObserver{Observer: spec.Observer, note: "Ran without the browser. " + reason}
+	spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + noBrowserNote + " " + reason)
 	return lp.runner.Run(ctx, spec)
 }
 
 // noBrowserNote takes back the browser a turn was told it had.
 const noBrowserNote = "The browser couldn't be reached this turn, so you have none, whatever was said above; do the work without it."
+
+// Record only when the fallback starts, never on the refused attempt.
+type browserFallbackObserver struct {
+	roles.Observer
+	note string
+}
+
+func (o browserFallbackObserver) Started() {
+	if o.Observer != nil {
+		o.Observer.Started()
+		if n, ok := o.Observer.(interface{ Note(string) }); ok {
+			n.Note(o.note)
+		}
+	}
+}
+func (o browserFallbackObserver) Asked(s string) {
+	if o.Observer != nil {
+		o.Observer.Asked(s)
+	}
+}
+func (o browserFallbackObserver) Saw(e session.Event) {
+	if o.Observer != nil {
+		o.Observer.Saw(e)
+	}
+}
+func (o browserFallbackObserver) Ended() {
+	if o.Observer != nil {
+		o.Observer.Ended()
+	}
+}

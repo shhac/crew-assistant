@@ -123,3 +123,15 @@ func TestEngineKeysLandOnTheirEngine(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigCodexBrowserBridgeHome(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "owner-codex")
+	if _, err := runConfig(t, dir, "set", "engines.codex.browser_bridge_home", home); err != nil {
+		t.Fatal(err)
+	}
+	got, err := runConfig(t, dir, "get", "engines.codex.browser_bridge_home")
+	if err != nil || got["value"] != home {
+		t.Fatalf("%v %v", got, err)
+	}
+}

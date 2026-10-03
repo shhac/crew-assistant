@@ -51,6 +51,8 @@ type CLIEngine struct {
 	Bin string `json:"bin,omitempty"`
 	// Home is the CLI's login home; empty is the default for the engine.
 	Home string `json:"home,omitempty"`
+	// BrowserBridgeHome supplies only Codex browser bridge declarations; blank uses ~/.codex.
+	BrowserBridgeHome string `json:"browser_bridge_home,omitempty"`
 	// UsageFloor holds team roles back while this little of a usage window
 	// is left.
 	UsageFloor UsageFloor `json:"usage_floor,omitzero"`
@@ -390,6 +392,12 @@ func (cli *CLIEngine) validate(prefix string) error {
 	if cli.Home != "" && (!filepath.IsAbs(cli.Home) || strings.ContainsRune(cli.Home, '\x00')) {
 		return fmt.Errorf("%s.home must be an absolute directory path", prefix)
 	}
+	if cli.BrowserBridgeHome != "" && (!filepath.IsAbs(cli.BrowserBridgeHome) || strings.ContainsRune(cli.BrowserBridgeHome, 0)) {
+		return fmt.Errorf("%s.browser_bridge_home must be an absolute directory path", prefix)
+	}
+	if prefix != "engines.codex" && cli.BrowserBridgeHome != "" {
+		return fmt.Errorf("%s.browser_bridge_home is only for Codex", prefix)
+	}
 	if strings.ContainsRune(cli.Bin, '\x00') {
 		return fmt.Errorf("%s.bin must be a command name or path", prefix)
 	}
@@ -429,4 +437,19 @@ func validateEndpoint(raw string) error {
 // CheckProvider validates a provider selection for a team member.
 func (e Engines) CheckProvider(engine, provider string) error {
 	return e.validateProvider(engine, provider)
+}
+
+// BridgeHome is the home declaring only the Codex ChatGPT browser bridge.
+func (e Engines) BridgeHome(engine string) string {
+	if engine != "codex" {
+		return ""
+	}
+	if e.Codex.BrowserBridgeHome != "" {
+		return e.Codex.BrowserBridgeHome
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".codex")
 }
