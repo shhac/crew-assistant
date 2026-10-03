@@ -437,6 +437,10 @@ export function requestTone(task: Task): Tone {
 
 export type ProjectGroup = "needs" | "working" | "waiting" | "quiet";
 
+/** Projects read in alphabetical order wherever they are listed. */
+export const byTitle = (a: Project, b: Project) =>
+  a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+
 export const projectGroups: { group: ProjectGroup; label: string }[] = [
   { group: "needs", label: "Needs you" },
   { group: "working", label: "Working" },

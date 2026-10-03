@@ -218,6 +218,72 @@ describe("project pause", () => {
     expect(within(paused).getByText("Paused")).toBeTruthy();
     expect(within(running).queryByText("Paused")).toBeNull();
   });
+  it("lists projects alphabetically within each group", () => {
+    const state = normalizeState({
+      projects: [
+        project({ id: "p1", title: "lib-agent-harness" }),
+        project({ id: "p2", title: "Demo Project" }),
+        project({ id: "p3", title: "crew-code-review" }),
+        project({ id: "p4", title: "Zeta", status: "completed" }),
+        project({ id: "p5", title: "alpha", status: "completed" }),
+      ],
+    });
+    render(<ProjectsPage state={state} onNew={() => {}} />);
+    const names = (group: HTMLElement) =>
+      within(group)
+        .getAllByRole("link")
+        .map((a) => a.textContent ?? "");
+    const quiet = names(screen.getByRole("region", { name: "Quiet" }));
+    expect(quiet.findIndex((n) => n.startsWith("crew-code-review"))).toBe(0);
+    expect(quiet.findIndex((n) => n.startsWith("Demo Project"))).toBe(1);
+    expect(quiet.findIndex((n) => n.startsWith("lib-agent-harness"))).toBe(2);
+    const finished = names(
+      screen.getByText("Finished").closest("details") as HTMLElement,
+    );
+    expect(finished[0].startsWith("alpha")).toBe(true);
+    expect(finished[1].startsWith("Zeta")).toBe(true);
+  });
+  it("sorts by most recent activity when chosen, and remembers it", () => {
+    localStorage.removeItem("crew-assistant.projects-sort");
+    const state = normalizeState({
+      projects: [
+        project({
+          id: "p1",
+          title: "Alpha",
+          updated_at: "2026-10-01T09:00:00Z",
+        }),
+        project({
+          id: "p2",
+          title: "Beta",
+          updated_at: "2026-10-03T09:00:00Z",
+        }),
+        project({
+          id: "p3",
+          title: "Gamma",
+          updated_at: "2026-10-02T09:00:00Z",
+        }),
+      ],
+    });
+    const first = render(<ProjectsPage state={state} onNew={() => {}} />);
+    const order = () =>
+      within(screen.getByRole("region", { name: "Quiet" }))
+        .getAllByRole("link")
+        .map(
+          (a) =>
+            ["Alpha", "Beta", "Gamma"].find((t) =>
+              (a.textContent ?? "").startsWith(t),
+            ) ?? "",
+        );
+    expect(order()).toEqual(["Alpha", "Beta", "Gamma"]);
+    fireEvent.change(screen.getByLabelText("Sort by"), {
+      target: { value: "recent" },
+    });
+    expect(order()).toEqual(["Beta", "Gamma", "Alpha"]);
+    first.unmount();
+    render(<ProjectsPage state={state} onNew={() => {}} />);
+    expect(order()).toEqual(["Beta", "Gamma", "Alpha"]);
+    localStorage.removeItem("crew-assistant.projects-sort");
+  });
   it("explains project pause after global reasons", () => {
     const request = started({ status: "writing", stage: "implementing" });
     const state = normalizeState({ projects: [project({ paused: true })] });

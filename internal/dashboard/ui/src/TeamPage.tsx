@@ -1,6 +1,8 @@
 import { shownProvider, useProviders } from "./providers";
 import { ProviderIcon } from "./ProviderIcon";
 import { useState } from "react";
+import { useRemembered } from "./remembered";
+import { byTitle } from "./stages";
 import { MemberForm } from "./MemberForm";
 import { AssistantForm } from "./AssistantForm";
 import {
@@ -35,6 +37,8 @@ const memberSorts = [
   { id: "role", label: "Role" },
   { id: "engine", label: "Engine" },
   { id: "newest", label: "Newest first" },
+  { id: "most-projects", label: "Most projects" },
+  { id: "fewest-projects", label: "Fewest projects" },
 ] as const;
 type MemberSort = (typeof memberSorts)[number]["id"];
 
@@ -58,38 +62,21 @@ const createdAt = (m: Member) => {
   return Number.isNaN(time) ? -Infinity : time;
 };
 
-const memberOrders: Record<MemberSort, (a: Member, b: Member) => number> = {
+// projects counts the open projects a member is on, for the sorts that
+// find who is free to assign and who may be over-assigned.
+const memberOrders = (
+  projects: (m: Member) => number,
+): Record<MemberSort, (a: Member, b: Member) => number> => ({
   name: byName,
   role: (a, b) => roleRank(a) - roleRank(b) || byName(a, b),
   engine: (a, b) =>
     engineLabel(a.engine).localeCompare(engineLabel(b.engine)) || byName(a, b),
   newest: (a, b) => createdAt(b) - createdAt(a) || byName(a, b),
-};
+  "most-projects": (a, b) => projects(b) - projects(a) || byName(a, b),
+  "fewest-projects": (a, b) => projects(a) - projects(b) || byName(a, b),
+});
 
-function storedChoice(key: string) {
-  try {
-    return localStorage.getItem(key) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-/** A choice kept in this browser, so the page opens the way it was left. */
-function useRemembered<T extends string>(
-  key: string,
-  read: (value: string) => T,
-) {
-  const [value, setValue] = useState(() => read(storedChoice(key)));
-  const remember = (next: T) => {
-    setValue(next);
-    try {
-      localStorage.setItem(key, next);
-    } catch {
-      // Storage can be unavailable; the choice still holds until a reload.
-    }
-  };
-  return [value, remember] as const;
-}
+type ProjectMatch = "any" | "all";
 
 export function TeamPage({
   state,
@@ -131,9 +118,27 @@ export function TeamPage({
   );
   const seated = state.assistant.id;
   const noMembers = !state.members.length;
+  const [picked, setPicked] = useState<string[]>([]);
+  const [match, setMatch] = useState<ProjectMatch>("any");
+  const openProjects = state.projects
+    .filter((p) => p.status !== "completed")
+    .sort(byTitle);
+  const projectsOf = (m: Member) =>
+    new Set(memberProjects(m, state.projects).map((p) => p.id));
+  const onPicked = (m: Member) => {
+    if (!picked.length) return true;
+    const on = projectsOf(m);
+    return match === "all"
+      ? picked.every((id) => on.has(id))
+      : picked.some((id) => on.has(id));
+  };
+  const toggle = (id: string) =>
+    setPicked((now) =>
+      now.includes(id) ? now.filter((p) => p !== id) : [...now, id],
+    );
   const members = state.members
-    .filter((m) => shown === "all" || holds(m, shown))
-    .sort(memberOrders[sort]);
+    .filter((m) => (shown === "all" || holds(m, shown)) && onPicked(m))
+    .sort(memberOrders((m) => projectsOf(m).size)[sort]);
   const newAssistant = (
     <button className="btn btn-primary" onClick={() => add("assistant")}>
       New assistant
@@ -248,7 +253,7 @@ export function TeamPage({
                 </button>
               ))}
             </div>
-            <label className="member-sort" htmlFor="team-sort">
+            <label className="sort-picker" htmlFor="team-sort">
               Sort by
               <select
                 id="team-sort"
@@ -263,6 +268,55 @@ export function TeamPage({
                 ))}
               </select>
             </label>
+            {openProjects.length > 0 && (
+              <details className="project-filter">
+                <summary className="field">
+                  {picked.length
+                    ? `On ${match} of ${counted(picked.length, "project")}`
+                    : "On any project"}
+                </summary>
+                <div className="project-filter-menu card">
+                  <div
+                    className="segmented"
+                    role="group"
+                    aria-label="Match projects"
+                  >
+                    {(["any", "all"] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        aria-pressed={match === m}
+                        onClick={() => setMatch(m)}
+                      >
+                        {m === "any" ? "Any" : "All"}
+                      </button>
+                    ))}
+                  </div>
+                  <fieldset>
+                    <legend className="sr-only">Projects</legend>
+                    {openProjects.map((p) => (
+                      <label key={p.id} className="check">
+                        <input
+                          type="checkbox"
+                          checked={picked.includes(p.id)}
+                          onChange={() => toggle(p.id)}
+                        />
+                        <span>{p.title}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                  {picked.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-quiet"
+                      onClick={() => setPicked([])}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </details>
+            )}
           </div>
         )}
         {!noMembers && members.length > 0 && (
@@ -274,7 +328,9 @@ export function TeamPage({
         )}
         {!noMembers && !members.length && (
           <p className="muted small">
-            No member holds the {kindWord(shown)} role yet.
+            {picked.length
+              ? `No member${shown === "all" ? "" : ` holding the ${kindWord(shown)} role`} is on ${match} of the chosen projects.`
+              : `No member holds the ${kindWord(shown)} role yet.`}
           </p>
         )}
       </section>

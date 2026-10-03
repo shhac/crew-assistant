@@ -13,7 +13,7 @@ import {
   within,
 } from "@testing-library/react";
 import { TeamPage } from "./TeamPage";
-import { normalizeState, type Member } from "./api";
+import { normalizeState, type Member, type Project } from "./api";
 
 const member = (
   id: string,
@@ -151,6 +151,73 @@ describe("TeamPage members", () => {
     expect(names()).toEqual(["Ada", "Bea", "Cy", "Zed"]);
     fireEvent.click(screen.getByRole("button", { name: "PM" }));
     sortBy("Engine");
+    expect(names()).toEqual(["Cy"]);
+  });
+});
+
+// A project whose team seats the given members.
+const staffed = (id: string, title: string, members: string[]): Project => ({
+  id,
+  title,
+  status: "active",
+  brief: { version: 2, goal: "", criteria: [] },
+  playbook: {
+    template: "code",
+    medium: "git",
+    max_rounds: 3,
+    deliver: "owner",
+    roles: members.map((member) => ({
+      name: member,
+      kinds: ["implementer"],
+      engine: "codex",
+      member,
+    })),
+  },
+});
+
+describe("TeamPage members by project", () => {
+  // Zed is on three projects, Ada on two, Bea on one, Cy on none.
+  const staffedState = normalizeState({
+    ...state,
+    projects: [
+      staffed("p1", "Service", ["m1", "m2", "m3"]),
+      staffed("p2", "Library", ["m1", "m2"]),
+      staffed("p3", "Docs", ["m1"]),
+      { ...staffed("p4", "Archive", ["m4"]), status: "completed" },
+    ],
+  });
+  const staffedPage = () =>
+    render(<TeamPage state={staffedState} refresh={async () => {}} />);
+  const pick = (title: string) =>
+    fireEvent.click(screen.getByRole("checkbox", { name: title }));
+
+  it("sorts by the number of open projects, most or fewest first", () => {
+    staffedPage();
+    sortBy("Most projects");
+    expect(names()).toEqual(["Zed", "Ada", "Bea", "Cy"]);
+    sortBy("Fewest projects");
+    expect(names()).toEqual(["Cy", "Bea", "Ada", "Zed"]);
+  });
+
+  it("filters to members on any or all of the chosen projects", () => {
+    staffedPage();
+    expect(
+      screen.getAllByRole("checkbox").map((c) => c.parentElement?.textContent),
+    ).toEqual(["Docs", "Library", "Service"]);
+    pick("Library");
+    pick("Docs");
+    expect(names()).toEqual(["Ada", "Zed"]);
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(names()).toEqual(["Zed"]);
+    expect(screen.getByText("On all of 2 projects")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "PM" }));
+    expect(names()).toEqual([]);
+    expect(
+      screen.getByText(
+        "No member holding the PM role is on all of the chosen projects.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(names()).toEqual(["Cy"]);
   });
 });

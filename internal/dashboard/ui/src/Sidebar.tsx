@@ -1,5 +1,5 @@
 import { href, projectHref, type Route } from "./router";
-import { projectGroup, projectTasks } from "./stages";
+import { byTitle, projectGroup, projectTasks } from "./stages";
 import { Avatar, hasFace } from "./Avatar";
 import { ErrorNotice, Icon } from "./ui";
 import { UsageStatus } from "./UsageStatus";
@@ -54,7 +54,9 @@ export function Sidebar({
   pauseError: string;
   onPause: () => void;
 }) {
-  const projects = state.projects.filter((p) => p.status !== "completed");
+  const projects = state.projects
+    .filter((p) => p.status !== "completed")
+    .sort(byTitle);
   const status = daemonStatus(state, offline);
   const current = (page: Route["page"]) =>
     route.page === page ||

@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { useRemembered } from "./remembered";
 import { projectHref } from "./router";
 import {
+  byTitle,
   decisionFor,
   finished,
   leadRequest,
@@ -15,6 +17,22 @@ import { landsBy } from "./landing";
 import { Pill, sinceLabel } from "./ui";
 import type { Project, State } from "./api";
 
+const projectSorts = [
+  { id: "name", label: "Name (A–Z)" },
+  { id: "recent", label: "Most recent activity" },
+] as const;
+type ProjectSort = (typeof projectSorts)[number]["id"];
+
+const projectSortOf = (value: string): ProjectSort =>
+  projectSorts.find((s) => s.id === value)?.id ?? "name";
+
+const updatedAt = (p: Project) => Date.parse(p.updated_at ?? "") || 0;
+
+const projectOrders: Record<ProjectSort, (a: Project, b: Project) => number> = {
+  name: byTitle,
+  recent: (a, b) => updatedAt(b) - updatedAt(a) || byTitle(a, b),
+};
+
 export function ProjectsPage({
   state,
   onNew,
@@ -23,14 +41,15 @@ export function ProjectsPage({
   onNew: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useRemembered(
+    "crew-assistant.projects-sort",
+    projectSortOf,
+  );
   const matches = (p: Project) =>
     p.title.toLowerCase().includes(query.trim().toLowerCase());
-  const open = state.projects.filter(
-    (p) => p.status !== "completed" && matches(p),
-  );
-  const done = state.projects.filter(
-    (p) => p.status === "completed" && matches(p),
-  );
+  const projects = [...state.projects].sort(projectOrders[sort]);
+  const open = projects.filter((p) => p.status !== "completed" && matches(p));
+  const done = projects.filter((p) => p.status === "completed" && matches(p));
   return (
     <div className="page">
       <header className="page-header page-header-actions">
@@ -46,6 +65,23 @@ export function ProjectsPage({
                 placeholder="Find a project"
                 onChange={(e) => setQuery(e.target.value)}
               />
+            </label>
+          )}
+          {state.projects.length > 1 && (
+            <label className="sort-picker" htmlFor="projects-sort">
+              Sort by
+              <select
+                id="projects-sort"
+                className="field"
+                value={sort}
+                onChange={(e) => setSort(projectSortOf(e.target.value))}
+              >
+                {projectSorts.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
             </label>
           )}
           <button className="btn btn-primary" onClick={onNew}>

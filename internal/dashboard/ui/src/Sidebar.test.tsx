@@ -2,14 +2,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { Sidebar } from "./Sidebar";
-import { normalizeState } from "./api";
+import { normalizeState, type Project } from "./api";
 
 afterEach(cleanup);
 
-const sidebar = (stopping: boolean, paused = false) =>
+const sidebar = (stopping: boolean, paused = false, projects: Project[] = []) =>
   render(
     <Sidebar
-      state={normalizeState({ stopping, paused })}
+      state={normalizeState({ stopping, paused, projects })}
       route={{ page: "inbox" }}
       needs={0}
       offline={false}
@@ -41,5 +41,34 @@ describe("Sidebar status", () => {
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(false);
+  });
+});
+
+const listed = (id: string, title: string, status: string): Project => ({
+  id,
+  title,
+  status,
+  brief: { version: 2, goal: "", criteria: [] },
+});
+
+describe("Sidebar projects", () => {
+  it("lists projects alphabetically, whatever order they were made in", () => {
+    sidebar(false, false, [
+      listed("1", "lib-agent-harness", "active"),
+      listed("2", "Demo Project", "active"),
+      listed("3", "crew-code-review", "active"),
+      listed("4", "Archived", "completed"),
+    ]);
+    const nav = screen
+      .getByText("Projects", { selector: ".nav-label" })
+      .closest(".nav-projects");
+    const titles = Array.from(nav?.querySelectorAll("a.nav-link") ?? []).map(
+      (a) => a.textContent?.trim(),
+    );
+    expect(titles).toEqual([
+      "crew-code-review",
+      "Demo Project",
+      "lib-agent-harness",
+    ]);
   });
 });
