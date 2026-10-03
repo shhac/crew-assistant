@@ -2,12 +2,15 @@ package work
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	harness "github.com/shhac/lib-agent-harness"
+	"github.com/shhac/lib-agent-harness/sandbox"
 	"github.com/shhac/lib-agent-harness/session"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -16,8 +19,8 @@ import (
 
 // commandSandbox is the daemon's proved boundary, independent of the role engine.
 type commandSandbox interface {
-	Run(context.Context, session.CommandRequest) (session.CommandResult, error)
-	Start(context.Context, session.CommandRequest) (startedCommand, error)
+	Run(context.Context, sandbox.CommandRequest) (sandbox.CommandResult, error)
+	Start(context.Context, sandbox.CommandRequest) (startedCommand, error)
 	Close() error
 }
 
@@ -47,18 +50,77 @@ func (lp *Loop) commandCleanupFor(observer roles.Observer) func(error) {
 type startedCommand interface {
 	Stop()
 	Done() <-chan struct{}
-	Result() (session.CommandResult, error)
+	Result() (sandbox.CommandResult, error)
 }
-type nativeCommands struct{ *session.CommandSandbox }
-
-func (s nativeCommands) Start(ctx context.Context, req session.CommandRequest) (startedCommand, error) {
-	return s.CommandSandbox.Start(ctx, req)
+type nativeCommands struct {
+	inner    *sandbox.Sandbox
+	once     sync.Once
+	closeErr error
 }
 
-// v0.22.0's standalone sandbox shares the workbench's ten-minute ceiling.
+func (s *nativeCommands) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
+	result, err := s.inner.Run(ctx, req)
+	return result, commandError(err)
+}
+
+func (s *nativeCommands) Start(ctx context.Context, req sandbox.CommandRequest) (startedCommand, error) {
+	h, err := s.inner.Start(ctx, req)
+	if err != nil {
+		return nil, commandError(err)
+	}
+	return &nativeStartedCommand{inner: h}, nil
+}
+
+func (s *nativeCommands) Close() error {
+	s.once.Do(func() { s.closeErr = commandError(s.inner.Close()) })
+	return s.closeErr
+}
+
+type nativeStartedCommand struct {
+	inner  *sandbox.StartedCommand
+	once   sync.Once
+	result sandbox.CommandResult
+	err    error
+}
+
+func (h *nativeStartedCommand) Stop()                 { h.inner.Stop() }
+func (h *nativeStartedCommand) Done() <-chan struct{} { return h.inner.Done() }
+func (h *nativeStartedCommand) Result() (sandbox.CommandResult, error) {
+	h.once.Do(func() { r, err := h.inner.Result(); h.result, h.err = r, commandError(err) })
+	return h.result, h.err
+}
+
+// commandError keeps the task-facing wording run_check had under session's wrapper.
+func commandError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var refusal *sandbox.RefusalError
+	if errors.As(err, &refusal) {
+		return &session.UnsupportedError{Engine: harness.OpenAICompatible, Operation: refusal.Operation, Code: refusal.Code, Capability: refusal.Capability}
+	}
+	var proof *sandbox.ProofError
+	if errors.As(err, &proof) {
+		return &session.CapabilityError{Engine: harness.OpenAICompatible, Code: proof.Code, Phase: session.BeforeLaunch, Tools: proof.Tools}
+	}
+	var command *sandbox.CommandError
+	if errors.As(err, &command) {
+		return &session.TurnError{Engine: harness.OpenAICompatible, Code: command.Code}
+	}
+	var state *sandbox.StateError
+	if errors.As(err, &state) {
+		return &session.StateError{Engine: harness.OpenAICompatible, Code: state.Code}
+	}
+	if errors.Is(err, sandbox.ErrClosed) {
+		return session.ErrClosed
+	}
+	return err
+}
+
+// The standalone sandbox shares the workbench's ten-minute ceiling.
 const commandTimeout = 10 * time.Minute
 
-func (lp *Loop) openCommands(ctx context.Context, opts session.CommandSandboxOptions) (commandSandbox, error) {
+func (lp *Loop) openCommands(ctx context.Context, opts sandbox.Options) (commandSandbox, error) {
 	opts.RuntimeHome = filepath.Join(lp.Core.StateDirectory(), "commands")
 	if err := os.MkdirAll(opts.RuntimeHome, 0700); err != nil {
 		return nil, err
@@ -68,13 +130,14 @@ func (lp *Loop) openCommands(ctx context.Context, opts session.CommandSandboxOpt
 	opts.Env = roles.CommandEnv(opts.Env)
 	opts.Background = harness.Support(harness.OpenAICompatible, harness.Session, harness.Background).Usable()
 	if lp.commands != nil {
-		return lp.commands(ctx, opts)
+		box, err := lp.commands(ctx, opts)
+		return box, commandError(err)
 	}
-	s, err := session.OpenCommandSandbox(ctx, opts)
+	s, err := sandbox.Open(ctx, opts)
 	if err != nil {
-		return nil, err
+		return nil, commandError(err)
 	}
-	return nativeCommands{s}, nil
+	return &nativeCommands{inner: s}, nil
 }
 
 // Opening a sandbox reclaims the harness's stale command supervisors. Do this
@@ -92,9 +155,9 @@ func (lp *Loop) sweepCommands(ctx context.Context) error {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	sandbox, err := lp.openCommands(ctx, session.CommandSandboxOptions{WorkDir: dir})
+	box, err := lp.openCommands(ctx, sandbox.Options{WorkDir: dir})
 	if err != nil {
 		return err
 	}
-	return sandbox.Close()
+	return box.Close()
 }

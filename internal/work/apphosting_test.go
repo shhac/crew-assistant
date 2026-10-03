@@ -12,7 +12,7 @@ import (
 	"time"
 
 	harness "github.com/shhac/lib-agent-harness"
-	"github.com/shhac/lib-agent-harness/session"
+	"github.com/shhac/lib-agent-harness/sandbox"
 
 	"github.com/shhac/crew-assistant/internal/core"
 )
@@ -26,23 +26,23 @@ func TestDaemonAppFailuresAreReportedAndReclaimed(t *testing.T) {
 			fake := &fakeCommands{started: newFakeStarted()}
 			switch scenario {
 			case "setup":
-				fake.result = session.CommandResult{ExitCode: 2, Stderr: "synthetic build failed"}
+				fake.result = sandbox.CommandResult{ExitCode: 2, Stderr: "synthetic build failed"}
 			case "start":
 				fake.startErr = errors.New("synthetic start failed")
 			case "early exit":
-				fake.started.result = session.CommandResult{ExitCode: 3, Stderr: "synthetic crash"}
+				fake.started.result = sandbox.CommandResult{ExitCode: 3, Stderr: "synthetic crash"}
 				fake.started.once.Do(func() { close(fake.started.done) })
 			case "readiness":
-				fake.run = func(_ context.Context, req session.CommandRequest) (session.CommandResult, error) {
+				fake.run = func(_ context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
 					if req.Command == testRecipe.Setup {
-						return session.CommandResult{}, nil
+						return sandbox.CommandResult{}, nil
 					}
-					return session.CommandResult{ExitCode: 1, Stdout: "synthetic health failed"}, nil
+					return sandbox.CommandResult{ExitCode: 1, Stdout: "synthetic health failed"}, nil
 				}
 			case "linux refusal":
-				fake.startErr = &session.UnsupportedError{Engine: harness.OpenAICompatible, Operation: "start", Code: session.RefusedNotOffered, Capability: harness.Capability{Availability: harness.Unsupported, Reason: "private localhost is unreachable from the host"}}
+				fake.startErr = &sandbox.RefusalError{Operation: "start", Code: sandbox.RefusedNotOffered, Capability: harness.Capability{Availability: harness.Unsupported, Reason: "private localhost is unreachable from the host"}}
 			}
-			lp.commands = func(context.Context, session.CommandSandboxOptions) (commandSandbox, error) {
+			lp.commands = func(context.Context, sandbox.Options) (commandSandbox, error) {
 				if scenario == "open refusal" {
 					return nil, errors.New("synthetic sandbox refusal")
 				}
@@ -70,8 +70,8 @@ func TestDaemonAppFailuresAreReportedAndReclaimed(t *testing.T) {
 func TestDaemonAppFailureBecomesQAFinding(t *testing.T) {
 	runner := &appRunner{codeRunner: codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass}}}, qaReply: pass}
 	lp, p := qaTeam(t, runner, "codex", core.Browser{On: true}, &testRecipe)
-	fake := &fakeCommands{result: session.CommandResult{ExitCode: 7, Stderr: "setup does not build"}}
-	lp.commands = func(context.Context, session.CommandSandboxOptions) (commandSandbox, error) { return fake, nil }
+	fake := &fakeCommands{result: sandbox.CommandResult{ExitCode: 7, Stderr: "setup does not build"}}
+	lp.commands = func(context.Context, sandbox.Options) (commandSandbox, error) { return fake, nil }
 	task, _ := lp.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add Feature"})
 	task = settleCode(t, lp, task.ID)
 	v := verdictBy(task, "Quinn")

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shhac/lib-agent-harness/sandbox"
 	"github.com/shhac/lib-agent-harness/session"
 
 	"github.com/shhac/crew-assistant/internal/config"
@@ -108,7 +109,7 @@ func qaTeam(t *testing.T, runner *appRunner, engine string, browser core.Browser
 	t.Helper()
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
 	a.runner = runner
-	a.commands = func(context.Context, session.CommandSandboxOptions) (commandSandbox, error) {
+	a.commands = func(context.Context, sandbox.Options) (commandSandbox, error) {
 		return &fakeCommands{started: newFakeStarted()}, nil
 	}
 	next := 43000

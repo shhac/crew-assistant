@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shhac/lib-agent-harness/session"
+	"github.com/shhac/lib-agent-harness/sandbox"
 
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 )
@@ -32,7 +32,7 @@ type checkRuns struct {
 type checkRun struct {
 	done      chan struct{}
 	start     time.Time
-	result    session.CommandResult
+	result    sandbox.CommandResult
 	err       error
 	delivered bool
 }
@@ -85,13 +85,13 @@ func (r *checkRuns) run(run *checkRun) {
 		return
 	}
 	defer copy.Remove()
-	var sandbox commandSandbox
-	sandbox, run.err = r.lp.openCommands(r.ctx, session.CommandSandboxOptions{WorkDir: copy.Dir, Env: copy.Env, Read: r.medium.readable(), Loopback: r.medium.playbook.CheckLoopback})
+	var box commandSandbox
+	box, run.err = r.lp.openCommands(r.ctx, sandbox.Options{WorkDir: copy.Dir, Env: copy.Env, Read: r.medium.readable(), Loopback: r.medium.playbook.CheckLoopback})
 	if run.err != nil {
 		return
 	}
 	defer func() {
-		if err := sandbox.Close(); err != nil {
+		if err := box.Close(); err != nil {
 			if r.cleanupError != nil {
 				r.cleanupError(err)
 			} else {
@@ -99,7 +99,7 @@ func (r *checkRuns) run(run *checkRun) {
 			}
 		}
 	}()
-	run.result, run.err = sandbox.Run(r.ctx, session.CommandRequest{Command: r.medium.playbook.Check})
+	run.result, run.err = box.Run(r.ctx, sandbox.CommandRequest{Command: r.medium.playbook.Check})
 }
 func (r *checkRuns) close() {
 	r.mu.Lock()
@@ -112,7 +112,7 @@ func (r *checkRuns) close() {
 	}
 }
 
-func boundedCommandResult(result session.CommandResult) session.CommandResult {
+func boundedCommandResult(result sandbox.CommandResult) sandbox.CommandResult {
 	var cut bool
 	result.Stdout, cut = commandTail(result.Stdout, 24<<10)
 	result.Truncated = result.Truncated || cut
@@ -129,7 +129,7 @@ func commandTail(s string, limit int) (string, bool) {
 
 // JSON escapes can expand output sixfold. Keep the encoded reply below the
 // hosted tool budget as well as bounding each stream's plain-text tail.
-func commandResultJSON(result session.CommandResult) (string, error) {
+func commandResultJSON(result sandbox.CommandResult) (string, error) {
 	result = boundedCommandResult(result)
 	for {
 		data, err := json.Marshal(result)

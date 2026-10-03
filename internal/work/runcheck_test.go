@@ -15,6 +15,7 @@ import (
 	"time"
 
 	harness "github.com/shhac/lib-agent-harness"
+	"github.com/shhac/lib-agent-harness/sandbox"
 	"github.com/shhac/lib-agent-harness/session"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -24,30 +25,30 @@ import (
 
 type fakeCommands struct {
 	mu                         sync.Mutex
-	runs                       []session.CommandRequest
-	starts                     []session.CommandRequest
-	run                        func(context.Context, session.CommandRequest) (session.CommandResult, error)
-	result                     session.CommandResult
+	runs                       []sandbox.CommandRequest
+	starts                     []sandbox.CommandRequest
+	run                        func(context.Context, sandbox.CommandRequest) (sandbox.CommandResult, error)
+	result                     sandbox.CommandResult
 	runErr, startErr, closeErr error
 	started                    *fakeStarted
 	closed                     bool
 }
 
-func (f *fakeCommands) Run(ctx context.Context, req session.CommandRequest) (session.CommandResult, error) {
+func (f *fakeCommands) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
 	f.mu.Lock()
 	f.runs = append(f.runs, req)
 	f.mu.Unlock()
 	if f.run != nil {
 		return f.run(ctx, req)
 	}
-	return f.result, f.runErr
+	return f.result, commandError(f.runErr)
 }
-func (f *fakeCommands) Start(_ context.Context, req session.CommandRequest) (startedCommand, error) {
+func (f *fakeCommands) Start(_ context.Context, req sandbox.CommandRequest) (startedCommand, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.starts = append(f.starts, req)
 	if f.startErr != nil {
-		return nil, f.startErr
+		return nil, commandError(f.startErr)
 	}
 	if f.started == nil {
 		f.started = newFakeStarted()
@@ -58,21 +59,24 @@ func (f *fakeCommands) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.closed = true
-	return f.closeErr
+	return commandError(f.closeErr)
 }
 
 type fakeStarted struct {
 	done    chan struct{}
 	once    sync.Once
 	stopped bool
-	result  session.CommandResult
+	result  sandbox.CommandResult
 	err     error
 }
 
-func newFakeStarted() *fakeStarted                            { return &fakeStarted{done: make(chan struct{})} }
-func (f *fakeStarted) Stop()                                  { f.stopped = true; f.once.Do(func() { close(f.done) }) }
-func (f *fakeStarted) Done() <-chan struct{}                  { return f.done }
-func (f *fakeStarted) Result() (session.CommandResult, error) { <-f.done; return f.result, f.err }
+func newFakeStarted() *fakeStarted           { return &fakeStarted{done: make(chan struct{})} }
+func (f *fakeStarted) Stop()                 { f.stopped = true; f.once.Do(func() { close(f.done) }) }
+func (f *fakeStarted) Done() <-chan struct{} { return f.done }
+func (f *fakeStarted) Result() (sandbox.CommandResult, error) {
+	<-f.done
+	return f.result, commandError(f.err)
+}
 
 func checkFixture(t *testing.T) (*Loop, gitMedium, string) {
 	t.Helper()
@@ -97,9 +101,9 @@ func TestRunCheckOnEveryEngineAndRole(t *testing.T) {
 			for _, loopback := range []bool{false, true} {
 				t.Run(engine+"/"+kind+"/"+map[bool]string{false: "offline", true: "localhost"}[loopback], func(t *testing.T) {
 					m.playbook.CheckLoopback = loopback
-					var opts session.CommandSandboxOptions
-					fake := &fakeCommands{result: session.CommandResult{Stdout: "tests passed"}}
-					lp.commands = func(_ context.Context, o session.CommandSandboxOptions) (commandSandbox, error) {
+					var opts sandbox.Options
+					fake := &fakeCommands{result: sandbox.CommandResult{Stdout: "tests passed"}}
+					lp.commands = func(_ context.Context, o sandbox.Options) (commandSandbox, error) {
 						opts = o
 						if o.Timeout > 10*time.Minute {
 							return nil, errors.New("command timeout exceeds the v0.22.0 limit")
@@ -164,17 +168,17 @@ func TestRunCheckOnEveryEngineAndRole(t *testing.T) {
 func TestRunCheckPollsOneRunAndCancelsAtTurnEnd(t *testing.T) {
 	lp, m, source := checkFixture(t)
 	started, finish := make(chan struct{}), make(chan struct{})
-	var opts session.CommandSandboxOptions
-	fake := &fakeCommands{run: func(ctx context.Context, _ session.CommandRequest) (session.CommandResult, error) {
+	var opts sandbox.Options
+	fake := &fakeCommands{run: func(ctx context.Context, _ sandbox.CommandRequest) (sandbox.CommandResult, error) {
 		close(started)
 		select {
 		case <-finish:
-			return session.CommandResult{Stdout: "done"}, nil
+			return sandbox.CommandResult{Stdout: "done"}, nil
 		case <-ctx.Done():
-			return session.CommandResult{}, ctx.Err()
+			return sandbox.CommandResult{}, ctx.Err()
 		}
 	}}
-	lp.commands = func(_ context.Context, o session.CommandSandboxOptions) (commandSandbox, error) {
+	lp.commands = func(_ context.Context, o sandbox.Options) (commandSandbox, error) {
 		opts = o
 		return fake, nil
 	}
@@ -225,10 +229,10 @@ func TestRunCheckPollsOneRunAndCancelsAtTurnEnd(t *testing.T) {
 
 	// Cleanup cancels an unfinished check and waits until its sandbox settles.
 	admitted := make(chan struct{})
-	fake = &fakeCommands{run: func(ctx context.Context, _ session.CommandRequest) (session.CommandResult, error) {
+	fake = &fakeCommands{run: func(ctx context.Context, _ sandbox.CommandRequest) (sandbox.CommandResult, error) {
 		close(admitted)
 		<-ctx.Done()
-		return session.CommandResult{}, ctx.Err()
+		return sandbox.CommandResult{}, ctx.Err()
 	}}
 	runs = newCheckRuns(lp, m, source, nil)
 	runs.wait = time.Millisecond
@@ -245,26 +249,26 @@ func TestRunCheckPollsOneRunAndCancelsAtTurnEnd(t *testing.T) {
 
 func TestRunCheckFailuresAndBoundedOutput(t *testing.T) {
 	lp, m, source := checkFixture(t)
-	refusal := &session.UnsupportedError{Engine: harness.OpenAICompatible, Operation: "run", Code: session.RefusedNotOffered, Capability: harness.Capability{Availability: harness.Unsupported, Reason: "synthetic sandbox refusal"}}
+	refusal := &sandbox.RefusalError{Operation: "run", Code: sandbox.RefusedNotOffered, Capability: harness.Capability{Availability: harness.Unsupported, Reason: "synthetic sandbox refusal"}}
 	cases := []struct {
 		name            string
-		result          session.CommandResult
+		result          sandbox.CommandResult
 		openErr, runErr error
 		want            string
 		isError         bool
 	}{
 		{name: "refused", openErr: refusal, want: "synthetic sandbox refusal", isError: true},
-		{name: "failed", result: session.CommandResult{ExitCode: 2, Stderr: "test failed"}, want: "test failed"},
-		{name: "timed out", result: session.CommandResult{ExitCode: -1, TimedOut: true}, want: "\"timed_out\":true"},
-		{name: "unknown outcome", runErr: &session.TurnError{Engine: harness.OpenAICompatible, Code: session.CommandOutcomeUnknown}, want: session.CommandOutcomeUnknown, isError: true},
-		{name: "process limit", runErr: &session.TurnError{Engine: harness.OpenAICompatible, Code: session.CommandProcessLimit}, want: session.CommandProcessLimit, isError: true},
-		{name: "truncated", result: session.CommandResult{Stdout: strings.Repeat("x", 200<<10) + "last stdout", Stderr: strings.Repeat("y", 200<<10) + "last stderr"}, want: "last stderr"},
-		{name: "escaped output", result: session.CommandResult{Stdout: strings.Repeat("\x00", 200<<10) + "last stdout", Stderr: strings.Repeat("\x01", 200<<10) + "last stderr"}, want: "last stderr"},
+		{name: "failed", result: sandbox.CommandResult{ExitCode: 2, Stderr: "test failed"}, want: "test failed"},
+		{name: "timed out", result: sandbox.CommandResult{ExitCode: -1, TimedOut: true}, want: "\"timed_out\":true"},
+		{name: "unknown outcome", runErr: &sandbox.CommandError{Code: sandbox.CommandOutcomeUnknown}, want: sandbox.CommandOutcomeUnknown, isError: true},
+		{name: "process limit", runErr: &sandbox.CommandError{Code: sandbox.CommandProcessLimit}, want: sandbox.CommandProcessLimit, isError: true},
+		{name: "truncated", result: sandbox.CommandResult{Stdout: strings.Repeat("x", 200<<10) + "last stdout", Stderr: strings.Repeat("y", 200<<10) + "last stderr"}, want: "last stderr"},
+		{name: "escaped output", result: sandbox.CommandResult{Stdout: strings.Repeat("\x00", 200<<10) + "last stdout", Stderr: strings.Repeat("\x01", 200<<10) + "last stderr"}, want: "last stderr"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			fake := &fakeCommands{result: c.result, runErr: c.runErr}
-			lp.commands = func(context.Context, session.CommandSandboxOptions) (commandSandbox, error) { return fake, c.openErr }
+			lp.commands = func(context.Context, sandbox.Options) (commandSandbox, error) { return fake, c.openErr }
 			runs := newCheckRuns(lp, m, source, nil)
 			defer runs.close()
 			tools := roleTools{checks: runs}
@@ -273,7 +277,7 @@ func TestRunCheckFailuresAndBoundedOutput(t *testing.T) {
 				t.Fatalf("%+v %v", out, err)
 			}
 			if !c.isError {
-				var got session.CommandResult
+				var got sandbox.CommandResult
 				if err := json.Unmarshal([]byte(out.Content), &got); err != nil {
 					t.Fatal(err)
 				}
@@ -291,7 +295,7 @@ func TestRunCheckFailuresAndBoundedOutput(t *testing.T) {
 func TestRunCheckNewCallAfterResultMakesFreshCopy(t *testing.T) {
 	lp, m, source := checkFixture(t)
 	var dirs []string
-	lp.commands = func(_ context.Context, o session.CommandSandboxOptions) (commandSandbox, error) {
+	lp.commands = func(_ context.Context, o sandbox.Options) (commandSandbox, error) {
 		dirs = append(dirs, o.WorkDir)
 		return &fakeCommands{}, nil
 	}
@@ -312,14 +316,14 @@ func TestRunCheckCleanupFailurePreservesKnownResult(t *testing.T) {
 		t.Run(string(rune('0'+exit)), func(t *testing.T) {
 			lp, m, source := checkFixture(t)
 			cleanupErr := errors.New("cleanup unknown")
-			fake := &fakeCommands{result: session.CommandResult{ExitCode: exit, Stdout: "check evidence"}, closeErr: cleanupErr}
-			lp.commands = func(context.Context, session.CommandSandboxOptions) (commandSandbox, error) { return fake, nil }
+			fake := &fakeCommands{result: sandbox.CommandResult{ExitCode: exit, Stdout: "check evidence"}, closeErr: cleanupErr}
+			lp.commands = func(context.Context, sandbox.Options) (commandSandbox, error) { return fake, nil }
 			runs := newCheckRuns(lp, m, source, nil)
 			defer runs.close()
 			var logged error
 			runs.cleanupError = func(err error) { logged = err }
 			out, err := runs.call(context.Background())
-			var result session.CommandResult
+			var result sandbox.CommandResult
 			if err != nil || json.Unmarshal([]byte(out), &result) != nil || result.ExitCode != exit || result.Stdout != "check evidence" || logged != cleanupErr {
 				t.Fatalf("result lost during cleanup: %s, %v, logged %v", out, err, logged)
 			}
@@ -354,8 +358,8 @@ func TestCodexQAUsesDaemonHostedApp(t *testing.T) {
 	runner := &appRunner{codeRunner: codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass}}}, qaReply: qaSawTheApp}
 	lp, p := qaTeam(t, runner, "codex", core.Browser{On: true}, &testRecipe)
 	fake := &fakeCommands{started: newFakeStarted()}
-	var opts session.CommandSandboxOptions
-	lp.commands = func(_ context.Context, o session.CommandSandboxOptions) (commandSandbox, error) {
+	var opts sandbox.Options
+	lp.commands = func(_ context.Context, o sandbox.Options) (commandSandbox, error) {
 		opts = o
 		return fake, nil
 	}
@@ -399,13 +403,13 @@ func TestRoleTurnCancelsHostedCheckAndRemovesItsCopy(t *testing.T) {
 			runner := &appRunner{codeRunner: codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass}}}, qaReply: pass}
 			lp, p := qaTeam(t, runner, "codex", core.Browser{}, nil)
 			admitted := make(chan struct{})
-			fake := &fakeCommands{run: func(ctx context.Context, _ session.CommandRequest) (session.CommandResult, error) {
+			fake := &fakeCommands{run: func(ctx context.Context, _ sandbox.CommandRequest) (sandbox.CommandResult, error) {
 				close(admitted)
 				<-ctx.Done()
-				return session.CommandResult{}, ctx.Err()
+				return sandbox.CommandResult{}, ctx.Err()
 			}}
 			var copyDir string
-			lp.commands = func(_ context.Context, opts session.CommandSandboxOptions) (commandSandbox, error) {
+			lp.commands = func(_ context.Context, opts sandbox.Options) (commandSandbox, error) {
 				copyDir = opts.WorkDir
 				return fake, nil
 			}
@@ -452,8 +456,8 @@ func TestRoleTurnCancelsHostedCheckAndRemovesItsCopy(t *testing.T) {
 func TestCommandCleanupFailureIsKeptAfterTurnEnds(t *testing.T) {
 	runner := &appRunner{codeRunner: codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass}}}, qaReply: pass}
 	lp, p := qaTeam(t, runner, "codex", core.Browser{On: true}, &testRecipe)
-	fake := &fakeCommands{started: newFakeStarted(), closeErr: &session.TurnError{Engine: harness.OpenAICompatible, Code: session.CommandCleanupUnknown}}
-	lp.commands = func(context.Context, session.CommandSandboxOptions) (commandSandbox, error) { return fake, nil }
+	fake := &fakeCommands{started: newFakeStarted(), closeErr: &sandbox.CommandError{Code: sandbox.CommandCleanupUnknown}}
+	lp.commands = func(context.Context, sandbox.Options) (commandSandbox, error) { return fake, nil }
 	task, _ := lp.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add Feature"})
 	// Preparation has no real turn yet: cleanup belongs only in diagnostics.
 	lp.commandCleanupFor(lp.watchTurn(task, core.RoleQA, core.Role{Name: "Quinn"}, "", false))(fake.closeErr)
@@ -468,7 +472,7 @@ func TestCommandCleanupFailureIsKeptAfterTurnEnds(t *testing.T) {
 		}
 	}
 	if !slices.ContainsFunc(steps, func(step core.TurnStep) bool {
-		return step.Kind == core.StepNote && strings.Contains(step.Text, session.CommandCleanupUnknown)
+		return step.Kind == core.StepNote && strings.Contains(step.Text, sandbox.CommandCleanupUnknown)
 	}) {
 		t.Fatalf("no cleanup finding in activity: %+v", steps)
 	}
@@ -477,9 +481,9 @@ func TestCommandCleanupFailureIsKeptAfterTurnEnds(t *testing.T) {
 func TestStartupReclaimsStaleCommandsWithoutRunningWorkspaceContent(t *testing.T) {
 	lp := testLoop(t)
 	opened := 0
-	var opts session.CommandSandboxOptions
+	var opts sandbox.Options
 	fake := &fakeCommands{}
-	lp.commands = func(_ context.Context, o session.CommandSandboxOptions) (commandSandbox, error) {
+	lp.commands = func(_ context.Context, o sandbox.Options) (commandSandbox, error) {
 		opened++
 		opts = o
 		return fake, nil

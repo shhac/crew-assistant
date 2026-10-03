@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shhac/lib-agent-harness/session"
+	"github.com/shhac/lib-agent-harness/sandbox"
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
@@ -33,14 +33,14 @@ func (a *appRun) start(ctx context.Context, lp *Loop, read []string) {
 		a.unavailable = fmt.Sprintf("The app was not run: %s failed: %v. QA should judge the check alone.", step, err)
 	}
 	env := append(gitrepo.WorkspaceEnv(a.tree), "PORT="+strconv.Itoa(a.port))
-	sandbox, err := lp.openCommands(ctx, session.CommandSandboxOptions{WorkDir: a.tree, Env: env, Read: read, Loopback: true})
+	box, err := lp.openCommands(ctx, sandbox.Options{WorkDir: a.tree, Env: env, Read: read, Loopback: true})
 	if err != nil {
 		fail("opening the app sandbox", err)
 		return
 	}
-	a.sandbox = sandbox
+	a.sandbox = box
 	if a.recipe.Setup != "" {
-		result, err := sandbox.Run(ctx, session.CommandRequest{Command: a.recipe.Setup, Timeout: 5 * time.Minute})
+		result, err := box.Run(ctx, sandbox.CommandRequest{Command: a.recipe.Setup, Timeout: 5 * time.Minute})
 		if err != nil {
 			fail("setup", err)
 			return
@@ -53,7 +53,7 @@ func (a *appRun) start(ctx context.Context, lp *Loop, read []string) {
 	a.log = filepath.Join(a.tree, ".crew-app.log")
 	// The fixed log name is relative to the sandbox's workspace; the recipe
 	// is run as its own shell group so redirects cover its entire output.
-	a.process, err = sandbox.Start(ctx, session.CommandRequest{Command: "(\n" + a.recipe.Start + "\n) > .crew-app.log 2>&1"})
+	a.process, err = box.Start(ctx, sandbox.CommandRequest{Command: "(\n" + a.recipe.Start + "\n) > .crew-app.log 2>&1"})
 	if err != nil {
 		fail("start", err)
 		return
@@ -83,7 +83,7 @@ func (a *appRun) start(ctx context.Context, lp *Loop, read []string) {
 		ready := false
 		if a.recipe.Ready != "" {
 			probeCtx, stop := context.WithTimeout(readyCtx, 5*time.Second)
-			result, err := sandbox.Run(probeCtx, session.CommandRequest{Command: strings.ReplaceAll(a.recipe.Ready, core.PortPlaceholder, strconv.Itoa(a.port)), Timeout: 5 * time.Second})
+			result, err := box.Run(probeCtx, sandbox.CommandRequest{Command: strings.ReplaceAll(a.recipe.Ready, core.PortPlaceholder, strconv.Itoa(a.port)), Timeout: 5 * time.Second})
 			stop()
 			ready = err == nil && result.ExitCode == 0 && !result.TimedOut
 			if err != nil {
@@ -124,7 +124,7 @@ func (a *appRun) start(ctx context.Context, lp *Loop, read []string) {
 	}
 }
 
-func commandFailure(result session.CommandResult) error {
+func commandFailure(result sandbox.CommandResult) error {
 	r := boundedCommandResult(result)
 	return fmt.Errorf("exit code %d, timed_out=%t, truncated=%t\n%s\n%s", r.ExitCode, r.TimedOut, r.Truncated, r.Stdout, r.Stderr)
 }

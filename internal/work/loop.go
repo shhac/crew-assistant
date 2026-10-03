@@ -14,6 +14,7 @@ import (
 	"time"
 
 	harness "github.com/shhac/lib-agent-harness"
+	"github.com/shhac/lib-agent-harness/sandbox"
 	"github.com/shhac/lib-agent-harness/session"
 
 	"github.com/shhac/crew-assistant/internal/config"
@@ -93,7 +94,7 @@ type Loop struct {
 	// ports are held by QA checks that run the app, one each.
 	ports    ports
 	appWait  time.Duration
-	commands func(context.Context, session.CommandSandboxOptions) (commandSandbox, error)
+	commands func(context.Context, sandbox.Options) (commandSandbox, error)
 	// checked, when set, is told a checker's turn is over, before its
 	// verdict is recorded. Set in tests.
 	checked func(taskID, checker string)
