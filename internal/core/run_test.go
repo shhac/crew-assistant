@@ -98,7 +98,7 @@ func TestAProposedRecipeAppliesOnlyWhenTheOwnerAcceptsIt(t *testing.T) {
 		t.Fatal("the recipe applied before the owner accepted it")
 	}
 	// Words of their own, even the choice's, are not accepting it.
-	if _, err := s.AnswerDecision(testContext, d.ID, ChoiceUseRecipe); err != nil {
+	if _, err := s.AnswerDecision(testContext, d.ID, ChoiceUseRecipe, FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ = s.Snapshot(testContext)
@@ -109,11 +109,11 @@ func TestAProposedRecipeAppliesOnlyWhenTheOwnerAcceptsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ChooseDecision(testContext, d.ID, ChoiceNotNow); err != nil {
+	if _, err := s.ChooseDecision(testContext, d.ID, ChoiceNotNow, FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	d, _ = s.ProposeRunRecipe(testContext, p.ID, "Pim", recipe, "")
-	if _, err := s.ChooseDecision(testContext, d.ID, ChoiceUseRecipe); err != nil {
+	if _, err := s.ChooseDecision(testContext, d.ID, ChoiceUseRecipe, FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ = s.Snapshot(testContext)

@@ -57,7 +57,7 @@ func TestTheOwnerApprovesAMergeThatIsReconsideredWhenThePullRequestChanges(t *te
 	if d = openDecision(t, s.a, task); d.Title != "Merge pull request #7 for “Add A”" {
 		t.Fatalf("not asked again: %q", d.Title)
 	}
-	s.a.Core.ChooseDecision(s.ctx, d.ID, choiceApprove)
+	s.a.Core.ChooseDecision(s.ctx, d.ID, choiceApprove, core.FromOwner)
 	if task = s.current(t); task.Status != core.TaskLanded || len(s.gh.merges) != 1 || !slices.Contains(s.gh.merges[0], task.Revisions[1].Ref) {
 		t.Fatalf("not merged on the owner's approval: %s merges %v", task.Status, s.gh.merges)
 	}
@@ -178,7 +178,7 @@ func TestTheOwnerKeepsATaskOnItsPullRequestWhenTheyAreTurnedOff(t *testing.T) {
 	if i < 0 || snap.Decisions[i].Status != core.DecisionOpen {
 		t.Fatalf("the owner was not asked: %+v", snap.Decisions)
 	}
-	if _, err := s.a.Core.ChooseDecision(s.ctx, snap.Decisions[i].ID, core.ChoiceKeepPR); err != nil {
+	if _, err := s.a.Core.ChooseDecision(s.ctx, snap.Decisions[i].ID, core.ChoiceKeepPR, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	task := s.current(t)

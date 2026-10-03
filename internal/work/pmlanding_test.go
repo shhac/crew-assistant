@@ -255,7 +255,7 @@ func TestThePMHoldsAChangeAndTheOwnerCanLandIt(t *testing.T) {
 		t.Fatal("a held change reached main")
 	}
 	// The owner lands it themselves.
-	if _, err := w.a.Core.ChooseDecision(ctx, d.ID, choiceApprove); err != nil {
+	if _, err := w.a.Core.ChooseDecision(ctx, d.ID, choiceApprove, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	if task = w.task(t, task.ID); task.Status != core.TaskLanded || task.LandDecision != nil {

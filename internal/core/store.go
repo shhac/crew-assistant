@@ -103,6 +103,7 @@ func Open(path string) (*Store, error) {
 	// large, and only the member panel that asks for them reads them.
 	_, err = db.Exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1);
 		CREATE TABLE IF NOT EXISTS turn_steps (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, seat TEXT NOT NULL, turn TEXT NOT NULL, item TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(turn, item));
+		CREATE TABLE IF NOT EXISTS decision_evaluations (decision_id TEXT PRIMARY KEY, resolved_at TEXT NOT NULL, payload TEXT NOT NULL);
 		CREATE INDEX IF NOT EXISTS turn_steps_task ON turn_steps(task_id, seat, id);`)
 	if err != nil {
 		db.Close()
@@ -110,6 +111,10 @@ func Open(path string) (*Store, error) {
 	}
 	s := &Store{db: db, stateDirectory: stateDirectory, temporaryState: temporaryState}
 	if err = s.upgrade(context.Background(), path); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = s.backfillDecisionEvaluations(context.Background()); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -205,8 +210,19 @@ func (s *Store) update(ctx context.Context, fn func(*Snapshot) error) error {
 	if err = checkFence(ctx, &state); err != nil {
 		return err
 	}
+	resolved := map[string]bool{}
+	for _, d := range state.Decisions {
+		resolved[d.ID] = d.Status == DecisionResolved
+	}
 	if err = fn(&state); err != nil {
 		return err
+	}
+	for _, d := range state.Decisions {
+		if !resolved[d.ID] {
+			if err := keepDecisionEvaluation(ctx, conn, d); err != nil {
+				return err
+			}
+		}
 	}
 	deriveStages(&state)
 	// A task's status can pass through a value within one change; checking

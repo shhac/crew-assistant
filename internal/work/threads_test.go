@@ -385,7 +385,7 @@ func TestARestartCarriesEachTaskOnInItsOwnConversation(t *testing.T) {
 	if cut := taskByID(t, a, harbour.ID); waiting.Status != core.TaskWaiting || cut.Status != core.TaskWriting || len(cut.Revisions) != 1 || len(waiting.Threads) != 1 || len(cut.Threads) != 1 {
 		t.Fatalf("before the restart: %+v / %+v", waiting, cut)
 	}
-	if _, err := a.Core.AnswerDecision(ctx, waiting.DecisionID, "The whole team"); err != nil {
+	if _, err := a.Core.AnswerDecision(ctx, waiting.DecisionID, "The whole team", core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	runner.onWriter = nil

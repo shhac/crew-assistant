@@ -43,7 +43,7 @@ func (lp *Loop) UpdateBrief(ctx context.Context, projectID string, in core.Brief
 
 // ResolveDecision answers a decision with one of its choices, or with the
 // owner's own words; never both, since words that spell a choice are not one.
-func (lp *Loop) ResolveDecision(ctx context.Context, id, choice, answer string) (core.Decision, error) {
+func (lp *Loop) ResolveDecision(ctx context.Context, id, choice, answer string, by string) (core.Decision, error) {
 	if (strings.TrimSpace(choice) == "") == (strings.TrimSpace(answer) == "") {
 		return core.Decision{}, errors.New("give either a choice or an answer")
 	}
@@ -51,7 +51,7 @@ func (lp *Loop) ResolveDecision(ctx context.Context, id, choice, answer string) 
 	if strings.TrimSpace(answer) != "" {
 		resolve, with = lp.Core.AnswerDecision, answer
 	}
-	d, err := resolve(ctx, id, with)
+	d, err := resolve(ctx, id, with, by)
 	lp.nudgeUnless(err)
 	return d, err
 }

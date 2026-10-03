@@ -160,7 +160,7 @@ func TestThePMCanAskTheOwnerAboutATaskInTriage(t *testing.T) {
 	if changed, _ := s.ApplyPM(testContext, p.ID, PMAnswer{Triage: []TriageRelease{{Task: task.ID, To: TriageToOwner, Question: "Again?"}}}); changed != "" {
 		t.Fatalf("asked again: %q", changed)
 	}
-	if _, err := s.AnswerDecision(testContext, d.ID, "Bodies too"); err != nil {
+	if _, err := s.AnswerDecision(testContext, d.ID, "Bodies too", FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	got = taskNow(t, s, task.ID)
@@ -186,7 +186,7 @@ func TestAnswersToThePMBeforeItLooksAreAllKept(t *testing.T) {
 	b, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "b"})
 	s.ApplyPM(testContext, p.ID, PMAnswer{Triage: []TriageRelease{{Task: a.ID, To: TriageToOwner, Question: "Why a?"}, {Task: b.ID, To: TriageToOwner, Question: "Why b?"}}})
 	for _, id := range []string{a.ID, b.ID} {
-		if _, err := s.AnswerDecision(testContext, taskNow(t, s, id).DecisionID, "Because "+id); err != nil {
+		if _, err := s.AnswerDecision(testContext, taskNow(t, s, id).DecisionID, "Because "+id, FromOwner); err != nil {
 			t.Fatal(err)
 		}
 	}

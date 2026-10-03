@@ -19,8 +19,9 @@ import (
 
 // TaskText is a task's objective and criteria at one moment.
 type TaskText struct {
-	Objective string   `json:"objective"`
-	Criteria  []string `json:"criteria"`
+	Objective   string   `json:"objective"`
+	Criteria    []string `json:"criteria"`
+	OwnerChecks []string `json:"owner_checks,omitempty"`
 }
 
 // TaskEdit is one change to a task's objective or criteria: who made it, as
@@ -62,11 +63,11 @@ const (
 func Rewrites(kind string) bool { return kind == RoleResearcher || kind == RolePM }
 
 func (t Task) text() TaskText {
-	return TaskText{Objective: t.Objective, Criteria: slices.Clone(t.Criteria)}
+	return TaskText{Objective: t.Objective, Criteria: slices.Clone(t.Criteria), OwnerChecks: slices.Clone(t.OwnerChecks)}
 }
 
 func (a TaskText) same(b TaskText) bool {
-	return a.Objective == b.Objective && slices.Equal(a.Criteria, b.Criteria)
+	return a.Objective == b.Objective && slices.Equal(a.Criteria, b.Criteria) && slices.Equal(a.OwnerChecks, b.OwnerChecks)
 }
 
 // EditTask changes a task's objective or criteria as a team role may,
@@ -128,20 +129,25 @@ func (s *Service) UndoTaskEdit(ctx context.Context, projectID, taskID, editID st
 			return fmt.Errorf("this request has finished: %w", ErrConflict)
 		}
 		before := t.Edits[i].Before
-		return s.applyEdit(v, t, TaskEdit{By: FromOwner, Kind: FromOwner, After: TaskText{Objective: before.Objective, Criteria: slices.Clone(before.Criteria)}, Undoes: editID}, &out)
+		checks := slices.Clone(t.OwnerChecks)
+		if !slices.Equal(before.OwnerChecks, t.Edits[i].After.OwnerChecks) {
+			checks = slices.Clone(before.OwnerChecks)
+		}
+		return s.applyEdit(v, t, TaskEdit{By: FromOwner, Kind: FromOwner, After: TaskText{Objective: before.Objective, Criteria: slices.Clone(before.Criteria), OwnerChecks: checks}, Undoes: editID}, &out)
 	})
 	return out, err
 }
 
 // applyEdit keeps e on t and puts its text in place, within a change.
 func (s *Service) applyEdit(v *Snapshot, t *Task, e TaskEdit, out *Task) error {
+	e.After.Criteria = slices.DeleteFunc(slices.Clone(e.After.Criteria), func(c string) bool { return slices.Contains(e.After.OwnerChecks, c) })
 	e.Before = t.text()
 	if e.Before.same(e.After) {
 		return errors.New("that changes nothing")
 	}
 	now := s.now().UTC()
 	e.ID, e.At = uid(), now
-	t.Objective, t.Criteria = e.After.Objective, e.After.Criteria
+	t.Objective, t.Criteria, t.OwnerChecks = e.After.Objective, e.After.Criteria, slices.Clone(e.After.OwnerChecks)
 	t.Edits = append(t.Edits, e)
 	// Every check made against the old text is asked for again.
 	t.TextVersion++

@@ -211,7 +211,7 @@ func TestAcceptAndFollowUpQueuesTheFollowUpRightAfterTheTask(t *testing.T) {
 	}
 	task = stepUntil(t, a, task.ID, waiting)
 	d := openDecision(t, a, task)
-	if _, err = a.Core.ChooseDecision(ctx, d.ID, choiceAcceptFollowUp); err != nil {
+	if _, err = a.Core.ChooseDecision(ctx, d.ID, choiceAcceptFollowUp, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	task = stepUntil(t, a, task.ID, func(t core.Task) bool { return t.Status != core.TaskWaiting })
@@ -304,7 +304,7 @@ func sandboxRequirementBecomesAnOwnerStep(t *testing.T, first string) {
 	if len(asked) != 1 || !strings.Contains(asked[0].Prompt, "There is no browser in my sandbox.") {
 		t.Fatalf("the PM should judge the requirement once: %d", len(asked))
 	}
-	if _, err := a.Core.ChooseDecision(ctx, d.ID, choiceOwnerStep); err != nil {
+	if _, err := a.Core.ChooseDecision(ctx, d.ID, choiceOwnerStep, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	task = stepUntil(t, a, task.ID, waitingAgain(d))
@@ -319,7 +319,7 @@ func sandboxRequirementBecomesAnOwnerStep(t *testing.T, first string) {
 	if d.Kind != core.DecisionDelivery || !strings.Contains(d.Context, checklist) {
 		t.Fatalf("the approval should carry the checklist: %+v", d)
 	}
-	if _, err := a.Core.ChooseDecision(ctx, d.ID, choiceApprove); err != nil {
+	if _, err := a.Core.ChooseDecision(ctx, d.ID, choiceApprove, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	task = stepUntil(t, a, task.ID, func(t core.Task) bool { return t.Finished() })
@@ -341,7 +341,7 @@ func TestARequirementKeptForTheTeamGoesOnToAnotherRound(t *testing.T) {
 		if d.OwnerStep == nil || d.OwnerStep.Step != "It opens in the owner's browser" || !strings.Contains(d.Context, "There is no browser in my sandbox.") || strings.HasPrefix(d.Recommendation, choiceOwnerStep+":") {
 			t.Fatalf("owner step decision %+v", d)
 		}
-		if _, err := a.Core.ChooseDecision(context.Background(), d.ID, choiceKeepForTeam); err != nil {
+		if _, err := a.Core.ChooseDecision(context.Background(), d.ID, choiceKeepForTeam, core.FromOwner); err != nil {
 			t.Fatal(err)
 		}
 		task = stepUntil(t, a, task.ID, waitingAgain(d))

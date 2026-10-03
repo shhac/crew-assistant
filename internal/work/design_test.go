@@ -226,7 +226,7 @@ func TestHandOffsToTheDesignerAreBounded(t *testing.T) {
 	if !strings.Contains(writerTurns(runner)[2].Prompt, "the most it allows") {
 		t.Fatal("the writer was not told it had had all the design input it could")
 	}
-	a.Core.AnswerDecision(ctx, d.ID, "Casual")
+	a.Core.AnswerDecision(ctx, d.ID, "Casual", core.FromOwner)
 	task = settle(t, a)
 	if len(task.Revisions) != 1 || task.Round != 1 || !strings.Contains(strings.Join(task.Direction, "\n"), "Casual") || task.Design[2].Open() {
 		t.Fatalf("the answer goes back to the writer in the same round: %d revisions, round %d, direction %v", len(task.Revisions), task.Round, task.Direction)
@@ -245,7 +245,7 @@ func TestADesignerThatEscalatesBringsTheOwnerADecisionAndTheTaskGoesBack(t *test
 	if !strings.Contains(d.Title, "Dee needs your call") || d.Recommendation != "A sidebar" || !strings.Contains(d.Context, "Evidence: Two teams") || !strings.Contains(d.Context, "2. A sidebar") || !strings.Contains(d.Context, "Consequences:") || task.Stage != core.StageDesigning {
 		t.Fatalf("escalation %+v, stage %s", d, task.Stage)
 	}
-	a.Core.AnswerDecision(ctx, d.ID, "Go with tabs")
+	a.Core.AnswerDecision(ctx, d.ID, "Go with tabs", core.FromOwner)
 	task = stepUntil(t, a, task.ID, func(t core.Task) bool { return t.Status != core.TaskWaiting })
 	if task.Status != core.TaskResearching || task.Round != 1 || task.Design[0].Open() {
 		t.Fatalf("the answer goes back to the researcher: %s round %d", task.Status, task.Round)
@@ -268,7 +268,7 @@ func TestADesignerThatFailsIsAskedAgainAndTheTaskStaysWhereItWas(t *testing.T) {
 	if d.Kind != core.DecisionFailure || task.ResumeStatus != core.TaskDesigning || task.Stage != core.StageDesigning {
 		t.Fatalf("a failed designer reaches the owner: %+v %s %s", d, task.ResumeStatus, task.Stage)
 	}
-	a.Core.ChooseDecision(context.Background(), d.ID, choiceTryAgain)
+	a.Core.ChooseDecision(context.Background(), d.ID, choiceTryAgain, core.FromOwner)
 	task = settle(t, a)
 	if task.Design[0].Input != "Keep it plain." || len(task.Revisions) != 1 || task.Round != 1 {
 		t.Fatalf("the designer should answer on the retry: %+v, %d revisions, round %d", task.Design, len(task.Revisions), task.Round)

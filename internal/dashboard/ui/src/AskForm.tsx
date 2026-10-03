@@ -12,6 +12,8 @@ export function AskForm({
 }) {
   const [objective, setObjective] = useState("");
   const [criteria, setCriteria] = useState("");
+  const [ownerChecks, setOwnerChecks] = useState("");
+  const [checking, setChecking] = useState(false);
   const [judging, setJudging] = useState(false);
   const { busy, error, run } = useAction();
   if (!project.brief.goal)
@@ -34,9 +36,12 @@ export function AskForm({
       await askForTask(project.id, {
         objective: objective.trim(),
         criteria: criteriaLines(criteria),
+        owner_checks: criteriaLines(ownerChecks),
       });
       setObjective("");
       setCriteria("");
+      setOwnerChecks("");
+      setChecking(false);
       setJudging(false);
       await refresh();
     });
@@ -82,6 +87,26 @@ export function AskForm({
           onClick={() => setJudging(true)}
         >
           + Say how you'll judge it
+        </button>
+      )}
+      {checking ? (
+        <label className="control">
+          What you'll check after it lands, one point per line
+          <textarea
+            className="field"
+            value={ownerChecks}
+            onChange={(e) => setOwnerChecks(e.target.value)}
+            rows={2}
+            maxLength={20000}
+          />
+        </label>
+      ) : (
+        <button
+          type="button"
+          className="link-button small ask-more"
+          onClick={() => setChecking(true)}
+        >
+          + Say what you'll check after it lands
         </button>
       )}
       <ErrorNotice error={error} />

@@ -26,6 +26,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 	registerProjectWork(mux, a)
 	registerProjectTasks(mux, a)
 	registerMembers(mux, a, models)
+	mux.HandleFunc("GET /api/decisions/evaluations.jsonl", decisionEvaluationHandler(a.Core.ExportDecisionEvaluations))
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
 		s, err := a.Snapshot(r.Context())
 		reply(w, 200, struct {
@@ -108,7 +109,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 		if decode(w, r, &in) != nil {
 			return
 		}
-		v, err := a.Work.ResolveDecision(r.Context(), r.PathValue("id"), in.Choice, in.Answer)
+		v, err := a.Work.ResolveDecision(r.Context(), r.PathValue("id"), in.Choice, in.Answer, core.FromOwner)
 		reply(w, 200, v, err)
 	})
 	mux.HandleFunc("POST /api/decisions/{id}/dismiss", func(w http.ResponseWriter, r *http.Request) {

@@ -115,7 +115,7 @@ func TestThePMsQuestionsGoToTheOwnerAndItWaitsForTheAnswer(t *testing.T) {
 	if looks() != 1 {
 		t.Fatal("the PM looked again before the owner answered")
 	}
-	if _, err := a.Core.ChooseDecision(ctx, snap.Decisions[i].ID, "Use your judgment"); err != nil {
+	if _, err := a.Core.ChooseDecision(ctx, snap.Decisions[i].ID, "Use your judgment", core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	step(t, a)

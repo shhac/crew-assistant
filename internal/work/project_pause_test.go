@@ -170,7 +170,7 @@ func TestProjectPauseHoldsOwnerAnswerAndReviewerMessage(t *testing.T) {
 	}
 	task = settle(t, a)
 	d := openDecision(t, a, task)
-	if _, err := a.Core.ChooseDecision(ctx, d.ID, choiceApprove); err != nil {
+	if _, err := a.Core.ChooseDecision(ctx, d.ID, choiceApprove, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	pauseProject(t, a, p.ID, true)

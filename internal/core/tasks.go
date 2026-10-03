@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 // Task is one outcome worked through the loop. Its roles and round limit are
@@ -21,10 +23,11 @@ type Task struct {
 	// Ref is the task's readable ID, such as CA-12: its project's prefix and
 	// its number. Derived with Stage, so it follows a renamed prefix, and
 	// never stored.
-	Ref       string   `json:"ref,omitempty"`
-	Objective string   `json:"objective"`
-	Criteria  []string `json:"criteria"`
-	Status    string   `json:"status"`
+	Ref         string   `json:"ref,omitempty"`
+	Objective   string   `json:"objective"`
+	Criteria    []string `json:"criteria"`
+	OwnerChecks []string `json:"owner_checks,omitempty"`
+	Status      string   `json:"status"`
 	// SentOn is a triaged task waiting for room in To do, never triaged again.
 	SentOn bool `json:"sent_on,omitempty"`
 	// Stage is where the task sits on its project's board, derived from the
@@ -450,9 +453,10 @@ type Finding struct {
 }
 
 type TaskInput struct {
-	Objective string   `json:"objective"`
-	Criteria  []string `json:"criteria"`
-	DependsOn []string `json:"depends_on,omitempty"`
+	Objective   string   `json:"objective"`
+	Criteria    []string `json:"criteria"`
+	OwnerChecks []string `json:"owner_checks,omitempty"`
+	DependsOn   []string `json:"depends_on,omitempty"`
 }
 
 // task is the task id names: its canonical ID, or failing that its
@@ -491,6 +495,18 @@ func (s *Service) QueueTaskAs(ctx context.Context, projectID string, in TaskInpu
 	}
 	now := s.now().UTC()
 	out := Task{ID: uid(), ProjectID: projectID, Objective: strings.TrimSpace(in.Objective), Criteria: cleanList(in.Criteria), Status: TaskQueued, Stage: StageTodo, Revisions: []Revision{}, Verdicts: []Verdict{}, CreatedAt: now, UpdatedAt: now}
+	for _, c := range cleanList(in.OwnerChecks) {
+		if slices.Contains(out.Criteria, c) {
+			return Task{}, errors.New("an owner check cannot also be a team requirement")
+		}
+		c = text.Clip(c, maxCriterion)
+		if slices.Contains(out.Criteria, c) {
+			return Task{}, errors.New("an owner check cannot also be a team requirement")
+		}
+		if !slices.Contains(out.OwnerChecks, c) {
+			out.OwnerChecks = append(out.OwnerChecks, c)
+		}
+	}
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		p := project(v, projectID)
 		if p == nil {

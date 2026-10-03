@@ -70,7 +70,7 @@ func TestTheResearchersQuestionsComeBeforeAnyCode(t *testing.T) {
 	if runner.edits != 0 {
 		t.Fatal("code was written before the questions were answered")
 	}
-	a.Core.AnswerDecision(ctx, d.ID, "Blue")
+	a.Core.AnswerDecision(ctx, d.ID, "Blue", core.FromOwner)
 	task = taskNow(t, a, task.ID)
 	if task.Round != 1 || len(task.Revisions) == 0 || !strings.Contains(strings.Join(task.Direction, "\n"), "Answer to a question (1. Which colour?): Blue") {
 		t.Fatalf("the answer should start round 1: round %d revisions %d direction %v", task.Round, len(task.Revisions), task.Direction)
@@ -89,7 +89,7 @@ func TestATaskThatDependsOnUnlandedWorkWaitsAndIsResearchedAgain(t *testing.T) {
 	if first.Status != core.TaskWaiting || second.Status != core.TaskQueued || second.Plan != nil || len(second.WaitsFor) != 1 || second.WaitsFor[0] != "Add A" {
 		t.Fatalf("B should wait for A: A %s, B %s %+v %v", first.Status, second.Status, second.Plan, second.WaitsFor)
 	}
-	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, first).ID, choiceApprove); err != nil {
+	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, first).ID, choiceApprove, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	second = taskNow(t, a, second.ID)
@@ -184,9 +184,9 @@ func TestAResearcherThatFailsResearchesAgainWhateverTheOwnerAnswers(t *testing.T
 			t.Fatalf("a failed researcher reaches the owner: %+v %s %s", d, task.ResumeStatus, task.Stage)
 		}
 		if answer == choiceTryAgain {
-			a.Core.ChooseDecision(ctx, d.ID, answer)
+			a.Core.ChooseDecision(ctx, d.ID, answer, core.FromOwner)
 		} else {
-			a.Core.AnswerDecision(ctx, d.ID, answer)
+			a.Core.AnswerDecision(ctx, d.ID, answer, core.FromOwner)
 		}
 		task = taskNow(t, a, task.ID)
 		if task.Plan == nil || len(task.Revisions) == 0 {

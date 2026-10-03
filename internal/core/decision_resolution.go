@@ -12,22 +12,22 @@ import (
 // ChooseDecision records the owner picking one of a decision's own choices.
 // Only a choice made this way can approve, stop or retry; the loop reads any
 // other answer as the owner's words.
-func (s *Service) ChooseDecision(ctx context.Context, id, choice string) (Decision, error) {
+func (s *Service) ChooseDecision(ctx context.Context, id, choice string, by string) (Decision, error) {
 	choice = strings.TrimSpace(choice)
 	if choice == "" {
 		return Decision{}, errors.New("choose one of the decision's choices")
 	}
-	return s.finishDecision(ctx, id, choice, DispositionChoice, "")
+	return s.finishDecision(ctx, id, choice, DispositionChoice, "", by)
 }
 
 // AnswerDecision records the owner's own words, even when they happen to
 // spell one of the choices.
-func (s *Service) AnswerDecision(ctx context.Context, id, answer string) (Decision, error) {
+func (s *Service) AnswerDecision(ctx context.Context, id, answer string, by string) (Decision, error) {
 	answer = strings.TrimSpace(answer)
 	if answer == "" || len(answer) > 16*1024 {
 		return Decision{}, errors.New("answer is required and must be at most 16 KiB")
 	}
-	return s.finishDecision(ctx, id, answer, DispositionCustom, "")
+	return s.finishDecision(ctx, id, answer, DispositionCustom, "", by)
 }
 
 // DismissDecision closes an obsolete question with an audit reason. It is not an
@@ -39,9 +39,9 @@ func (s *Service) DismissDecision(ctx context.Context, id, reason string) (Decis
 	if reason == "" || len(reason) > 4096 {
 		return Decision{}, errors.New("dismissal reason is required and must be at most 4 KiB")
 	}
-	return s.finishDecision(ctx, id, "", DispositionDismissed, reason)
+	return s.finishDecision(ctx, id, "", DispositionDismissed, reason, "")
 }
-func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, reason string) (Decision, error) {
+func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, reason string, by string) (Decision, error) {
 	var out Decision
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		d := decision(v, id)
@@ -94,6 +94,7 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 		} else {
 			d.Status = DecisionResolved
 			d.Answer = answer
+			d.AnsweredBy = by
 			recordOn(v, now, d.ProjectID, d.TaskID, "decision.resolved", d.Title+": "+answer)
 		}
 		// The owner's answer to the PM goes to its next look at the list;

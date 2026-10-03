@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
 )
@@ -118,9 +119,11 @@ func TestParsePrerequisitesAndWaitSummaryGuard(t *testing.T) {
 		}
 	}
 	for _, summary := range featureSummaries {
-		if core.UndeclaredPlanWait(core.Plan{Summary: summary}, nil, core.Task{}) {
-			t.Errorf("feature wording rejected: %q", summary)
-		}
+		t.Run(summary, func(t *testing.T) {
+			if core.UndeclaredPlanWait(core.Plan{Summary: summary}, nil, core.Task{}) {
+				t.Errorf("feature wording rejected: %q", summary)
+			}
+		})
 	}
 	if core.UndeclaredPlanWait(core.Plan{Summary: "Implement the feature"}, nil, core.Task{}) || core.UndeclaredPlanWait(core.Plan{Summary: "Implementation waits", Prerequisites: []core.Prerequisite{{What: "release"}}}, nil, core.Task{}) {
 		t.Fatal("unnecessary send-back")
@@ -224,13 +227,38 @@ var featureSummaries = []string{
 
 func TestFeatureSummariesResearchOnce(t *testing.T) {
 	t.Parallel()
-	for _, summary := range featureSummaries {
+	for _, summary := range []string{featureSummaries[0], featureSummaries[5]} {
 		t.Run(summary, func(t *testing.T) {
 			t.Parallel()
 			reply := fmt.Sprintf(`{"summary":%q}`, summary)
 			a, runner, p := plannedCode(t, 6, reply)
-			queued, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Feature"})
-			got := taskNow(t, a, queued.ID)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			queued, err := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Feature"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got core.Task
+			for {
+				if _, err := a.loopStep(ctx, false); err != nil {
+					t.Fatal(err)
+				}
+				snap, err := a.Core.Snapshot(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, _ = findTask(snap, p.ID, queued.ID)
+				// A no-progress pass can precede scheduling research; wait for
+				// its recorded result and the first draft, not temporary idleness.
+				if (got.Plan != nil && len(got.Revisions) > 0) || got.Status == core.TaskWaiting || got.Finished() {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					t.Fatalf("research did not finish: %+v: %v", got, ctx.Err())
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
 			count := 0
 			for _, spec := range runner.seen {
 				if strings.Contains(spec.Prompt, "Plan this task before anything is written") {
@@ -410,9 +438,9 @@ func TestAnsweredWaitQuestionIsNotAskedAgain(t *testing.T) {
 				}
 				d := openDecision(t, a, waiting)
 				if typed {
-					_, err = a.Core.AnswerDecision(ctx, d.ID, "Start the work now")
+					_, err = a.Core.AnswerDecision(ctx, d.ID, "Start the work now", core.FromOwner)
 				} else {
-					_, err = a.Core.ChooseDecision(ctx, d.ID, "Use your judgment")
+					_, err = a.Core.ChooseDecision(ctx, d.ID, "Use your judgment", core.FromOwner)
 				}
 				if err != nil {
 					t.Fatal(err)

@@ -55,18 +55,23 @@ func (t *Task) SettleUnreachable(criterion string) {
 // OwnersAlready is what the owner has taken on for this task: its steps, and
 // the requirements they came from.
 func (t Task) OwnersAlready() []string {
-	return append(slices.Clone(t.OwnerSteps), t.OwnerTook...)
+	return append(append(slices.Clone(t.OwnerChecks), t.OwnerSteps...), t.OwnerTook...)
 }
 
 // OwnerChecklist is the steps the owner checks once the change lands, as a
 // checklist, or empty when there are none.
 func (t Task) OwnerChecklist() string {
-	if len(t.OwnerSteps) == 0 {
+	if len(t.OwnerChecks)+len(t.OwnerSteps) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("After it lands, check:")
-	for _, s := range t.OwnerSteps {
+	seen := map[string]bool{}
+	for _, s := range append(slices.Clone(t.OwnerChecks), t.OwnerSteps...) {
+		if seen[s] {
+			continue
+		}
+		seen[s] = true
 		b.WriteString("\n- [ ] " + s)
 	}
 	return b.String()
@@ -148,7 +153,7 @@ func (s *Service) MakeOwnerStep(ctx context.Context, taskID, decisionID string) 
 		}
 		// A step proposed for what is already the owner's would be the same
 		// check twice, reworded.
-		if !slices.Contains(t.OwnersAlready(), d.OwnerStep.Criterion) && !slices.Contains(t.OwnerSteps, step) {
+		if !slices.Contains(t.OwnersAlready(), d.OwnerStep.Criterion) && !slices.Contains(t.OwnerSteps, step) && !slices.Contains(t.OwnerChecks, step) {
 			t.OwnerSteps = append(t.OwnerSteps, step)
 		}
 		if !slices.Contains(t.OwnerTook, d.OwnerStep.Criterion) {

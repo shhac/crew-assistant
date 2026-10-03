@@ -212,6 +212,7 @@ func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
 			t.NextRound()
 		}
 	case open != nil:
+		open.AnsweredBy = m.From
 		open.Status, open.Disposition, open.Answer, open.ResolvedAt = DecisionResolved, DispositionCustom, m.Text, &now
 		recordOn(v, now, open.ProjectID, open.TaskID, "decision.resolved", open.Title+": "+m.Text)
 		// A design question goes back, in the same round, to the step that

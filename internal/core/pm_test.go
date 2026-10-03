@@ -247,7 +247,7 @@ func TestTheOwnersAnswerToThePMBringsItBack(t *testing.T) {
 	if err != nil || d.Kind != DecisionPMQuestion {
 		t.Fatalf("decision %+v %v", d, err)
 	}
-	if _, err := s.ChooseDecision(testContext, d.ID, "Keep the order as it is"); err != nil {
+	if _, err := s.ChooseDecision(testContext, d.ID, "Keep the order as it is", FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	if _, project := queuedOrder(t, s, p.ID); !project.PMDue || project.PMDirection != "Keep the order as it is" {

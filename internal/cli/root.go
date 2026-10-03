@@ -96,6 +96,7 @@ func NewRoot(version string) *cobra.Command {
 			return o.emit(v)
 		}})
 	}
+	root.AddCommand(decisionsCommand(o))
 	root.AddCommand(configCommand(o))
 	operations := &cobra.Command{Use: "operations", Short: "Inspect interrupted operations without replaying them"}
 	operations.AddCommand(&cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
@@ -155,6 +156,10 @@ func (o *options) request(method, path string, value any) (any, error) {
 }
 
 func (o *options) requestInto(method, path string, value, out any) error {
+	return o.requestBody(method, path, value, func(r io.Reader) error { return json.NewDecoder(io.LimitReader(r, 4<<20)).Decode(out) })
+}
+
+func (o *options) requestBody(method, path string, value any, consume func(io.Reader) error) error {
 	info, err := o.runtime()
 	if err != nil {
 		return err
@@ -184,14 +189,14 @@ func (o *options) requestInto(method, path string, value, out any) error {
 		return errors.New("could not reach daemon; check crew-assistant serve and the selected --state path")
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 400 {
+		return consume(resp.Body)
+	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode >= 400 {
-		return daemonError(resp.StatusCode, data)
-	}
-	return json.NewDecoder(bytes.NewReader(data)).Decode(out)
+	return daemonError(resp.StatusCode, data)
 }
 
 // daemonError is the daemon's own message when it sent one. A reply that isn't

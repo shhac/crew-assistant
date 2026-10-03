@@ -138,6 +138,7 @@ const (
 )
 
 type Decision struct {
+	AnsweredBy       string `json:"answered_by,omitempty"`
 	Disposition      string `json:"disposition,omitempty"`
 	ResolutionReason string `json:"resolution_reason,omitempty"`
 	ID               string `json:"id"`

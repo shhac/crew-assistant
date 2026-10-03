@@ -169,7 +169,7 @@ var toolActions = map[string]toolAction{
 		return map[string]string{"answer": answer}, nil
 	}),
 	"resolve_decision": with(func(a *App, ctx context.Context, in engine.ResolveDecisionArgs) (any, error) {
-		return a.Work.ResolveDecision(ctx, in.DecisionID, in.Choice, in.Answer)
+		return a.Work.ResolveDecision(ctx, in.DecisionID, in.Choice, in.Answer, core.FromAssistant)
 	}),
 	"ask_decision": with(func(a *App, ctx context.Context, in engine.DecisionArgs) (any, error) {
 		return a.Core.CreateDecision(ctx, core.DecisionInput{ProjectID: in.ProjectID, Title: in.Question, Context: in.Why + evidenceText(in.Evidence), Recommendation: in.Recommendation, Choices: in.Options})

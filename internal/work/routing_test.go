@@ -24,7 +24,7 @@ func TestTheResearcherPlansAgainWithTheOwnersAnswer(t *testing.T) {
 	if task.Asker == nil || task.Asker.Step != core.TaskResearching || task.Asker.From != "Researcher" {
 		t.Fatalf("who asked: %+v", task.Asker)
 	}
-	a.Core.AnswerDecision(ctx, d.ID, "Blue")
+	a.Core.AnswerDecision(ctx, d.ID, "Blue", core.FromOwner)
 	task = taskNow(t, a, task.ID)
 	research := turns(&runner.scriptedRunner, "Plan this task before anything is written")
 	if len(research) != 2 || !strings.Contains(research[1].Prompt, "Blue") || !strings.Contains(research[1].Prompt, "Unclear which colour.") || !strings.Contains(research[1].Prompt, "Plan again with their answers") {
@@ -47,7 +47,7 @@ func TestTheCheckerThatAskedJudgesAgainWithTheAnswer(t *testing.T) {
 	if task.Stage != core.StageReviewing || task.Asker == nil || task.Asker.From != "Reviewer" || task.Asker.Revision != 1 {
 		t.Fatalf("waiting on the owner for the Reviewer: %s %+v", task.Stage, task.Asker)
 	}
-	a.Core.AnswerDecision(ctx, d.ID, "The whole team")
+	a.Core.AnswerDecision(ctx, d.ID, "The whole team", core.FromOwner)
 	task = settle(t, a)
 	d = openDecision(t, a, task)
 	if d.Kind != core.DecisionDelivery || len(task.Revisions) != 1 || task.Round != 1 || runner.writes != 1 {

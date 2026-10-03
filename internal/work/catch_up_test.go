@@ -174,7 +174,7 @@ func TestAConflictWithARewrittenMainReachesTheImplementer(t *testing.T) {
 	// their own.
 	ownerGit(t, source, "reset", "-q", "--hard", "HEAD~1")
 	rewritten := ownerCommits(t, source, "feature.go", "package main\n\n// Feature, the owner's\nfunc Feature() {}\n", "owner's feature")
-	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove); err != nil {
+	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	settle(t, a)
@@ -275,7 +275,7 @@ func TestLeftoverConflictMarkersRetryWithNamedDecision(t *testing.T) {
 	ownerCommits(t, source, "feature.go", "package main\nfunc Feature() {}\n", "owner feature")
 	runner.onEdit = func(string, int) bool { return false }
 	ctx := context.Background()
-	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove); err != nil {
+	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i <= roleRetries; i++ {
@@ -310,7 +310,7 @@ func TestLeftoverConflictMarkersRetryWithNamedDecision(t *testing.T) {
 	if refusals != roleRetries+1 {
 		t.Fatalf("got %d refusal entries, want %d", refusals, roleRetries+1)
 	}
-	if _, err := a.Core.ChooseDecision(ctx, d.ID, choiceTryAgain); err != nil {
+	if _, err := a.Core.ChooseDecision(ctx, d.ID, choiceTryAgain, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	step(t, a)
@@ -328,7 +328,7 @@ func TestApprovedCleanCatchUpLandsWithoutAnotherDecision(t *testing.T) {
 	settle(t, a)
 	task = taskByID(t, a, task.ID)
 	ctx := context.Background()
-	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove); err != nil {
+	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	ownerCommits(t, source, "owner.go", "package main\n", "owner work")

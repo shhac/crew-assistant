@@ -1233,7 +1233,7 @@ func TestAConflictBetweenTasksBuiltSideBySideGoesToTheImplementer(t *testing.T) 
 	if first.Status != core.TaskWaiting || second.Status != core.TaskWaiting || first.Base != second.Base {
 		t.Fatalf("both should wait for approval, built from the same start: %+v\n%+v", first, second)
 	}
-	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, first).ID, choiceApprove); err != nil {
+	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, first).ID, choiceApprove, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	settle(t, a)
@@ -1323,7 +1323,7 @@ func TestAConflictWithWorkBuiltAfterGoesToTheImplementer(t *testing.T) {
 	if first.Status != core.TaskWaiting || second.Status != core.TaskWaiting || first.BuiltBeside(second) {
 		t.Fatalf("B should be built after A: %+v\n%+v", first, second)
 	}
-	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, second).ID, choiceApprove); err != nil {
+	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, second).ID, choiceApprove, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	settle(t, a)

@@ -686,6 +686,7 @@ describe("the board", () => {
         body: {
           objective: "Cache the lookups",
           criteria: ["No stale reads", "Under 1ms"],
+          owner_checks: [],
         },
       },
     ]);

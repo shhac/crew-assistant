@@ -82,7 +82,7 @@ func TestPrerequisitesConfirmedAndDropped(t *testing.T) {
 	for _, choice := range []string{ChoiceReadyPrerequisite, ChoiceDropPrerequisite} {
 		t.Run(choice, func(t *testing.T) {
 			s, _, held, d := prerequisiteTask(t)
-			if _, err := s.ChooseDecision(testContext, d.ID, choice); err != nil {
+			if _, err := s.ChooseDecision(testContext, d.ID, choice, FromOwner); err != nil {
 				t.Fatal(err)
 			}
 			outcome := "confirmed"
@@ -113,7 +113,7 @@ func TestPrerequisiteAnswerDismissAndClearAuthority(t *testing.T) {
 			s, p, held, d := prerequisiteTask(t)
 			var err error
 			if typed {
-				_, err = s.AnswerDecision(testContext, d.ID, ChoiceReadyPrerequisite)
+				_, err = s.AnswerDecision(testContext, d.ID, ChoiceReadyPrerequisite, FromOwner)
 			} else {
 				_, err = s.DismissDecision(testContext, d.ID, "Later")
 			}
@@ -139,7 +139,7 @@ func TestPrerequisiteAnswerDismissAndClearAuthority(t *testing.T) {
 	if snap.Decisions[0].Status != DecisionDismissed || snap.Decisions[0].ResolutionReason != "Cleared on the task" {
 		t.Fatal(snap.Decisions)
 	}
-	if _, err := s.ChooseDecision(testContext, d.ID, ChoiceDropPrerequisite); !errors.Is(err, ErrConflict) {
+	if _, err := s.ChooseDecision(testContext, d.ID, ChoiceDropPrerequisite, FromOwner); !errors.Is(err, ErrConflict) {
 		t.Fatal(err)
 	}
 }
@@ -147,7 +147,7 @@ func TestPrerequisiteAnswerDismissAndClearAuthority(t *testing.T) {
 func TestStoppingTaskDismissesPrerequisite(t *testing.T) {
 	s, _, held, d := prerequisiteTask(t)
 	s.UpdateTask(testContext, held.ID, func(t *Task, _ *Project) (string, error) { t.Status = TaskStopped; return "", nil })
-	if _, err := s.ChooseDecision(testContext, d.ID, ChoiceReadyPrerequisite); !errors.Is(err, ErrConflict) {
+	if _, err := s.ChooseDecision(testContext, d.ID, ChoiceReadyPrerequisite, FromOwner); !errors.Is(err, ErrConflict) {
 		t.Fatal(err)
 	}
 	snap, _ := s.Snapshot(testContext)
@@ -225,7 +225,7 @@ func TestPrerequisiteAnswerRacesTaskPageClear(t *testing.T) {
 	s, p, held, d := prerequisiteTask(t)
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); s.ChooseDecision(testContext, d.ID, ChoiceDropPrerequisite) }()
+	go func() { defer wg.Done(); s.ChooseDecision(testContext, d.ID, ChoiceDropPrerequisite, FromOwner) }()
 	go func() {
 		defer wg.Done()
 		s.ClearBlocker(testContext, p.ID, held.ID, held.Blockers[0].ID, LinkedByOwner, "ready")

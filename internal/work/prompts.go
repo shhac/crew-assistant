@@ -30,7 +30,7 @@ func briefText(p core.Project, t core.Task) string {
 	}
 	// A brief's requirement the owner took on for this task stays in the
 	// brief, and is listed with the owner's steps instead.
-	criteria := slices.DeleteFunc(append(slices.Clone(p.Brief.Criteria), t.Criteria...), func(c string) bool { return slices.Contains(t.OwnerTook, c) })
+	criteria := slices.DeleteFunc(append(slices.Clone(p.Brief.Criteria), t.Criteria...), func(c string) bool { return slices.Contains(t.OwnerTook, c) || slices.Contains(t.OwnerChecks, c) })
 	if len(criteria) > 0 {
 		b.WriteString("\nThe result must meet every one of these criteria:\n")
 		b.WriteString(numbered(criteria))
@@ -775,7 +775,7 @@ If it needs more than about 10 changes or would touch more than about 30 files, 
 	if local.Len() > 0 || external.Len() > 0 {
 		b.WriteString("\nA plan may depend on any task listed above.\n")
 	}
-	b.WriteString("\nPut conditions no task tracks under prerequisites. Implementation will wait for the owner's confirmation or decision to drop each condition, so a prerequisite is only something that must exist before this task's work can start. What can only happen after this task lands, such as CI passing on it, tagging or publishing its release, or a manual check by the owner, is not a prerequisite: leave it out, and the implementer can hand it over as an owner step.\n")
+	b.WriteString("\nPut conditions no task tracks under prerequisites. Implementation will wait for the owner's confirmation or decision to drop each condition, so a prerequisite is only something that must exist before this task's work can start. What can only happen after this task lands, such as CI passing on it, tagging or publishing its release, or a manual check by the owner, is not a prerequisite: move any such task criterion into owner_checks, quoted exactly, and say so in the plan instead of leaving it to be escalated later. Never move a brief criterion. These become the owner’s checks after landing, never team requirements.\n")
 	for _, blocker := range t.Blockers {
 		if blocker.Kind == core.BlockerPrerequisite {
 			outcome := blocker.Outcome
@@ -799,7 +799,7 @@ If it needs more than about 10 changes or would touch more than about 30 files, 
 	if code {
 		changes += `"failure_paths": ["..."], "tests": ["..."], `
 	}
-	plan := `{"summary": "the plan in a few sentences", "exists": ["..."], ` + needsDesigner + changes + `"out_of_scope": ["..."], "questions": ["only what the owner must answer"], "depends_on": ["ids of tasks above this one must wait for, each readable (such as CA-3) or canonical"], "prerequisites": ["a condition no task tracks, such as a library version being tagged"], "split_off": [{"title": "a part left for later", "requirements": ["..."]}]}`
+	plan := `{"summary": "the plan in a few sentences", "exists": ["..."], ` + needsDesigner + changes + `"owner_checks": ["exact task criteria to move to the owner after landing"], "out_of_scope": ["..."], "questions": ["only what the owner must answer"], "depends_on": ["ids of tasks above this one must wait for, each readable (such as CA-3) or canonical"], "prerequisites": ["a condition no task tracks, such as a library version being tagged"], "split_off": [{"title": "a part left for later", "requirements": ["..."]}]}`
 	// The reply can ask for design input only while the hand-off is offered,
 	// so the contract a role follows never contradicts the guide above it.
 	if designsFor(t, researcher) && t.DesignsAt(core.TaskResearching) < core.DesignLimit {

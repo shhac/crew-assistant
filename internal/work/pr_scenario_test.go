@@ -210,7 +210,7 @@ func (s *prScenario) current(t *testing.T) core.Task {
 func (s *prScenario) open(t *testing.T) core.Task {
 	t.Helper()
 	task := s.current(t)
-	s.a.Core.ChooseDecision(s.ctx, openDecision(t, s.a, task).ID, choiceApprove)
+	s.a.Core.ChooseDecision(s.ctx, openDecision(t, s.a, task).ID, choiceApprove, core.FromOwner)
 	task = s.current(t)
 	if task.Status != core.TaskAwaiting || task.Proposal == nil || task.Proposal.Number != 7 {
 		t.Fatalf("the pull request did not open: %+v", task)

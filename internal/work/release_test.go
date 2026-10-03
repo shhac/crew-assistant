@@ -139,7 +139,7 @@ func chooseRelease(t *testing.T, a *Loop, id, choice string) {
 	if p.Release == nil || p.Release.DecisionID == "" {
 		t.Fatal("no decision", p)
 	}
-	if _, err := a.Core.ChooseDecision(context.Background(), p.Release.DecisionID, choice); err != nil {
+	if _, err := a.Core.ChooseDecision(context.Background(), p.Release.DecisionID, choice, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 }

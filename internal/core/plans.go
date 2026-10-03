@@ -24,6 +24,7 @@ type Prerequisite struct {
 // what is unclear. What the task waits for is kept on the task itself.
 // Prerequisites record external conditions and outcomes copied from blockers.
 type Plan struct {
+	OwnerChecks   []string `json:"owner_checks,omitempty"`
 	NeedsDesigner string   `json:"needs_designer,omitempty"`
 	Summary       string   `json:"summary"`
 	Exists        []string `json:"exists,omitempty"`
@@ -233,6 +234,23 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 			p.listChanged()
 		}
 		if t.Plan != nil {
+			after := t.text()
+			moved := []string{}
+			for _, c := range cleanList(t.Plan.OwnerChecks) {
+				if i := slices.Index(after.Criteria, c); i >= 0 {
+					after.Criteria = slices.Delete(after.Criteria, i, i+1)
+					if !slices.Contains(after.OwnerChecks, c) {
+						after.OwnerChecks = append(after.OwnerChecks, c)
+					}
+					moved = append(moved, c)
+				}
+			}
+			t.Plan.OwnerChecks = moved
+			if !t.text().same(after) {
+				if err := s.applyEdit(v, t, TaskEdit{By: plan.Role, Kind: RoleResearcher, After: after}, &out); err != nil {
+					return err
+				}
+			}
 			t = splitOff(v, t, now)
 		}
 		derive(v, t)

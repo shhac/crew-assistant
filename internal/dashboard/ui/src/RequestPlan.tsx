@@ -19,6 +19,10 @@ export function RequestPlan({ plan }: { plan: Plan }) {
         (p) => `${p.what} (${p.outcome || "waiting"})`,
       ),
     },
+    {
+      label: "Moved to your checks after landing",
+      items: plan.owner_checks ?? [],
+    },
     { label: "What exists", items: plan.exists ?? [] },
     { label: "What will change", items: plan.changes ?? [] },
     { label: "If a step stops part-way", items: plan.failure_paths ?? [] },

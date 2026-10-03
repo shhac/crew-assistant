@@ -97,7 +97,7 @@ func TestReleaseProposalsAndDecisions(t *testing.T) {
 	if currentRelease(t, s, p.ID).DecisionID != r.DecisionID {
 		t.Fatal("second proposal replaced pending")
 	}
-	if _, err := s.AnswerDecision(testContext, r.DecisionID, "Release v1.1.0"); err != nil {
+	if _, err := s.AnswerDecision(testContext, r.DecisionID, "Release v1.1.0", FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	if currentRelease(t, s, p.ID) != nil {
@@ -106,7 +106,7 @@ func TestReleaseProposalsAndDecisions(t *testing.T) {
 	// Open a fresh proposal: custom answers cannot approve.
 	s.ApplyPM(testContext, p.ID, in)
 	r = currentRelease(t, s, p.ID)
-	if _, err := s.ChooseDecision(testContext, r.DecisionID, "Release v1.1.0"); err != nil {
+	if _, err := s.ChooseDecision(testContext, r.DecisionID, "Release v1.1.0", FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	if currentRelease(t, s, p.ID).ApprovedBy != "owner" {
@@ -116,13 +116,13 @@ func TestReleaseProposalsAndDecisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	r = currentRelease(t, s, p.ID)
-	s.ChooseDecision(testContext, r.DecisionID, "Try again")
+	s.ChooseDecision(testContext, r.DecisionID, "Try again", FromOwner)
 	if currentRelease(t, s, p.ID).State != "approved" {
 		t.Fatal("retry not approved")
 	}
 	s.ReleaseFailed(testContext, p.ID, "diverged", true)
 	r = currentRelease(t, s, p.ID)
-	s.ChooseDecision(testContext, r.DecisionID, "Leave it")
+	s.ChooseDecision(testContext, r.DecisionID, "Leave it", FromOwner)
 	snap, _ := s.Snapshot(testContext)
 	p, _ = findProjectByID(snap, p.ID)
 	if p.Release != nil || len(p.Releases) != 1 || p.Releases[0].Published != "" {
@@ -251,13 +251,13 @@ func TestReleaseClosingDispositionsAllowAnotherProposal(t *testing.T) {
 					s.ApplyPM(testContext, p.ID, in)
 					r := currentRelease(t, s, p.ID)
 					if failed {
-						s.ChooseDecision(testContext, r.DecisionID, "Release v1.1.0")
+						s.ChooseDecision(testContext, r.DecisionID, "Release v1.1.0", FromOwner)
 						s.ReleaseFailed(testContext, p.ID, "failed", local)
 						r = currentRelease(t, s, p.ID)
 					}
 					var err error
 					if custom {
-						_, err = s.AnswerDecision(testContext, r.DecisionID, "Try again")
+						_, err = s.AnswerDecision(testContext, r.DecisionID, "Try again", FromOwner)
 					} else {
 						_, err = s.DismissDecision(testContext, r.DecisionID, "obsolete")
 					}

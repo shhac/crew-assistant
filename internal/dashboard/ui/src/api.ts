@@ -355,6 +355,7 @@ export interface WorkspaceInput {
   sign: string;
 }
 export interface TaskInput {
+  owner_checks?: string[];
   objective: string;
   criteria: string[];
 }
@@ -447,6 +448,7 @@ export interface ResearchRequest {
   answered_at?: string;
 }
 export interface TaskText {
+  owner_checks?: string[];
   objective: string;
   criteria: string[] | null;
 }
@@ -508,6 +510,7 @@ export interface TeamMessage {
 }
 /** What the researcher worked out before anything was written. */
 export interface Plan {
+  owner_checks?: string[];
   needs_designer?: string;
   summary: string;
   exists?: string[];
@@ -638,6 +641,7 @@ export interface NextTaker {
   others?: string[];
 }
 export interface Task {
+  owner_checks?: string[];
   takes?: NextTaker[];
   blockers?: Blocker[];
   /** Original source issues and their context for the offline team. */

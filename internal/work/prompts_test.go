@@ -241,7 +241,7 @@ func TestTheResearcherPlansFailurePathsAndTestsAndFlagsASplit(t *testing.T) {
 	task := core.Task{Objective: "Add Feature"}
 	split := "If it needs more than about 10 changes or would touch more than about 30 files, it is too big to review well in one piece: ask the owner, in your questions, whether to split it, and say into what."
 	paths := "- the failure paths: stopping during each step, a restart between two writes, concurrent callers, a partial failure, and what the record must say after each;\n- the tests that will show it works, including on those paths;"
-	schema := `"changes": ["..."], "failure_paths": ["..."], "tests": ["..."], "out_of_scope"`
+	schema := `"changes": ["..."], "failure_paths": ["..."], "tests": ["..."], "owner_checks": ["exact task criteria to move to the owner after landing"], "out_of_scope"`
 	c, d := researcherPrompt(code, task, nil, nil), researcherPrompt(docs, task, nil, nil)
 	for _, want := range []string{split, paths, schema} {
 		if !strings.Contains(c, want) {

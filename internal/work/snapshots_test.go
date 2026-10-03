@@ -411,7 +411,7 @@ func TestEachTaskGetsItsOwnCloneAndBranch(t *testing.T) {
 	if ownerGit(t, two, "branch", "--list", first.Branch) != "" || ownerGit(t, one, "branch", "--list", second.Branch) != "" || ownerGit(t, m.repo.Workspace(), "branch", "--list", "crew-task/*") != "" {
 		t.Fatal("a task's branch is outside its own clone")
 	}
-	a.Core.ChooseDecision(ctx, openDecision(t, a, first).ID, choiceApprove)
+	a.Core.ChooseDecision(ctx, openDecision(t, a, first).ID, choiceApprove, core.FromOwner)
 	first = settleCode(t, a, first.ID)
 	if first.Status != core.TaskDelivered {
 		t.Fatalf("first %s", first.Status)
@@ -491,7 +491,7 @@ func TestChecksAndLandingNeedNoTaskClone(t *testing.T) {
 	if task.Status != core.TaskWaiting || len(task.Verdicts) != 2 {
 		t.Fatalf("the draft was not checked without its clone: %+v", task)
 	}
-	a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove)
+	a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, choiceApprove, core.FromOwner)
 	task = settleCode(t, a, task.ID)
 	if task.Status != core.TaskDelivered || ownerGit(t, m.playbook.Repo, "rev-parse", task.DeliveredTo) != task.Revisions[0].Ref {
 		t.Fatalf("the draft did not land without its clone: %+v", task)

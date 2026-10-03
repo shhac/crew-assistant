@@ -96,7 +96,7 @@ func TestUpdateOffAndSuperseding(t *testing.T) {
 	if len(v.Decisions) != 1 || v.Decisions[0].Status != DecisionResolved || v.Decisions[0].Disposition != DispositionSuperseded {
 		t.Fatal(v.Decisions)
 	}
-	if _, err := s.ChooseDecision(context.Background(), old, ChoiceUpgradeByHand); !errors.Is(err, ErrConflict) {
+	if _, err := s.ChooseDecision(context.Background(), old, ChoiceUpgradeByHand, FromOwner); !errors.Is(err, ErrConflict) {
 		t.Fatal(err)
 	}
 	cfg.Upgrade.Mode = "ask"
@@ -109,7 +109,7 @@ func TestUpdateOffAndSuperseding(t *testing.T) {
 	if len(newer.Decisions) != 3 || newer.Decisions[1].Status != DecisionResolved || newer.Decisions[1].Disposition != DispositionSuperseded || newer.Decisions[2].Status != DecisionOpen {
 		t.Fatal(newer.Decisions)
 	}
-	if _, err := s.AnswerDecision(context.Background(), v.Decisions[1].ID, "yes"); !errors.Is(err, ErrConflict) {
+	if _, err := s.AnswerDecision(context.Background(), v.Decisions[1].ID, "yes", FromOwner); !errors.Is(err, ErrConflict) {
 		t.Fatal(err)
 	}
 	v = recordUpdate(t, s, "v1.2.0")
@@ -126,13 +126,13 @@ func TestUpdateSkipDismissCustomAndHand(t *testing.T) {
 			var err error
 			switch answer {
 			case "skip":
-				_, err = s.ChooseDecision(context.Background(), id, "Skip v1.1.0")
+				_, err = s.ChooseDecision(context.Background(), id, "Skip v1.1.0", FromOwner)
 			case "dismiss":
 				_, err = s.DismissDecision(context.Background(), id, "Later")
 			case "custom":
-				_, err = s.AnswerDecision(context.Background(), id, "Later")
+				_, err = s.AnswerDecision(context.Background(), id, "Later", FromOwner)
 			case "hand":
-				_, err = s.ChooseDecision(context.Background(), id, ChoiceUpgradeByHand)
+				_, err = s.ChooseDecision(context.Background(), id, ChoiceUpgradeByHand, FromOwner)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -250,7 +250,7 @@ func TestRunningUpdateCompletesDecisionWithoutAnOwnerAnswer(t *testing.T) {
 			if !found {
 				t.Fatal("completion not recorded")
 			}
-			if _, err := s.ChooseDecision(context.Background(), id, ChoiceUpgradeByHand); !errors.Is(err, ErrConflict) {
+			if _, err := s.ChooseDecision(context.Background(), id, ChoiceUpgradeByHand, FromOwner); !errors.Is(err, ErrConflict) {
 				t.Fatal(err)
 			}
 		})

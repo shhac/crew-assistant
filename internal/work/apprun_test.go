@@ -506,7 +506,7 @@ func TestTheResearcherAndThePMProposeARecipe(t *testing.T) {
 	if now, _ := findProject(snap, p.ID); now.Playbook.Run != nil {
 		t.Fatal("the proposal applied before the owner accepted it")
 	}
-	if _, err := a.Core.ChooseDecision(ctx, snap.Decisions[i].ID, core.ChoiceUseRecipe); err != nil {
+	if _, err := a.Core.ChooseDecision(ctx, snap.Decisions[i].ID, core.ChoiceUseRecipe, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	snap, _ = a.Core.Snapshot(ctx)

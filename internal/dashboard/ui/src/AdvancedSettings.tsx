@@ -63,6 +63,14 @@ export function AdvancedSettings({
         Read Linear directly. You can also use a CLI account in Connections.
         Changes here need crew-assistant restarted.
       </p>
+      <Panel title="Decision record">
+        <p>
+          Answered decisions, kept for evaluating a future decision classifier.
+        </p>
+        <a href="/api/decisions/evaluations.jsonl" download>
+          Download JSONL
+        </a>
+      </Panel>
       <Panel title="Linear">
         <label className="check">
           <input

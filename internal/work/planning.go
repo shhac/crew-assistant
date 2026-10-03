@@ -79,6 +79,13 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 			plan.Questions = append(plan.Questions, core.UndeclaredWaitQuestion)
 		}
 	}
+	var checks []string
+	for _, quoted := range plan.OwnerChecks {
+		if c := matchCriterion(t.Criteria, quoted); c != "" {
+			checks = append(checks, c)
+		}
+	}
+	plan.OwnerChecks = checks
 	plan.Role = researcher.Name
 	var prerequisites []string
 	for _, pre := range plan.Prerequisites {
@@ -151,6 +158,7 @@ const (
 // once the input is back.
 func parsePlan(reply string, designs, noDesigner bool) (core.Plan, []string, string, error) {
 	var in struct {
+		OwnerChecks   []string `json:"owner_checks"`
 		NeedsDesigner string   `json:"needs_designer"`
 		Summary       string   `json:"summary"`
 		Exists        []string `json:"exists"`
@@ -196,6 +204,7 @@ func parsePlan(reply string, designs, noDesigner bool) (core.Plan, []string, str
 	if noDesigner {
 		plan.NeedsDesigner = text.Clip(strings.TrimSpace(in.NeedsDesigner), maxPlanItem)
 	}
+	plan.OwnerChecks = keep(in.OwnerChecks)
 	plan.Changes = keep(in.Changes)
 	plan.FailurePaths = keep(in.FailurePaths)
 	plan.Tests = keep(in.Tests)

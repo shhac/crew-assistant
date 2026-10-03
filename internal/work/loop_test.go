@@ -291,7 +291,7 @@ func TestLoopRevisesUntilReviewersPassThenDeliversOnApproval(t *testing.T) {
 	if reviewer.Write || reviewer.WorkDir == writer.WorkDir || reviewer.Engine != "codex" {
 		t.Fatalf("reviewer spec %+v", reviewer)
 	}
-	if _, err := a.Core.ChooseDecision(context.Background(), d.ID, choiceApprove); err != nil {
+	if _, err := a.Core.ChooseDecision(context.Background(), d.ID, choiceApprove, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
 	task = settle(t, a)
@@ -317,7 +317,7 @@ func TestOwnerChangesQuestionsAndRoundLimits(t *testing.T) {
 	if d.Kind != core.DecisionQuestion || !strings.Contains(d.Context, "whole team") {
 		t.Fatalf("question %+v", d)
 	}
-	a.Core.AnswerDecision(ctx, d.ID, "The whole team")
+	a.Core.AnswerDecision(ctx, d.ID, "The whole team", core.FromOwner)
 	task = settle(t, a)
 	// The reviewer that asked judged draft 1 again with the answer; rounds
 	// 1 to 3 were revised; the limit of three rounds then comes to the
@@ -329,19 +329,19 @@ func TestOwnerChangesQuestionsAndRoundLimits(t *testing.T) {
 	if runner.seen[2].Write || !strings.Contains(runner.seen[2].Prompt, "The whole team") || !strings.Contains(runner.seen[3].Prompt, "The whole team") {
 		t.Fatal("the owner's answer did not reach the reviewer that asked, then the writer")
 	}
-	a.Core.ChooseDecision(ctx, d.ID, choiceAnotherRound)
+	a.Core.ChooseDecision(ctx, d.ID, choiceAnotherRound, core.FromOwner)
 	task = settle(t, a)
 	d = openDecision(t, a, task)
 	if d.Kind != core.DecisionEscalation || task.Round != 4 {
 		t.Fatalf("another round should end at another escalation, got %+v", task)
 	}
-	a.Core.AnswerDecision(ctx, d.ID, "Make it shorter")
+	a.Core.AnswerDecision(ctx, d.ID, "Make it shorter", core.FromOwner)
 	task = settle(t, a)
 	d = openDecision(t, a, task)
 	if d.Kind != core.DecisionDelivery || !strings.Contains(runner.seen[len(runner.seen)-2].Prompt, "Make it shorter") {
 		t.Fatalf("free-text direction did not produce a new round: %+v", task)
 	}
-	a.Core.ChooseDecision(ctx, d.ID, choiceApprove)
+	a.Core.ChooseDecision(ctx, d.ID, choiceApprove, core.FromOwner)
 	if task = settle(t, a); task.Status != core.TaskDelivered || task.DeliveredTo != "" {
 		t.Fatalf("approval without a folder should just mark it delivered: %+v", task)
 	}
@@ -360,7 +360,7 @@ func TestTypedAnswersAreDirectionNotChoices(t *testing.T) {
 	if d.Kind != core.DecisionDelivery {
 		t.Fatalf("delivery %+v", d)
 	}
-	if d, _ = a.Core.AnswerDecision(ctx, d.ID, "approve"); d.Disposition != core.DispositionCustom {
+	if d, _ = a.Core.AnswerDecision(ctx, d.ID, "approve", core.FromOwner); d.Disposition != core.DispositionCustom {
 		t.Fatalf("typed words were recorded as a choice: %+v", d)
 	}
 	task = settle(t, a)
@@ -371,11 +371,11 @@ func TestTypedAnswersAreDirectionNotChoices(t *testing.T) {
 	if !strings.Contains(runner.seen[2].Prompt, "approve") {
 		t.Fatal("the owner's words did not reach the writer")
 	}
-	a.Core.AnswerDecision(ctx, d.ID, "Stop")
+	a.Core.AnswerDecision(ctx, d.ID, "Stop", core.FromOwner)
 	if task = settle(t, a); task.Status == core.TaskStopped || !strings.Contains(strings.Join(task.Direction, "\n"), "): Stop") {
 		t.Fatalf("a typed stop should be an answer to the question, got %+v", task)
 	}
-	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, "Ship it"); !errors.Is(err, core.ErrConflict) {
+	if _, err := a.Core.ChooseDecision(ctx, openDecision(t, a, task).ID, "Ship it", core.FromOwner); !errors.Is(err, core.ErrConflict) {
 		t.Fatalf("a choice the decision does not offer was accepted: %v", err)
 	}
 }
@@ -427,7 +427,7 @@ func TestFailuresRetryQuietlyThenAskOnce(t *testing.T) {
 	if d.Kind != core.DecisionFailure || task.ResumeStatus != core.TaskWriting {
 		t.Fatalf("a sandbox problem should reach the owner at once: %+v %+v", d, task)
 	}
-	a.Core.ChooseDecision(context.Background(), d.ID, choiceTryAgain)
+	a.Core.ChooseDecision(context.Background(), d.ID, choiceTryAgain, core.FromOwner)
 	if task = settle(t, a); openDecision(t, a, task).Kind != core.DecisionDelivery {
 		t.Fatalf("try again should resume the failed step: %+v", task)
 	}
@@ -526,7 +526,7 @@ func TestBriefChangeRechecksBeforeDelivery(t *testing.T) {
 	if _, err := a.Core.UpdateBrief(ctx, p.ID, core.BriefInput{Goal: "Thank the team for the launch", Criteria: []string{"Warm tone", "Mentions the launch"}}); err != nil {
 		t.Fatal(err)
 	}
-	a.Core.ChooseDecision(ctx, d.ID, choiceChanges)
+	a.Core.ChooseDecision(ctx, d.ID, choiceChanges, core.FromOwner)
 	task = settle(t, a)
 	if openDecision(t, a, task).Kind != core.DecisionDelivery || len(task.Revisions) != 2 || task.Revisions[1].BriefVersion != 2 {
 		t.Fatalf("the new draft should answer brief 2: %+v", task)
@@ -726,7 +726,7 @@ func TestChoosingStopEndsTheTaskWhateverItWasWaitingOn(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := a.Core.ChooseDecision(ctx, d.ID, choiceStop); err != nil {
+			if _, err := a.Core.ChooseDecision(ctx, d.ID, choiceStop, core.FromOwner); err != nil {
 				t.Fatal(err)
 			}
 			if got := settle(t, a); got.Status != core.TaskStopped || runner.writes != 0 {
