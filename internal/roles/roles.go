@@ -279,7 +279,7 @@ func options(spec Spec) session.Options {
 		o.Sandbox, o.Env, o.Browser = nil, nil, false
 		o.Workbench = &session.Workbench{Write: spec.Write}
 		if harness.Support(o.Provider.Engine, harness.Session, harness.Sandbox).Usable() {
-			o.Workbench.Commands = &session.Commands{Read: spec.Read, Loopback: spec.Loopback, Env: commandEnv(spec.Env)}
+			o.Workbench.Commands = &session.Commands{Read: spec.Read, Loopback: spec.Loopback, Env: CommandEnv(spec.Env)}
 		}
 		o.Restriction = &session.Restriction{Tools: session.ToolHost{Server: "crew", Tools: spec.Tools, Handler: spec.Handler, MaxResultBytes: 128 << 10}}
 		o.Loop = session.Loop{MaxSteps: 1024, MaxRequestBytes: 64 << 20, RequestTimeout: 5 * time.Minute}
@@ -406,11 +406,11 @@ func VerifySandbox(ctx context.Context, spec Spec) error {
 	return session.VerifySandbox(ctx, options(spec))
 }
 
-// commandEnv carries the medium's build settings and QA's port to API
-// commands. Only PATH and locale settings are inherited from the daemon;
+// CommandEnv carries the medium's build settings and the app's port to
+// hosted commands. Only PATH and locale settings are inherited from the daemon;
 // HOME and TMPDIR belong to the harness's private scratch. Other caller
 // settings are passed whole so the harness refuses unsafe names before launch.
-func commandEnv(extra []string) []string {
+func CommandEnv(extra []string) []string {
 	var env []string
 	for _, entry := range os.Environ() {
 		key, _, ok := strings.Cut(entry, "=")

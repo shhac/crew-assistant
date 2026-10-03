@@ -43,7 +43,7 @@ type appTree struct {
 
 // appCommandsRoot is where QA's prompt says to run the app's commands, or "".
 func appCommandsRoot(prompt string) string {
-	_, rest, ok := strings.Cut(prompt, "Run each of these commands from ")
+	_, rest, ok := strings.Cut(prompt, "The app builds in ")
 	if !ok {
 		return ""
 	}
@@ -62,7 +62,7 @@ func canWrite(dir string) bool {
 }
 
 func (r *appRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
-	if !strings.Contains(spec.Prompt, "Run exactly this") {
+	if !strings.Contains(spec.Prompt, "Use run_check for the project check") {
 		return r.codeRunner.Run(ctx, spec)
 	}
 	tree := appTree{root: appCommandsRoot(spec.Prompt)}
@@ -108,6 +108,9 @@ func qaTeam(t *testing.T, runner *appRunner, engine string, browser core.Browser
 	t.Helper()
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
 	a.runner = runner
+	a.commands = func(context.Context, session.CommandSandboxOptions) (commandSandbox, error) {
+		return &fakeCommands{started: newFakeStarted()}, nil
+	}
 	next := 43000
 	a.ports.find = func() (int, error) { next++; return next, nil }
 	ctx := context.Background()
@@ -164,28 +167,28 @@ func TestClaudeQARunsTheAppAndKeepsWhatItSaw(t *testing.T) {
 		t.Fatalf("task %s after %d QA turns", task.Status, len(runner.qa))
 	}
 	qa := runner.qa[0]
-	port := portOf(qa)
-	if !qa.Loopback || !qa.Browser || !qa.Write || qa.Web || port == "" || port == "0" {
+	port := "43001"
+	if qa.Loopback || !qa.Browser || !qa.Write || qa.Web || portOf(qa) != "" {
 		t.Fatalf("QA was not given the app to run: loopback %v browser %v port %q", qa.Loopback, qa.Browser, port)
 	}
 	// The app's commands run in a writable copy of the revision in QA's
-	// scratch folder, so setup can build, even though the team's check runs
-	// in the read-only checkout as it always has.
+	// scratch folder, so setup can build. The hosted check gets its own
+	// writable copy of the read-only revision.
 	built := runner.built[0]
 	if built.root == "" || !built.rootOK || !strings.HasPrefix(built.root, qa.WorkDir+string(os.PathSeparator)) || built.checkoutOK {
 		t.Fatalf("the app's commands can't build in a copy of their own: %+v, scratch %s", built, qa.WorkDir)
 	}
-	if !strings.Contains(qa.Prompt, "checked out, read-only, at "+qa.Read[len(qa.Read)-1]+": that is the repository root to run the check from") {
-		t.Fatalf("the check no longer runs from the read-only checkout:\n%s", qa.Prompt)
+	if !strings.Contains(qa.Prompt, "checked out, read-only, at "+qa.Read[len(qa.Read)-1]+". run_check runs the check in its own writable copy") {
+		t.Fatalf("the hosted check no longer names its read-only revision source:\n%s", qa.Prompt)
 	}
-	for _, want := range []string{"npm run build", "npm start", "PORT=" + port, "http://127.0.0.1:" + port + "/", "curl -sf http://127.0.0.1:" + port + "/health", `select_browser`, `"Work laptop"`, "real Chrome", "Stop everything you started", `"evidence"`} {
+	for _, want := range []string{"http://127.0.0.1:" + port + "/", ".crew-app.log", "will stop it when your turn ends", `select_browser`, `"Work laptop"`, "real Chrome", `"evidence"`} {
 		if !strings.Contains(qa.Prompt, want) {
 			t.Errorf("QA's prompt does not say %q", want)
 		}
 	}
 	// Everyone else runs as before.
 	for _, spec := range runner.seen {
-		if !strings.Contains(spec.Prompt, "Run exactly this") && (spec.Loopback || spec.Browser || portOf(spec) != "") {
+		if !strings.Contains(spec.Prompt, "Use run_check for the project check") && (spec.Loopback || spec.Browser || portOf(spec) != "") {
 			t.Fatalf("a role other than QA was given the app: %+v", spec)
 		}
 	}
@@ -316,8 +319,8 @@ func hasTool(spec roles.Spec, name string) bool {
 	return slices.ContainsFunc(spec.Tools, func(d session.ToolDefinition) bool { return d.Name == name })
 }
 
-// QA on Codex can't be given a network limited to this machine, so it runs
-// the check alone, never with a wider network, and its verdict says why.
+// Codex QA without an allowed browser uses the hosted check alone and
+// reports why the daemon-hosted app is unavailable.
 func TestCodexQASaysWhyItDidNotRunTheApp(t *testing.T) {
 	t.Parallel()
 	runner := &appRunner{codeRunner: codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass}}}, qaReply: pass}
@@ -329,11 +332,11 @@ func TestCodexQASaysWhyItDidNotRunTheApp(t *testing.T) {
 	if qa.Loopback || qa.Browser || qa.Web || portOf(qa) != "" || strings.Contains(qa.Prompt, "npm start") {
 		t.Fatalf("Codex QA was given the app to run: %+v", qa)
 	}
-	if built := runner.built[0]; built.root != "" || strings.Contains(qa.Prompt, "writable copy") {
-		t.Fatalf("Codex QA, which runs the check only, got a copy to build in: %+v", built)
+	if built := runner.built[0]; built.root != "" || strings.Contains(qa.Prompt, "The app builds in") {
+		t.Fatalf("Codex QA without a browser got an app tree: %+v", built)
 	}
 	v := verdictBy(task, "Quinn")
-	if len(v.Findings) != 1 || v.Findings[0].Criterion != "Running the app" || !strings.Contains(v.Findings[0].Note, "Codex") || !strings.Contains(v.Findings[0].Note, "all or nothing") {
+	if len(v.Findings) != 1 || v.Findings[0].Criterion != "Running the app" || !strings.Contains(v.Findings[0].Note, "Codex") || !strings.Contains(v.Findings[0].Note, "needs an allowed browser") {
 		t.Fatalf("Codex QA's verdict %+v", v)
 	}
 	if len(v.Evidence) != 0 || len(task.Attachments) != 0 {
@@ -341,8 +344,8 @@ func TestCodexQASaysWhyItDidNotRunTheApp(t *testing.T) {
 	}
 }
 
-// Without a run recipe, QA runs exactly as it always has, even with its
-// browser setting on.
+// Without a run recipe, QA gets the hosted check and no app guidance,
+// even with its browser setting on.
 func TestQAWithoutARecipeRunsTheCheckAsBefore(t *testing.T) {
 	t.Parallel()
 	runner := &appRunner{codeRunner: codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass}}}, qaReply: pass}
@@ -358,10 +361,10 @@ func TestQAWithoutARecipeRunsTheCheckAsBefore(t *testing.T) {
 	if !qa.Browser || !strings.Contains(qa.Instructions, "only for controlling a browser") {
 		t.Fatalf("QA whose member allows the browser: %+v", qa)
 	}
-	// Ordinary QA gets no writable copy: the check runs in the read-only
+	// QA gets no app tree: run_check copies the read-only
 	// checkout, exactly as before.
-	if built := runner.built[0]; built.root != "" || built.checkoutOK || strings.Contains(qa.Prompt, "writable copy") || !strings.Contains(qa.Prompt, "checked out, read-only, at") {
-		t.Fatalf("QA without a recipe got a writable copy: %+v\n%s", built, qa.Prompt)
+	if built := runner.built[0]; built.root != "" || built.checkoutOK || strings.Contains(qa.Prompt, "The app builds in") || !strings.Contains(qa.Prompt, "checked out, read-only, at") {
+		t.Fatalf("QA without a recipe got an app tree: %+v\n%s", built, qa.Prompt)
 	}
 	if entries, _ := os.ReadDir(qa.WorkDir); len(entries) != 0 {
 		t.Fatalf("the check's scratch folder was left behind: %v", entries)
@@ -562,7 +565,7 @@ func TestQAIsToldItsPortIsAlreadySet(t *testing.T) {
 	spec := roles.Spec{}
 	app.apply(&spec)
 	prompt := appPrompt(app)
-	if !slices.Contains(spec.Env, "PORT=41234") || !strings.Contains(prompt, "PORT=41234 set (it already is, in your environment)") || !strings.Contains(prompt, testRecipe.Start) || !strings.Contains(prompt, testRecipe.Address(app.port)) {
+	if portOf(spec) != "" || strings.Contains(prompt, testRecipe.Start) || !strings.Contains(prompt, "will stop it when your turn ends") || !strings.Contains(prompt, testRecipe.Address(app.port)) {
 		t.Fatalf("%+v %s", spec, prompt)
 	}
 }
@@ -581,7 +584,7 @@ func TestHowQARunsTheAppFollowsWhatTheHarnessOffers(t *testing.T) {
 	}{
 		{role: core.Role{Kinds: []string{core.RoleQA}, Engine: "claude", Browser: core.Browser{On: true}}, running: true, browser: true, shots: true},
 		{role: core.Role{Kinds: []string{core.RoleQA}, Engine: "claude"}, running: true, shots: true},
-		{role: core.Role{Kinds: []string{core.RoleQA}, Engine: "codex", Browser: core.Browser{On: true}}, unavailable: true},
+		{role: core.Role{Kinds: []string{core.RoleQA}, Engine: "codex", Browser: core.Browser{On: true}}, running: true, browser: true, shots: true},
 		{role: core.Role{Kinds: []string{core.RoleReviewer}, Engine: "claude"}},
 	} {
 		app, err := lp.planApp(c.role, playbook)
@@ -590,10 +593,10 @@ func TestHowQARunsTheAppFollowsWhatTheHarnessOffers(t *testing.T) {
 		}
 		spec := roles.Spec{Engine: c.role.Engine, Env: []string{"GOCACHE=/x"}}
 		app.apply(&spec)
-		if app.running() != c.running || spec.Loopback != c.running || spec.Browser != c.browser || app.images != c.shots || (app.unavailable != "") != c.unavailable {
+		if app.running() != c.running || spec.Loopback != (c.running && !c.browser) || spec.Browser != c.browser || app.images != c.shots || (app.unavailable != "") != c.unavailable {
 			t.Errorf("%s %v: app %+v spec %+v", c.role.Engine, c.role.Kinds, app, spec)
 		}
-		if c.running && !slices.Equal(spec.Env, []string{"GOCACHE=/x", "PORT=42000"}) {
+		if c.running && !slices.Equal(spec.Env, []string{"GOCACHE=/x"}) {
 			t.Errorf("env %v", spec.Env)
 		}
 		app.release()
@@ -617,16 +620,16 @@ func TestAPIQAAppRunFollowsLoopbackSupportAndCarriesPort(t *testing.T) {
 	spec := roles.Spec{Env: []string{"GOCACHE=/cache", "GOPROXY=off"}}
 	app.apply(&spec)
 	if config.Supports("openai-compatible", config.UseLoopback) {
-		if !app.running() || reserved != 1 || !spec.Loopback || !slices.Equal(spec.Env, []string{"GOCACHE=/cache", "GOPROXY=off", "PORT=42000"}) {
+		if !app.running() || reserved != 1 || !spec.Loopback || !slices.Equal(spec.Env, []string{"GOCACHE=/cache", "GOPROXY=off"}) {
 			t.Fatalf("%+v %+v", app, spec)
 		}
 		prompt := appPrompt(app)
-		if !strings.Contains(prompt, testRecipe.Address(42000)) || !strings.Contains(prompt, "PORT=42000 set (it already is, in your environment)") || spec.Browser {
+		if !strings.Contains(prompt, testRecipe.Address(42000)) || !strings.Contains(prompt, "will stop it when your turn ends") || spec.Browser {
 			t.Fatalf("%+v %s", spec, prompt)
 		}
 	} else {
 		reason := harness.Support(harness.OpenAICompatible, harness.Session, harness.Loopback).Reason
-		if app.running() || reserved != 0 || spec.Loopback || !strings.Contains(app.unavailable, reason) || appPrompt(app) != "" {
+		if app.running() || reserved != 0 || spec.Loopback || !strings.Contains(app.unavailable, reason) || !strings.Contains(appPrompt(app), app.unavailable) {
 			t.Fatalf("%+v %+v", app, spec)
 		}
 	}

@@ -14,11 +14,14 @@ import (
 // guide tells the role what its tools are for.
 func (r roleTools) guide() string {
 	guide := r.guideTools()
+	if r.checks != nil {
+		guide += " Use run_check for the project's check; repeat while it says still running. The daemon hosts its sandbox, including localhost when the project allows it, whatever your engine."
+	}
 	if r.lin != nil {
 		guide += "\n\n" + connections.LinGuide(r.lin.writes && !r.notesOnly)
 	}
 	if r.proposes {
-		guide += " QA can also start this project's app and use it, on this machine only, when the project has a run recipe: "
+		guide += " QA can also use this project's daemon-hosted app, on this machine only, when the project has a run recipe: "
 		if r.run != nil {
 			guide += "it has one now (start: " + r.run.Start + "; URL: " + r.run.URL + ")."
 		} else {
@@ -65,7 +68,11 @@ func (r roleTools) guideTools() string {
 }
 
 func (r roleTools) Definitions() []session.ToolDefinition {
+
 	defs := r.definitions()
+	if r.checks != nil {
+		defs = append(defs, session.ToolDefinition{Name: "run_check", Description: "Run the project's check in a fresh workspace copy in a daemon-hosted sandbox. Each call waits at most 45 seconds; while still running, call again to wait for the same run. A call after its result starts a new check.", Schema: schema([]string{})})
+	}
 	if r.lin != nil {
 		defs = append(defs, session.ToolDefinition{Name: "lin", Description: "Use this project’s linked Linear account. Give args or a shipped reference (commands or output).", Schema: map[string]any{"type": "object", "properties": map[string]any{"args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "reference": map[string]any{"type": "string"}}, "required": []string{"args", "reference"}, "additionalProperties": false}})
 	}

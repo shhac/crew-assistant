@@ -513,8 +513,9 @@ func ownerStepPrompt(p core.Project, t core.Task, u core.Unreachable) string {
 	if len(t.Criteria) > 0 {
 		b.WriteString("Its criteria:\n" + numbered(t.Criteria))
 	}
-	fmt.Fprintf(&b, "\nThe implementer says it can't meet this requirement from its sandbox, which writes only to its workspace and has no network, browser or access to the owner's machine:\n%s\n\nWhy: %s\n", u.Criterion, orDash(u.Why))
+	fmt.Fprintf(&b, "\nThe implementer says it can't meet this requirement from its sandbox, which writes only to its workspace and has no general network or access to the owner's machine; browser access is available only when the owner allows it:\n%s\n\nWhy: %s\n", u.Criterion, orDash(u.Why))
 	b.WriteString(`
+The team can run the project's check through run_check in a daemon-hosted sandbox, with localhost when the project allows it, on any engine. A requirement that the check passes stays with the team; it is not an owner step. QA can use a daemon-hosted app when a run recipe and browser access are available.
 Judge whether a requirement the implementer can't meet from its sandbox is truly out of the team's reach, such as a live run on the owner's machine or in their browser, or whether the team could meet it after all, such as with a test or a fake. If it is out of reach, word it as one step the owner checks after the change lands. The owner decides. Only judge: do not change, queue or approve anything.
 
 Reply with only this JSON object:

@@ -40,6 +40,9 @@ func (r *releaseRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result,
 	command, _, _ = strings.Cut(command, "\n")
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = spec.Read[len(spec.Read)-1]
+	if _, root, ok := strings.Cut(spec.Prompt, "The repository root to run the check from is "); ok {
+		cmd.Dir, _, _ = strings.Cut(root, ": a writable copy")
+	}
 	cmd.Env = append(os.Environ(), spec.Env...)
 	output, err := cmd.CombinedOutput()
 	if r.verdict != "" {
@@ -194,6 +197,41 @@ func TestReleaseOwnerApprovalChecksAndPublishes(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("check activity missing")
+	}
+}
+
+func TestReleaseCheckRetainsShellRepositoryRoot(t *testing.T) {
+	for _, inCopy := range []bool{false, true} {
+		t.Run(fmt.Sprint(inCopy), func(t *testing.T) {
+			a, p, runner, _, _, _ := releaseFixture(t, "", false, false, 0)
+			book := *p.Playbook
+			book.CheckInCopy = inCopy
+			var err error
+			p, err = a.Core.SetPlaybook(context.Background(), p.ID, book)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checked := false
+			runner.before = func(spec roles.Spec) {
+				checked = true
+				root := spec.Read[len(spec.Read)-1]
+				if inCopy {
+					root = filepath.Join(spec.WorkDir, "tree")
+				}
+				if !strings.Contains(spec.Prompt, "repository root to run the check from") || !strings.Contains(spec.Prompt, root) || strings.Contains(spec.Prompt, "run_check") || strings.Contains(spec.Prompt, "app may build") || hasTool(spec, "run_check") {
+					t.Fatalf("release shell root lost: %s", spec.Prompt)
+				}
+				if inCopy && !strings.Contains(spec.Prompt, "repository root to run the check from is "+root) {
+					t.Fatal(spec.Prompt)
+				}
+			}
+			proposeFromPM(t, a, p)
+			chooseRelease(t, a, p.ID, "Release v1.1.0")
+			releasePass(t, a)
+			if !checked {
+				t.Fatal("release QA did not run")
+			}
+		})
 	}
 }
 func TestReleasePMApprovalPRPushesOnlyTag(t *testing.T) {

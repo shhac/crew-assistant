@@ -61,13 +61,16 @@ type checkout struct {
 	ref string
 	// workDir is where the role runs, and write whether it may write there:
 	// the read-only copy itself for a reviewer, a scratch folder for QA.
-	workDir string
-	write   bool
-	env     []string
+	checkDir string
+	workDir  string
+	write    bool
+	env      []string
 	// read is the copy, when the role runs elsewhere, and note tells the
 	// role where it is.
 	read []string
 	note string
+	// hostedNote describes the source for run_check; note retains shell check roots.
+	hostedNote string
 	// tree is a writable copy of the revision in the scratch folder, when
 	// QA was given one: to run the check in, or the app's commands.
 	tree string

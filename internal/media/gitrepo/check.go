@@ -133,3 +133,45 @@ func (c Checkout) Remove() {
 func (r Repo) RemoveChecks() error {
 	return media.RemoveReadOnly(r.checksDir())
 }
+
+// CopyForCheck copies uncommitted and prepared files into a disposable writable
+// tree. cache optionally names QA's cache outside its read-only checkout.
+func (r Repo) CopyForCheck(from string, cache ...string) (Checkout, error) {
+	if err := os.MkdirAll(r.checksDir(), 0700); err != nil {
+		return Checkout{}, err
+	}
+	root, err := os.MkdirTemp(r.checksDir(), "run-")
+	if err != nil {
+		return Checkout{}, err
+	}
+	c := Checkout{Dir: filepath.Join(root, "tree"), root: root}
+	if err = copyTree(from, c.Dir); err != nil {
+		c.Remove()
+		return Checkout{}, err
+	}
+	if err = media.SetWritable(c.Dir, true); err != nil {
+		c.Remove()
+		return Checkout{}, err
+	}
+	dest := filepath.Join(c.Dir, cacheDir)
+	if len(cache) > 0 && cache[0] != "" && cache[0] != filepath.Join(from, cacheDir) {
+		if _, err := os.Stat(cache[0]); err == nil {
+			if err = media.RemoveReadOnly(dest); err == nil {
+				err = copyTree(cache[0], dest)
+			}
+			if err != nil {
+				c.Remove()
+				return Checkout{}, err
+			}
+			if err = media.SetWritable(dest, true); err != nil {
+				c.Remove()
+				return Checkout{}, err
+			}
+		} else if !os.IsNotExist(err) {
+			c.Remove()
+			return Checkout{}, err
+		}
+	}
+	c.Env = envAt(dest)
+	return c, nil
+}

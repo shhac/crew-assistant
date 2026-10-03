@@ -210,7 +210,7 @@ func (m gitMedium) check(ctx context.Context, t core.Task, r core.Revision, qa, 
 	if err != nil {
 		return checkout{}, err
 	}
-	out := checkout{ref: r.Ref, workDir: c.Dir, env: c.Env, verify: c.Verify, remove: c.Remove}
+	out := checkout{ref: r.Ref, checkDir: c.Dir, workDir: c.Dir, env: c.Env, verify: c.Verify, remove: c.Remove}
 	if !qa {
 		return out, nil
 	}
@@ -219,6 +219,7 @@ func (m gitMedium) check(ctx context.Context, t core.Task, r core.Revision, qa, 
 	if inCopy {
 		out.note = fmt.Sprintf("\n\nThe repository root to run the check from is %s: a writable copy of the revision, in your scratch folder, for a check that writes into the tree it runs in. The revision itself is at %s, read-only.\n", c.Tree, c.Dir)
 	}
+	out.hostedNote = fmt.Sprintf("\n\nThe revision is checked out, read-only, at %s. run_check runs the check in its own writable copy, regardless of the check-in-copy setting. Your working directory is a scratch folder.\n", c.Dir)
 	return out, nil
 }
 

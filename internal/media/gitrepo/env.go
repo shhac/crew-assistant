@@ -40,7 +40,13 @@ var moduleCache = sync.OnceValue(func() string {
 // Env is the environment roles need to build and test inside their sandbox:
 // caches and temporary files in the clone, and no attempts at the network.
 func (r Repo) Env() []string {
-	return envAt(filepath.Join(r.Workspace(), cacheDir))
+	return WorkspaceEnv(r.Workspace())
+}
+
+// WorkspaceEnv keeps build caches inside a writable workspace, including
+// disposable command-sandbox copies that cannot write to QA's scratch root.
+func WorkspaceEnv(dir string) []string {
+	return envAt(filepath.Join(dir, cacheDir))
 }
 
 // envAt is that environment with its caches and temporary files in cache,

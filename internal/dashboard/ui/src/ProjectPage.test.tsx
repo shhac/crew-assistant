@@ -2340,6 +2340,10 @@ describe("the project's tabs", () => {
         "Let the check use this machine's own network",
       ),
     );
+    expect(within(team).getByText(/sandbox crew-assistant hosts/).textContent).toMatch(
+      /implementer and QA on any engine/,
+    );
+    expect(within(team).queryByText(/Each member must use an engine/)).toBeNull();
     // Where the work happens is set on the Config tab.
     for (const moved of [
       "Repository",

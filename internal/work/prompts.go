@@ -158,6 +158,9 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string, fresh bool) stri
 			b.WriteString("\n" + strings.TrimSpace(guide) + "\n")
 		}
 	}
+	if playbook := taskPlaybook(p, t); isCode(p, t) && playbook != nil && playbook.Check != "" {
+		b.WriteString("\nUse run_check for the project's check before handing over; repeat while it says still running. The project's check, including tests that start local servers when the project allows localhost, is within reach through run_check and is never an owner step.")
+	}
 	b.WriteString("\nIf a requirement needs something outside your sandbox, such as the owner's machine, their browser or the network, do everything else it asks, then end your reply with a ```owner-step block holding a JSON list: [{\"requirement\": \"the requirement, quoted\", \"why\": \"why you can't meet it from here\"}]. It goes to the owner to check after the change lands, instead of another round.\n")
 	account := "."
 	if !merging {
@@ -381,9 +384,14 @@ func checkerPrompt(p core.Project, t core.Task, r core.Revision, checker core.Ro
 		if notes := notesText(t); notes != "" {
 			b.WriteString(strings.TrimPrefix(notes, "\n") + "\n")
 		}
-		fmt.Fprintf(&b, "Run exactly this from the repository root, once:\n\n    %s\n\n", playbook.Check)
-		b.WriteString(`Do not change, fix or commit anything; only run the check and read its output.
-Use "pass" if it exits successfully. Otherwise use "revise", with one finding per failing test, build error or check, quoting the key lines of output in the note.
+		if playbook.Medium == core.MediumGit && playbook.Check != "" {
+			fmt.Fprintf(&b, "Use run_check for the project check (%s), once. Repeat calls while it says still running; they wait for the same run. Judge the exit code, timed_out flag and output it returns.\n\n", playbook.Check)
+			b.WriteString("Do not change, fix or commit anything; only use run_check and read its output.\n")
+		} else {
+			fmt.Fprintf(&b, "Run exactly this from the repository root, once:\n%s\n\n", playbook.Check)
+			b.WriteString("Do not change, fix or commit anything; only run the check and read its output.\n")
+		}
+		b.WriteString(`Use "pass" only if it exits successfully without timing out. Otherwise use "revise", with one finding per failing test, build error or check, quoting the key lines of output in the note.
 Use "question" only if the check cannot run at all for a reason the implementer cannot fix (for example a missing tool), and say what is missing.`)
 		b.WriteString(sandboxGuide)
 		b.WriteString(verdictFormat(t))
@@ -414,35 +422,19 @@ Review it as a careful senior engineer, against the task and every criterion abo
 	return reviewerPrompt(p, t, r)
 }
 
-// appPrompt tells QA, after its check, to start the app from the project's
-// run recipe, use it against the task, and stop it; empty when QA doesn't
-// run the app.
+// appPrompt gives QA the daemon-hosted app and evidence guidance.
 func appPrompt(app appRun) string {
+	if app.unavailable != "" {
+		return "\n" + app.unavailable + "\n"
+	}
 	if !app.running() {
 		return ""
 	}
-	r := app.recipe
+
 	var b strings.Builder
-	fmt.Fprintf(&b, "\nAfter the check, whatever it showed, and still changing nothing in the repository, use the app itself to judge whether this change works, against the task and each of its criteria. Your shell reaches this machine's own addresses and nothing else, so everything runs offline: dependencies are already in place, copied in by the project's prepare setting, and nothing can be downloaded.")
-	if app.tree != "" {
-		fmt.Fprintf(&b, " Run each of these commands from %s, a writable copy of the revision in your scratch folder, so setup and the app can write what they build there; it is thrown away afterwards.\n", app.tree)
-	} else {
-		b.WriteString(" Run each command from the repository root.\n")
-	}
+	address := app.recipe.Address(app.port)
+	fmt.Fprintf(&b, "\nAfter the check, whatever it showed, use the app itself to judge this change against each criterion. crew-assistant has started it in a sandbox at %s and will stop it when your turn ends. Its output file is %s. The app builds in %s, a disposable writable copy of the revision. Do not start or stop the app yourself.\n", address, app.log, app.tree)
 	step := 1
-	if r.Setup != "" {
-		fmt.Fprintf(&b, "%d. Set it up, once:\n\n    %s\n\n", step, r.Setup)
-		step++
-	}
-	fmt.Fprintf(&b, "%d. Start it in the background, with PORT=%d set (it already is, in your environment), sending its output to a file in your working directory:\n\n    %s\n\n", step, app.port, r.Start)
-	step++
-	address := r.Address(app.port)
-	if r.Ready != "" {
-		fmt.Fprintf(&b, "%d. Wait, for at most two minutes, until this succeeds:\n\n    %s\n\n   It answers at %s.\n", step, strings.ReplaceAll(r.Ready, core.PortPlaceholder, fmt.Sprint(app.port)), address)
-	} else {
-		fmt.Fprintf(&b, "%d. Wait, for at most two minutes, until %s answers.\n", step, address)
-	}
-	step++
 	if app.browser.On {
 		if app.browser.Name != "" {
 			fmt.Fprintf(&b, "%d. Before anything else in the browser, call select_browser to choose the connected browser named %q. If it isn't connected, say so in a finding and don't use another.\n", step, app.browser.Name)
@@ -457,7 +449,7 @@ func appPrompt(app appRun) string {
 		fmt.Fprintf(&b, "%d. Use the app by requesting it at %s, such as with curl, as the task's criteria need, and read its output file for errors.\n", step, address)
 	}
 	step++
-	fmt.Fprintf(&b, "%d. Stop everything you started, the app and anything setup left running, before you reply.\n", step)
+
 	fmt.Fprintf(&b, `
 If the check passes but the app doesn't do what the task asks, use "revise", with a finding for each thing that doesn't work. If the app can't start or be reached for a reason the implementer can't fix, such as a missing tool or a need for the network, judge the check alone and say why in a finding.
 Add to your JSON object an "evidence" list of what you saw using the app, at most %d items, one finding each, in a sentence or two: {"kind": "page" | "console" | "network", "text": "..."}. Screenshots are kept for you; don't list them.

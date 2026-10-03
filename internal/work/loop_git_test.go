@@ -196,7 +196,7 @@ func (r *codeRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, er
 	if _, ok := r.scriptedRunner.script(spec); ok {
 		return r.scriptedRunner.Run(ctx, spec)
 	}
-	checking := strings.Contains(spec.Prompt, "Run exactly this") || strings.Contains(spec.Prompt, "Do not modify anything")
+	checking := strings.Contains(spec.Prompt, "Use run_check for the project check") || strings.Contains(spec.Prompt, "Do not modify anything")
 	if !checking {
 		r.mu.Lock()
 		r.edits++
@@ -286,7 +286,7 @@ func TestCodeTaskRunsInACloneAndDeliversALocalBranch(t *testing.T) {
 	prompts := []string{}
 	for _, spec := range runner.seen {
 		prompts = append(prompts, spec.Prompt)
-		qa := strings.Contains(spec.Prompt, "Run exactly this")
+		qa := strings.Contains(spec.Prompt, "Use run_check for the project check")
 		reviewer := strings.Contains(spec.Prompt, "Do not modify anything")
 		switch {
 		case qa:

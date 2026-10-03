@@ -90,7 +90,9 @@ type Loop struct {
 	// harness's own. Replaced in tests.
 	reclaim func(ctx context.Context, dir string) (session.Reclamation, error)
 	// ports are held by QA checks that run the app, one each.
-	ports ports
+	ports    ports
+	appWait  time.Duration
+	commands func(context.Context, session.CommandSandboxOptions) (commandSandbox, error)
 	// checked, when set, is told a checker's turn is over, before its
 	// verdict is recorded. Set in tests.
 	checked func(taskID, checker string)
@@ -127,6 +129,11 @@ func (lp *Loop) Run(stop lifecycle.Stop, noDispatch bool) {
 	// Learnings are copied out only while a turn runs; any left here were
 	// left by a daemon that stopped mid-turn.
 	os.RemoveAll(lp.learningsRoot())
+	if !lp.Demo && !noDispatch {
+		if err := lp.sweepCommands(stop.Force); err != nil {
+			lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "command_recovery"}, err)
+		}
+	}
 	ready := lp.Demo || noDispatch
 	defer lp.jobs.wg.Wait()
 	tick := time.NewTicker(15 * time.Second)
@@ -259,17 +266,16 @@ func taskPlaybook(p core.Project, t core.Task) *core.Playbook {
 	return p.Playbook
 }
 
-// checkLoopback says whether r may bind and reach this machine's own
-// addresses, as the project's check may: QA runs the check, and the
-// implementer is asked to run the tests before handing over, so a check
-// that needs a local server would otherwise fail it every time.
+// checkLoopback lets the implementer's own session run individual tests
+// with local servers where its engine offers it. The project's full check
+// uses run_check independently of this session capability.
 func checkLoopback(playbook *core.Playbook, r core.Role) bool {
 	return playbook != nil && playbook.CheckLoopback && config.Supports(r.Engine, config.UseLoopback)
 }
 
 // roleSpec is how a role runs for one turn. The files it reads its learnings
 // from last only as long as the turn: run it before cleanup.
-func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m medium, prompt string) (spec roles.Spec, cleanup func(), err error) {
+func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m medium, prompt string, checkCopy *checkout) (spec roles.Spec, cleanup func(), err error) {
 	spec = lp.baseSpec(r, workDir, prompt)
 	spec.Write, spec.Env, spec.Read = write, m.env(t), m.readable()
 	learned, err := lp.prepareLearnings(t, r)
@@ -295,8 +301,20 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 	if g, ok := m.(gitMedium); ok && kind == core.RoleResearcher {
 		tools = tools.proposing(&g.playbook)
 	}
+
+	if g, ok := m.(gitMedium); ok && g.playbook.Check != "" && (kind == core.RoleImplementer || kind == core.RoleQA) {
+		from := workDir
+		env := spec.Env
+		if checkCopy != nil {
+			from, env = checkCopy.checkDir, checkCopy.env
+		}
+		tools.checks = newCheckRuns(lp, g, from, env)
+	}
 	lp.withTools(&spec, tools)
 	spec.Observer = lp.watchTurn(t, kind, r, workDir, write)
+	if tools.checks != nil {
+		tools.checks.cleanupError = lp.commandCleanupFor(spec.Observer)
+	}
 	// Research is the one step that looks outward; nothing its shell runs
 	// reaches the network either way.
 	spec.Web = kind == core.RoleResearcher
@@ -310,6 +328,11 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 			learned.cleanup()
 			g.remove()
 		}
+	}
+
+	if runs := tools.checks; runs != nil {
+		previous := cleanup
+		cleanup = func() { runs.close(); previous() }
 	}
 	return spec, cleanup, nil
 }

@@ -26,7 +26,7 @@ type checkRunner struct {
 }
 
 func (r checkRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
-	if r.onCheck != nil && (strings.Contains(spec.Prompt, "Run exactly this") || strings.Contains(spec.Prompt, "Do not modify anything")) {
+	if r.onCheck != nil && ((strings.Contains(spec.Prompt, "Use run_check for the project check") || strings.Contains(spec.Prompt, "Run exactly this")) || strings.Contains(spec.Prompt, "Do not modify anything")) {
 		r.onCheck(spec)
 	}
 	if r.onWrite != nil && strings.Contains(spec.Prompt+spec.FreshPrompt, "Run the relevant tests yourself") {
@@ -535,7 +535,7 @@ type docsQARunner struct {
 }
 
 func (r docsQARunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
-	if strings.Contains(spec.Prompt, "Run exactly this") {
+	if strings.Contains(spec.Prompt, "Use run_check for the project check") || strings.Contains(spec.Prompt, "Run exactly this") {
 		return roles.Result{Text: r.onQA(spec)}, nil
 	}
 	return r.scriptedRunner.Run(ctx, spec)
@@ -567,6 +567,14 @@ func TestDocumentQAChecksACopyThatHoldsStill(t *testing.T) {
 	}
 	var checked string
 	a.runner = docsQARunner{scriptedRunner: scripted, onQA: func(spec roles.Spec) string {
+		if strings.Contains(spec.Prompt, "run_check") || !strings.Contains(spec.Prompt, "Run exactly this from the repository root, once:\nvale .") {
+			t.Fatalf("document QA must use its shell check: %s", spec.Prompt)
+		}
+		for _, tool := range spec.Tools {
+			if tool.Name == "run_check" {
+				t.Fatal("document QA unexpectedly offers run_check")
+			}
+		}
 		if len(spec.Read) == 0 {
 			t.Fatalf("QA was given no copy to read beside its working directory %s", spec.WorkDir)
 		}
@@ -662,9 +670,9 @@ func TestACarriedOverPassNamesWhatItChecked(t *testing.T) {
 	}
 }
 
-// A team whose check writes into the tree it runs in has QA run it in a
-// writable copy in its scratch folder; the draft checked stays as recorded.
-func TestQACanRunTheCheckInAWritableCopy(t *testing.T) {
+// The legacy copy setting retains its writable tree, while hosted-check
+// guidance describes its own copy and never invents an app.
+func TestQACheckInCopyKeepsHostedCheckGuidance(t *testing.T) {
 	t.Parallel()
 	a, code, p, task := codeTask(t, pass, pass)
 	ctx := context.Background()
@@ -677,7 +685,7 @@ func TestQACanRunTheCheckInAWritableCopy(t *testing.T) {
 			return
 		}
 		tree = filepath.Join(spec.WorkDir, "tree")
-		if !strings.Contains(spec.Prompt, "run the check from is "+tree) {
+		if !strings.Contains(spec.Prompt, "run_check runs the check in its own writable copy") || strings.Contains(spec.Prompt, "app may build") {
 			t.Fatalf("QA was not sent to its copy: %s", spec.Prompt)
 		}
 		if err := os.WriteFile(filepath.Join(tree, "feature.go"), []byte("written by the check"), 0o600); err != nil {
@@ -690,12 +698,9 @@ func TestQACanRunTheCheckInAWritableCopy(t *testing.T) {
 	}
 }
 
-// A library's tests may start a local server, which QA's sandbox refuses
-// unless the team lets the check use this machine's own addresses, on an
-// engine that can limit a network to them. QA, which runs the check, and the
-// implementer, which runs the tests before handing over, are let; the
-// reviewer isn't. Saving the team again without saying keeps the setting.
-func TestQAsCheckCanUseThisMachinesNetwork(t *testing.T) {
+// Hosted checks cover QA localhost independently; only the implementer
+// retains session localhost for individual tests. Saving keeps the setting.
+func TestHostedCheckDoesNotGiveQASessionLoopback(t *testing.T) {
 	t.Parallel()
 	a, code, p, task := codeTask(t, pass, pass)
 	ctx := context.Background()
@@ -718,8 +723,8 @@ func TestQAsCheckCanUseThisMachinesNetwork(t *testing.T) {
 		writerLoopback = append(writerLoopback, spec.Loopback)
 	}}
 	task = settleCode(t, a, task.ID)
-	if task.Status != core.TaskWaiting || !loopback[true] || loopback[false] {
-		t.Fatalf("loopback by QA (true) and the reviewer (false): %v, task %s", loopback, task.Status)
+	if task.Status != core.TaskWaiting || loopback[true] || loopback[false] {
+		t.Fatalf("hosted checks must not give QA (true) or reviewer (false) session loopback: %v, task %s", loopback, task.Status)
 	}
 	if len(writerLoopback) == 0 || slices.Contains(writerLoopback, false) {
 		t.Fatalf("the implementer can't run tests that need a local server: %v", writerLoopback)

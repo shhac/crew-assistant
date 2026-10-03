@@ -400,7 +400,7 @@ func TestAFailedCheckOnTheMergedResultGoesBackThenToTheOwner(t *testing.T) {
 	task = w.task(t, task.ID)
 	var toImplementer bool
 	for _, spec := range w.runner.seen {
-		toImplementer = toImplementer || spec.Write && !strings.Contains(spec.Prompt, "Run exactly this") && strings.Contains(spec.Prompt, "both declare Helper")
+		toImplementer = toImplementer || spec.Write && !strings.Contains(spec.Prompt, "Use run_check for the project check") && strings.Contains(spec.Prompt, "both declare Helper")
 	}
 	if !toImplementer {
 		t.Fatal("QA's failure on the merged result never reached the implementer")

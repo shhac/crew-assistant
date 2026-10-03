@@ -140,7 +140,7 @@ func TestEachRoleGetsItsTools(t *testing.T) {
 		core.TaskReviewing:   {false, []string{"list_tasks", "read_task", "read_notes", "link_tasks", "unlink_tasks", "edit_task", "add_note"}},
 	} {
 		task.Status = status
-		spec, cleanup, err := a.roleSpec(task, core.Role{Name: "Seat", Kinds: []string{core.RoleResearcher, core.RoleImplementer}, Engine: "claude"}, t.TempDir(), false, docsMedium{}, "prompt")
+		spec, cleanup, err := a.roleSpec(task, core.Role{Name: "Seat", Kinds: []string{core.RoleResearcher, core.RoleImplementer}, Engine: "claude"}, t.TempDir(), false, docsMedium{}, "prompt", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -59,6 +59,7 @@ type roleTools struct {
 	// QA runs the app, for the owner to accept; run is the recipe in use.
 	proposes bool
 	run      *core.RunRecipe
+	checks   *checkRuns
 }
 
 // proposing lets the role propose a run recipe, if playbook is a code team's.
@@ -162,6 +163,8 @@ func (r roleTools) execute(ctx context.Context, name string, raw json.RawMessage
 		taskID, while = in["task_id"], ""
 	}
 	switch name {
+	case "run_check":
+		return r.checks.call(ctx)
 	case "order_tasks":
 		ids := strings.FieldsFunc(in["task_ids"], func(c rune) bool { return c == ',' || c == '\n' })
 		for i := range ids {

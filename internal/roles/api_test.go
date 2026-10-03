@@ -226,7 +226,7 @@ func TestAPIWorkbenchReferenceChangesOpenFreshWithoutInference(t *testing.T) {
 
 func TestAPIRefusedCallerEnvironmentStopsBeforeLaunch(t *testing.T) {
 	if !harness.Support(harness.OpenAICompatible, harness.Session, harness.Sandbox).Usable() {
-		if got := commandEnv([]string{"API_TOKEN=synthetic-value"}); !slices.Contains(got, "API_TOKEN=synthetic-value") {
+		if got := CommandEnv([]string{"API_TOKEN=synthetic-value"}); !slices.Contains(got, "API_TOKEN=synthetic-value") {
 			t.Fatal("refused caller setting silently dropped")
 		}
 		return

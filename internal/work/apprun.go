@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -16,7 +15,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/roles"
 )
 
-// appRun is how QA runs the project's app in one check, from the project's
+// appRun is the daemon-hosted app for one QA turn, from the project's
 // run recipe: on a port of its own, reached on this machine only, and
 // through the engine's own browser when its seat says so. Without a recipe,
 // or with a checker that isn't QA, it is the zero value and QA's check is
@@ -35,10 +34,15 @@ type appRun struct {
 	// tree is the writable copy of the revision the app's commands run in,
 	// in QA's scratch folder, so setup can build without touching the
 	// revision checked.
-	tree string
+	tree            string
+	sandbox         commandSandbox
+	process         startedCommand
+	sessionLoopback bool
+	log             string
+	cleanupError    func(error)
 }
 
-// running reports whether QA starts and uses the app in this check.
+// running reports whether the app is available for QA in this check.
 func (a appRun) running() bool { return a.recipe != nil && a.unavailable == "" }
 
 // planApp works out how a checker runs the app for one check, reserving it a
@@ -51,9 +55,13 @@ func (lp *Loop) planApp(checker core.Role, playbook *core.Playbook) (appRun, err
 	}
 	run := none
 	run.recipe = playbook.Run
-	if !config.Supports(checker.Engine, config.UseLoopback) {
+	browser := checker.Browser
+	if !browser.On {
+		browser = lp.memberBrowser(checker)
+	}
+	if !(browser.On && config.Supports(checker.Engine, config.UseBrowser)) && !config.Supports(checker.Engine, config.UseLoopback) {
 		c := harness.Support(harness.Engine(checker.Engine), harness.Session, harness.Loopback)
-		run.unavailable = fmt.Sprintf("The app was not run: %s doesn't offer QA a network limited to this machine (%s), so QA ran the check only and was given no wider network instead.", config.EngineLabel(checker.Engine), strings.TrimSpace(c.Reason))
+		run.unavailable = fmt.Sprintf("The app was not run: %s QA needs an allowed browser or session localhost access (%s). QA ran the check only.", config.EngineLabel(checker.Engine), strings.TrimSpace(c.Reason))
 		return run, nil
 	}
 	port, err := lp.ports.reserve()
@@ -61,22 +69,21 @@ func (lp *Loop) planApp(checker core.Role, playbook *core.Playbook) (appRun, err
 		return none, fmt.Errorf("finding a port for the app: %w", err)
 	}
 	run.port, run.release = port, func() { lp.ports.free(port) }
-	if checker.Browser.On && config.Supports(checker.Engine, config.UseBrowser) {
-		run.browser = checker.Browser
+	if browser.On && config.Supports(checker.Engine, config.UseBrowser) {
+		run.browser = browser
 	}
+	run.sessionLoopback = !run.browser.On && config.Supports(checker.Engine, config.UseLoopback)
 	run.images = harness.Support(harness.Engine(checker.Engine), harness.Session, harness.ToolImages).Usable()
 	return run, nil
 }
 
-// apply gives QA's session what running the app needs: its port, this
-// machine's own addresses and, if its seat uses it, the browser. Nothing
-// else about the session changes.
+// apply gives QA its allowed browser, or session localhost for requesting
+// the daemon-hosted app where the engine offers it.
 func (a appRun) apply(spec *roles.Spec) {
 	if !a.running() {
 		return
 	}
-	spec.Env = append(append([]string(nil), spec.Env...), "PORT="+strconv.Itoa(a.port))
-	spec.Loopback = true
+	spec.Loopback = a.sessionLoopback
 	// The member may already allow the browser everywhere; QA's own setting
 	// adds it for using the app, never takes it away.
 	spec.Browser = spec.Browser || a.browser.On

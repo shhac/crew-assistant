@@ -70,7 +70,7 @@ func (lp *Loop) design(ctx context.Context, p core.Project, t core.Task, m mediu
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
 	base := designerPrompt(p, t, *request, generatesImages(designer)) + learnedGuide(designer, true)
-	spec, cleanup, err := lp.roleSpec(t, designer, m.workspace(t), false, m, base)
+	spec, cleanup, err := lp.roleSpec(t, designer, m.workspace(t), false, m, base, nil)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}

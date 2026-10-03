@@ -94,7 +94,7 @@ func (lp *Loop) sleptSince(start time.Time) time.Duration {
 // scratch folder, to run the check. The copy must still be exactly the
 // revision afterwards, or the verdict is discarded and the check fails, to
 // run again. A reply that is not a usable verdict gets one plain retry.
-// Where the project has a run recipe, QA also starts the app and uses it, on
+// Where the project has a run recipe, the daemon starts the app for QA, on
 // a port of its own, and gives the screenshots it took, to keep with its
 // verdict when that is recorded.
 func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium, note string) (core.Verdict, core.Screenshots, core.TurnEnd, error) {
@@ -109,13 +109,20 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 		return core.Verdict{}, core.Screenshots{}, core.TurnEnd{}, err
 	}
 	app.tree = c.tree
+	app.cleanupError = lp.commandCleanup
 	// The port is held until the copy the app ran from is gone.
 	defer func() {
+		app.stop()
 		c.remove()
 		app.release()
 	}()
-	base := checkerPrompt(p, t, r, checker, playbook) + c.note + appPrompt(app) + note + learnedGuide(checker, true) + handOnGuide(t, checker.Working(), t.CheckerGroup(checker.Name))
-	spec, cleanupLearnings, err := lp.roleSpec(t, checker, c.workDir, c.write, m, base)
+	app.start(ctx, lp, append(m.readable(), c.read...))
+	checkoutNote := c.note
+	if c.hostedNote != "" {
+		checkoutNote = c.hostedNote
+	}
+	base := checkerPrompt(p, t, r, checker, playbook) + checkoutNote + appPrompt(app) + note + learnedGuide(checker, true) + handOnGuide(t, checker.Working(), t.CheckerGroup(checker.Name))
+	spec, cleanupLearnings, err := lp.roleSpec(t, checker, c.workDir, c.write, m, base, &c)
 	if err != nil {
 		return core.Verdict{}, core.Screenshots{}, core.TurnEnd{}, err
 	}
@@ -124,10 +131,8 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 		spec.Env = c.env
 	}
 	spec.Read = append(append([]string(nil), spec.Read...), c.read...)
+	app.cleanupError = lp.commandCleanupFor(spec.Observer)
 	app.apply(&spec)
-	if checker.Holds(core.RoleQA) && checkLoopback(playbook, checker) {
-		spec.Loopback = true
-	}
 	var shots *screenshots
 	if app.running() && app.images {
 		shots = &screenshots{next: spec.Observer}

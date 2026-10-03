@@ -92,7 +92,7 @@ func TestTheOwnersChangeByHandBecomesTheNextDraft(t *testing.T) {
 
 	checks := len(runner.seen)
 	landed := settleCode(t, a, task.ID)
-	if landed.Status != core.TaskDelivered || len(runner.seen) != checks+1 || !strings.Contains(runner.seen[len(runner.seen)-1].Prompt, "Run exactly this") {
+	if landed.Status != core.TaskDelivered || len(runner.seen) != checks+1 || !strings.Contains(runner.seen[len(runner.seen)-1].Prompt, "Use run_check for the project check") {
 		t.Fatalf("after: status %s, %d more turns", landed.Status, len(runner.seen)-checks)
 	}
 	if got := ownerGit(t, source, "show", landed.DeliveredTo+":feature.go"); !strings.Contains(got, "tidied by hand") {

@@ -40,7 +40,7 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 	}
 	seen := len(t.Direction)
 	guide := learnedGuide(writer, false) + handOnGuide(t, core.RoleImplementer, "")
-	spec, cleanup, err := lp.roleSpec(t, writer, m.workspace(t), true, m, writerPrompt(p, t, caughtUp, false)+prompt+guide)
+	spec, cleanup, err := lp.roleSpec(t, writer, m.workspace(t), true, m, writerPrompt(p, t, caughtUp, false)+prompt+guide, nil)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}

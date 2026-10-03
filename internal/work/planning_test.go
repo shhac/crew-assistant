@@ -46,7 +46,7 @@ func TestATaskIsPlannedReadOnlyAndEveryoneWorksFromThePlan(t *testing.T) {
 		switch {
 		case strings.Contains(spec.Prompt, "Plan this task before anything is written"):
 			researcher = !spec.Write
-		case spec.Write && !strings.Contains(spec.Prompt, "Run exactly this"):
+		case spec.Write && !strings.Contains(spec.Prompt, "Use run_check for the project check"):
 			writer = strings.Contains(spec.Prompt, "The plan Researcher worked out") && strings.Contains(spec.Prompt, "- the CLI")
 		case strings.Contains(spec.Prompt, "Do not modify anything"):
 			reviewer = strings.Contains(spec.Prompt, "Add Feature beside main.") && strings.Contains(spec.Prompt, "goes beyond it")
