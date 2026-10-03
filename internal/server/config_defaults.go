@@ -21,6 +21,7 @@ func configDefaults() map[string]any {
 	}
 	baseURL, _ := config.Engines{}.Endpoint()
 	return map[string]any{
+		"upgrade":          config.DefaultUpgrade(),
 		"engines":          engines,
 		"choices":          engineChoices(),
 		"usage_floor":      config.DefaultUsageFloor,

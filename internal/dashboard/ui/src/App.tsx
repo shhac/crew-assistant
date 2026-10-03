@@ -195,6 +195,7 @@ export function App() {
         <main id="main" tabIndex={-1}>
           {route.page === "inbox" && (
             <InboxPage
+              decision={route.decision}
               state={state}
               refresh={refresh}
               onNew={() => setNewProject(true)}

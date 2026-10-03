@@ -7,6 +7,7 @@ import { LimitsSettings } from "./LimitsSettings";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { SlackBotSettings } from "./SlackBotSettings";
 import { Panel } from "./SettingsPanel";
+import { UpdatesSettings } from "./UpdatesSettings";
 import { appearanceOf, applyAppearance, type Appearance } from "./appearance";
 import { href } from "./router";
 import { assistantSummary } from "./members";
@@ -25,6 +26,7 @@ import {
 const sections = [
   { id: "assistant", label: "Assistant" },
   { id: "appearance", label: "Appearance" },
+  { id: "updates", label: "Updates" },
   { id: "models", label: "Models" },
   { id: "chat", label: "Chat" },
   { id: "connections", label: "Connections" },
@@ -185,6 +187,13 @@ export function Settings({
                 <Panel title="Chat">
                   <ChatSettings config={draft} onChange={setDraft} />
                 </Panel>
+              )}
+              {current === "updates" && (
+                <UpdatesSettings
+                  config={draft}
+                  update={state.update}
+                  onChange={setDraft}
+                />
               )}
               {current === "connections" && (
                 <>

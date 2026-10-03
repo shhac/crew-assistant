@@ -47,6 +47,7 @@ describe("addresses", () => {
   it("writes addresses that read back the same", () => {
     for (const hash of [
       "#/inbox",
+      "#/inbox/decision%20%2F1",
       "#/projects",
       "#/memory",
       "#/team",

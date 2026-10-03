@@ -111,9 +111,11 @@ type Landing struct {
 // How a decision was closed. Only DispositionChoice can approve, stop or
 // retry a task; DispositionCustom is the owner's own words.
 const (
-	DispositionChoice    = "choice"
-	DispositionCustom    = "custom"
-	DispositionDismissed = "dismissed"
+	DispositionChoice     = "choice"
+	DispositionCustom     = "custom"
+	DispositionDismissed  = "dismissed"
+	DispositionCompleted  = "completed"
+	DispositionSuperseded = "superseded"
 )
 
 // Decision kinds. A choice is an ordinary decision; the rest hold a task.
@@ -224,6 +226,7 @@ type PendingOperation struct {
 }
 
 type Snapshot struct {
+	Update         UpdateStatus   `json:"update,omitzero"`
 	ChatCheckpoint ChatCheckpoint `json:"-"`
 	// ChatSession is the current conversation's model session.
 	ChatSession *ChatSession `json:"-"`

@@ -27,6 +27,12 @@ crew-assistant completion fish > ~/.config/fish/completions/crew-assistant.fish
 
 Create Fish's completions directory first if needed. PowerShell scripts are also available with `crew-assistant completion powershell`. Completions suggest config keys and supported values, login engines and configured assistants. They only read local configuration; they never contact the daemon, integrations, or model providers.
 
+## Staying up to date
+
+Settings → Updates offers **Ask me** (the default) or **Off**. The daemon checks for an installable release every six hours and checks sooner after its own project publishes one. Ask me opens a decision with the running and available versions, release notes and manual instructions; Off keeps the version display without opening new decisions. Skipping a version hides its sidebar notice until a newer release appears. Development and demo builds do not check for updates.
+
+To upgrade a Homebrew install by hand, run `brew upgrade shhac/tap/crew-assistant`, then restart the daemon. For a standalone install, download the new binary from the releases page. Automatic upgrades aren't available yet.
+
 ## Run it
 
 Building requires Go 1.26.4 or newer. `make build` writes the gitignored `./crew-assistant` binary. Node is only needed when developing the dashboard; its compiled assets are committed.

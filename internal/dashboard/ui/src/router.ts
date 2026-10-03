@@ -10,7 +10,7 @@ export const projectTabs: ProjectTab[] = [
 ];
 
 export type Route =
-  | { page: "inbox" }
+  | { page: "inbox"; decision?: string }
   | { page: "projects" }
   | {
       page: "project";
@@ -38,6 +38,10 @@ const decode = (part: string) => {
 export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
   switch (parts[0]) {
+    case "inbox":
+      return parts[1]
+        ? { page: "inbox", decision: decode(parts[1]) }
+        : { page: "inbox" };
     case "projects": {
       const id = parts[1] && decode(parts[1]);
       if (!id) return { page: "projects" };
@@ -70,7 +74,9 @@ export function parseRoute(hash: string): Route {
 export function href(route: Route): string {
   switch (route.page) {
     case "inbox":
-      return "#/inbox";
+      return route.decision
+        ? `#/inbox/${encodeURIComponent(route.decision)}`
+        : "#/inbox";
     case "projects":
       return "#/projects";
     case "team":

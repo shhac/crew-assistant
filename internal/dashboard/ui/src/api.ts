@@ -739,7 +739,7 @@ export type DecisionKind =
   | "release-failed";
 export interface Decision {
   answer?: string;
-  disposition?: "choice" | "custom" | "dismissed";
+  disposition?: "choice" | "custom" | "dismissed" | "completed" | "superseded";
   resolution_reason?: string;
   resolved_at?: string;
   id: string;
@@ -912,7 +912,20 @@ export interface TurnStep {
   /** Some of it was cut to keep it to a sensible size. */
   clipped?: boolean;
 }
+export interface UpdateStatus {
+  running?: string;
+  available?: string;
+  notes?: string;
+  url?: string;
+  checked_at?: string;
+  error?: string;
+  skipped?: string;
+  decision_version?: string;
+  mode?: "off" | "ask";
+  unavailable?: string;
+}
 export interface State {
+  update?: UpdateStatus;
   pending_operations: PendingOperation[];
   /** The assistant in the seat; with no one there it has no id. */
   assistant: Drawable & {
@@ -937,6 +950,14 @@ export interface State {
   demo: boolean;
 }
 export type Config = Record<string, unknown> & {
+  upgrade?: {
+    mode: "off" | "ask";
+    check_interval?: string;
+    source_repo?: string;
+    formula?: string;
+    release_api_url?: string;
+    formula_url?: string;
+  };
   assistant?: {
     /** The id of the assistant in the seat; empty is no one. */
     seat?: string;
@@ -1010,6 +1031,7 @@ export async function api<T>(
 }
 export function normalizeState(raw: Partial<State>): State {
   return {
+    update: raw.update,
     assistant: raw.assistant ?? { name: "", personality: "" },
     assistants: raw.assistants ?? [],
     pending_operations: raw.pending_operations ?? [],

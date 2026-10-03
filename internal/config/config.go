@@ -24,12 +24,13 @@ type Config struct {
 	Dashboard  Dashboard          `json:"dashboard"`
 	// Models are the models for the daemon's own small jobs; Engines are how
 	// every model is reached.
-	Models      Models       `json:"models"`
-	Engines     Engines      `json:"engines"`
-	Slack       Slack        `json:"slack"`
-	Linear      Linear       `json:"linear"`
-	Limits      Limits       `json:"limits"`
-	Connections []Connection `json:"connections"`
+	Models      Models          `json:"models"`
+	Engines     Engines         `json:"engines"`
+	Slack       Slack           `json:"slack"`
+	Linear      Linear          `json:"linear"`
+	Limits      Limits          `json:"limits"`
+	Connections []Connection    `json:"connections"`
+	Upgrade     UpgradeSettings `json:"upgrade"`
 }
 type Chat struct {
 	LoadingPhrases LoadingPhrases `json:"loading_phrases"`
@@ -108,6 +109,7 @@ type FilePaths struct {
 
 func Default() Config {
 	return Config{
+		Upgrade:     DefaultUpgrade(),
 		Chat:        Chat{LoadingPhrases: LoadingPhrases{Enabled: true}},
 		Assistant:   Assistant{Seat: DefaultProfile().ID, Theme: ThemeSystem},
 		Assistants:  []AssistantProfile{DefaultProfile()},
@@ -157,6 +159,9 @@ func Paths() (FilePaths, error) {
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func (c Config) Validate() error {
+	if err := c.Upgrade.validate(); err != nil {
+		return err
+	}
 	switch c.Assistant.Theme {
 	case ThemeSystem, ThemeLight, ThemeDark:
 	default:

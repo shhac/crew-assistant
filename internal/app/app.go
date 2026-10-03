@@ -18,10 +18,14 @@ import (
 	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/integrations/connections"
 	"github.com/shhac/crew-assistant/internal/lifecycle"
+	"github.com/shhac/crew-assistant/internal/upgrade"
 	"github.com/shhac/crew-assistant/internal/work"
 )
 
 type App struct {
+	version          string
+	checker          *upgrade.Checker
+	updateError      string // A state write failure cannot rely on that state being writable.
 	Diagnostics      *diagnostics.Logger
 	small            *smallModels // Loading captions and suggestions.
 	connectionClient connections.Client
@@ -65,6 +69,8 @@ type App struct {
 
 // Options are what the daemon decides about the app it builds.
 type Options struct {
+	Version string
+	Checker *upgrade.Checker
 	// Demo runs on sample data, with every model and integration off.
 	Demo bool
 	// Diagnostics records failures, the app's and its loop's; nil keeps the
@@ -78,6 +84,10 @@ type Options struct {
 func New(s *core.Service, cfg config.Config, path string, opts Options) *App {
 	a := &App{Diagnostics: opts.Diagnostics, connectionClient: connections.New(), Core: s, cfg: cfg, slackConfig: cfg.Slack, configPath: path, Demo: opts.Demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), summarize: engine.Complete, stop: lifecycle.Now(context.Background()), statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
 	a.Work = work.New(s, a.Config, opts.Demo)
+	a.version, a.checker = opts.Version, opts.Checker
+	if a.checker != nil && !a.Demo {
+		s.OnReleaseRecorded(a.releaseRecorded)
+	}
 	a.Work.Diagnostics = opts.Diagnostics
 	a.small.outOfUsage, a.small.recheck, a.small.busy = a.Work.OutOfUsage, a.Work.RecheckUsage, a.Work.Interactive
 	if opts.DrawWithCodex && !opts.Demo {
@@ -127,7 +137,11 @@ func (a *App) applyConfigLocked(cfg config.Config) error {
 	if err := a.Core.UpdateConfig(cfg); err != nil {
 		return err
 	}
+	upgradeChanged := a.cfg.Upgrade != cfg.Upgrade
 	a.cfg = cfg
+	if upgradeChanged && a.checker != nil && !a.Demo {
+		a.checker.Wake()
+	}
 	return nil
 }
 
@@ -218,6 +232,8 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 		return s, err
 	}
 	cfg := a.Config()
+	s.Update.Running, s.Update.Mode = a.version, cfg.Upgrade.Mode
+	s.Update.Unavailable = upgrade.Unavailable(a.version, a.Demo)
 	s.Stopping = a.Stopping()
 	if a.Work != nil {
 		s.Turns = a.Work.Turns()
@@ -235,6 +251,9 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	if a.updateError != "" {
+		s.Update.Error = a.updateError
+	}
 	s.Integrations = withLiveStatuses(integrations, a.statuses, ignoreLive)
 	if s.Assistant.ID != "" {
 		d := a.drawing[drawingKey(s.Assistant.ID)]

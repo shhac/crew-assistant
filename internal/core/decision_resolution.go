@@ -60,6 +60,9 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 			}
 		}
 		now := s.now().UTC()
+		if d.Kind == DecisionUpgradeAvailable && (disposition != DispositionChoice || answer != ChoiceUpgradeByHand) {
+			v.Update.Skipped = v.Update.DecisionVersion
+		}
 		if d.Kind == DecisionRelease || d.Kind == DecisionReleaseFailed {
 			choice := answer
 			if disposition != DispositionChoice {

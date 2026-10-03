@@ -31,6 +31,24 @@ func runConfig(t *testing.T, dir string, args ...string) (map[string]any, error)
 	return record, nil
 }
 
+func TestConfigUpdateModeAndInterval(t *testing.T) {
+	dir := t.TempDir()
+	for _, mode := range []string{"off", "ask"} {
+		if _, err := runConfig(t, dir, "set", "upgrade.mode", mode); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := runConfig(t, dir, "get", "upgrade.mode"); err != nil || got["value"] != mode {
+			t.Fatal(got, err)
+		}
+	}
+	if _, err := runConfig(t, dir, "set", "upgrade.mode", "auto"); err == nil || !strings.Contains(err.Error(), "available yet") {
+		t.Fatal(err)
+	}
+	if _, err := runConfig(t, dir, "set", "upgrade.check_interval", "14m"); err == nil {
+		t.Fatal("short interval accepted")
+	}
+}
+
 func TestConfigGetSetUnsetOnAFileInTheEarlierLayout(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "config.json")

@@ -104,7 +104,11 @@ export function DecisionCard({
     </button>
   );
   return (
-    <article className={`decision card${full ? " decision-full" : ""}`}>
+    <article
+      id={`decision-${decision.id}`}
+      tabIndex={-1}
+      className={`decision card${full ? " decision-full" : ""}`}
+    >
       <div className="decision-meta">
         {!full && (
           <Pill tone="needs" dot>

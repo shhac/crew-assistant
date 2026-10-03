@@ -43,6 +43,13 @@ func (a *App) Run(stop lifecycle.Stop, noDispatch bool) (runErr error) {
 	listeners.Add(1)
 	go func() {
 		defer listeners.Done()
+		if err := a.runUpdates(stop.Graceful); err != nil && !stop.Stopping() {
+			a.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "update_checks"}, err)
+		}
+	}()
+	listeners.Add(1)
+	go func() {
+		defer listeners.Done()
 		if err := a.RunChatQueue(stop); err != nil && !stop.Stopping() {
 			a.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "chat_queue"}, err)
 			a.Status("chat", "Conversation", "error", "The chat stopped; restart crew-assistant to pick up waiting messages")

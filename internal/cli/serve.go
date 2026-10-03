@@ -24,6 +24,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/sample"
 	"github.com/shhac/crew-assistant/internal/server"
 	"github.com/shhac/crew-assistant/internal/statepath"
+	"github.com/shhac/crew-assistant/internal/upgrade"
 	"github.com/spf13/cobra"
 )
 
@@ -119,7 +120,11 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 	if demo {
 		appConfigPath = filepath.Join(o.runtimeDir(), "demo-config.json")
 	}
-	a := app.New(service, cfg, appConfigPath, app.Options{Demo: demo, Diagnostics: o.diagnostics, DrawWithCodex: true})
+	var checker *upgrade.Checker
+	if upgrade.Unavailable(o.version, demo) == "" {
+		checker = upgrade.New(o.version, nil, nil)
+	}
+	a := app.New(service, cfg, appConfigPath, app.Options{Demo: demo, Diagnostics: o.diagnostics, DrawWithCodex: true, Version: o.version, Checker: checker})
 	publicURL := ""
 	if cfg.Dashboard.Tailscale == "serve" {
 		var cleanup func() error

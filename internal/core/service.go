@@ -32,14 +32,22 @@ func Reason(err error) string {
 
 // Service deliberately exposes no execution, shell, production or purchase capability.
 type Service struct {
-	store *Store
-	mu    sync.RWMutex
-	cfg   config.Config
-	now   func() time.Time
+	store           *Store
+	mu              sync.RWMutex
+	cfg             config.Config
+	releaseRecorded func(repo, version string)
+	now             func() time.Time
 }
 
 func NewService(store *Store, cfg config.Config) *Service {
 	return &Service{store: store, cfg: cfg, now: time.Now}
+}
+
+// OnReleaseRecorded observes a committed release, never an uncommitted attempt.
+func (s *Service) OnReleaseRecorded(fn func(repo, version string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.releaseRecorded = fn
 }
 func (s *Service) UpdateConfig(cfg config.Config) error {
 	if err := cfg.Validate(); err != nil {

@@ -3,6 +3,7 @@ import { byTitle, projectGroup, projectTasks } from "./stages";
 import { Avatar, hasFace } from "./Avatar";
 import { ErrorNotice, Icon } from "./ui";
 import { UsageStatus } from "./UsageStatus";
+import { versionLabel } from "./UpdatesSettings";
 import type { State } from "./api";
 
 const dotTone = {
@@ -58,6 +59,12 @@ export function Sidebar({
     .filter((p) => p.status !== "completed")
     .sort(byTitle);
   const status = daemonStatus(state, offline);
+  const updateDecision = state.decisions.find(
+    (d) =>
+      d.kind === "upgrade-available" &&
+      d.status === "open" &&
+      state.update?.available === state.update?.decision_version,
+  );
   const current = (page: Route["page"]) =>
     route.page === page ||
     (page === "projects" && route.page === "project") ||
@@ -171,6 +178,25 @@ export function Sidebar({
           {status.label}
         </p>
         {status.hint && <p className="hint">{status.hint}</p>}
+        {state.update?.running && (
+          <p className="hint">{versionLabel(state.update.running)}</p>
+        )}
+        {state.update?.available &&
+          state.update.available !== state.update.skipped && (
+            <a
+              className="hint"
+              href={href(
+                updateDecision
+                  ? { page: "inbox", decision: updateDecision.id }
+                  : { page: "settings", section: "updates" },
+              )}
+            >
+              {versionLabel(state.update.available)} available
+            </a>
+          )}
+        {state.update?.unavailable && (
+          <p className="hint">{state.update.unavailable}</p>
+        )}
         <UsageStatus />
         <button
           type="button"

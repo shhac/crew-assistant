@@ -78,6 +78,12 @@ func configKeys(o *options) []libcli.ConfigKey {
 		Doc:     &doc,
 	}
 	keys := []libcli.ConfigKey{
+		withValues(libcli.StringKey(b, "upgrade.mode", "Update notices: off or ask; automatic upgrades are not available yet", func(c *config.Config) *string { return &c.Upgrade.Mode }, nil), "off", "ask"),
+		libcli.StringKey(b, "upgrade.check_interval", "How often releases are checked; at least 15m", func(c *config.Config) *string { return &c.Upgrade.CheckInterval }, nil),
+		libcli.StringKey(b, "upgrade.source_repo", "The release repository, owner/name", func(c *config.Config) *string { return &c.Upgrade.SourceRepo }, nil),
+		libcli.StringKey(b, "upgrade.formula", "The Homebrew formula, owner/tap/formula", func(c *config.Config) *string { return &c.Upgrade.Formula }, nil),
+		libcli.StringKey(b, "upgrade.release_api_url", "Release API URL override; empty follows source_repo", func(c *config.Config) *string { return &c.Upgrade.ReleaseAPIURL }, nil),
+		libcli.StringKey(b, "upgrade.formula_url", "Formula URL override; empty follows formula", func(c *config.Config) *string { return &c.Upgrade.FormulaURL }, nil),
 		libcli.StringKey(b, "assistant.seat", "The id of the assistant in the seat, from assistants; empty is no one", func(c *config.Config) *string { return &c.Assistant.Seat }, nil),
 		libcli.JSONKey[config.Config, []config.AssistantProfile](b, "assistants", "The assistant profiles, each with its name, personality, avatar and model, as a JSON array", func(c *config.Config) *[]config.AssistantProfile { return &c.Assistants }, nil),
 		libcli.OneOfKey(b, "models.suggestions.engine", "The engine that suggests next messages and writes loading lines; empty is the approved small models", func(c *config.Config) *string { return &c.Models.Suggestions.Engine }, append([]string{""}, config.EnginesFor(config.UseSmall)...)),

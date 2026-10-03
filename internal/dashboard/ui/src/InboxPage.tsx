@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { DecisionCard } from "./DecisionCard";
 import { projectHref, requestHref } from "./router";
 import { requestStep, requestTone, underWay } from "./stages";
@@ -41,12 +41,21 @@ export function InboxPage({
   state,
   refresh,
   onNew,
+  decision: selectedDecision,
 }: {
   state: State;
   refresh: () => Promise<void>;
   onNew: () => void;
+  decision?: string;
 }) {
   const decisions = pendingDecisions(state.decisions);
+  const selectedOpen = decisions.some((d) => d.id === selectedDecision);
+  useEffect(() => {
+    if (!selectedOpen) return;
+    const card = document.getElementById(`decision-${selectedDecision}`);
+    card?.scrollIntoView?.({ block: "start" });
+    card?.focus({ preventScroll: true });
+  }, [selectedDecision, selectedOpen]);
   const needs = decisions.length + state.pending_operations.length;
   const project = (id?: string) => state.projects.find((p) => p.id === id);
   const task = (id?: string) => state.tasks.find((t) => t.id === id);
@@ -59,7 +68,7 @@ export function InboxPage({
   const past = state.decisions
     .filter((d) => d.status === "resolved" || d.status === "dismissed")
     .reverse();
-  if (!state.projects.length)
+  if (!state.projects.length && !needs && !past.length)
     return (
       <div className="page">
         <header className="page-header">
@@ -301,7 +310,10 @@ function PastDecisions({
               <span className="muted small">
                 {dismissed
                   ? `Closed without deciding${d.resolution_reason ? `: ${d.resolution_reason}` : ""}`
-                  : `You chose: ${d.answer}`}
+                  : d.disposition === "completed" ||
+                      d.disposition === "superseded"
+                    ? d.resolution_reason
+                    : `You chose: ${d.answer}`}
               </span>
               <span className="muted small">
                 {project && (

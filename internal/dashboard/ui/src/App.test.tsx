@@ -973,6 +973,7 @@ describe("settings", () => {
     ).toEqual([
       "Assistant",
       "Appearance",
+      "Updates",
       "Models",
       "Chat",
       "Connections",

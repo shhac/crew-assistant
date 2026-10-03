@@ -291,7 +291,8 @@ func finishRelease(v *Snapshot, p *Project, now time.Time, published, note strin
 	record(v, now, p.ID, "release.recorded", "Released "+r.Version+" "+note)
 }
 func (s *Service) FinishRelease(ctx context.Context, id, published, note string) error {
-	return s.store.update(ctx, func(v *Snapshot) error {
+	var version string
+	err := s.store.update(ctx, func(v *Snapshot) error {
 		p := project(v, id)
 		if p == nil || p.Release == nil || p.Release.State != "publishing" || p.Release.DecisionID != "" {
 			return ErrConflict
@@ -310,9 +311,19 @@ func (s *Service) FinishRelease(ctx context.Context, id, published, note string)
 			return ErrConflict
 		}
 		record(v, s.now().UTC(), id, "release.published", "Publication exit 0: tagged "+p.Release.Version+" at "+p.Release.Commit)
+		version = p.Release.Version
 		finishRelease(v, p, s.now().UTC(), published, note)
 		return nil
 	})
+	if err == nil && published != "" {
+		s.mu.RLock()
+		fn := s.releaseRecorded
+		s.mu.RUnlock()
+		if fn != nil {
+			fn(published, version)
+		}
+	}
+	return err
 }
 
 // UpdateReleaseSettings reconciles unstarted proposals inside EditPlaybook's update.
