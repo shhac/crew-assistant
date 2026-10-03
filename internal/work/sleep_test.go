@@ -11,6 +11,7 @@ import (
 // counting with the lid shut, so a failure is checked again once; a pass
 // stands.
 func TestACheckThatSleptThroughAFailureRunsAgain(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{revise, pass}}
 	a, _, _ := loopApp(t, runner, t.TempDir())
 	a.slept = func(time.Time) time.Duration { return time.Hour }
@@ -21,6 +22,7 @@ func TestACheckThatSleptThroughAFailureRunsAgain(t *testing.T) {
 }
 
 func TestACheckThatStayedAwakeKeepsItsFailure(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{revise, pass}}
 	a, _, _ := loopApp(t, runner, t.TempDir())
 	a.slept = func(time.Time) time.Duration { return time.Second }
@@ -32,6 +34,7 @@ func TestACheckThatStayedAwakeKeepsItsFailure(t *testing.T) {
 
 // The real clocks: no sleep has happened in the moment since now.
 func TestNoSleepIsSeenWhileAwake(t *testing.T) {
+	// Serial: checks a real wall-clock bound without competing package tests.
 	var lp Loop
 	if slept := lp.sleptSince(time.Now()); slept > time.Second || slept < -time.Second {
 		t.Fatalf("slept %v", slept)

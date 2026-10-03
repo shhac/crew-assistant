@@ -6,9 +6,8 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/crew-assistant
 
-# internal/work takes minutes on its own, and the team's checks run at
-# background priority beside other work, where Go's ten-minute default for a
-# package is too tight.
+# A generous ceiling protects the team's background-priority checks running
+# beside other work, even when packages are fast in isolation.
 TEST_TIMEOUT ?= 30m
 
 dashboard:

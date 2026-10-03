@@ -18,6 +18,7 @@ import (
 )
 
 func TestAPullRequestIsBabysatThroughReviewAndCIUntilItMerges(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 4)
 	a, gh, runner, remote, ctx, p := s.a, s.gh, s.runner, s.remote, s.ctx, s.p
 	current := func() core.Task { return s.current(t) }
@@ -100,6 +101,7 @@ func TestAPullRequestIsBabysatThroughReviewAndCIUntilItMerges(t *testing.T) {
 }
 
 func TestTheImplementerAsksForItsOwnWakesInItsReply(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	ctx := context.Background()
 	gh := &fakeGitHub{t: t, checks: "PENDING", decision: "REVIEW_REQUIRED"}
@@ -160,6 +162,7 @@ func TestTheImplementerAsksForItsOwnWakesInItsReply(t *testing.T) {
 }
 
 func TestAnUpdateThatTouchesWhatRunsWaitsForTheOwnerBeforeItIsPushed(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 4)
 	first := s.open(t).Revisions[0].Ref
 	s.runner.onEdit = func(dir string, n int) bool {
@@ -182,6 +185,7 @@ func TestAnUpdateThatTouchesWhatRunsWaitsForTheOwnerBeforeItIsPushed(t *testing.
 }
 
 func TestAClosedPullRequestComesToTheOwnerAndATryAgainOpensANewOne(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2)
 	s.open(t)
 	s.gh.set(func() { s.gh.closed = true })
@@ -200,6 +204,7 @@ func TestAClosedPullRequestComesToTheOwnerAndATryAgainOpensANewOne(t *testing.T)
 }
 
 func TestSomeoneElsesPushToThePullRequestIsTakenInNotOverwritten(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 4)
 	s.open(t)
 	other := t.TempDir()
@@ -233,6 +238,7 @@ func TestSomeoneElsesPushToThePullRequestIsTakenInNotOverwritten(t *testing.T) {
 // Someone the repository's owner didn't let in can comment, but the team
 // never acts on it: it is only counted for the owner to see.
 func TestFeedbackFromOutsideTheRepositoryIsCountedNotActedOn(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2)
 	s.open(t)
 	at := time.Now()
@@ -253,6 +259,7 @@ func TestFeedbackFromOutsideTheRepositoryIsCountedNotActedOn(t *testing.T) {
 }
 
 func TestFeedbackThatNeedsNoChangeDoesNotLoop(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2)
 	s.open(t)
 	s.runner.onEdit = func(string, int) bool { return false }
@@ -274,6 +281,7 @@ func TestFeedbackThatNeedsNoChangeDoesNotLoop(t *testing.T) {
 // made on an older push names that commit, not the draft pushed since, and
 // a comment, which is on no commit, claims none.
 func TestPullRequestFeedbackNamesTheCommitItWasOn(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 4)
 	task := s.open(t)
 	pushed := task.Revisions[0].Ref
@@ -310,6 +318,7 @@ func TestPullRequestFeedbackNamesTheCommitItWasOn(t *testing.T) {
 // Right after a push GitHub may report no checks only because none have
 // started; the pull request isn't taken as green until they've had time to.
 func TestNoChecksRightAfterAPushAreChecksStillToStart(t *testing.T) {
+	t.Parallel()
 	pushed := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	pr := github.PR{State: "OPEN", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN"}
 	prop := core.Proposal{PushedAt: pushed}
@@ -324,6 +333,7 @@ func TestNoChecksRightAfterAPushAreChecksStillToStart(t *testing.T) {
 // By default the PM decides whether a pull request opens, and it opens with
 // the title and description the implementer wrote with its draft.
 func TestThePMDecidesWhetherAPullRequestOpensWithTheImplementersText(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2, withPM, func(_ *testing.T, _ *Loop, _ *TeamChoice, land *core.LandPolicy) { land.Open = "" })
 	s.runner.ending = func(int) string { return prBlock("Add Feature", "Adds Feature so callers can use it.") }
 	task := s.current(t)
@@ -347,6 +357,7 @@ func TestThePMDecidesWhetherAPullRequestOpensWithTheImplementersText(t *testing.
 
 // Left to the implementer, a passed draft opens its pull request unasked.
 func TestAPullRequestLeftToTheImplementerOpensUnasked(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2, func(_ *testing.T, _ *Loop, _ *TeamChoice, land *core.LandPolicy) { land.Open = core.OpenImplementer })
 	task := s.current(t)
 	if task.Status != core.TaskAwaiting || !task.PROpen() {
@@ -363,6 +374,7 @@ func TestAPullRequestLeftToTheImplementerOpensUnasked(t *testing.T) {
 
 // A later draft that rewrites the description updates the open pull request.
 func TestARewrittenDescriptionUpdatesTheOpenPullRequest(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 4)
 	s.runner.ending = func(n int) string {
 		if n == 1 {

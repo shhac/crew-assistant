@@ -13,6 +13,7 @@ import (
 const handOnReply = "\n```hand-on\n{\"why\":\"A fresh view would help\"}\n```"
 
 func TestHandOnRecordedWithWriterAndChecker(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{core.RoleImplementer, core.RoleReviewer} {
 		t.Run(kind, func(t *testing.T) {
 			runner := &scriptedRunner{reviews: []string{pass}}
@@ -44,6 +45,7 @@ func TestHandOnRecordedWithWriterAndChecker(t *testing.T) {
 }
 
 func TestHandOnRecordedWithResearch(t *testing.T) {
+	t.Parallel()
 	a, _, p := plannedCode(t, 6, plainPlan+handOnReply)
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add A"})
 	task = taskNow(t, a, task.ID)
@@ -53,6 +55,7 @@ func TestHandOnRecordedWithResearch(t *testing.T) {
 }
 
 func TestStoppedWriterRecordsNeitherDraftNorHandOn(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{writerText: "Done." + handOnReply}
 	a, _, task := loopApp(t, runner, "")
 	runner.onWriter = func(string) {
@@ -71,6 +74,7 @@ func TestStoppedWriterRecordsNeitherDraftNorHandOn(t *testing.T) {
 }
 
 func TestMalformedHandOnIsReportedAndIgnored(t *testing.T) {
+	t.Parallel()
 	for _, block := range []string{"{", `{"why":""}`, `{"why":17}`, `null`} {
 		if why, problems := parseHandOn(block); why != "" || len(problems) != 1 {
 			t.Fatalf("%q: why=%q problems=%v", block, why, problems)
@@ -85,6 +89,7 @@ func TestMalformedHandOnIsReportedAndIgnored(t *testing.T) {
 }
 
 func TestResearchPassCanHandOnAndKeepsBuildersWakeErrors(t *testing.T) {
+	t.Parallel()
 	research := `{"outcome":"research","summary":"Check v2.","findings":[],"question":"Does v2 cover this?"}`
 	a, runner, p := plannedCode(t, 0, plainPlan, plainPlan+handOnReply)
 	pb := *p.Playbook
@@ -114,6 +119,7 @@ func TestResearchPassCanHandOnAndKeepsBuildersWakeErrors(t *testing.T) {
 }
 
 func TestNonWriterBlockProblemsAreLoggedWithoutChangingWakeErrors(t *testing.T) {
+	t.Parallel()
 	broken := "\n```hand-on\n{\n```"
 	for _, role := range []string{"research", "design request", "checker"} {
 		t.Run(role, func(t *testing.T) {
@@ -169,6 +175,7 @@ func TestNonWriterBlockProblemsAreLoggedWithoutChangingWakeErrors(t *testing.T) 
 }
 
 func TestFailedFirstBuildKeepsClaimant(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{fail: []error{errors.New("provider unavailable")}, reviews: []string{pass}}
 	a, p, queued := loopApp(t, runner, "")
 	pb := *p.Playbook
@@ -198,6 +205,7 @@ func TestFailedFirstBuildKeepsClaimant(t *testing.T) {
 }
 
 func TestDesignQuestionsDoNotHandOnAnUnfinishedRound(t *testing.T) {
+	t.Parallel()
 	t.Run("writer", func(t *testing.T) {
 		runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign + handOnReply, "Done."}}
 		a, p, queued := loopApp(t, runner, "")

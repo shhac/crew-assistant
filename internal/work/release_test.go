@@ -150,6 +150,7 @@ func tagPresent(t *testing.T, dir, tag string) bool {
 	return cmd.Run() == nil
 }
 func TestReleaseOwnerApprovalChecksAndPublishes(t *testing.T) {
+	t.Parallel()
 	a, p, r, source, remote, tip := releaseFixture(t, "", false, true, 0)
 	proposeFromPM(t, a, p)
 	pending, snap := releaseState(t, a, p.ID)
@@ -196,6 +197,7 @@ func TestReleaseOwnerApprovalChecksAndPublishes(t *testing.T) {
 	}
 }
 func TestReleasePMApprovalPRPushesOnlyTag(t *testing.T) {
+	t.Parallel()
 	a, p, r, _, remote, tip := releaseFixture(t, core.ApprovePM, true, false, 0)
 	proposeFromPM(t, a, p)
 	before := ownerGit(t, remote, "rev-parse", "main")
@@ -215,6 +217,7 @@ func TestReleasePMApprovalPRPushesOnlyTag(t *testing.T) {
 	}
 }
 func TestReleaseLocalOnlyAndDeclined(t *testing.T) {
+	t.Parallel()
 	a, p, _, source, remote, _ := releaseFixture(t, "", false, false, 0)
 	proposeFromPM(t, a, p)
 	chooseRelease(t, a, p.ID, "Not now")
@@ -231,6 +234,7 @@ func TestReleaseLocalOnlyAndDeclined(t *testing.T) {
 	}
 }
 func TestReleaseFailedCheckNeverRetriesAutomatically(t *testing.T) {
+	t.Parallel()
 	a, p, r, source, _, _ := releaseFixture(t, core.ApprovePM, false, false, 3)
 	proposeFromPM(t, a, p)
 	releasePass(t, a)
@@ -254,6 +258,7 @@ func TestReleaseFailedCheckNeverRetriesAutomatically(t *testing.T) {
 	}
 }
 func TestOwnerReleaseKeepsProposalContentsBeforeApproval(t *testing.T) {
+	t.Parallel()
 	a, p, r, source, remote, tip := releaseFixture(t, "", false, true, 0)
 	proposeFromPM(t, a, p)
 	pending, snap := releaseState(t, a, p.ID)
@@ -280,6 +285,7 @@ func TestOwnerReleaseKeepsProposalContentsBeforeApproval(t *testing.T) {
 }
 
 func TestReleasePauseAndMovingTarget(t *testing.T) {
+	t.Parallel()
 	a, p, r, source, remote, tip := releaseFixture(t, core.ApprovePM, false, true, 0)
 	ctx := context.Background()
 	proposeFromPM(t, a, p)
@@ -320,8 +326,10 @@ func TestReleasePauseAndMovingTarget(t *testing.T) {
 	}
 }
 func TestReleaseDivergenceLeavesLocalTag(t *testing.T) {
+	t.Parallel()
 	for _, retry := range []bool{false, true} {
 		t.Run(fmt.Sprint(retry), func(t *testing.T) {
+			t.Parallel()
 			a, p, _, source, remote, tip := releaseFixture(t, core.ApprovePM, false, true, 0)
 			foreign := ownerGit(t, source, "commit-tree", "v1.0.0^{tree}", "-p", "v1.0.0", "-m", "foreign")
 			ownerGit(t, remote, "fetch", source, foreign)
@@ -351,6 +359,7 @@ func TestReleaseDivergenceLeavesLocalTag(t *testing.T) {
 	}
 }
 func TestReleaseNoSettingsAndSettingsRemoval(t *testing.T) {
+	t.Parallel()
 	a, p, r, source, _, _ := releaseFixture(t, core.ApprovePM, false, false, 0)
 	if _, err := a.SetRelease(context.Background(), p.ID, nil); err != nil {
 		t.Fatal(err)
@@ -377,8 +386,10 @@ func TestReleaseNoSettingsAndSettingsRemoval(t *testing.T) {
 	}
 }
 func TestReleaseReconcilesPublishingAndChecking(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []string{"checking", "branch pushed", "tag pushed", "version taken"} {
 		t.Run(stage, func(t *testing.T) {
+			t.Parallel()
 			a, p, r, source, remote, tip := releaseFixture(t, core.ApprovePM, false, true, 0)
 			ctx := context.Background()
 			proposeFromPM(t, a, p)
@@ -447,8 +458,10 @@ func TestReleaseReconcilesPublishingAndChecking(t *testing.T) {
 }
 
 func TestReleaseCheckChangesAndMissingQARequireOwner(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"changed checkout", "missing QA"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
 			a, p, r, source, _, _ := releaseFixture(t, core.ApprovePM, false, false, 0)
 			proposeFromPM(t, a, p)
 			if mode == "missing QA" {
@@ -508,6 +521,7 @@ func TestReleaseCheckChangesAndMissingQARequireOwner(t *testing.T) {
 }
 
 func TestReleaseSettingsRemainOwnerOnlyAndStartedCheckFinishes(t *testing.T) {
+	t.Parallel()
 	a, p, r, source, _, _ := releaseFixture(t, core.ApprovePM, false, false, 0)
 	for _, d := range a.managerTools(p.ID, core.Role{Name: "Pim", Kinds: []string{core.RolePM}}).proposing(p.Playbook).Definitions() {
 		if strings.Contains(d.Name, "release") {
@@ -536,6 +550,7 @@ func TestReleaseSettingsRemainOwnerOnlyAndStartedCheckFinishes(t *testing.T) {
 }
 
 func TestReleaseTailIsBoundedAndRedacted(t *testing.T) {
+	t.Parallel()
 	tail := releaseTail(strings.Repeat("line\n", 70) + "Authorization: Bearer sample-secret\nghp_sampletoken\ngithub_pat_sampletoken")
 	if len(strings.Split(tail, "\n")) > 40 || strings.Contains(tail, "sample-secret") || strings.Contains(tail, "sampletoken") {
 		t.Fatal(tail)
@@ -546,6 +561,7 @@ func TestReleaseTailIsBoundedAndRedacted(t *testing.T) {
 }
 
 func TestReleaseTagPushFailureRetriesOnlyPublication(t *testing.T) {
+	t.Parallel()
 	a, p, r, source, remote, tip := releaseFixture(t, core.ApprovePM, false, true, 0)
 	proposeFromPM(t, a, p)
 	releasePass(t, a)
@@ -571,6 +587,7 @@ func TestReleaseTagPushFailureRetriesOnlyPublication(t *testing.T) {
 }
 
 func TestReleaseWithNoCheckPublishesWithoutQA(t *testing.T) {
+	t.Parallel()
 	a, p, r, source, _, _ := releaseFixture(t, core.ApprovePM, false, false, 0)
 	if _, err := a.SetRelease(context.Background(), p.ID, &core.ReleasePolicy{When: "after features", Approve: core.ApprovePM}); err != nil {
 		t.Fatal(err)
@@ -584,6 +601,7 @@ func TestReleaseWithNoCheckPublishesWithoutQA(t *testing.T) {
 }
 
 func TestReleaseFailedVerdictPreservesCommandExitStatus(t *testing.T) {
+	t.Parallel()
 	a, p, r, source, _, _ := releaseFixture(t, core.ApprovePM, false, false, 0)
 	r.verdict = `{"outcome":"fail","exit_status":0,"output":"verification failed"}`
 	proposeFromPM(t, a, p)
@@ -604,6 +622,7 @@ func TestReleaseFailedVerdictPreservesCommandExitStatus(t *testing.T) {
 }
 
 func TestReleaseAbandonedPRTagDoesNotBlockNextProposal(t *testing.T) {
+	t.Parallel()
 	a, p, _, source, remote, _ := releaseFixture(t, "pm", true, false, 0)
 	proposeFromPM(t, a, p)
 	releasePass(t, a)
@@ -634,6 +653,7 @@ func TestReleaseAbandonedPRTagDoesNotBlockNextProposal(t *testing.T) {
 	}
 }
 func TestReleasePromptUsesClockAndLatestDeclineOnly(t *testing.T) {
+	t.Parallel()
 	a, p, r, _, _, _ := releaseFixture(t, "", false, false, 0)
 	now := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
 	a.Now = func() time.Time { return now }
@@ -651,6 +671,7 @@ func TestReleasePromptUsesClockAndLatestDeclineOnly(t *testing.T) {
 	}
 }
 func TestReleaseActiveCheckDoesNotReportWaitingOnItself(t *testing.T) {
+	t.Parallel()
 	a, p, r, _, _, _ := releaseFixture(t, "pm", false, false, 0)
 	proposeFromPM(t, a, p)
 	r.before = func(spec roles.Spec) {
@@ -679,6 +700,7 @@ func TestReleaseActiveCheckDoesNotReportWaitingOnItself(t *testing.T) {
 }
 
 func TestReleaseWaitsForSeatBeforeFetchingTarget(t *testing.T) {
+	t.Parallel()
 	a, p, runner, _, remote, tip := releaseFixture(t, "pm", true, false, 0)
 	proposeFromPM(t, a, p)
 	a.gate.interactive = 1
@@ -704,6 +726,7 @@ func TestReleaseWaitsForSeatBeforeFetchingTarget(t *testing.T) {
 	}
 }
 func TestReleaseSchedulingErrorDoesNotStopOtherProjects(t *testing.T) {
+	t.Parallel()
 	a, p, runner, _, _, _ := releaseFixture(t, "pm", false, false, 0)
 	proposeFromPM(t, a, p)
 	snap, _ := a.Core.Snapshot(context.Background())
@@ -726,6 +749,7 @@ func TestReleaseSchedulingErrorDoesNotStopOtherProjects(t *testing.T) {
 }
 
 func TestReleasePMSeesRemoteOffTargetVersionOnPushProject(t *testing.T) {
+	t.Parallel()
 	a, p, _, source, remote, tip := releaseFixture(t, "pm", false, true, 0)
 	ownerGit(t, source, "checkout", "-qb", "off-target")
 	ownerGit(t, source, "commit", "--allow-empty", "-qm", "off target")

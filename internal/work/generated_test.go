@@ -50,6 +50,7 @@ const (
 // afterwards. A reply that had to be asked for again runs in a new session,
 // whose tools reach only that session's images.
 func TestACodexDesignerAttachesAnImageItGeneratedInItsTurn(t *testing.T) {
+	t.Parallel()
 	var results []session.ToolResult
 	var homes []string
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign}, designs: []string{"not JSON", `{"input": "Use this icon.", "current": "this", "escalate": null}`}}
@@ -109,6 +110,7 @@ func TestACodexDesignerAttachesAnImageItGeneratedInItsTurn(t *testing.T) {
 // a path out of it, a link, a hidden file or one in another folder is
 // refused, and a turn with nothing generated gets a tool error.
 func TestOnlyThisTurnsGeneratedImagesCanBeAttached(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign}}
 	a, p, task := loopApp(t, runner, "")
 	seatDesignerOn(t, a, p.ID, "codex")
@@ -186,6 +188,7 @@ func TestOnlyThisTurnsGeneratedImagesCanBeAttached(t *testing.T) {
 // ended keeps them, since that turn may still be making them; one that
 // confirms it removes them, and the designer then runs again as usual.
 func TestARestartRemovesImagesACrashedDesignerTurnLeftOnceItEnded(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign}}
 	a, p, task := loopApp(t, runner, "")
 	seatDesignerOn(t, a, p.ID, "codex")
@@ -246,6 +249,7 @@ func TestARestartRemovesImagesACrashedDesignerTurnLeftOnceItEnded(t *testing.T) 
 // stopped one can, keeps that session's images, since it may still be
 // making them; a restart that reclaims the session removes them.
 func TestAnUnconfirmedDesignerTurnKeepsItsImagesUntilARestartReclaimsIt(t *testing.T) {
+	t.Parallel()
 	var left, launch string
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign}}
 	runner.onDesigner = func(spec roles.Spec) error {
@@ -289,6 +293,7 @@ func TestAnUnconfirmedDesignerTurnKeepsItsImagesUntilARestartReclaimsIt(t *testi
 // A designer on an engine that can't generate images is told so, and
 // attach_file offers it no generated images.
 func TestADesignerThatCantGenerateImagesIsToldSo(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign}}
 	a, p, task := loopApp(t, runner, "")
 	seatDesigner(t, a, p.ID)

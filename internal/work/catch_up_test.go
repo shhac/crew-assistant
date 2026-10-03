@@ -70,6 +70,7 @@ func pushProjectApp(t *testing.T, runner *codeRunner, source string) (*Loop, cor
 // main's new tip, the implementer is told, and its next draft includes what
 // landed.
 func TestARevisionRoundStartsFromACleanMergeOfWhatLanded(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	start := ownerGit(t, source, "rev-parse", "main")
 	reviews := append([]string{revise}, passes(10)...)
@@ -138,6 +139,7 @@ func TestARevisionRoundStartsFromACleanMergeOfWhatLanded(t *testing.T) {
 // the task's own change replayed onto the rewritten main with the conflicts
 // left to resolve: nothing main dropped comes back.
 func TestAConflictWithARewrittenMainReachesTheImplementer(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	ownerCommits(t, source, "dropped.go", "package main // dropped later\n", "a commit the owner will drop")
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: passes(12)}}
@@ -206,6 +208,7 @@ func TestAConflictWithARewrittenMainReachesTheImplementer(t *testing.T) {
 }
 
 func TestUnrecordedReplayKeepsTheOldBase(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	ownerCommits(t, source, "dropped.go", "package main\n", "dropped")
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: passes(12)}}
@@ -262,6 +265,7 @@ func TestUnrecordedReplayKeepsTheOldBase(t *testing.T) {
 }
 
 func TestLeftoverConflictMarkersRetryWithNamedDecision(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: passes(12)}}
 	a, p := pushProjectApp(t, runner, source)
@@ -316,6 +320,7 @@ func TestLeftoverConflictMarkersRetryWithNamedDecision(t *testing.T) {
 }
 
 func TestApprovedCleanCatchUpLandsWithoutAnotherDecision(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: passes(12)}}
 	a, p := pushProjectApp(t, runner, source)

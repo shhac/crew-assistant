@@ -41,6 +41,7 @@ func step(t *testing.T, a *Loop) {
 }
 
 func TestThePMOrdersTheListBeforeTheNextTaskStarts(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, first, second := pmTeam(t, runner)
 	runner.pm = []string{fmt.Sprintf(`{"triage": [{"task": %q, "to": "research"}], "order": [%q, %q], "depends": [], "note": "the second is smaller", "questions": []}`, second.ID, second.ID, first.ID)}
@@ -67,6 +68,7 @@ func TestThePMOrdersTheListBeforeTheNextTaskStarts(t *testing.T) {
 }
 
 func TestAnUnreadablePMIsSkippedAndTheWorkGoesOn(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass, pass}, pm: []string{"no idea", "still no idea"}}
 	a, p, _, _ := pmTeam(t, runner)
 	step(t, a)
@@ -87,6 +89,7 @@ func TestAnUnreadablePMIsSkippedAndTheWorkGoesOn(t *testing.T) {
 }
 
 func TestThePMsQuestionsGoToTheOwnerAndItWaitsForTheAnswer(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass, pass, pass, pass}, pm: []string{`{"order": [], "questions": ["Which note matters more?"]}`}}
 	a, p, _, _ := pmTeam(t, runner)
 	ctx := context.Background()
@@ -122,6 +125,7 @@ func TestThePMsQuestionsGoToTheOwnerAndItWaitsForTheAnswer(t *testing.T) {
 }
 
 func TestAPMJoinsTheSeatItsMemberAlreadyHolds(t *testing.T) {
+	t.Parallel()
 	a, p, _ := loopApp(t, &scriptedRunner{}, "")
 	ctx := context.Background()
 	ada, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Ada", Kinds: []string{core.RoleImplementer, core.RolePM}, Engine: "claude"})
@@ -144,6 +148,7 @@ func TestAPMJoinsTheSeatItsMemberAlreadyHolds(t *testing.T) {
 }
 
 func TestARolesJSONIsReadFromAFenceProseOrAlone(t *testing.T) {
+	t.Parallel()
 	for reply, want := range map[string]string{
 		`{"note": "bare"}`: "bare",
 		"Here you go:\n{\"note\": \"prose\"}\nThanks.":                "prose",
@@ -162,6 +167,7 @@ func TestARolesJSONIsReadFromAFenceProseOrAlone(t *testing.T) {
 }
 
 func TestThePMsAnswerAndWhatItIsTold(t *testing.T) {
+	t.Parallel()
 	answer, questions, err := parsePM("```json\n{\"order\": [\"b\", \"a\"], \"depends\": [{\"task\": \" a \", \"on\": [\"b\"]}, {\"task\": \"c\", \"on\": null}], \"note\": \"b first\", \"questions\": [\" \", \"Why c?\"]}\n```")
 	if err != nil || !slices.Equal(answer.Order, []string{"b", "a"}) || !slices.Equal(answer.Depends["a"], []string{"b"}) || answer.Depends["c"] != nil || !slices.Equal(questions, []string{"Why c?"}) {
 		t.Fatalf("answer %+v questions %v: %v", answer, questions, err)
@@ -194,6 +200,7 @@ func TestThePMsAnswerAndWhatItIsTold(t *testing.T) {
 }
 
 func TestAPMThatLeftOrFailedNeverHoldsUpTheWork(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, _, _ := pmTeam(t, runner)
 	ctx := context.Background()
@@ -217,6 +224,7 @@ func TestAPMThatLeftOrFailedNeverHoldsUpTheWork(t *testing.T) {
 }
 
 func TestTheAssistantCanAskThePMAndItChangesNothing(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, first, second := pmTeam(t, runner)
 	ctx := context.Background()
@@ -256,6 +264,7 @@ func statusOf(t *testing.T, a *Loop, id string) core.Task {
 }
 
 func TestTriageGoesOnWhenThePMLeftOrCouldNotLook(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	// The PM left after the work was asked for.
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
@@ -287,6 +296,7 @@ func TestTriageGoesOnWhenThePMLeftOrCouldNotLook(t *testing.T) {
 }
 
 func TestAProjectWithoutAPMNeverUsesTriage(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, _ := loopApp(t, runner, "")
 	task, err := a.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Another note"}, core.LinkedByAssistant)
@@ -296,6 +306,7 @@ func TestAProjectWithoutAPMNeverUsesTriage(t *testing.T) {
 }
 
 func TestThePMAsksTheOwnerAboutATaskInTriageThroughTheLoop(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, _, second := pmTeam(t, runner)
 	ctx := context.Background()
@@ -321,6 +332,7 @@ func TestThePMAsksTheOwnerAboutATaskInTriageThroughTheLoop(t *testing.T) {
 }
 
 func TestThePMIsToldWhatWaitsInTriage(t *testing.T) {
+	t.Parallel()
 	answer, _, err := parsePM(`{"triage": [{"task": " S-3 ", "to": " Research "}, {"task": "S-4", "to": "owner", "question": " Which? "}], "order": []}`)
 	if err != nil || !slices.Equal(answer.Triage, []core.TriageRelease{{Task: "S-3", To: core.TriageToResearch}, {Task: "S-4", To: core.TriageToOwner, Question: "Which?"}}) {
 		t.Fatalf("answer %+v: %v", answer.Triage, err)
@@ -348,6 +360,7 @@ func TestThePMIsToldWhatWaitsInTriage(t *testing.T) {
 // the answer arrived for, so it doesn't ask again; another project's stay
 // out, and so does a question still open.
 func TestThePMKeepsSeeingTheOwnersAnswers(t *testing.T) {
+	t.Parallel()
 	p := core.Project{ID: "p1", Title: "Notes", Brief: core.Brief{Goal: "Notes"}}
 	at := time.Date(2026, 9, 30, 18, 0, 0, 0, time.UTC)
 	snap := core.Snapshot{Decisions: []core.Decision{
@@ -369,6 +382,7 @@ func TestThePMKeepsSeeingTheOwnersAnswers(t *testing.T) {
 }
 
 func TestThePMTurnReordersAfterTheOwner(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{}
 	a, p, first, second := pmTeam(t, runner)
 	ctx := context.Background()
@@ -405,6 +419,7 @@ func TestThePMTurnReordersAfterTheOwner(t *testing.T) {
 }
 
 func TestNoPMDoesNotLoopOnSentOnTasksWhenTodoIsFull(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{}
 	a, p, _, _ := pmTeam(t, runner)
 	ctx := context.Background()

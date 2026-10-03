@@ -15,6 +15,7 @@ import (
 // with what went in and what came out. A reply streaming in shows as it
 // grows; a tool the turn never saw finish is marked stopped.
 func TestATurnKeepsItsStepsForTheOwner(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a := testLoop(t)
 	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Brief: core.BriefInput{Goal: "Faster"}, Template: "draft"})
@@ -77,6 +78,7 @@ func TestATurnKeepsItsStepsForTheOwner(t *testing.T) {
 
 // A turn on no task, such as the PM ordering the list, keeps nothing.
 func TestATurnOnNoTaskKeepsNoSteps(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	kept := 0
 	watch := a.watchTurn(core.Task{ProjectID: "p"}, core.RolePM, core.Role{Name: "Pia"}, t.TempDir(), false).(*liveTurn)

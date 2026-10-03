@@ -98,6 +98,7 @@ func writerTurns(r *scriptedRunner) []roles.Spec {
 }
 
 func TestTheResearcherHandsTheTaskToTheDesignerAndGetsItBack(t *testing.T) {
+	t.Parallel()
 	a, runner, p := plannedCode(t, 6, `{"design": "Tabs or a sidebar?"}`)
 	seatDesigner(t, a, p.ID)
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add A"})
@@ -131,6 +132,7 @@ func TestTheResearcherHandsTheTaskToTheDesignerAndGetsItBack(t *testing.T) {
 // The reply the researcher is finally told to give offers the design form
 // exactly while a hand-off is offered, so following it can ask for input.
 func TestTheResearchersReplyContractOffersDesignOnlyWhileItCanAsk(t *testing.T) {
+	t.Parallel()
 	p := core.Project{Title: "Service", Brief: core.Brief{Goal: "Faster"}}
 	researcher := core.Role{Name: "Researcher", Kinds: []string{core.RoleResearcher}}
 	dee := core.Role{Name: "Dee", Kinds: []string{core.RoleDesigner}}
@@ -157,6 +159,7 @@ func TestTheResearchersReplyContractOffersDesignOnlyWhileItCanAsk(t *testing.T) 
 }
 
 func TestTheImplementerHandsTheTaskToTheDesignerAndGetsItBack(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign}}
 	a, p, task := loopApp(t, runner, "")
 	seatDesigner(t, a, p.ID)
@@ -187,6 +190,7 @@ func TestTheImplementerHandsTheTaskToTheDesignerAndGetsItBack(t *testing.T) {
 }
 
 func TestATeamWithoutADesignerNeverHandsATaskOver(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign}}
 	a, _, _ := loopApp(t, runner, "")
 	task := settle(t, a)
@@ -206,6 +210,7 @@ func TestATeamWithoutADesignerNeverHandsATaskOver(t *testing.T) {
 }
 
 func TestHandOffsToTheDesignerAreBounded(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign, askDesign, askDesign}}
 	a, p, task := loopApp(t, runner, "")
 	seatDesigner(t, a, p.ID)
@@ -229,6 +234,7 @@ func TestHandOffsToTheDesignerAreBounded(t *testing.T) {
 }
 
 func TestADesignerThatEscalatesBringsTheOwnerADecisionAndTheTaskGoesBack(t *testing.T) {
+	t.Parallel()
 	a, runner, p := plannedCode(t, 6, `{"design": "Tabs or a sidebar?"}`)
 	runner.designs = []string{`{"input": "", "escalate": {"evidence": "Two teams use the board differently.", "alternatives": ["Tabs", "A sidebar"], "consequences": "Tabs hide work; a sidebar costs width.", "recommendation": "A sidebar"}}`}
 	seatDesigner(t, a, p.ID)
@@ -252,6 +258,7 @@ func TestADesignerThatEscalatesBringsTheOwnerADecisionAndTheTaskGoesBack(t *test
 }
 
 func TestADesignerThatFailsIsAskedAgainAndTheTaskStaysWhereItWas(t *testing.T) {
+	t.Parallel()
 	permanent := &session.CapabilityError{Engine: "claude", Code: session.CapabilitySandboxUnavailable, Phase: session.BeforeLaunch}
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign}, fail: []error{nil, permanent}}
 	a, p, task := loopApp(t, runner, "")
@@ -269,6 +276,7 @@ func TestADesignerThatFailsIsAskedAgainAndTheTaskStaysWhereItWas(t *testing.T) {
 }
 
 func TestStoppingAndMessagingATaskWithTheDesigner(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign}}
 	a, p, task := loopApp(t, runner, "")
 	seatDesigner(t, a, p.ID)
@@ -294,6 +302,7 @@ func TestStoppingAndMessagingATaskWithTheDesigner(t *testing.T) {
 }
 
 func TestARestartResumesADesignHandOffOnce(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign}}
 	a, p, task := loopApp(t, runner, "")
 	seatDesigner(t, a, p.ID)
@@ -317,6 +326,7 @@ func TestARestartResumesADesignHandOffOnce(t *testing.T) {
 }
 
 func TestADesignerIsSeatedFromAMemberAloneOrBesideOtherRoles(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	ctx := context.Background()
 	p, _ := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{t.TempDir()}, Brief: core.BriefInput{Goal: "x"}})
@@ -361,6 +371,7 @@ func TestADesignerIsSeatedFromAMemberAloneOrBesideOtherRoles(t *testing.T) {
 }
 
 func TestVisualWorkGoesToTheDesignerBeforeBuilding(t *testing.T) {
+	t.Parallel()
 	researcher := core.Role{Name: "Researcher", Kinds: []string{core.RoleResearcher}}
 	writer := core.Role{Name: "Writer", Kinds: []string{core.RoleImplementer}}
 	designer := core.Role{Name: "Dee", Kinds: []string{core.RoleDesigner}}
@@ -388,6 +399,7 @@ func TestVisualWorkGoesToTheDesignerBeforeBuilding(t *testing.T) {
 }
 
 func TestNoDesignerGuidanceOnlyWhenTheSeatIsMissing(t *testing.T) {
+	t.Parallel()
 	researcher := core.Role{Name: "Researcher", Kinds: []string{core.RoleResearcher}}
 	task := core.Task{Roles: []core.Role{researcher}}
 	prompt := researcherPrompt(core.Project{}, task, nil, nil)

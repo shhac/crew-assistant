@@ -51,6 +51,7 @@ func writerTurnsOf(runner *scriptedRunner) []int {
 // A member who allows the browser has it in every turn they take, whatever
 // the role, told what it is for; a seat no member fills has none.
 func TestAMembersBrowserPolicyReachesTheirTurns(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}}
 	a, _ := browserTeam(t, runner)
 	settle(t, a)
@@ -72,6 +73,7 @@ func TestAMembersBrowserPolicyReachesTheirTurns(t *testing.T) {
 // The policy is read as each turn starts, so withdrawing it takes the
 // browser from the member's next turn without re-seating anyone.
 func TestWithdrawingTheBrowserReachesTheNextTurn(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}}
 	a, ada := browserTeam(t, runner)
 	seat := core.Role{Name: "Ada", Kinds: []string{core.RoleImplementer}, Engine: "claude", Member: ada.ID}
@@ -89,6 +91,7 @@ func TestWithdrawingTheBrowserReachesTheNextTurn(t *testing.T) {
 // When Chrome isn't connected, a turn given the browser goes on without
 // it, told so, rather than failing the task.
 func TestATurnWhoseBrowserIsUnreachableGoesOnWithoutIt(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}, fail: []error{&session.CapabilityError{Engine: harness.Claude, Code: session.CapabilityBrowserToolsMissing, Phase: session.BeforeFirstPrompt}}}
 	a, _ := browserTeam(t, runner)
 	task := settle(t, a)

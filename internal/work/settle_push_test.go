@@ -63,6 +63,7 @@ func stopMidLanding(t *testing.T, a *Loop, p core.Project, task core.Task, metho
 // but before it was recorded, is settled from the target: recorded as
 // landed there, and nothing is pushed a second time.
 func TestAStopWhilePushingRecordsTheChangeAsLanded(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		method string
@@ -143,6 +144,7 @@ func TestAStopWhilePushingRecordsTheChangeAsLanded(t *testing.T) {
 // One stopped before its push went anywhere stays stopped, and main is
 // left as it was.
 func TestAStopBeforePushingLeavesTheTaskStopped(t *testing.T) {
+	t.Parallel()
 	a, p, task, source := pushTask(t)
 	start := ownerGit(t, source, "rev-parse", "main")
 	stopMidLanding(t, a, p, task, "")

@@ -191,6 +191,9 @@ func (lp *Loop) waitQuiet(ctx context.Context) error {
 		}
 		freed := g.freed
 		g.mu.Unlock()
+		if lp.parked != nil {
+			lp.parked()
+		}
 		timer := time.NewTimer(time.Second)
 		select {
 		case <-ctx.Done():

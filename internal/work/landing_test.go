@@ -7,6 +7,7 @@ import (
 )
 
 func TestAnApprovalStandsOnlyThroughCleanMergesOfTheApprovedDraft(t *testing.T) {
+	t.Parallel()
 	revs := func(pairs ...[2]int) []core.Revision {
 		out := []core.Revision{}
 		for _, p := range pairs {

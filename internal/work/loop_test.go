@@ -269,6 +269,7 @@ func openDecision(t *testing.T, a *Loop, task core.Task) core.Decision {
 }
 
 func TestLoopRevisesUntilReviewersPassThenDeliversOnApproval(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{revise, pass}}
 	dest := t.TempDir()
 	a, p, _ := loopApp(t, runner, dest)
@@ -307,6 +308,7 @@ func TestLoopRevisesUntilReviewersPassThenDeliversOnApproval(t *testing.T) {
 }
 
 func TestOwnerChangesQuestionsAndRoundLimits(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{ask, revise, revise, revise, revise, pass}}
 	a, _, _ := loopApp(t, runner, "")
 	ctx := context.Background()
@@ -349,6 +351,7 @@ func TestOwnerChangesQuestionsAndRoundLimits(t *testing.T) {
 // "approve" in answer to what should change must not land the change, and
 // typing "stop" in answer to a question must not stop the request.
 func TestTypedAnswersAreDirectionNotChoices(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass, ask, pass}}
 	a, _, _ := loopApp(t, runner, "")
 	ctx := context.Background()
@@ -380,6 +383,7 @@ func TestTypedAnswersAreDirectionNotChoices(t *testing.T) {
 // A locked keychain is the owner's to unlock, not a failure: the task waits
 // and checks again, however often, without counting failures or asking.
 func TestALockedKeychainWaitsWithoutCountingFailures(t *testing.T) {
+	t.Parallel()
 	locked := &session.UnsupportedError{Engine: "claude", Operation: "login", Code: harness.CodeKeychainUnavailable}
 	runner := &scriptedRunner{fail: []error{locked, locked, locked, locked}, reviews: []string{pass}}
 	a, _, _ := loopApp(t, runner, "")
@@ -399,6 +403,7 @@ func TestALockedKeychainWaitsWithoutCountingFailures(t *testing.T) {
 }
 
 func TestFailuresRetryQuietlyThenAskOnce(t *testing.T) {
+	t.Parallel()
 	boom := errors.New("provider unavailable")
 	runner := &scriptedRunner{fail: []error{boom}, reviews: []string{pass}}
 	a, _, _ := loopApp(t, runner, "")
@@ -429,6 +434,7 @@ func TestFailuresRetryQuietlyThenAskOnce(t *testing.T) {
 }
 
 func TestAPISandboxProofFailureBlocksOnceAcrossTicks(t *testing.T) {
+	t.Parallel()
 	problem := &session.CapabilityError{Engine: harness.OpenAICompatible, Code: session.CapabilityProbeTimeout, Phase: session.BeforeLaunch}
 	runner := &scriptedRunner{fail: []error{problem}}
 	lp, _, queued := loopApp(t, runner, "")
@@ -459,6 +465,7 @@ func TestAPISandboxProofFailureBlocksOnceAcrossTicks(t *testing.T) {
 }
 
 func TestAPIMemberSeatAndBaseSpecKeepProvider(t *testing.T) {
+	t.Parallel()
 	lp := testLoop(t)
 	cfg := lp.Config()
 	cfg.Engines.Providers = []config.Provider{{ID: "fixture-api", HTTPEngine: config.HTTPEngine{BaseURL: "http://127.0.0.1:1234/v1"}}}
@@ -483,6 +490,7 @@ func TestAPIMemberSeatAndBaseSpecKeepProvider(t *testing.T) {
 }
 
 func TestAWriterTurnStartsFromTheLastRevision(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{revise, pass}}
 	runner.onWriter = func(dir string) {
 		if _, err := os.Stat(filepath.Join(dir, "stray.txt")); err == nil {
@@ -509,6 +517,7 @@ func TestAWriterTurnStartsFromTheLastRevision(t *testing.T) {
 }
 
 func TestBriefChangeRechecksBeforeDelivery(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, _ := loopApp(t, runner, "")
 	ctx := context.Background()
@@ -530,6 +539,7 @@ func TestBriefChangeRechecksBeforeDelivery(t *testing.T) {
 }
 
 func TestPausedAndNoDispatchDoNothing(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}}
 	a, _, _ := loopApp(t, runner, "")
 	if progressed, _ := a.loopStep(context.Background(), true); progressed || len(runner.seen) != 0 {
@@ -542,6 +552,7 @@ func TestPausedAndNoDispatchDoNothing(t *testing.T) {
 }
 
 func TestParseVerdictRejectsUnusableReviews(t *testing.T) {
+	t.Parallel()
 	for _, bad := range []string{"", "no json here", `{"outcome":"maybe","summary":"x"}`, `{"outcome":"revise","summary":"x","findings":[]}`, `{"outcome":"question","summary":"x","question":""}`, `{"outcome":"pass","summary":""}`, `{"outcome":"research","summary":"x","question":""}`} {
 		if _, err := parseVerdict(bad, true); err == nil {
 			t.Errorf("accepted %q", bad)
@@ -561,6 +572,7 @@ func TestParseVerdictRejectsUnusableReviews(t *testing.T) {
 }
 
 func TestNearlyUsedSubscriptionHoldsTheRoleWithoutFailing(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}}
 	a, _, _ := loopApp(t, runner, "")
 	used := 95.0
@@ -585,6 +597,7 @@ func TestNearlyUsedSubscriptionHoldsTheRoleWithoutFailing(t *testing.T) {
 // it, such as the owner raising it, without waiting for the usage to reset;
 // a failure's own backoff is never cut short.
 func TestRaisingAUsageLimitLetsHeldWorkGoAtOnce(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}}
 	a, _, _ := loopApp(t, runner, "")
 	used := 95.0
@@ -631,6 +644,7 @@ func TestRaisingAUsageLimitLetsHeldWorkGoAtOnce(t *testing.T) {
 }
 
 func TestStoppingATaskSticksEvenMidTurn(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}}
 	var a *Loop
 	var taskID, projectID string
@@ -666,6 +680,7 @@ func TestStoppingATaskSticksEvenMidTurn(t *testing.T) {
 // Choosing a team wakes the loop, whoever chose it, so queued work that was
 // waiting on a team starts now rather than at the next tick.
 func TestChoosingATeamWakesTheLoop(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	ctx := context.Background()
 	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Notes", Brief: core.BriefInput{Goal: "Notes", Criteria: []string{"Short"}}})
@@ -697,6 +712,7 @@ func TestChoosingATeamWakesTheLoop(t *testing.T) {
 // Stop is the owner's to choose on every decision a task brings them, and it
 // always ends the task for good.
 func TestChoosingStopEndsTheTaskWhateverItWasWaitingOn(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{core.DecisionFailure, core.DecisionQuestion, core.DecisionDelivery, core.DecisionEscalation, core.DecisionUpdate} {
 		for _, resume := range []string{"", core.TaskWriting} {
 			runner := &scriptedRunner{reviews: []string{pass, pass, pass, pass}}
@@ -724,6 +740,7 @@ func TestChoosingStopEndsTheTaskWhateverItWasWaitingOn(t *testing.T) {
 // can't be read doesn't hold Codex, floors of 0 don't read usage at all, and
 // an API engine is never held.
 func TestUsageSettingsBelongToTheirEngine(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	reads := map[harness.Engine]int{}
 	a.meter = &quota.Meter{Inspect: func(_ context.Context, o harness.Provider) (harness.AccountReport, error) {
@@ -752,6 +769,7 @@ func TestUsageSettingsBelongToTheirEngine(t *testing.T) {
 }
 
 func TestNonSandboxCapabilityFailureKeepsItsOwnReason(t *testing.T) {
+	t.Parallel()
 	problem := &session.CapabilityError{Engine: harness.Claude, Code: session.CapabilityLoginUnavailable, Phase: session.BeforeLaunch}
 	lp, _, _ := loopApp(t, &scriptedRunner{fail: []error{problem}}, "")
 	task := settle(t, lp)

@@ -15,6 +15,7 @@ import (
 // The researcher's questions come back to the researcher with the owner's
 // answers, and it plans again before anything is written.
 func TestTheResearcherPlansAgainWithTheOwnersAnswer(t *testing.T) {
+	t.Parallel()
 	a, runner, p := plannedCode(t, 6, `{"summary": "Unclear which colour.", "questions": ["Which colour?"]}`)
 	ctx := context.Background()
 	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Paint it"})
@@ -37,6 +38,7 @@ func TestTheResearcherPlansAgainWithTheOwnersAnswer(t *testing.T) {
 // A checker's question comes back to that checker with the owner's answer,
 // and it decides what happens next: here, that the draft passes as it is.
 func TestTheCheckerThatAskedJudgesAgainWithTheAnswer(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{ask, pass}}
 	a, _, _ := loopApp(t, runner, "")
 	ctx := context.Background()
@@ -61,6 +63,7 @@ func TestTheCheckerThatAskedJudgesAgainWithTheAnswer(t *testing.T) {
 // updates the plan and the task comes back to that reviewer, on the same
 // draft and branch.
 func TestAReviewerSendsTheTaskBackForResearchAndGetsItBack(t *testing.T) {
+	t.Parallel()
 	research := `{"outcome":"research","summary":"The approach is unchecked.","findings":[],"question":"Does the v2 API cover this?"}`
 	a, runner, p := plannedCode(t, 0, plainPlan, `{"summary": "v2 covers it; use it.", "changes": ["use v2"]}`)
 	runner.reviews = []string{research, pass, pass}
@@ -89,6 +92,7 @@ func TestAReviewerSendsTheTaskBackForResearchAndGetsItBack(t *testing.T) {
 // Where a checker recommends another step than its outcome leads to, the
 // PM chooses; without a PM, or when the PM can't say, the checks decide.
 func TestThePMChoosesWhereATaskGoesWhenACheckerRecommendsOtherwise(t *testing.T) {
+	t.Parallel()
 	warmer := `{"outcome":"pass","summary":"Fine.","findings":[],"question":"","next":"revise","note":"I want the closing warmer"}`
 	for _, c := range []struct {
 		name   string
@@ -142,6 +146,7 @@ func TestThePMChoosesWhereATaskGoesWhenACheckerRecommendsOtherwise(t *testing.T)
 // Roles edit their task's title and requirements as their role allows,
 // and leave notes every other role reads.
 func TestRolesEditTheirTaskAndLeaveNotes(t *testing.T) {
+	t.Parallel()
 	a, p, task := loopApp(t, &scriptedRunner{}, "")
 	ctx := context.Background()
 	reviewer := a.toolsFor(task, core.RoleReviewer, core.Role{Name: "Rune"})
@@ -196,6 +201,7 @@ func (r *editingRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result,
 // added while the draft was checked, even by the checker itself, has the
 // draft checked again before it goes on.
 func TestARequirementAddedDuringChecksIsCheckedBeforeTheDraftGoesOn(t *testing.T) {
+	t.Parallel()
 	scripted := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, task := loopApp(t, scripted, "")
 	a.runner = &editingRunner{scriptedRunner: scripted, onCheck: func() {
@@ -232,6 +238,7 @@ func (r *routeEditingRunner) Run(ctx context.Context, spec roles.Spec) (roles.Re
 // A PM that changes the task's requirements while it chooses where the task
 // goes can't send it on unchecked: the draft is checked again first.
 func TestAPMThatEditsTheTaskItRoutesHasItCheckedAgain(t *testing.T) {
+	t.Parallel()
 	warmer := `{"outcome":"pass","summary":"Fine.","findings":[],"question":"","next":"revise","note":"I want the closing warmer"}`
 	scripted := &scriptedRunner{reviews: []string{warmer, pass}, route: []string{`{"next": "land", "reason": "it reads well"}`}}
 	a, _, task, _ := pmTeam(t, scripted)
@@ -254,6 +261,7 @@ func TestAPMThatEditsTheTaskItRoutesHasItCheckedAgain(t *testing.T) {
 // Every note stays readable to the team: the latest are in view, and
 // read_notes pages through the rest.
 func TestRolesReadEveryNoteAPageAtATime(t *testing.T) {
+	t.Parallel()
 	a, p, task := loopApp(t, &scriptedRunner{}, "")
 	ctx := context.Background()
 	for i := 1; i <= 25; i++ {
@@ -297,6 +305,7 @@ func specTools(spec roles.Spec) []string {
 // The researcher and the PM can remove every requirement, the last one
 // included, while an empty value leaves them as they are.
 func TestTheResearcherAndPMCanRemoveEveryRequirement(t *testing.T) {
+	t.Parallel()
 	a, p, task := loopApp(t, &scriptedRunner{}, "")
 	ctx := context.Background()
 	second, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Translate it", Criteria: []string{"The owner's only requirement"}})
@@ -324,6 +333,7 @@ func TestTheResearcherAndPMCanRemoveEveryRequirement(t *testing.T) {
 
 // QA decides what a task waits for, as the researcher does.
 func TestQALinksWhatATaskWaitsFor(t *testing.T) {
+	t.Parallel()
 	a, p, first := loopApp(t, &scriptedRunner{}, "")
 	ctx := context.Background()
 	second, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Translate it"})
@@ -343,6 +353,7 @@ func TestQALinksWhatATaskWaitsFor(t *testing.T) {
 // The PM tidies any task, links any two and queues splits or siblings, a
 // few each look; the owner's links stay theirs.
 func TestThePMTidiesLinksAndQueuesTasks(t *testing.T) {
+	t.Parallel()
 	a, p, first := loopApp(t, &scriptedRunner{}, "")
 	ctx := context.Background()
 	second, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Translate it"})
@@ -390,6 +401,7 @@ func TestThePMTidiesLinksAndQueuesTasks(t *testing.T) {
 // Answering the assistant's question changes nothing, so the PM may leave
 // a note then, but not edit, link or queue.
 func TestThePMAnsweringAQuestionOnlyLeavesNotes(t *testing.T) {
+	t.Parallel()
 	a, p, task := loopApp(t, &scriptedRunner{}, "")
 	answering := a.answerTools(p.ID, core.Role{Name: "Pim"})
 	if got := callTool(t, answering, "add_note", map[string]string{"task_id": task.ID, "text": "Asked about by the assistant."}); got.IsError {

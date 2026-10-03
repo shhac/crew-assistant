@@ -11,6 +11,7 @@ import (
 )
 
 func TestCrossProjectLandingReplansOnceWithoutAnotherQuestion(t *testing.T) {
+	t.Parallel()
 	a, runner, p := plannedCode(t, 6)
 	ctx := context.Background()
 	other, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Library", Template: "draft", Brief: core.BriefInput{Goal: "Publish", Criteria: []string{"Ready"}}})
@@ -53,8 +54,10 @@ func TestCrossProjectLandingReplansOnceWithoutAnotherQuestion(t *testing.T) {
 }
 
 func TestResearchWaitSummaryIsSentBackOnce(t *testing.T) {
+	t.Parallel()
 	for _, outcome := range []string{"still inconsistent", "declared prerequisite", "malformed retry", "malformed both"} {
 		t.Run(outcome, func(t *testing.T) {
+			t.Parallel()
 			missing := `{"summary":"Implementation waits for lib-agent-harness v0.20.0 to be tagged"}`
 			second := missing
 			if outcome == "declared prerequisite" {
@@ -100,6 +103,7 @@ func TestResearchWaitSummaryIsSentBackOnce(t *testing.T) {
 }
 
 func TestParsePrerequisitesAndWaitSummaryGuard(t *testing.T) {
+	t.Parallel()
 	plan, _, _, err := parsePlan(`{"summary":"Use library", "prerequisites":[" lib tagged ","", "Owner ready"]}`, false, false)
 	if err != nil || len(plan.Prerequisites) != 2 || plan.Prerequisites[0].What != "lib tagged" {
 		t.Fatalf("parse %+v %v", plan, err)
@@ -124,6 +128,7 @@ func TestParsePrerequisitesAndWaitSummaryGuard(t *testing.T) {
 }
 
 func TestOtherProjectsAreShownAndPrerequisiteOutcomesCarried(t *testing.T) {
+	t.Parallel()
 	own := core.Task{ID: "own", ProjectID: "a", Objective: "Use library"}
 	same := core.Task{ID: "same", ProjectID: "a", Ref: "A-2", Objective: "Schema", Status: core.TaskQueued}
 	other := core.Task{ID: "other", ProjectID: "b", Ref: "LIB-1", Objective: "Library tag", Status: core.TaskResearching}
@@ -162,6 +167,7 @@ func TestOtherProjectsAreShownAndPrerequisiteOutcomesCarried(t *testing.T) {
 }
 
 func TestWaitSummaryWithExistingDependencyNeedsNoSendBack(t *testing.T) {
+	t.Parallel()
 	a, runner, p := plannedCode(t, 6, `{"summary":"Implementation waits for existing work"}`)
 	ctx := context.Background()
 	dep, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Dependency"})
@@ -217,8 +223,10 @@ var featureSummaries = []string{
 }
 
 func TestFeatureSummariesResearchOnce(t *testing.T) {
+	t.Parallel()
 	for _, summary := range featureSummaries {
 		t.Run(summary, func(t *testing.T) {
+			t.Parallel()
 			reply := fmt.Sprintf(`{"summary":%q}`, summary)
 			a, runner, p := plannedCode(t, 6, reply)
 			queued, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Feature"})
@@ -237,6 +245,7 @@ func TestFeatureSummariesResearchOnce(t *testing.T) {
 }
 
 func TestResearcherOnlyShowsNonemptyTaskGroups(t *testing.T) {
+	t.Parallel()
 	p := core.Project{ID: "app", Title: "App"}
 	lib := core.Project{ID: "lib", Title: "Library"}
 	own := core.Task{ID: "own", ProjectID: p.ID}
@@ -264,6 +273,7 @@ func TestResearcherOnlyShowsNonemptyTaskGroups(t *testing.T) {
 }
 
 func TestClearedPrerequisiteCountsAsDeclaredWait(t *testing.T) {
+	t.Parallel()
 	now := core.Task{}.CreatedAt
 	for _, outcome := range []string{"confirmed", "dropped"} {
 		task := core.Task{Blockers: []core.Blocker{{Kind: core.BlockerPrerequisite, Outcome: outcome, ClearedAt: &now}}}
@@ -274,6 +284,7 @@ func TestClearedPrerequisiteCountsAsDeclaredWait(t *testing.T) {
 }
 
 func TestInvalidResearchDependencyIsSentBack(t *testing.T) {
+	t.Parallel()
 	missing := `{"summary":"Implementation waits for LIB-999 to land","depends_on":["LIB-999"]}`
 	a, runner, p := plannedCode(t, 6, missing, missing)
 	queued, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Use dependency"})
@@ -293,8 +304,10 @@ func TestInvalidResearchDependencyIsSentBack(t *testing.T) {
 }
 
 func TestResolvedPrerequisiteResearchesOnce(t *testing.T) {
+	t.Parallel()
 	for _, outcome := range []string{"confirmed", "dropped"} {
 		t.Run(outcome, func(t *testing.T) {
+			t.Parallel()
 			a, runner, p := plannedCode(t, 6, `{"summary":"Implementation waits for lib v0.20.0, now confirmed"}`)
 			ctx := context.Background()
 			queued, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Use release"})
@@ -330,8 +343,10 @@ func TestResolvedPrerequisiteResearchesOnce(t *testing.T) {
 }
 
 func TestBegunTaskWaitSummaryReturnsToItsChecker(t *testing.T) {
+	t.Parallel()
 	for _, malformed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "JSON", true: "fallback"}[malformed], func(t *testing.T) {
+			t.Parallel()
 			reply := `{"summary":"Implementation waits for the library to be tagged"}`
 			if malformed {
 				reply = "Implementation waits for the library to be tagged."
@@ -372,10 +387,12 @@ func TestBegunTaskWaitSummaryReturnsToItsChecker(t *testing.T) {
 }
 
 func TestAnsweredWaitQuestionIsNotAskedAgain(t *testing.T) {
+	t.Parallel()
 	for _, typed := range []bool{false, true} {
 		for _, malformed := range []bool{false, true} {
 			name := fmt.Sprintf("typed=%v/fallback=%v", typed, malformed)
 			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 				missing := `{"summary":"Implementation waits for the library to be tagged"}`
 				reply := missing
 				if malformed {

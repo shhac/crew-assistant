@@ -16,6 +16,7 @@ func pauseProject(t *testing.T, a *Loop, id string, paused bool) {
 }
 
 func TestProjectPauseIsolatesWorkAndBothPausesHoldIt(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, first := loopApp(t, runner, "")
@@ -64,6 +65,7 @@ func TestProjectPauseIsolatesWorkAndBothPausesHoldIt(t *testing.T) {
 }
 
 func TestProjectPauseLetsRunningStepRecordItsResult(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	started, release := make(chan struct{}), make(chan struct{})
 	runner := &scriptedRunner{reviews: []string{pass}, onWriter: func(string) { close(started); <-release }}
@@ -104,6 +106,7 @@ func TestProjectPauseLetsRunningStepRecordItsResult(t *testing.T) {
 }
 
 func TestProjectPauseHoldsPMAndTriageIncludingNoPM(t *testing.T) {
+	t.Parallel()
 	for _, noPM := range []bool{false, true} {
 		t.Run(map[bool]string{false: "PM", true: "no PM"}[noPM], func(t *testing.T) {
 			ctx := context.Background()
@@ -141,6 +144,7 @@ func TestProjectPauseHoldsPMAndTriageIncludingNoPM(t *testing.T) {
 }
 
 func TestProjectPauseHoldsOwnerAnswerAndReviewerMessage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, task := loopApp(t, runner, "")
@@ -186,6 +190,7 @@ func TestProjectPauseHoldsOwnerAnswerAndReviewerMessage(t *testing.T) {
 }
 
 func TestProjectPauseHoldsRecordSettlementsUntilResume(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, p, first := loopApp(t, &scriptedRunner{}, "")
 	a.Build = func() (string, bool) { return "synthetic-build", true }

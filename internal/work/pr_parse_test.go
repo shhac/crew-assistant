@@ -12,6 +12,7 @@ import (
 // A pr or pr-reply block the implementer got wrong is told back to it, and
 // nothing half-read is acted on.
 func TestPRBlocksTellTheImplementerWhatWasWrong(t *testing.T) {
+	t.Parallel()
 	for block, want := range map[string]string{
 		`not json`:                     "not valid JSON",
 		`{"title": "  ", "body": "b"}`: `needs a "title" and a "body"`,
@@ -37,6 +38,7 @@ func TestPRBlocksTellTheImplementerWhatWasWrong(t *testing.T) {
 // every thread resolved and checks done is ready, and feedback that says
 // nothing isn't counted as ignored.
 func TestWhatTheLoopObservesOfAPullRequest(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	green := []github.Check{{Status: "COMPLETED", Conclusion: "SUCCESS"}}
 	ready := github.PR{State: "OPEN", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN", Checks: green}

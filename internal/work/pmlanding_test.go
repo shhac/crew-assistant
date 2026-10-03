@@ -114,6 +114,7 @@ func passes(n int) []string {
 }
 
 func TestWithoutThePMOptionTheOwnerStillApproves(t *testing.T) {
+	t.Parallel()
 	for _, approve := range []string{"", core.ApproveBefore} {
 		w := newPMPush(t, approve, "", passes(4)...)
 		task, _ := w.a.Core.QueueTask(context.Background(), w.p.ID, core.TaskInput{Objective: "Add A"})
@@ -128,6 +129,7 @@ func TestWithoutThePMOptionTheOwnerStillApproves(t *testing.T) {
 }
 
 func TestThePMLandsASignedOffChangeOnAPushProject(t *testing.T) {
+	t.Parallel()
 	w := newPMPush(t, core.ApprovePM, "", passes(4)...)
 	w.runner.pmLand = []string{`{"land": true, "reason": "nothing else waits on main"}`}
 	ctx := context.Background()
@@ -183,6 +185,7 @@ func (w pmPush) branchLeft(t *testing.T, task core.Task) bool {
 // The PM may land a change keeping the team's own commits: main moves
 // forward onto them as they are, and the branch is cleaned up as well.
 func TestThePMCanLandAChangeKeepingItsCommits(t *testing.T) {
+	t.Parallel()
 	w := newPMPush(t, core.ApprovePM, "", pass, qaFailOnce, pass, pass)
 	w.runner.pmLand = []string{`{"land": true, "how": "fast-forward", "reason": "both drafts read well on their own"}`}
 	ctx := context.Background()
@@ -208,6 +211,7 @@ func TestThePMCanLandAChangeKeepingItsCommits(t *testing.T) {
 // The owner lands a signed-off change themselves while the PM is still
 // deciding; the PM's answer, arriving after, changes nothing.
 func TestTheOwnerCanLandAheadOfThePM(t *testing.T) {
+	t.Parallel()
 	w := newPMPush(t, core.ApprovePM, "", passes(2)...)
 	w.runner.pmLand = []string{`{"land": false, "reason": "wait for the schema"}`}
 	ctx := context.Background()
@@ -233,6 +237,7 @@ func TestTheOwnerCanLandAheadOfThePM(t *testing.T) {
 }
 
 func TestThePMHoldsAChangeAndTheOwnerCanLandIt(t *testing.T) {
+	t.Parallel()
 	w := newPMPush(t, core.ApprovePM, "", passes(4)...)
 	w.runner.pmLand = []string{"```json\n{\"land\": false, \"reason\": \"the API change should land first\"}\n```"}
 	ctx := context.Background()
@@ -262,6 +267,7 @@ func TestThePMHoldsAChangeAndTheOwnerCanLandIt(t *testing.T) {
 }
 
 func TestThePMIsNotAskedAboutAChangeThatIsNotSignedOff(t *testing.T) {
+	t.Parallel()
 	w := newPMPush(t, core.ApprovePM, "", ask, pass)
 	ctx := context.Background()
 	// A reviewer's question goes to the owner, not the PM.
@@ -294,6 +300,7 @@ func TestThePMIsNotAskedAboutAChangeThatIsNotSignedOff(t *testing.T) {
 // A new branch lands nothing, so there is nothing for the PM to decide; a
 // push lands, and a pull request merges, on the PM's word.
 func TestABranchProjectCannotLeaveLandingToThePM(t *testing.T) {
+	t.Parallel()
 	w := newPMPush(t, "", "")
 	ctx := context.Background()
 	if _, err := w.a.SetLanding(ctx, w.p.ID, core.LandPolicy{Via: core.LandBranch, Approve: core.ApprovePM}); err == nil || !strings.Contains(err.Error(), "only for changes that land by push or pull request") {
@@ -307,6 +314,7 @@ func TestABranchProjectCannotLeaveLandingToThePM(t *testing.T) {
 // The owner takes the decision back from the PM while a task is under way:
 // it comes to them, although the task started while the PM decided.
 func TestTheOwnerCanTakeTheDecisionBack(t *testing.T) {
+	t.Parallel()
 	w := newPMPush(t, core.ApprovePM, "", passes(4)...)
 	ctx := context.Background()
 	w.runner.onCheck = func() {
@@ -328,6 +336,7 @@ func TestTheOwnerCanTakeTheDecisionBack(t *testing.T) {
 // A PM that cannot answer leaves the decision to the owner, who can stop
 // the task.
 func TestAnUnreadablePMLeavesTheLandingToTheOwner(t *testing.T) {
+	t.Parallel()
 	w := newPMPush(t, core.ApprovePM, "", passes(2)...)
 	w.runner.pmLand = []string{"land it, I think", `{"land": true}`}
 	ctx := context.Background()
@@ -350,6 +359,7 @@ func TestAnUnreadablePMLeavesTheLandingToTheOwner(t *testing.T) {
 // the implementer for fresh checks and a new PM decision, without counting
 // the conflict as a failed landing.
 func TestRepeatedLandingConflictsStayWithTheTeam(t *testing.T) {
+	t.Parallel()
 	w := newPMPush(t, core.ApprovePM, "", passes(16)...)
 	conflicts := 0
 	w.runner.onPMLand = func() {
@@ -378,6 +388,7 @@ func TestRepeatedLandingConflictsStayWithTheTeam(t *testing.T) {
 // to the implementer with QA's findings; at the round limit, the owner
 // decides rather than the PM.
 func TestAFailedCheckOnTheMergedResultGoesBackThenToTheOwner(t *testing.T) {
+	t.Parallel()
 	qaFail := `{"outcome":"revise","summary":"make check failed after the merge.","findings":[{"criterion":"make check","note":"owner.go and feature.go both declare Helper"}],"question":""}`
 	w := newPMPush(t, core.ApprovePM, "2", pass, pass, qaFail, pass, pass)
 	w.runner.onPMLand = func() {
@@ -406,6 +417,7 @@ func TestAFailedCheckOnTheMergedResultGoesBackThenToTheOwner(t *testing.T) {
 // A daemon that stops after the PM decided never asks again or lands twice:
 // here the push went out before it stopped, and the restart finds it there.
 func TestARestartAfterThePMDecidedNeverLandsTwice(t *testing.T) {
+	t.Parallel()
 	w := newPMPush(t, core.ApprovePM, "", passes(4)...)
 	ctx := context.Background()
 	task, _ := w.a.Core.QueueTask(ctx, w.p.ID, core.TaskInput{Objective: "Add A"})
@@ -441,6 +453,7 @@ func TestARestartAfterThePMDecidedNeverLandsTwice(t *testing.T) {
 }
 
 func TestPMLandingStillBoundsRepeatedTargetMovement(t *testing.T) {
+	t.Parallel()
 	w := newPMPush(t, core.ApprovePM, "", passes(24)...)
 	n := 0
 	w.runner.onPMLand = func() {

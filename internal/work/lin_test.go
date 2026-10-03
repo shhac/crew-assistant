@@ -14,6 +14,7 @@ import (
 )
 
 func TestPMLinOfferedLinkedOnlyAndChecksCurrentAuthority(t *testing.T) {
+	t.Parallel()
 	lp, p, task := loopApp(t, &scriptedRunner{}, "")
 	ctx := context.Background()
 	if pm := lp.managerTools(p.ID, core.Role{}); slices.Contains(toolNames(pm), "lin") || strings.Contains(pm.guide(), "Use the lin tool") {

@@ -121,6 +121,7 @@ func taskByID(t *testing.T, a *Loop, id string) core.Task {
 // Two tasks written by the same member each carry on their own
 // conversation, and neither's prompts, replies or session reach the other.
 func TestTwoTasksOfOneMemberNeverShareAConversation(t *testing.T) {
+	t.Parallel()
 	runner := &threadRunner{reviews: map[string][]string{
 		"Picnic note":  {revise, pass},
 		"Harbour note": {revise, pass},
@@ -196,6 +197,7 @@ func TestTwoTasksOfOneMemberNeverShareAConversation(t *testing.T) {
 // every finding of the latest draft: a resumed conversation has never seen
 // them, so they follow the merge, once, however the round starts.
 func TestACatchUpDuringARevisionStillCarriesItsFindings(t *testing.T) {
+	t.Parallel()
 	p := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit}}
 	task := core.Task{Objective: "Add Feature", Base: "abc",
 		Revisions: []core.Revision{{N: 1, Summary: "First try"}, {N: 2, Summary: "Second try"}},
@@ -230,6 +232,7 @@ func TestACatchUpDuringARevisionStillCarriesItsFindings(t *testing.T) {
 // Catching up a draft that passed, to land it, owes only the merge: the
 // history carries its checks, and nothing asks for more changes.
 func TestACatchUpBeforeLandingOwesOnlyTheMerge(t *testing.T) {
+	t.Parallel()
 	p := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit}}
 	task := core.Task{Objective: "Add Feature", Base: "abc",
 		Revisions: []core.Revision{{N: 1, Summary: "First try"}},
@@ -258,6 +261,7 @@ func otherSecret(secret string) string {
 // from the task's record, and leaves the first seat's conversation for it
 // to carry on when it takes the task back.
 func TestOnlyTheSameMemberOnTheSameEngineAndModelCarriesOnAConversation(t *testing.T) {
+	t.Parallel()
 	const task = "Thank-you note"
 	runner := &threadRunner{reviews: map[string][]string{task: {revise, revise, revise, revise, pass}}}
 	a, p, taskRecord := loopApp(t, &scriptedRunner{}, "")
@@ -359,6 +363,7 @@ func crashingSettle(t *testing.T, a *Loop) {
 // round it recorded: a round cut off mid-turn runs once more, neither lost
 // nor recorded twice, and never in another task's conversation.
 func TestARestartCarriesEachTaskOnInItsOwnConversation(t *testing.T) {
+	t.Parallel()
 	runner := &threadRunner{reviews: map[string][]string{
 		// The reviewer that asked judges the draft again with the answer.
 		"Picnic note":  {ask, revise, pass},

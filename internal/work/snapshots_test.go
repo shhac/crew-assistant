@@ -76,6 +76,7 @@ func (lp *Loop) testMedium(t *testing.T, projectID, taskID string) (gitMedium, c
 // while the implementer works on another task in that task's clone, and on
 // this task's next draft in its own; every verdict names what it checked.
 func TestAChecksCopyHoldsStillWhileTheImplementerWorksOn(t *testing.T) {
+	t.Parallel()
 	a, code, p, task := codeTask(t, pass, pass)
 	ctx := context.Background()
 	var checked []string
@@ -129,6 +130,7 @@ func TestAChecksCopyHoldsStillWhileTheImplementerWorksOn(t *testing.T) {
 // A check that changes the copy it was given has its verdict discarded, and
 // runs again; only the check of the unchanged draft counts.
 func TestACheckThatChangesItsCopyIsDiscardedAndRunsAgain(t *testing.T) {
+	t.Parallel()
 	a, code, p, task := codeTask(t, pass, pass, pass)
 	ctx := context.Background()
 	tampered := false
@@ -166,6 +168,7 @@ func TestACheckThatChangesItsCopyIsDiscardedAndRunsAgain(t *testing.T) {
 // of its own that is never moved; one that can't be handed over is not
 // recorded, and the round runs again on a fresh attempt.
 func TestADraftCountsOnlyOnceTheProjectsCloneHoldsIt(t *testing.T) {
+	t.Parallel()
 	a, _, p, task := codeTask(t, pass, pass)
 	ctx := context.Background()
 	for task.Status != core.TaskWriting {
@@ -253,6 +256,7 @@ func restart(t *testing.T, a *Loop) *Loop {
 // before, or with the draft gone, the round runs again. Either way no ref is
 // left that no revision records.
 func TestARestartMidHandoffNeitherLosesNorRepeatsADraft(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	recorded := func(t *testing.T, a *Loop, p core.Project, task core.Task, h core.Handoff) {
 		t.Helper()
@@ -283,12 +287,14 @@ func TestARestartMidHandoffNeitherLosesNorRepeatsADraft(t *testing.T) {
 		}
 	}
 	t.Run("before publishing", func(t *testing.T) {
+		t.Parallel()
 		a, p, task, _, h := handoffAt(t)
 		a = restart(t, a)
 		recorded(t, a, p, task, h)
 		recorded(t, restart(t, a), p, task, h)
 	})
 	t.Run("after publishing", func(t *testing.T) {
+		t.Parallel()
 		a, p, task, m, h := handoffAt(t)
 		if err := m.publish(ctx, task, h.Revision.Ref, h.Name); err != nil {
 			t.Fatal(err)
@@ -296,6 +302,7 @@ func TestARestartMidHandoffNeitherLosesNorRepeatsADraft(t *testing.T) {
 		recorded(t, restart(t, a), p, task, h)
 	})
 	t.Run("after recording", func(t *testing.T) {
+		t.Parallel()
 		a, p, task, m, h := handoffAt(t)
 		if err := m.publish(ctx, task, h.Revision.Ref, h.Name); err != nil {
 			t.Fatal(err)
@@ -306,6 +313,7 @@ func TestARestartMidHandoffNeitherLosesNorRepeatsADraft(t *testing.T) {
 		recorded(t, restart(t, a), p, task, h)
 	})
 	t.Run("with the draft lost", func(t *testing.T) {
+		t.Parallel()
 		a, p, task, m, _ := handoffAt(t)
 		if err := m.repo.RemoveTask(task.ID); err != nil {
 			t.Fatal(err)
@@ -313,6 +321,7 @@ func TestARestartMidHandoffNeitherLosesNorRepeatsADraft(t *testing.T) {
 		rerun(t, restart(t, a), p, task)
 	})
 	t.Run("with the ref taken", func(t *testing.T) {
+		t.Parallel()
 		a, p, task, m, h := handoffAt(t)
 		if err := m.repo.Publish(ctx, m.repo, task.Base, h.Name); err != nil {
 			t.Fatal(err)
@@ -320,6 +329,7 @@ func TestARestartMidHandoffNeitherLosesNorRepeatsADraft(t *testing.T) {
 		rerun(t, restart(t, a), p, task)
 	})
 	t.Run("before the intent was stored", func(t *testing.T) {
+		t.Parallel()
 		a, p, task, _, h := handoffAt(t)
 		a.dropHandoff(ctx, task.ID, h.Name)
 		rerun(t, restart(t, a), p, task)
@@ -330,6 +340,7 @@ func TestARestartMidHandoffNeitherLosesNorRepeatsADraft(t *testing.T) {
 // the project's clone holds it only once its handoff publishes it; a daemon
 // stopped after storing the intent records it once on starting again.
 func TestACleanCatchUpIsHandedOverAsADraftIs(t *testing.T) {
+	t.Parallel()
 	a, _, p, task := codeTask(t, pass, pass)
 	ctx := context.Background()
 	task = settleCode(t, a, task.ID)
@@ -377,6 +388,7 @@ func TestACleanCatchUpIsHandedOverAsADraftIs(t *testing.T) {
 // The implementer's next task gets a clone and branch of its own; the one
 // before keeps its own until it finishes, and nothing is left of it after.
 func TestEachTaskGetsItsOwnCloneAndBranch(t *testing.T) {
+	t.Parallel()
 	a, _, p, first := codeTask(t, passes(8)...)
 	ctx := context.Background()
 	second, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add Other"})
@@ -430,6 +442,7 @@ func TestEachTaskGetsItsOwnCloneAndBranch(t *testing.T) {
 // asked the checker, no new draft can replace it; the check that was asked
 // for judges the draft it was given.
 func TestNoDraftReplacesOneBeingChecked(t *testing.T) {
+	t.Parallel()
 	a, code, p, task := codeTask(t, pass, pass, pass)
 	ctx := context.Background()
 	var refused []error
@@ -463,6 +476,7 @@ func TestNoDraftReplacesOneBeingChecked(t *testing.T) {
 // Checks and landing read only what the project's clone keeps: with the
 // task's own clone gone, the draft is still checked and lands.
 func TestChecksAndLandingNeedNoTaskClone(t *testing.T) {
+	t.Parallel()
 	a, _, p, task := codeTask(t, pass, pass)
 	ctx := context.Background()
 	for task.Status != core.TaskReviewing {
@@ -490,6 +504,7 @@ func TestChecksAndLandingNeedNoTaskClone(t *testing.T) {
 // Written work has a workspace per task too, and its verdicts name the
 // draft they checked by its digest.
 func TestADocumentsVerdictNamesTheDraftItChecked(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{revise, pass}}
 	a, p, task := loopApp(t, runner, "")
 	task = settle(t, a)
@@ -544,6 +559,7 @@ func docsTaskWithQA(t *testing.T, reviews ...string) (*Loop, *scriptedRunner, co
 // to a scratch folder; the copy stays exactly the draft while the writer
 // works on the next draft and on another task, and the verdict names it.
 func TestDocumentQAChecksACopyThatHoldsStill(t *testing.T) {
+	t.Parallel()
 	a, scripted, p, task := docsTaskWithQA(t, pass)
 	docs, err := localdocs.Open(p.ScratchDirectory)
 	if err != nil {
@@ -599,6 +615,7 @@ func TestDocumentQAChecksACopyThatHoldsStill(t *testing.T) {
 // Document QA that changes its copy of the draft has its verdict discarded,
 // and runs again.
 func TestDocumentQAThatChangesItsCopyIsDiscarded(t *testing.T) {
+	t.Parallel()
 	a, scripted, _, task := docsTaskWithQA(t, pass)
 	tampered := false
 	a.runner = docsQARunner{scriptedRunner: scripted, onQA: func(spec roles.Spec) string {
@@ -628,6 +645,7 @@ func TestDocumentQAThatChangesItsCopyIsDiscarded(t *testing.T) {
 // A pass carried over to a clean catch-up keeps naming the draft it checked,
 // and the task's record says so where that is not the draft it counts for.
 func TestACarriedOverPassNamesWhatItChecked(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	checked := strings.Repeat("a", 40)
 	carried := carriedOver([]core.Verdict{{Revision: 1, Ref: checked, Role: "Reviewer", Outcome: core.VerdictPass, BriefVersion: 1, Summary: "Fine."}}, 1, 2, func(seat string) string { return seat }, map[string]bool{"Reviewer": true}, 1, now)
@@ -647,6 +665,7 @@ func TestACarriedOverPassNamesWhatItChecked(t *testing.T) {
 // A team whose check writes into the tree it runs in has QA run it in a
 // writable copy in its scratch folder; the draft checked stays as recorded.
 func TestQACanRunTheCheckInAWritableCopy(t *testing.T) {
+	t.Parallel()
 	a, code, p, task := codeTask(t, pass, pass)
 	ctx := context.Background()
 	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", CheckInCopy: "yes"}); err != nil {
@@ -677,6 +696,7 @@ func TestQACanRunTheCheckInAWritableCopy(t *testing.T) {
 // implementer, which runs the tests before handing over, are let; the
 // reviewer isn't. Saving the team again without saying keeps the setting.
 func TestQAsCheckCanUseThisMachinesNetwork(t *testing.T) {
+	t.Parallel()
 	a, code, p, task := codeTask(t, pass, pass)
 	ctx := context.Background()
 	quinn, err := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Quinn", Kinds: []string{core.RoleQA}, Engine: "claude"})
@@ -714,6 +734,7 @@ func TestQAsCheckCanUseThisMachinesNetwork(t *testing.T) {
 // them onto the project's team as it is now, such as a QA whose engine can
 // run the check; never one queued or being worked on.
 func TestATaskWaitingForTheOwnerCanTakeOnTheProjectsTeam(t *testing.T) {
+	t.Parallel()
 	a, _, p, task := codeTask(t, pass, ask)
 	ctx := context.Background()
 	if _, err := a.UseProjectTeam(ctx, p.ID, task.ID); !errors.Is(err, core.ErrConflict) {
@@ -753,6 +774,7 @@ func snapshotOf(t *testing.T, a *Loop) core.Snapshot {
 }
 
 func TestRestartRecordsResolvedDraftBaseTogether(t *testing.T) {
+	t.Parallel()
 	a, p, task, _, _ := handoffAt(t)
 	_, err := a.Core.UpdateTask(context.Background(), task.ID, func(task *core.Task, _ *core.Project) (string, error) {
 		task.Handoff.DraftCatchUp = &core.DraftCatchUp{Base: "new-base", From: "main", What: "main moved on since this request started (it is now at abc1234)", Conflicts: []string{"feature.go"}}

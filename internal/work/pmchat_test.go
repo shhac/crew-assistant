@@ -22,6 +22,7 @@ func (r pmChatRunner) Run(ctx context.Context, s roles.Spec) (roles.Result, erro
 	return r.run(ctx, s)
 }
 func TestPMChatRepliesInProjectWhilePaused(t *testing.T) {
+	t.Parallel()
 	for _, global := range []bool{false, true} {
 		t.Run(map[bool]string{false: "project", true: "all"}[global], func(t *testing.T) {
 			lp, p, first, _ := pmTeam(t, &scriptedRunner{})
@@ -67,6 +68,7 @@ func TestPMChatRepliesInProjectWhilePaused(t *testing.T) {
 	}
 }
 func TestPMChatToolsAndPartialFailureReceipts(t *testing.T) {
+	t.Parallel()
 	for _, fail := range []bool{false, true} {
 		t.Run(map[bool]string{false: "reply", true: "partial failure"}[fail], func(t *testing.T) {
 			lp, p, first, second := pmTeam(t, &scriptedRunner{})
@@ -123,6 +125,7 @@ func TestPMChatToolsAndPartialFailureReceipts(t *testing.T) {
 	}
 }
 func TestPMChatWaitsOnBusySeatAndSeesEarlierReplies(t *testing.T) {
+	t.Parallel()
 	lp, p, _, _ := pmTeam(t, &scriptedRunner{})
 	ctx := context.Background()
 	lp.Core.SetPaused(ctx, true)
@@ -165,6 +168,7 @@ func TestPMChatWaitsOnBusySeatAndSeesEarlierReplies(t *testing.T) {
 }
 
 func TestPMChatOrderConflictAddsNoReceiptAndToolsStayScoped(t *testing.T) {
+	t.Parallel()
 	lp, p, first, second := pmTeam(t, &scriptedRunner{})
 	ctx := context.Background()
 	changes := &pmChatChanges{}
@@ -192,6 +196,7 @@ func TestPMChatOrderConflictAddsNoReceiptAndToolsStayScoped(t *testing.T) {
 }
 
 func TestPMChatWaitsForPMUsageAllowance(t *testing.T) {
+	t.Parallel()
 	lp, p, _, _ := pmTeam(t, &scriptedRunner{})
 	ctx := context.Background()
 	lp.Core.SetPaused(ctx, true)
@@ -207,6 +212,7 @@ func TestPMChatWaitsForPMUsageAllowance(t *testing.T) {
 }
 
 func TestPMChatHistoryOnlyCompletedEarlierExchanges(t *testing.T) {
+	t.Parallel()
 	snap := core.Snapshot{PMChats: []core.PMChatMessage{
 		{ID: "first", ProjectID: "p", From: "owner", Text: "Earlier question", Status: "answered"},
 		{ID: "failed", ProjectID: "p", From: "owner", Text: "Failed question", Status: "failed"},
@@ -236,6 +242,7 @@ func TestPMChatHistoryOnlyCompletedEarlierExchanges(t *testing.T) {
 }
 
 func TestPMChatThreadHistoryIsSeparateWhileThePMLookSeesProjectPriorities(t *testing.T) {
+	t.Parallel()
 	var snap core.Snapshot
 	for _, conversation := range []string{"", "slack-thread-one", "slack-thread-two"} {
 		id := "question-" + conversation

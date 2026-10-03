@@ -35,6 +35,7 @@ func call(t *testing.T, a *Loop, tool string, in map[string]string) any {
 }
 
 func TestTheAssistantWaitsOnSeveralThingsAndCancelsWhatItNoLongerNeeds(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	ctx := context.Background()
 	repo := t.TempDir()

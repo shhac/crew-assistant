@@ -17,6 +17,7 @@ import (
 // The implementer answers a thread that needs no change on the pull request
 // itself, signed, and resolves it; nothing it posts is taken for feedback.
 func TestTheImplementerAnswersAThreadOnThePullRequest(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2)
 	s.open(t)
 	s.runner.onEdit = func(_ string, n int) bool { return n == 1 }
@@ -49,6 +50,7 @@ func TestTheImplementerAnswersAThreadOnThePullRequest(t *testing.T) {
 // A question about trying the product can go to QA, whose answer is posted
 // on the pull request in its own name.
 func TestTheImplementerHandsAPullRequestQuestionToQA(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 3)
 	s.open(t)
 	s.runner.onEdit = func(_ string, n int) bool { return n == 1 }
@@ -73,6 +75,7 @@ func TestTheImplementerHandsAPullRequestQuestionToQA(t *testing.T) {
 // Handed to the PM, a pull request question can be answered there and put
 // to the owner.
 func TestThePMAnswersAPullRequestQuestionAndAsksTheOwner(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2, withPM)
 	s.open(t)
 	s.runner.onEdit = func(_ string, n int) bool { return n == 1 }
@@ -104,6 +107,7 @@ func TestThePMAnswersAPullRequestQuestionAndAsksTheOwner(t *testing.T) {
 // the same account; neither it nor the reply is feedback, so the team's own
 // answer never starts another round.
 func TestTheTeamsOwnThreadReplyStartsNoRound(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2)
 	s.open(t)
 	s.runner.onEdit = func(_ string, n int) bool { return n == 1 }
@@ -139,6 +143,7 @@ func TestTheTeamsOwnThreadReplyStartsNoRound(t *testing.T) {
 // A reply posted in the same look as new feedback arrives is posted once:
 // answering the feedback never puts back what was already posted.
 func TestAPostedReplyIsNotPostedAgainWhenFeedbackArrivesInTheSameLook(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 4)
 	s.open(t)
 	if _, err := s.a.Core.UpdateTask(s.ctx, s.id, func(t *core.Task, _ *core.Project) (string, error) {
@@ -161,6 +166,7 @@ func TestAPostedReplyIsNotPostedAgainWhenFeedbackArrivesInTheSameLook(t *testing
 // teammate's answer is posted first, so a thread is never resolved for a fix
 // a reviewer then turns down.
 func TestRepliesWithADraftWaitForItsPushEvenWhenQAAnswersFirst(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 4)
 	s.open(t)
 	snap, _ := s.a.Core.Snapshot(s.ctx)
@@ -187,6 +193,7 @@ func TestRepliesWithADraftWaitForItsPushEvenWhenQAAnswersFirst(t *testing.T) {
 // A reply GitHub keeps refusing, such as one to a thread that doesn't exist,
 // is given up after a few looks rather than holding the pull request.
 func TestAReplyGitHubKeepsRefusingIsGivenUp(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2)
 	s.open(t)
 	run := s.a.github.Run

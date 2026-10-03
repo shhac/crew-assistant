@@ -16,6 +16,7 @@ import (
 )
 
 func TestDaemonVersionConditionsFindSquashAndPreservedLandings(t *testing.T) {
+	t.Parallel()
 	for _, squash := range []bool{true, false} {
 		t.Run(map[bool]string{true: "squash", false: "keep"}[squash], func(t *testing.T) {
 			ctx := context.Background()
@@ -90,6 +91,7 @@ func TestDaemonVersionConditionsFindSquashAndPreservedLandings(t *testing.T) {
 }
 
 func TestDaemonCheckWaitsForLandingAndRetriesErrorsWithoutEscalation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	lp, _, _ := loopApp(t, &scriptedRunner{}, "")
 	p := codeProject(t, lp, ownerRepo(t))
@@ -150,6 +152,7 @@ func TestDaemonCheckWaitsForLandingAndRetriesErrorsWithoutEscalation(t *testing.
 }
 
 func TestPMBlockerToolsAndPrompts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	lp, p, task := loopApp(t, &scriptedRunner{}, "")
 	pm := lp.managerTools(p.ID, core.Role{})
@@ -187,6 +190,7 @@ func TestPMBlockerToolsAndPrompts(t *testing.T) {
 }
 
 func TestPMListPromptIncludesOwnerConditions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	lp, p, task := loopApp(t, &scriptedRunner{}, "")
 	if _, err := lp.SetBlocker(ctx, core.BlockerInput{Project: p.ID, Task: task.ID, Kind: core.BlockerManual, Description: "a new build", By: core.LinkedByOwner}); err != nil {
@@ -201,6 +205,7 @@ func TestPMListPromptIncludesOwnerConditions(t *testing.T) {
 }
 
 func TestBlockerAddedAfterClaimStillStopsPullRequestMerge(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	lp, p, task := loopApp(t, &scriptedRunner{}, "")
 	task, err := lp.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
@@ -244,6 +249,7 @@ func TestBlockerAddedAfterClaimStillStopsPullRequestMerge(t *testing.T) {
 
 // A successful merge request can mean queued, rather than actually merged.
 func TestSuccessfulMergeRequestReleasesDeliveryMarkAndKeepsBlockersEffective(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	lp, p, task := loopApp(t, &scriptedRunner{}, "")
 	task, err := lp.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
@@ -301,6 +307,7 @@ func (m *blockedDeliveryMedium) deliver(context.Context, core.Task, core.Revisio
 }
 
 func TestBlockerAddedAfterClaimStopsLocalDeliveryQuietly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	lp, p, task := loopApp(t, &scriptedRunner{}, "")
 	task, err := lp.Core.UpdateTask(ctx, task.ID, func(t *core.Task, p *core.Project) (string, error) {
@@ -331,6 +338,7 @@ func TestBlockerAddedAfterClaimStopsLocalDeliveryQuietly(t *testing.T) {
 }
 
 func TestLandTaskRefusesBlockedDeliveredChange(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	lp, p, task := loopApp(t, &scriptedRunner{}, "")
 	if _, err := lp.SetBlocker(ctx, core.BlockerInput{Project: p.ID, Task: task.ID, Kind: core.BlockerManual, Description: "a new build", LandingOnly: true, By: core.LinkedByOwner}); err != nil {
@@ -350,6 +358,7 @@ func TestLandTaskRefusesBlockedDeliveredChange(t *testing.T) {
 }
 
 func TestStoppedAndRemovedDaemonTargetsLeaveAReasonWithoutGit(t *testing.T) {
+	t.Parallel()
 	for _, removed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "stopped", true: "removed"}[removed], func(t *testing.T) {
 			ctx := context.Background()
@@ -401,6 +410,7 @@ func TestStoppedAndRemovedDaemonTargetsLeaveAReasonWithoutGit(t *testing.T) {
 }
 
 func TestBlockerContextDistinguishesOwnerAndAssistant(t *testing.T) {
+	t.Parallel()
 	for _, by := range []string{core.LinkedByOwner, core.LinkedByAssistant} {
 		lines := strings.Join(blockerLines(core.Task{Blockers: []core.Blocker{{ID: "b", Kind: core.BlockerManual, Description: "ready", By: by}}}), "\n")
 		if !strings.Contains(lines, "(set by the "+by+")") {
@@ -410,6 +420,7 @@ func TestBlockerContextDistinguishesOwnerAndAssistant(t *testing.T) {
 }
 
 func TestPMLandingWaitsForExternalConditionWithoutOwnerDecision(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{core.BlockerManual, core.BlockerDaemonIncludes} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := context.Background()

@@ -38,6 +38,7 @@ func seatsHolding(pb core.Playbook, kind string) []string {
 // the role's last, and someone already in it a seat alike beside theirs, to
 // run a second step at once.
 func TestSomeoneAddedToARoleGetsASeatInIt(t *testing.T) {
+	t.Parallel()
 	pb := codePlaybook()
 	snap := roleCrew()
 	for _, add := range []string{"ada", "sol", "ada", ""} {
@@ -59,6 +60,7 @@ func TestSomeoneAddedToARoleGetsASeatInIt(t *testing.T) {
 // seat, as one person, unless both roles do the work: a seat implements,
 // reviews or runs QA, never two of them.
 func TestSomeoneOnTheTeamTakesAnotherRoleInTheirSeatWhereTheyCan(t *testing.T) {
+	t.Parallel()
 	pb := codePlaybook()
 	snap := roleCrew()
 	if err := addToRole(&pb, core.RoleImplementer, "ada", snap); err != nil {
@@ -86,6 +88,7 @@ func TestSomeoneOnTheTeamTakesAnotherRoleInTheirSeatWhereTheyCan(t *testing.T) {
 }
 
 func TestATeamKeepsOnePMAndOnlyMembersWhoHoldTheRole(t *testing.T) {
+	t.Parallel()
 	pb := codePlaybook()
 	snap := roleCrew()
 	if err := addToRole(&pb, core.RolePM, "pia", snap); err != nil {
@@ -105,6 +108,7 @@ func TestATeamKeepsOnePMAndOnlyMembersWhoHoldTheRole(t *testing.T) {
 // Removing someone from a role takes their seat, or only that role where
 // the seat holds others; the team keeps an implementer and a reviewer.
 func TestSomeoneRemovedFromARoleKeepsTheirOtherRoles(t *testing.T) {
+	t.Parallel()
 	pb := codePlaybook()
 	snap := roleCrew()
 	for _, kind := range []string{core.RoleImplementer, core.RoleResearcher} {

@@ -28,6 +28,7 @@ func spentReading(engine harness.Engine) harness.AccountReport {
 
 // The sidebar reads the meter the hold reads, and says the same thing of it.
 func TestUsageAgreesWithTheHold(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	a.meter = &quota.Meter{Inspect: func(_ context.Context, o harness.Provider) (harness.AccountReport, error) {
 		return spentReading(o.Engine), nil
@@ -47,6 +48,7 @@ func TestUsageAgreesWithTheHold(t *testing.T) {
 // A check that fails after a login was measured spent measures nothing, so
 // the sidebar still shows it out of usage, as the small models still skip it.
 func TestUsageStaysOutUntilMeasuredOtherwise(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	cfg := a.Config()
 	self, err := os.Executable()
@@ -84,6 +86,7 @@ func TestUsageStaysOutUntilMeasuredOtherwise(t *testing.T) {
 
 // A slow reading answers within the wait, and fills the meter for the next.
 func TestUsageIsBoundedAndNeverSpendsALook(t *testing.T) {
+	// Serial: checks a real wall-clock bound without competing package tests.
 	a := testLoop(t)
 	release := make(chan struct{})
 	var mu sync.Mutex
@@ -105,12 +108,9 @@ func TestUsageIsBoundedAndNeverSpendsALook(t *testing.T) {
 		t.Fatalf("%v %+v", time.Since(started), got)
 	}
 	close(release)
-	deadline := time.Now().Add(2 * time.Second)
-	for !a.OutOfUsage(claude) {
-		if time.Now().After(deadline) {
-			t.Fatal("the slow reading never reached the meter")
-		}
-		time.Sleep(5 * time.Millisecond)
+	awaitUsageReading(t, a, claude)
+	if !a.OutOfUsage(claude) {
+		t.Fatal("the slow reading never reached the meter")
 	}
 	if got := a.Usage(context.Background(), "claude", time.Second); got.Level != quota.LevelExhausted {
 		t.Fatalf("%+v", got)
@@ -126,6 +126,7 @@ func TestUsageIsBoundedAndNeverSpendsALook(t *testing.T) {
 // counts for neither the sidebar nor the small models, so the two never
 // disagree; an engine-wide window counts for both.
 func TestTheSidebarAndTheSmallModelsReadOneRule(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	used, minutes, resets := 100.0, int64(10080), now.Add(time.Hour)
 	observation := harness.Observation{Quality: harness.Measured, ObservedAt: now}
@@ -155,9 +156,15 @@ func TestTheSidebarAndTheSmallModelsReadOneRule(t *testing.T) {
 // A refused small-model request has the login read again, so running out
 // shows wherever usage does.
 func TestARefusalHasTheLoginReadAgain(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	looked := make(chan string, 1)
+	var mu sync.Mutex
+	reads := 0
 	a.meter = &quota.Meter{Inspect: func(_ context.Context, o harness.Provider) (harness.AccountReport, error) {
+		mu.Lock()
+		reads++
+		mu.Unlock()
 		looked <- string(o.Engine)
 		return spentReading(o.Engine), nil
 	}}
@@ -171,17 +178,37 @@ func TestARefusalHasTheLoginReadAgain(t *testing.T) {
 		t.Fatal("the login wasn't read again")
 	}
 	// The reading is kept once the look returns, just after it was seen.
-	deadline := time.Now().Add(2 * time.Second)
-	for !a.OutOfUsage(a.Config().Harness("claude", "haiku", "")) {
-		if time.Now().After(deadline) {
-			t.Fatal("the new reading didn't count")
-		}
-		time.Sleep(5 * time.Millisecond)
+	h := a.Config().Harness("claude", "haiku", "")
+	awaitUsageReading(t, a, h)
+	if !a.OutOfUsage(h) {
+		t.Fatal("the new reading didn't count")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if reads != 1 {
+		t.Fatalf("waiting for the refused request's reading started another inspection: %d", reads)
+	}
+}
+
+// Observe joins the inspection already in flight under the meter's lock;
+// once it returns, that inspection's cached reading is available.
+func awaitUsageReading(t *testing.T, a *Loop, h config.Harness) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		a.meter.Observe(context.Background(), h)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the usage inspection never completed")
 	}
 }
 
 // Kept figures survive failures and restarts, but never become admission data.
 func TestKeptUsage(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	h := a.Config().Harness("codex", "", "")
 	report := spentReading(harness.Codex)
@@ -261,6 +288,7 @@ func TestKeptUsage(t *testing.T) {
 }
 
 func TestCorruptKeptUsageIsReplaced(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	path := filepath.Join(a.Core.StateDirectory(), "usage.json")
 	if err := os.WriteFile(path, []byte("{broken"), 0600); err != nil {

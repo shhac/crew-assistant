@@ -61,6 +61,7 @@ func waitFor(t *testing.T, ch <-chan struct{}, what string) {
 // The first stop lets the turn in progress finish and be recorded, and
 // starts no other.
 func TestAStopFinishesTheStepInProgressAndStartsNoOther(t *testing.T) {
+	t.Parallel()
 	a, g := gatedLoop(t)
 	graceful, stopTaking := context.WithCancel(context.Background())
 	done := runLoop(a, lifecycle.Stop{Graceful: graceful, Force: context.Background()})
@@ -79,6 +80,7 @@ func TestAStopFinishesTheStepInProgressAndStartsNoOther(t *testing.T) {
 
 // The second stop ends the turn in progress.
 func TestASecondStopEndsTheStepInProgress(t *testing.T) {
+	t.Parallel()
 	a, g := gatedLoop(t)
 	graceful, stopTaking := context.WithCancel(context.Background())
 	force, stopNow := context.WithCancel(context.Background())
@@ -91,6 +93,7 @@ func TestASecondStopEndsTheStepInProgress(t *testing.T) {
 
 // The wake watcher looks no more once stopping.
 func TestTheWakeWatcherStopsWithTheFirstStop(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	graceful, stopTaking := context.WithCancel(context.Background())
 	done := make(chan struct{})

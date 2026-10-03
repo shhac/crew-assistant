@@ -37,6 +37,7 @@ func settleCode(t *testing.T, a *Loop, id string) core.Task {
 // hands it back approved: it becomes the next draft, marked as theirs, the
 // decision on the old one closes, QA still checks it, and it lands.
 func TestTheOwnersChangeByHandBecomesTheNextDraft(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass, pass}}}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
@@ -102,6 +103,7 @@ func TestTheOwnersChangeByHandBecomesTheNextDraft(t *testing.T) {
 // A change by hand has to build on where the task started, and can't be
 // taken while a role is at work on the task.
 func TestAChangeByHandIsRefusedWhenItCantCount(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass}}}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
@@ -132,6 +134,7 @@ func TestAChangeByHandIsRefusedWhenItCantCount(t *testing.T) {
 // the whole of the step, not just the model's turn, so the two drafts never
 // share a number and the owner's is never replaced unseen.
 func TestAChangeByHandWaitsForTheStepInProgress(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{revise, pass, pass, pass}}}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
@@ -162,6 +165,7 @@ func TestAChangeByHandWaitsForTheStepInProgress(t *testing.T) {
 // A reviewer is told a draft is the owner's own change, and the implementer
 // to build on it.
 func TestTheTeamIsToldADraftIsTheOwners(t *testing.T) {
+	t.Parallel()
 	p := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit}}
 	task := core.Task{Objective: "Add Feature", Base: "abc", Revisions: []core.Revision{{N: 1}, {N: 2, By: core.DraftByOwner, Summary: "Tidy Feature by hand"}}}
 	reviewer := core.Role{Name: "Reviewer", Kinds: []string{core.RoleReviewer}}

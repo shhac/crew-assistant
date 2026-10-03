@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -18,7 +20,10 @@ import (
 
 func ownerGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	// Include child receive-pack processes on local scratch remotes. Otherwise
+	// a push can leave detached maintenance changing objects during a clone.
+	full := append([]string{"--no-optional-locks", "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "receive.autogc=false"}, args...)
+	cmd := exec.Command("git", full...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_AUTHOR_NAME=Owner", "GIT_AUTHOR_EMAIL=owner@example.test", "GIT_COMMITTER_NAME=Owner", "GIT_COMMITTER_EMAIL=owner@example.test")
 	out, err := cmd.CombinedOutput()
@@ -28,17 +33,124 @@ func ownerGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// The starting repository is read-only once built. Every caller gets a copy.
+var startingRepo = sync.OnceValues(func() (string, error) {
+	dir := filepath.Join(fixtureRoot, "owner")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		return "", err
+	}
+	run := func(args ...string) error {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Owner", "GIT_AUTHOR_EMAIL=owner@example.test", "GIT_COMMITTER_NAME=Owner", "GIT_COMMITTER_EMAIL=owner@example.test")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("git %v: %w: %s", args, err, out)
+		}
+		return nil
+	}
+	if err := run("init", "-q", "-b", "main"); err != nil {
+		return "", err
+	}
+	// Commit can launch detached maintenance before returning. Disable it
+	// before the first commit, so no process can change the shared source
+	// while cp walks it. Copies inherit this policy for their scratch commits.
+	for _, setting := range []struct{ key, value string }{
+		{"maintenance.auto", "false"},
+		{"gc.auto", "0"},
+	} {
+		if err := run("config", setting.key, setting.value); err != nil {
+			return "", err
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0600); err != nil {
+		return "", err
+	}
+	if err := run("add", "-A"); err != nil {
+		return "", err
+	}
+	if err := run("commit", "-q", "-m", "start"); err != nil {
+		return "", err
+	}
+	return dir, nil
+})
+
 // ownerRepo is the owner's repository: main, with one commit.
 func ownerRepo(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	ownerGit(t, dir, "init", "-q", "-b", "main")
-	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0600); err != nil {
+	source, err := startingRepo()
+	if err != nil {
 		t.Fatal(err)
 	}
-	ownerGit(t, dir, "add", "-A")
-	ownerGit(t, dir, "commit", "-q", "-m", "start")
+	dir := filepath.Join(t.TempDir(), "owner")
+	flag := "-R"
+	if runtime.GOOS == "darwin" {
+		flag = "-Rc"
+	}
+	if out, err := exec.Command("cp", flag, source, dir).CombinedOutput(); err != nil {
+		t.Fatalf("copy starting repository: %v: %s", err, out)
+	}
 	return dir
+}
+
+func TestOwnerRepositoryCopiesAreIsolated(t *testing.T) {
+	t.Parallel()
+	one, two := ownerRepo(t), ownerRepo(t)
+	source, err := startingRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := ownerGit(t, source, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(one, "main.go"), []byte("package changed\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ownerGit(t, one, "add", "-A")
+	ownerGit(t, one, "commit", "-qm", "change one copy")
+	if ownerGit(t, one, "rev-parse", "HEAD") == base {
+		t.Fatal("first copy did not change")
+	}
+	for _, dir := range []string{two, source} {
+		body, err := os.ReadFile(filepath.Join(dir, "main.go"))
+		// Even status can refresh the index through a transient index.lock.
+		// Keep this inspection read-only while other tests copy the source.
+		if err != nil || string(body) != "package main\n" || ownerGit(t, dir, "rev-parse", "HEAD") != base || ownerGit(t, dir, "status", "--porcelain") != "" {
+			t.Fatalf("copy changed another repository: %s: %q: %v", dir, body, err)
+		}
+	}
+}
+
+func TestOwnerRepositoriesDisableAutomaticMaintenance(t *testing.T) {
+	t.Parallel()
+	source, err := startingRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Check both paths: the shared source must stay still during copies,
+	// and scratch commits must not leave detached maintenance behind.
+	for _, dir := range []string{source, ownerRepo(t)} {
+		for key, want := range map[string]string{"maintenance.auto": "false", "gc.auto": "0"} {
+			if got := ownerGit(t, dir, "config", "--local", "--get", key); got != want {
+				t.Fatalf("%s: %s = %q, want %q", dir, key, got, want)
+			}
+		}
+	}
+}
+
+func TestOwnerGitDisablesHousekeepingForScratchRemotes(t *testing.T) {
+	t.Parallel()
+	remote := t.TempDir()
+	ownerGit(t, remote, "init", "-q", "--bare")
+	// Fresh remotes do not inherit the starter's local config. The helper
+	// must override these settings for every command and its Git children.
+	for key, want := range map[string]string{
+		"maintenance.auto": "false",
+		"gc.auto":          "0",
+		"receive.autogc":   "false",
+	} {
+		if got := ownerGit(t, remote, "config", "--get", key); got != want {
+			t.Fatalf("scratch remote: %s = %q, want %q", key, got, want)
+		}
+	}
 }
 
 // codeProject is a project with a code team on source. The writing task
@@ -116,6 +228,7 @@ func (r *codeRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, er
 }
 
 func TestCodeTaskRunsInACloneAndDeliversALocalBranch(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	os.WriteFile(filepath.Join(source, "wip.txt"), []byte("owner's own work"), 0600)
 	start := ownerGit(t, source, "rev-parse", "HEAD")
@@ -244,6 +357,7 @@ func TestCodeTaskRunsInACloneAndDeliversALocalBranch(t *testing.T) {
 }
 
 func TestACodeTeamOnlyWorksOnTheProjectsOwnFolders(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	ctx := context.Background()
 	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Brief: core.BriefInput{Goal: "Add a feature"}})
@@ -259,6 +373,7 @@ func TestACodeTeamOnlyWorksOnTheProjectsOwnFolders(t *testing.T) {
 }
 
 func TestBranchNamesKeepWholeWords(t *testing.T) {
+	t.Parallel()
 	for objective, want := range map[string]string{
 		"Next-message suggestions in the chat composer": "next-message-suggestions-in-the-chat",
 		"Add Feature":                  "add-feature",
@@ -275,6 +390,7 @@ func TestBranchNamesKeepWholeWords(t *testing.T) {
 // point and touched the same file, catches up, resolves the conflict with its
 // team and asks again, building on what landed. The owner only approves.
 func TestTheSecondChangeCatchesUpWhenTheFirstLands(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass, pass, pass, pass, pass}}}
@@ -350,6 +466,7 @@ func TestTheSecondChangeCatchesUpWhenTheFirstLands(t *testing.T) {
 // main later under a new landing policy: in order, catching up with the
 // owner's own commits, never forcing, and never touching uncommitted work.
 func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 
 	reviews := make([]string, 12)
@@ -472,6 +589,7 @@ func TestDeliveredChangesLandOnMainInTheOrderTheyWereBuilt(t *testing.T) {
 // after a bounded number of catch-ups, instead of looping; their retry starts
 // the count again.
 func TestATargetThatKeepsMovingComesToTheOwner(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	reviews := make([]string, 40)
 	for i := range reviews {
@@ -536,6 +654,7 @@ func TestATargetThatKeepsMovingComesToTheOwner(t *testing.T) {
 }
 
 func TestLandingRefusesWhenItCannotTellTheOrder(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass}}}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
@@ -569,6 +688,7 @@ func TestLandingRefusesWhenItCannotTellTheOrder(t *testing.T) {
 // A project whose owner lets checked changes land unasked gets no approval
 // question, and a change already on the target is recorded, not pushed again.
 func TestNoApprovalStepAndAlreadyLanded(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass, pass, pass}}}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
@@ -633,6 +753,7 @@ func landedAsOne(t *testing.T, source, clone, target string, task core.Task) boo
 // change's own work onto the rewritten main: what they dropped stays dropped,
 // nothing on main is lost, and the change is one commit.
 func TestARewrittenMainKeepsWhatTheOwnerDropped(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	os.WriteFile(filepath.Join(source, "dropped.go"), []byte("package main // dropped later\n"), 0600)
 	ownerGit(t, source, "add", "dropped.go")

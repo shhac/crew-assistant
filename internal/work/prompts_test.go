@@ -11,6 +11,7 @@ import (
 )
 
 func TestLinearSourceDescriptionIsContextForTheOfflineTeam(t *testing.T) {
+	t.Parallel()
 	p := core.Project{Brief: core.Brief{Goal: "Build exports", Criteria: []string{"Tests pass"}}}
 	task := core.Task{Objective: "EX-1: Empty exports", Linear: []core.LinearRef{{LinearIssue: core.LinearIssue{Identifier: "EX-1", Title: "Empty exports", URL: "https://linear.app/example/issue/EX-1", Description: "Keep column names even when there are no rows."}, Kind: "issue"}}}
 	prompt := briefText(p, task)
@@ -48,6 +49,7 @@ func reviewedTask() core.Task {
 // A reviewer starts afresh every draft, so it is shown what the checks found
 // on the latest few drafts, and never the implementer's account of them.
 func TestAReviewerIsShownTheEarlierFindingsAndAskedForEverything(t *testing.T) {
+	t.Parallel()
 	code := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit}}
 	docs := core.Project{Brief: core.Brief{Goal: "Write notes"}}
 	task := reviewedTask()
@@ -92,6 +94,7 @@ func TestAReviewerIsShownTheEarlierFindingsAndAskedForEverything(t *testing.T) {
 // A check the checker's own sandbox refused is the owner's to settle, unless
 // the change could do without it; otherwise the implementer loops on it.
 func TestACheckerRaisesASandboxRefusalWithTheOwner(t *testing.T) {
+	t.Parallel()
 	code := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit, Check: "make check"}}
 	task := reviewedTask()
 	rev := task.Revisions[4]
@@ -113,6 +116,7 @@ func TestACheckerRaisesASandboxRefusalWithTheOwner(t *testing.T) {
 // the task, like every other role's turn: an answer to QA's own question
 // reaches it only this way.
 func TestQAsCheckCarriesTheOwnersDirectionAndNotes(t *testing.T) {
+	t.Parallel()
 	code := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit, Check: "make check"}}
 	task := reviewedTask()
 	task.Direction = []string{"Treat the refused socket binds as expected and give your verdict"}
@@ -128,6 +132,7 @@ func TestQAsCheckCarriesTheOwnersDirectionAndNotes(t *testing.T) {
 // The implementer accounts for everything it was asked for before it hands
 // a draft on, so a gap shows in its own reply rather than a review.
 func TestTheImplementerAccountsForEveryFindingAndPlanItem(t *testing.T) {
+	t.Parallel()
 	code := core.Project{Brief: core.Brief{Goal: "Add features", Criteria: []string{"Handles errors"}}, Playbook: &core.Playbook{Medium: core.MediumGit}}
 	docs := core.Project{Brief: core.Brief{Goal: "Write notes"}}
 	task := reviewedTask()
@@ -166,6 +171,7 @@ func TestTheImplementerAccountsForEveryFindingAndPlanItem(t *testing.T) {
 // A plan's steps are kept whole, within a bound on the whole plan, and its
 // failure paths and tests reach everyone who works from it.
 func TestAPlanKeepsItsStepsWholeWithinABound(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("a", 1500)
 	reply, _ := json.Marshal(map[string]any{
 		"summary":       "Add it.",
@@ -215,6 +221,7 @@ func TestAPlanKeepsItsStepsWholeWithinABound(t *testing.T) {
 
 // A plan stored before failure paths and tests were asked for reads as it did.
 func TestAnOlderPlanStillReads(t *testing.T) {
+	t.Parallel()
 	var plan core.Plan
 	if err := json.Unmarshal([]byte(`{"summary": "Add it.", "exists": ["main.go"], "changes": ["add feature.go"], "out_of_scope": ["the CLI"], "role": "Researcher", "at": "2026-09-01T00:00:00Z"}`), &plan); err != nil {
 		t.Fatal(err)
@@ -228,6 +235,7 @@ func TestAnOlderPlanStillReads(t *testing.T) {
 // A code plan works out its failure paths and tests; any plan big enough to
 // review badly in one piece asks the owner whether to split it.
 func TestTheResearcherPlansFailurePathsAndTestsAndFlagsASplit(t *testing.T) {
+	t.Parallel()
 	code := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit}}
 	docs := core.Project{Brief: core.Brief{Goal: "Write notes"}}
 	task := core.Task{Objective: "Add Feature"}
@@ -248,6 +256,7 @@ func TestTheResearcherPlansFailurePathsAndTestsAndFlagsASplit(t *testing.T) {
 // Whatever a plan leaves for later it lists as parts to split off, which
 // everyone working on the task then sees are not theirs.
 func TestAPlanListsWhatItSplitsOff(t *testing.T) {
+	t.Parallel()
 	code := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit}}
 	docs := core.Project{Brief: core.Brief{Goal: "Write notes"}}
 	task := core.Task{Objective: "Add Feature"}

@@ -41,6 +41,7 @@ func writerFor(t *testing.T, a *Loop, p core.Project, next string) core.Project 
 // An implementer told to start afresh or compact does so at its next round.
 // The round under way when it was asked finishes as it is.
 func TestTheImplementerStartsAfreshOrCompactsAtItsNextRound(t *testing.T) {
+	t.Parallel()
 	for _, next := range []string{core.WriterFresh, core.WriterCompact} {
 		t.Run(next, func(t *testing.T) {
 			runner := &scriptedRunner{reviews: []string{revise, revise, pass}}
@@ -80,6 +81,7 @@ func TestTheImplementerStartsAfreshOrCompactsAtItsNextRound(t *testing.T) {
 // request: it applies to the round after, rather than being cleared with the
 // one the running round took.
 func TestTheSameRequestMadeMidRoundAppliesToTheNextRoundToo(t *testing.T) {
+	t.Parallel()
 	for _, next := range []string{core.WriterFresh, core.WriterCompact} {
 		t.Run(next, func(t *testing.T) {
 			runner := &scriptedRunner{reviews: []string{revise, revise, revise, pass}}

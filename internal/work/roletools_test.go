@@ -34,6 +34,7 @@ func toolNames(tools roleTools) []string {
 // A role sees its own project's tasks, filtered as it asks, and links only
 // its own task, only as its role may, and only while its turn still counts.
 func TestARoleSeesItsProjectsTasksAndLinksOnlyItsOwn(t *testing.T) {
+	t.Parallel()
 	a, p, first := loopApp(t, &scriptedRunner{}, "")
 	ctx := context.Background()
 	second, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Write the follow-up", Criteria: []string{"Warm"}})
@@ -101,6 +102,7 @@ func TestARoleSeesItsProjectsTasksAndLinksOnlyItsOwn(t *testing.T) {
 // A role can name tasks by their readable IDs, which its tools show beside
 // the canonical ones.
 func TestARoleNamesTasksByTheirReadableIDs(t *testing.T) {
+	t.Parallel()
 	a, p, first := loopApp(t, &scriptedRunner{}, "")
 	ctx := context.Background()
 	second, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Write the follow-up", Criteria: []string{"Warm"}})
@@ -127,6 +129,7 @@ func TestARoleNamesTasksByTheirReadableIDs(t *testing.T) {
 // Research alone looks outward, and decides what a task waits for; other
 // roles only mark related work, and every turn can look tasks up.
 func TestEachRoleGetsItsTools(t *testing.T) {
+	t.Parallel()
 	a, _, task := loopApp(t, &scriptedRunner{}, "")
 	for status, want := range map[string]struct {
 		web   bool
@@ -161,6 +164,7 @@ func TestEachRoleGetsItsTools(t *testing.T) {
 // Every turn can call exactly the tools it is offered: whatever
 // Definitions lists is taken, and any other name is refused as unknown.
 func TestARoleCallsExactlyTheToolsItIsOffered(t *testing.T) {
+	t.Parallel()
 	a, p, task := loopApp(t, &scriptedRunner{}, "")
 	code := &core.Playbook{Medium: core.MediumGit}
 	designing := task
@@ -202,6 +206,7 @@ func TestARoleCallsExactlyTheToolsItIsOffered(t *testing.T) {
 // and the tasks it links to in its own project alone; a verdict on an older
 // draft, or one whose question was answered, no longer counts.
 func TestATaskBriefShowsItsRecordAndOnlyItsProjectsLinks(t *testing.T) {
+	t.Parallel()
 	near := core.Task{ID: "t-near", Ref: "CA-2", ProjectID: "p", Status: core.TaskQueued, Objective: "Near work"}
 	far := core.Task{ID: "t-far", ProjectID: "elsewhere", Status: core.TaskQueued, Objective: "Secret elsewhere"}
 	task := core.Task{
@@ -245,6 +250,7 @@ func TestATaskBriefShowsItsRecordAndOnlyItsProjectsLinks(t *testing.T) {
 }
 
 func TestATurnPlaysTheRoleItsStepCallsFor(t *testing.T) {
+	t.Parallel()
 	both := core.Role{Kinds: []string{core.RoleResearcher, core.RoleImplementer}}
 	qa := core.Role{Kinds: []string{core.RoleQA}}
 	for _, tc := range []struct {

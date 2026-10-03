@@ -7,6 +7,7 @@ import (
 )
 
 func TestAnImplementersReplyIsTakenApartIntoItsBlocks(t *testing.T) {
+	t.Parallel()
 	text := "Did it.\n```learned\nL\n```\n```wake\nW\n```\n```owner-step\nO\n```\n```pr-reply\nR\n```\n```pr\nP\n```\n```design\nD\n```"
 	got := parseWriterReply(text, true)
 	want := writerReply{reply: "Did it.", learned: "L", wake: "W", unmet: "O", prReply: "R", pr: "P", question: "D"}
@@ -23,6 +24,7 @@ func TestAnImplementersReplyIsTakenApartIntoItsBlocks(t *testing.T) {
 // with the draft the pull request has, and lands again, unless direction
 // came while it ran, which it revises with at once.
 func TestARoundThatChangedNothingRepliesWithTheDraftThePullRequestHas(t *testing.T) {
+	t.Parallel()
 	task := core.Task{Status: core.TaskWriting, Round: 2, MaxRounds: 5, Revisions: []core.Revision{{N: 1}, {N: 2}}, WriterRequest: 3, WriterNext: "x"}
 	h := core.Handoff{Reply: "Nothing to change.", Request: 3, WakeErrors: []string{"w"}, Posts: []core.PRPost{{Thread: "T1", Body: "As intended.", Revision: 3}}}
 	noChangeNeeded(&task, h)

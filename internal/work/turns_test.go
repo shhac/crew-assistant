@@ -15,6 +15,7 @@ import (
 // A turn is on show from when it is picked up to when it ends, counting its
 // tool calls, edits and output as its session reports them.
 func TestARunningTurnCountsWhatItDoes(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	task := core.Task{ID: "task-one", ProjectID: "project-one"}
 	watch := a.watchTurn(task, core.RoleImplementer, core.Role{Name: "Implementer", Member: "ada"}, t.TempDir(), false)
@@ -41,6 +42,7 @@ func TestARunningTurnCountsWhatItDoes(t *testing.T) {
 // A turn that writes counts the files it has changed as it goes; files
 // left as they were before it began don't count.
 func TestAWritingTurnCountsItsChangedFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "old.md"), []byte("before"), 0o600)
 	os.WriteFile(filepath.Join(dir, "kept.md"), []byte("before"), 0o600)
@@ -61,6 +63,7 @@ func TestAWritingTurnCountsItsChangedFiles(t *testing.T) {
 
 // A turn that runs twice, as one asked again does, counts each run afresh.
 func TestARunAgainCountsAfresh(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	watch := a.watchTurn(core.Task{ID: "task-one"}, core.RoleReviewer, core.Role{}, t.TempDir(), false)
 	watch.Started()

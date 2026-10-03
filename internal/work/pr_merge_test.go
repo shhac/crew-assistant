@@ -15,6 +15,7 @@ import (
 
 // By default the PM decides whether a ready pull request merges.
 func TestThePMMergesAReadyPullRequest(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2, withPM, opensUnasked, mergeBy(""))
 	if task := s.current(t); task.Status != core.TaskAwaiting || !task.PROpen() {
 		t.Fatalf("the pull request did not open: %s %s", task.Status, task.Detail)
@@ -33,6 +34,7 @@ func TestThePMMergesAReadyPullRequest(t *testing.T) {
 // while they decide is looked at again rather than merged as it was, and
 // the task is not taken for closed.
 func TestTheOwnerApprovesAMergeThatIsReconsideredWhenThePullRequestChanges(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 4, opensUnasked, mergeBy(core.ApproveBefore))
 	s.current(t)
 	s.readyPR(t)
@@ -65,6 +67,7 @@ func TestTheOwnerApprovesAMergeThatIsReconsideredWhenThePullRequestChanges(t *te
 // still needs doing, rather than merging it or asking the owner; what the
 // implementer does then is decided on afresh.
 func TestThePMSendsAReadyPullRequestBack(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 4, withPM, opensUnasked, mergeBy(""))
 	s.runner.mu.Lock()
 	s.runner.pmLand = []string{`{"land": false, "reason": "it needs a changelog entry", "implementer": "Add a changelog entry for Feature."}`}
@@ -88,6 +91,7 @@ func TestThePMSendsAReadyPullRequestBack(t *testing.T) {
 // A code freeze holds a ready pull request from merging, not from being
 // watched; resuming merges it.
 func TestAPausedProjectHoldsAReadyPullRequestUntilLandingResumes(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2, opensUnasked, mergeBy(core.ApproveNone))
 	if task := s.current(t); !task.PROpen() {
 		t.Fatalf("the pull request did not open: %s %s", task.Status, task.Detail)
@@ -111,6 +115,7 @@ func TestAPausedProjectHoldsAReadyPullRequestUntilLandingResumes(t *testing.T) {
 // A merge GitHub refuses, such as for branch protection, comes to the owner
 // rather than waiting on wakes that won't fire.
 func TestARefusedMergeComesToTheOwner(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2, opensUnasked, mergeBy(core.ApproveNone))
 	s.current(t)
 	run := s.a.github.Run
@@ -132,6 +137,7 @@ func TestARefusedMergeComesToTheOwner(t *testing.T) {
 // with them: one it moves lands the project's way, its pull request closed
 // with a word on why, and is decided again before it lands.
 func TestThePMMovesATaskOffPullRequestsWhenTheyAreTurnedOff(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2, withPM, opensUnasked, mergeBy(core.ApproveBefore))
 	if task := s.current(t); !task.PROpen() || task.Status != core.TaskAwaiting {
 		t.Fatalf("the pull request did not open: %s %s", task.Status, task.Detail)
@@ -161,6 +167,7 @@ func TestThePMMovesATaskOffPullRequestsWhenTheyAreTurnedOff(t *testing.T) {
 // Without a PM the owner is asked, and keeping its pull request leaves the
 // task as it started.
 func TestTheOwnerKeepsATaskOnItsPullRequestWhenTheyAreTurnedOff(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2, opensUnasked, mergeBy(core.ApproveBefore))
 	s.current(t)
 	if _, err := s.a.SetLanding(s.ctx, s.p.ID, core.LandPolicy{Via: core.LandPush, Target: "main"}); err != nil {
@@ -184,6 +191,7 @@ func TestTheOwnerKeepsATaskOnItsPullRequestWhenTheyAreTurnedOff(t *testing.T) {
 // merged needs nothing more, and one GitHub keeps refusing is left to the
 // owner rather than tried for ever.
 func TestClosingAnEndedPullRequestIsTriedAFewTimes(t *testing.T) {
+	t.Parallel()
 	s := newPRScenario(t, 2)
 	s.open(t)
 	closeTo := func(c core.PRClose) {

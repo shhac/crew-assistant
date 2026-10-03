@@ -95,6 +95,8 @@ type Loop struct {
 	checked func(taskID, checker string)
 	// slept replaces how long the machine slept since a time. Set in tests.
 	slept func(start time.Time) time.Duration
+	// parked is told a turn is waiting for the owner's use to end. Set in tests.
+	parked func()
 }
 
 func New(s *core.Service, cfg func() config.Config, demo bool) *Loop {

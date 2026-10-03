@@ -59,6 +59,7 @@ func waitingNeedsFix(reply string) string {
 // At the round limit the PM judges what remains, and the owner gets the
 // one choice a fixed rule makes of that judgement, with the PM's reason.
 func TestThePMJudgesWhatRemainsAtTheRoundLimit(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name, reply, want, why string
 	}{
@@ -113,6 +114,7 @@ func TestThePMJudgesWhatRemainsAtTheRoundLimit(t *testing.T) {
 // Each thing that calls for another round does, even with every finding
 // narrow; a failing check among them.
 func TestTheRecommendationRule(t *testing.T) {
+	t.Parallel()
 	yes, no := true, false
 	findings := []finding{{Role: "Reviewer", Note: "Rename the flag"}, {Role: "QA", Note: "Add a test"}}
 	narrow := findingJudgement{Narrow: true}
@@ -168,6 +170,7 @@ func TestTheRecommendationRule(t *testing.T) {
 // follow up, with a follow-up made from the findings as they are and no
 // recommendation made up.
 func TestWithoutThePMsJudgementTheFollowUpIsMadeFromTheFindings(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name string
 		pm   bool
@@ -198,6 +201,7 @@ func TestWithoutThePMsJudgementTheFollowUpIsMadeFromTheFindings(t *testing.T) {
 // follow-up the owner read, waiting for the accepted task and next in line
 // after it, as the owner's own task.
 func TestAcceptAndFollowUpQueuesTheFollowUpRightAfterTheTask(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{revise}, escalate: []string{judgement(true, false, false, false, false)}}
 	a, p, task := roundLimited(t, runner, true)
 	ctx := context.Background()
@@ -264,6 +268,7 @@ func ownerStepApp(t *testing.T, runner *scriptedRunner, pm bool) (*Loop, core.Ta
 // back or pass it: never another round, and never landed without it. Taken
 // on, it leaves the team's requirements and the delivery lists it to check.
 func TestARequirementTheSandboxCantMeetBecomesAnOwnerStep(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name  string
 		first string
@@ -327,6 +332,7 @@ func sandboxRequirementBecomesAnOwnerStep(t *testing.T, first string) {
 // the requirement for the team; a PM that says the team can meet it keeps
 // it there itself, with a note saying why.
 func TestARequirementKeptForTheTeamGoesOnToAnotherRound(t *testing.T) {
+	t.Parallel()
 	t.Run("the owner keeps it", func(t *testing.T) {
 		runner := &scriptedRunner{reviews: []string{revise, pass}}
 		a, task := ownerStepApp(t, runner, false)
@@ -363,6 +369,7 @@ func TestARequirementKeptForTheTeamGoesOnToAnotherRound(t *testing.T) {
 // or in part, would bring the owner the same step reworded, round after
 // round.
 func TestAnOwnerStepIsNotRaisedAgain(t *testing.T) {
+	t.Parallel()
 	steps := []string{"After it lands, ask the designer on a real task to generate one image and check it shows up attached to the task."}
 	block := `[{"requirement": "ask the designer on a real task to generate one image", "why": "no network"}, {"requirement": "It opens in the owner's browser", "why": "no browser"}]`
 	got := parseOwnerSteps(block, 2, []string{"It opens in the owner's browser"}, steps)
@@ -374,6 +381,7 @@ func TestAnOwnerStepIsNotRaisedAgain(t *testing.T) {
 // A requirement of the brief the owner took on for a task is theirs for it:
 // the team isn't asked to meet it, and raising it again is ignored.
 func TestABriefRequirementTheOwnerTookIsNotTheTeams(t *testing.T) {
+	t.Parallel()
 	p := core.Project{Brief: core.Brief{Goal: "Tools", Criteria: []string{"CI is green on every platform", "The README says how"}}}
 	task := core.Task{Objective: "Write the design", OwnerSteps: []string{"Check the CI run"}, OwnerTook: []string{"CI is green on every platform"}}
 	brief := briefText(p, task)

@@ -13,6 +13,7 @@ import (
 // Two changes to a team made at the same time both stay: neither writes
 // back a copy of the team read before the other was saved.
 func TestConcurrentTeamEditsBothSurvive(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	ctx := context.Background()
 	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{t.TempDir()}, Brief: core.BriefInput{Goal: "Faster"}})
@@ -53,6 +54,7 @@ func TestConcurrentTeamEditsBothSurvive(t *testing.T) {
 // without one, and stay when the team is chosen again; a stage that can't
 // have one is refused.
 func TestStageLimitsAreSetAndKeptAcrossATeamChange(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	ctx := context.Background()
 	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{t.TempDir()}, Brief: core.BriefInput{Goal: "Faster"}})

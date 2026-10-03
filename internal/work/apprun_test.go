@@ -149,6 +149,7 @@ func portOf(spec roles.Spec) string {
 // own, reaches it on this machine only, and uses the browser its seat names;
 // its screenshots and what it saw are kept with its verdict.
 func TestClaudeQARunsTheAppAndKeepsWhatItSaw(t *testing.T) {
+	t.Parallel()
 	runner := &appRunner{codeRunner: codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass}}}, qaReply: qaSawTheApp}
 	runner.events = []session.Event{
 		{Kind: "tool_started", Tool: "mcp__claude-in-chrome__computer"},
@@ -256,6 +257,7 @@ func keptOnDisk(t *testing.T, a *Loop, taskID string) []os.DirEntry {
 // before its verdict is recorded: nothing of the check is kept, so no
 // screenshot names a verdict that never was.
 func TestStoppingATaskBeforeQAsVerdictKeepsNoScreenshots(t *testing.T) {
+	t.Parallel()
 	runner := &appRunner{codeRunner: codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass}}}, qaReply: qaSawTheApp}
 	runner.events = []session.Event{{Kind: "tool_completed", Tool: "mcp__claude-in-chrome__computer", Images: []session.Image{screenshot(t, 1), screenshot(t, 2)}}}
 	a, p := qaTeam(t, runner, "claude", core.Browser{On: true}, &testRecipe)
@@ -283,6 +285,7 @@ func TestStoppingATaskBeforeQAsVerdictKeepsNoScreenshots(t *testing.T) {
 // Asked directly once approval is waiting, QA's passing check is not
 // counted, so the screenshots it took are not kept either.
 func TestQAsAnswerThatDoesNotCountKeepsNoScreenshots(t *testing.T) {
+	t.Parallel()
 	runner := &appRunner{codeRunner: codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass}}}, qaReply: qaSawTheApp}
 	runner.events = []session.Event{{Kind: "tool_completed", Tool: "mcp__claude-in-chrome__computer", Images: []session.Image{screenshot(t, 1), screenshot(t, 2)}}}
 	a, p := qaTeam(t, runner, "claude", core.Browser{On: true}, &testRecipe)
@@ -316,6 +319,7 @@ func hasTool(spec roles.Spec, name string) bool {
 // QA on Codex can't be given a network limited to this machine, so it runs
 // the check alone, never with a wider network, and its verdict says why.
 func TestCodexQASaysWhyItDidNotRunTheApp(t *testing.T) {
+	t.Parallel()
 	runner := &appRunner{codeRunner: codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass}}}, qaReply: pass}
 	runner.events = []session.Event{{Kind: "tool_completed", Tool: "x", Images: []session.Image{screenshot(t, 1)}}}
 	a, p := qaTeam(t, runner, "codex", core.Browser{}, &testRecipe)
@@ -340,6 +344,7 @@ func TestCodexQASaysWhyItDidNotRunTheApp(t *testing.T) {
 // Without a run recipe, QA runs exactly as it always has, even with its
 // browser setting on.
 func TestQAWithoutARecipeRunsTheCheckAsBefore(t *testing.T) {
+	t.Parallel()
 	runner := &appRunner{codeRunner: codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass}}}, qaReply: pass}
 	runner.events = []session.Event{{Kind: "tool_completed", Tool: "x", Images: []session.Image{screenshot(t, 1)}}}
 	a, p := qaTeam(t, runner, "claude", core.Browser{On: true}, nil)
@@ -369,6 +374,7 @@ func TestQAWithoutARecipeRunsTheCheckAsBefore(t *testing.T) {
 // Checks running side by side never share a port, and a port is free again
 // once the check that held it is done.
 func TestChecksSideBySideNeverShareAPort(t *testing.T) {
+	t.Parallel()
 	var p ports
 	offered := []int{41000, 41000, 41000, 41001}
 	p.find = func() (int, error) {
@@ -415,6 +421,7 @@ func TestChecksSideBySideNeverShareAPort(t *testing.T) {
 // chosen again, and taken away only when asked; QA's browser is copied from
 // its member and can be changed for the project, on an engine that has one.
 func TestTheRecipeAndQAsBrowserAreProjectSettings(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	ctx := context.Background()
 	source := ownerRepo(t)
@@ -479,6 +486,7 @@ func seatHolding(p core.Project, kind string) (core.Role, bool) {
 // The researcher and the PM of a code project can propose a run recipe for
 // the owner to accept; it changes nothing until they do.
 func TestTheResearcherAndThePMProposeARecipe(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	ctx := context.Background()
 	id := codeProject(t, a, ownerRepo(t)).ID
@@ -532,6 +540,7 @@ func TestTheResearcherAndThePMProposeARecipe(t *testing.T) {
 // to select: it uses the browser the extension connects by default, and is
 // told not to switch.
 func TestQASelectsABrowserOnlyWhenOneIsNamed(t *testing.T) {
+	t.Parallel()
 	app := appRun{recipe: &testRecipe, port: 41234, browser: core.Browser{On: true}}
 	prompt := appPrompt(app)
 	if strings.Contains(prompt, "select_browser") || !strings.Contains(prompt, "connects by default; don't select or switch") {
@@ -548,6 +557,7 @@ func TestQASelectsABrowserOnlyWhenOneIsNamed(t *testing.T) {
 }
 
 func TestQAIsToldItsPortIsAlreadySet(t *testing.T) {
+	t.Parallel()
 	app := appRun{recipe: &testRecipe, port: 41234}
 	spec := roles.Spec{}
 	app.apply(&spec)
@@ -560,6 +570,7 @@ func TestQAIsToldItsPortIsAlreadySet(t *testing.T) {
 // Which engines run the app, and how, comes from what the harness says each
 // offers, never from the engine's name.
 func TestHowQARunsTheAppFollowsWhatTheHarnessOffers(t *testing.T) {
+	t.Parallel()
 	lp := testLoop(t)
 	lp.ports.find = func() (int, error) { return 42000, nil }
 	playbook := &core.Playbook{Medium: core.MediumGit, Run: &testRecipe}
@@ -594,6 +605,7 @@ func TestHowQARunsTheAppFollowsWhatTheHarnessOffers(t *testing.T) {
 }
 
 func TestAPIQAAppRunFollowsLoopbackSupportAndCarriesPort(t *testing.T) {
+	t.Parallel()
 	lp := testLoop(t)
 	reserved := 0
 	lp.ports.find = func() (int, error) { reserved++; return 42000, nil }

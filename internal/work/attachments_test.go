@@ -33,6 +33,7 @@ func attachArgs(name, content, path string) map[string]string {
 // who works on the task afterwards is told the second is the target, and
 // can open the first's file, marked as superseded.
 func TestTheCurrentDesignIsTheTargetAndEveryRoleCanOpenItsFiles(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign, askDesign}, designs: []string{
 		`{"input": "Casual, in short lines.", "current": "this", "escalate": null}`,
 		`{"input": "Formal after all.", "current": "this", "escalate": null}`,
@@ -95,6 +96,7 @@ func TestTheCurrentDesignIsTheTargetAndEveryRoleCanOpenItsFiles(t *testing.T) {
 // kept, so it can open the target's artefacts; another task's role reads
 // only their names, since its turn can't open them.
 func TestReadTaskListsTheCurrentDesignsFiles(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign}, designs: []string{`{"input": "A sidebar.", "current": "this", "escalate": null}`}}
 	a, p, task := loopApp(t, runner, "")
 	seatDesigner(t, a, p.ID)
@@ -119,6 +121,7 @@ func TestReadTaskListsTheCurrentDesignsFiles(t *testing.T) {
 }
 
 func TestTheDesignerAttachesOnlyFilesInsideItsWorkspace(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign}}
 	a, p, task := loopApp(t, runner, "")
 	seatDesigner(t, a, p.ID)
@@ -165,6 +168,7 @@ func TestTheDesignerAttachesOnlyFilesInsideItsWorkspace(t *testing.T) {
 }
 
 func TestTheDesignerSaysWhichDesignIsCurrent(t *testing.T) {
+	t.Parallel()
 	task := core.Task{Design: []core.DesignRequest{{ID: "d1", N: 1, Input: "Tabs"}, {ID: "d2"}}}
 	for said, want := range map[string]int{"": 0, "none": 0, " This ": core.CurrentThis, "design 1": 1, "1": 1, "Design #1": 1} {
 		if got, err := designCurrent(said, "Input", task); err != nil || got != want {
@@ -185,6 +189,7 @@ func TestTheDesignerSaysWhichDesignIsCurrent(t *testing.T) {
 // target, then superseded designs and advice, each marked as not the
 // target; QA's check names the current design.
 func TestEveryRoleIsToldWhichDesignIsCurrent(t *testing.T) {
+	t.Parallel()
 	code := core.Project{Title: "Service", Brief: core.Brief{Goal: "Faster"}, Playbook: &core.Playbook{Medium: core.MediumGit, Check: "make check"}}
 	docs := core.Project{Title: "Notes", Brief: core.Brief{Goal: "Clear"}}
 	task := core.Task{Objective: "Settings page", Round: 1, CurrentDesign: "d2", Design: []core.DesignRequest{

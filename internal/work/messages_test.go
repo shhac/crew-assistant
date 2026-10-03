@@ -9,6 +9,7 @@ import (
 )
 
 func TestTheWriterRevisesWithAMessageInsteadOfAwaitingApproval(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, _ := loopApp(t, runner, "")
 	task := settle(t, a)
@@ -30,6 +31,7 @@ func TestTheWriterRevisesWithAMessageInsteadOfAwaitingApproval(t *testing.T) {
 }
 
 func TestAMessageSentMidTurnIsNotDroppedWhenTheReviewPasses(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
 	var a *Loop
 	var p core.Project
@@ -58,6 +60,7 @@ func TestAMessageSentMidTurnIsNotDroppedWhenTheReviewPasses(t *testing.T) {
 }
 
 func TestAskingTheReviewerChecksTheLatestDraftNow(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}}
 	a, p, task := loopApp(t, runner, "")
 	ctx := context.Background()
@@ -97,6 +100,7 @@ func TestAskingTheReviewerChecksTheLatestDraftNow(t *testing.T) {
 }
 
 func TestAMessageToSomeoneNoLongerOnTheTeamFailsWithoutACheck(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}}
 	a, p, task := loopApp(t, runner, "")
 	ctx := context.Background()

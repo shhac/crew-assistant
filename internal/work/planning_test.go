@@ -34,6 +34,7 @@ func taskNow(t *testing.T, a *Loop, id string) core.Task {
 }
 
 func TestATaskIsPlannedReadOnlyAndEveryoneWorksFromThePlan(t *testing.T) {
+	t.Parallel()
 	a, runner, p := plannedCode(t, 6, `{"summary": "Add Feature beside main.", "exists": ["main.go has main"], "changes": ["add feature.go"], "out_of_scope": ["the CLI"], "questions": [], "depends_on": []}`)
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add A"})
 	task = taskNow(t, a, task.ID)
@@ -57,6 +58,7 @@ func TestATaskIsPlannedReadOnlyAndEveryoneWorksFromThePlan(t *testing.T) {
 }
 
 func TestTheResearchersQuestionsComeBeforeAnyCode(t *testing.T) {
+	t.Parallel()
 	a, runner, p := plannedCode(t, 6, `{"summary": "Unclear.", "questions": ["Which colour?"]}`)
 	ctx := context.Background()
 	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Paint it"})
@@ -76,6 +78,7 @@ func TestTheResearchersQuestionsComeBeforeAnyCode(t *testing.T) {
 }
 
 func TestATaskThatDependsOnUnlandedWorkWaitsAndIsResearchedAgain(t *testing.T) {
+	t.Parallel()
 	a, runner, p := plannedCode(t, 12)
 	ctx := context.Background()
 	first, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})
@@ -96,6 +99,7 @@ func TestATaskThatDependsOnUnlandedWorkWaitsAndIsResearchedAgain(t *testing.T) {
 }
 
 func TestWhatAPlanSplitsOffIsQueuedToWaitForTheTask(t *testing.T) {
+	t.Parallel()
 	a, runner, p := plannedCode(t, 6, `{"summary": "Only export.", "changes": ["add export.go"], "split_off": [{"title": "Import CSV", "requirements": ["Reads what export writes"]}]}`)
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Export and import CSV"})
 	task = taskNow(t, a, task.ID)
@@ -124,6 +128,7 @@ func TestWhatAPlanSplitsOffIsQueuedToWaitForTheTask(t *testing.T) {
 }
 
 func TestAPlanThatCannotBeReadIsKeptAsWritten(t *testing.T) {
+	t.Parallel()
 	a, _, p := plannedCode(t, 6, "no json here", "still no json")
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add A"})
 	task = taskNow(t, a, task.ID)
@@ -133,6 +138,7 @@ func TestAPlanThatCannotBeReadIsKeptAsWritten(t *testing.T) {
 }
 
 func TestOneMemberResearchesAndImplementsFromOneSeat(t *testing.T) {
+	t.Parallel()
 	a := testLoop(t)
 	ctx := context.Background()
 	source := ownerRepo(t)
@@ -165,6 +171,7 @@ func TestOneMemberResearchesAndImplementsFromOneSeat(t *testing.T) {
 }
 
 func TestAResearcherThatFailsResearchesAgainWhateverTheOwnerAnswers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	permanent := &session.CapabilityError{Engine: "claude", Code: session.CapabilitySandboxUnavailable, Phase: session.BeforeLaunch}
 	for _, answer := range []string{choiceTryAgain, "Look at the CLI too"} {
@@ -197,6 +204,7 @@ func TestAResearcherThatFailsResearchesAgainWhateverTheOwnerAnswers(t *testing.T
 // Only the reply a role's work was taken from teaches it anything: a reply
 // that couldn't be read and was asked for again keeps nothing it learned.
 func TestOnlyTheReplyUsedTeachesTheResearcher(t *testing.T) {
+	t.Parallel()
 	learned := func(when string) string {
 		return "\n```learned\n" + `[{"when": "` + when + `", "learning": "Read the tests before the code."}]` + "\n```"
 	}
@@ -220,6 +228,7 @@ func TestOnlyTheReplyUsedTeachesTheResearcher(t *testing.T) {
 }
 
 func TestMissingDesignerIsRecordedWithThePlanAndVisible(t *testing.T) {
+	t.Parallel()
 	for _, seated := range []bool{false, true} {
 		t.Run(fmt.Sprintf("designer=%v", seated), func(t *testing.T) {
 			a, _, p := plannedCode(t, 6, `{"summary":"Add icons.", "needs_designer":"  New provider icons need drawings.  "}`)
@@ -257,6 +266,7 @@ func TestMissingDesignerIsRecordedWithThePlanAndVisible(t *testing.T) {
 }
 
 func TestMissingDesignerFlagIsOptionalBoundedAndIndependentOfHandOff(t *testing.T) {
+	t.Parallel()
 	plan, _, design, err := parsePlan(`{"summary":"Add a command.", "design":"ignored"}`, false, true)
 	if err != nil || design != "" || plan.NeedsDesigner != "" {
 		t.Fatalf("%+v %q %v", plan, design, err)

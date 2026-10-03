@@ -46,6 +46,7 @@ func (r *stageRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, e
 }
 
 func TestThreeWritersAndTwoQARunTogetherByDefault(t *testing.T) {
+	t.Parallel()
 	runner := &stageRunner{}
 	a, p := parallelApp(t, runner, 0)
 	cfg := a.Config()
@@ -230,6 +231,7 @@ func within(ch <-chan struct{}) bool {
 // While one task is checked, the implementer writes the next queued task,
 // within the project's cap; each seat still works on one task at a time.
 func TestTheImplementerWritesTheNextTaskWhileOneIsChecked(t *testing.T) {
+	t.Parallel()
 	runner := &parallelRunner{}
 	a, p := parallelApp(t, runner, 2)
 	writingB := make(chan struct{})
@@ -263,6 +265,7 @@ func TestTheImplementerWritesTheNextTaskWhileOneIsChecked(t *testing.T) {
 // With an explicit cap of one and one implementer, the next task starts
 // only once the one under way waits on the owner, as before.
 func TestACapOfOneStartsTheNextTaskOnlyOnceTheFirstWaits(t *testing.T) {
+	t.Parallel()
 	runner := &parallelRunner{}
 	a, p := parallelApp(t, runner, 1)
 	first, second := queue(t, a, p, "A"), queue(t, a, p, "B")
@@ -286,6 +289,7 @@ func TestACapOfOneStartsTheNextTaskOnlyOnceTheFirstWaits(t *testing.T) {
 // own, when their engine allows two turns at once; the task moves on only
 // once both verdicts are in.
 func TestReviewerAndQACheckOneDraftAtOnce(t *testing.T) {
+	t.Parallel()
 	a, runner, _, task := codeTask(t, pass, pass)
 	two := 2
 	cfg := config.Default()
@@ -302,9 +306,17 @@ func TestReviewerAndQACheckOneDraftAtOnce(t *testing.T) {
 		close(qaStarted)
 		// QA holds on until the reviewer's verdict is in: the task has not
 		// moved on without QA's.
-		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		timer := time.NewTimer(10 * time.Second)
+		defer timer.Stop()
+		for {
 			if now := taskByID(t, a, task.ID); len(now.Verdicts) == 1 {
 				during = now.Status
+				return
+			}
+			select {
+			case <-a.loopWake:
+			case <-timer.C:
+				t.Error("the reviewer's verdict never arrived while QA waited")
 				return
 			}
 		}
@@ -353,6 +365,7 @@ func twoProjects(t *testing.T, runner roles.Runner, first, second string) (*Loop
 // the owner's cap of one turn on Claude, DevB waits for DevA, and its task
 // says it waits for that cap.
 func TestTwoMembersOnOneEngineWorkAtOnce(t *testing.T) {
+	t.Parallel()
 	for _, capped := range []bool{false, true} {
 		t.Run(fmt.Sprintf("capped %v", capped), func(t *testing.T) {
 			runner := &parallelRunner{}
@@ -398,15 +411,26 @@ func TestTwoMembersOnOneEngineWorkAtOnce(t *testing.T) {
 // them back, they still write one project's task and then the other's, and
 // the other says it waits for them, busy on the first.
 func TestAMemberSharedByTwoProjectsWorksOneStepAtATime(t *testing.T) {
+	t.Parallel()
 	runner := &parallelRunner{}
 	a, one, other := twoProjects(t, runner, "Lucius", "Lucius")
 	first := queue(t, a, one, "A")
 	b := queue(t, a, other, "B")
 	var waited *core.Wait
-	runner.onTurn = func(_ context.Context, _, objective string, write bool) error {
+	runner.onTurn = func(ctx context.Context, _, objective string, write bool) error {
 		if write && objective == "A" {
-			// Give B's step every chance to start beside A's.
-			time.Sleep(100 * time.Millisecond)
+			// Try another scheduling pass while A is definitely still writing.
+			// This exercises exclusion beyond the pass that first admitted A,
+			// without depending on a wall-clock overlap window.
+			claimed, err := a.Core.Schedule(ctx, (&slots{lp: a}).admit)
+			if err != nil {
+				return err
+			}
+			if len(claimed) != 0 {
+				return fmt.Errorf("claimed work while A held Lucius: %+v", claimed)
+			}
+			// Schedule records B's wait before launching A. Seeing that wait
+			// proves B was considered while A held the member's seat.
 			waited = taskByID(t, a, b.ID).Waiting
 		}
 		return nil
@@ -427,6 +451,7 @@ func TestAMemberSharedByTwoProjectsWorksOneStepAtATime(t *testing.T) {
 // owner set, across every task; with none set, nothing but the people
 // bounds them.
 func TestTurnsOnOneEngineWaitForAFreeSlot(t *testing.T) {
+	// Serial: retains a negative overlap window while checking exclusion.
 	a, runner, _, task := codeTask(t, pass, pass)
 	one := 1
 	cfg := config.Default()
@@ -471,6 +496,7 @@ func TestTurnsOnOneEngineWaitForAFreeSlot(t *testing.T) {
 // No new role turn starts while the owner is chatting or composing, nor for
 // a moment after; a turn already running goes on to the end.
 func TestNoNewRoleTurnStartsWhileTheOwnerIsBusy(t *testing.T) {
+	// Serial: asserts exclusion before the real interactive grace expires.
 	runner := &parallelRunner{}
 	a, p := parallelApp(t, runner, 0)
 	var chatting func()
@@ -519,6 +545,7 @@ func quiet(a *Loop) {
 // queue, however long that is, and while it is answered; only once it is
 // gone, and a moment after, do they start.
 func TestAQueuedChatHoldsRoleTurnsUntilItIsAnswered(t *testing.T) {
+	// Serial: asserts exclusion before the real interactive grace expires.
 	runner := &parallelRunner{}
 	a, p := parallelApp(t, runner, 0)
 	ctx := context.Background()
@@ -564,6 +591,7 @@ func TestAQueuedChatHoldsRoleTurnsUntilItIsAnswered(t *testing.T) {
 // its turn only once they are done: whether the owner is busy is checked as
 // the turn starts, not only when its step was claimed.
 func TestAClaimedStepWaitsForChatThatBeganAfterItWasClaimed(t *testing.T) {
+	t.Parallel()
 	runner := &parallelRunner{}
 	a, p := parallelApp(t, runner, 0)
 	ctx := context.Background()
@@ -574,9 +602,16 @@ func TestAClaimedStepWaitsForChatThatBeganAfterItWasClaimed(t *testing.T) {
 		t.Fatalf("claimed %+v %v", claimed, err)
 	}
 	// The composer asks for a suggestion between the claim and the turn.
+	parked := make(chan struct{}, 1)
+	a.parked = func() {
+		select {
+		case parked <- struct{}{}:
+		default:
+		}
+	}
 	composing := a.Interactive()
 	ran := a.launch(ctx, claimed[0], true)
-	time.Sleep(300 * time.Millisecond)
+	waitFor(t, parked, "the claimed turn never waited for the composer")
 	if n := runner.turnsOf("Writer: A"); n != 0 {
 		t.Fatal("the turn started while the owner was composing")
 	}
@@ -625,6 +660,7 @@ func (r *lateToolRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result
 // running, a tool call the turn makes changes nothing, though the task is
 // still where it was.
 func TestALateToolCallRecordsNothing(t *testing.T) {
+	t.Parallel()
 	runner := &lateToolRunner{}
 	a, p := parallelApp(t, runner, 0)
 	ctx := context.Background()
@@ -645,6 +681,7 @@ func TestALateToolCallRecordsNothing(t *testing.T) {
 // Stopping a task cancels only its own turn: nothing the turn returns is
 // recorded, its seat is freed for other work, and the other task goes on.
 func TestStoppingOneTaskLeavesTheOthersWorking(t *testing.T) {
+	t.Parallel()
 	runner := &parallelRunner{}
 	a, p := parallelApp(t, runner, 2)
 	first, second := queue(t, a, p, "A"), queue(t, a, p, "B")
@@ -711,6 +748,7 @@ func (r *staleRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, e
 // cancelled has its later tool calls refused as stale, and its seat is free
 // for other work while it still runs.
 func TestAStoppedTurnThatRunsOnHoldsNoSeatAndRecordsNothing(t *testing.T) {
+	t.Parallel()
 	runner := &staleRunner{inTurn: make(chan struct{}), stopped: make(chan struct{}), called: make(chan struct{}), release: make(chan struct{})}
 	a, p := parallelApp(t, runner, 2)
 	// Claude has room for a second turn, so only the seat could hold B back.
@@ -764,6 +802,7 @@ func TestAStoppedTurnThatRunsOnHoldsNoSeatAndRecordsNothing(t *testing.T) {
 // turn the old daemon left that can't be confirmed ended keeps its task
 // held, and the rest are claimed afresh and run once.
 func TestARestartResumesEachClaimOnceAndHoldsAnUnconfirmedOne(t *testing.T) {
+	t.Parallel()
 	runner := &parallelRunner{}
 	a, p := parallelApp(t, runner, 0)
 	ctx := context.Background()
@@ -861,6 +900,7 @@ func (r *seatRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, er
 // A member who both keeps the list and implements does one at a time: the
 // PM's look waits while its seat writes, and runs once the seat is free.
 func TestThePMWaitsForItsSeatToFinishWriting(t *testing.T) {
+	t.Parallel()
 	runner := &seatRunner{scriptedRunner: &scriptedRunner{reviews: []string{pass, pass}}}
 	a, p, _ := loopApp(t, runner.scriptedRunner, "")
 	a.runner = runner
@@ -911,6 +951,7 @@ func TestThePMWaitsForItsSeatToFinishWriting(t *testing.T) {
 // ended runs again, once; one that can't be confirmed holds the project's
 // list rather than look beside it.
 func TestARestartRunsThePMsLookOnceOrHoldsIt(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, _, second := pmTeam(t, runner)
 	ctx := context.Background()
@@ -983,6 +1024,7 @@ func (r *askRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, err
 // it never waits either, for them or for the chat: a busy PM is said to be
 // busy.
 func TestTheAssistantsQuestionTakesThePMsSeatAndATurn(t *testing.T) {
+	t.Parallel()
 	scripted := &scriptedRunner{reviews: []string{pass, pass}}
 	a, p, _, _ := pmTeam(t, scripted)
 	runner := &askRunner{scriptedRunner: scripted}
@@ -1055,6 +1097,7 @@ func TestTheAssistantsQuestionTakesThePMsSeatAndATurn(t *testing.T) {
 // engine, as its look at the list does: the assistant's question meanwhile
 // is refused as busy, whether the seat or only the turn is taken.
 func TestTheAssistantsQuestionWaitsForTheTaskThePMIsDeciding(t *testing.T) {
+	t.Parallel()
 	warmer := `{"outcome":"pass","summary":"Fine.","findings":[],"question":"","next":"revise","note":"I want the closing warmer"}`
 	for _, c := range []struct {
 		name     string
@@ -1132,6 +1175,7 @@ func TestTheAssistantsQuestionWaitsForTheTaskThePMIsDeciding(t *testing.T) {
 // A message to a reviewer busy checking another task waits for that seat,
 // then is answered on the draft it was about.
 func TestAMessageWaitsForItsSeatToBeFree(t *testing.T) {
+	t.Parallel()
 	runner := &parallelRunner{}
 	a, p := parallelApp(t, runner, 2)
 	ctx := context.Background()
@@ -1172,6 +1216,7 @@ func TestAMessageWaitsForItsSeatToBeFree(t *testing.T) {
 // side by side conflict, the implementer resolves it and the resolved draft
 // goes through fresh checks and approval.
 func TestAConflictBetweenTasksBuiltSideBySideGoesToTheImplementer(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass, pass, pass, pass, pass}}}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
@@ -1218,6 +1263,7 @@ func TestAConflictBetweenTasksBuiltSideBySideGoesToTheImplementer(t *testing.T) 
 // Giving a role to someone else keeps as many seats for it as it had: the
 // work it runs at once stays as the owner set it.
 func TestChangingARoleKeepsItsSeats(t *testing.T) {
+	t.Parallel()
 	a, p := parallelApp(t, &parallelRunner{}, 0)
 	ctx := context.Background()
 	claudius, _ := a.Core.SaveMember(ctx, "", core.MemberInput{Name: "Claudius", Kinds: []string{core.RoleImplementer}, Engine: "claude"})
@@ -1259,6 +1305,7 @@ func TestChangingARoleKeepsItsSeats(t *testing.T) {
 // the implementer's to resolve, as it always was, whatever the project's
 // cap: here B started only once A waited for approval.
 func TestAConflictWithWorkBuiltAfterGoesToTheImplementer(t *testing.T) {
+	t.Parallel()
 	source := ownerRepo(t)
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, pass, pass, pass, pass, pass}}}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
@@ -1297,6 +1344,7 @@ func TestAConflictWithWorkBuiltAfterGoesToTheImplementer(t *testing.T) {
 // out but before that was recorded, is settled from where the change went:
 // it is recorded as landed, not left stopped with its change delivered.
 func TestAStopWhileLandingRecordsWhereTheChangeWent(t *testing.T) {
+	t.Parallel()
 	a, _, p, task := codeTask(t, pass, pass)
 	ctx := context.Background()
 	settle(t, a)
@@ -1348,6 +1396,7 @@ func TestAStopWhileLandingRecordsWhereTheChangeWent(t *testing.T) {
 // A seat that takes a task's next round carries on the conversation of its
 // earlier rounds, whichever seat of the same member had them.
 func TestAnotherSeatOfTheSameMemberCarriesOnTheTasksConversation(t *testing.T) {
+	t.Parallel()
 	runner := &threadRunner{reviews: map[string][]string{"A": {revise, pass}}}
 	a, p, _ := threadsApp(t, runner)
 	ctx := context.Background()
