@@ -29,9 +29,34 @@ Create Fish's completions directory first if needed. PowerShell scripts are also
 
 ## Staying up to date
 
-Settings → Updates offers **Ask me** (the default) or **Off**. The daemon checks for an installable release every six hours and checks sooner after its own project publishes one. Ask me opens a decision with the running and available versions, release notes and manual instructions; Off keeps the version display without opening new decisions. Skipping a version hides its sidebar notice until a newer release appears. Development and demo builds do not check for updates.
+Settings → Updates offers **Ask me** (the default) or **Off**. Checks run every six hours and sooner after this project's own release. Ask me opens a decision with the versions and release notes. On a Homebrew install, its recommended choice is **Upgrade to vX**: it drains at once, finishes running work, then upgrades. Off keeps the version display without starting upgrades or opening decisions. Skipping a version hides its notice until a newer release appears. Development and demo builds do not check. Demo mode refuses a state file with an upgrade record; use a fresh state file for a demo.
 
-To upgrade a Homebrew install by hand, run `brew upgrade shhac/tap/crew-assistant`, then restart the daemon. For a standalone install, download the new binary from the releases page. Automatic upgrades aren't available yet.
+Automatic mode is available through the CLI (its dashboard option is a follow-up):
+
+```sh
+crew-assistant config set upgrade.mode automatic
+```
+
+It checks each minute for a moment with no role turn or assistant reply running. Work continues while it waits. After six hours it drains anyway: nothing new starts, and running work finishes. Once draining, Activity names the turns and replies it is waiting on, their running durations, and changes to that set. A version that failed is never retried automatically; choose **Try vX again** or clear its rollback explicitly.
+
+Before installation, the daemon saves its running binary and backs up SQLite and configuration under the state directory's `upgrade/<state identity>/attempts/`. It runs the Homebrew prefix's own `bin/brew upgrade <configured formula>`, finding that prefix from the executable's Cellar path rather than PATH. It removes `HOMEBREW_NO_INSTALL_CLEANUP` from the installer environment. After installation it replaces itself, handing over the listening socket and browser sessions, so the dashboard address and your paired browser stay the same. The new version holds all work and refuses mutations while it opens and migrates state and answers its authenticated API health check, within two minutes.
+
+If startup fails, state and config are restored before the saved previous version starts. SQLite WAL and SHM files are removed. A saved-binary watchdog covers crashes and hangs: for a terminal start it brings the previous daemon back **detached**, logging to `<state directory>/upgrade/<state identity>/rollback-serve.log`; its own log is `upgrade/<state identity>/watchdog.log`. The next terminal start explains the rollback and names the log, including when that detached daemon is already running. A health-check failure with the process still alive replaces it directly with the previous binary. Recovery stays pending until that restored daemon opens its config and state and answers its API; the watchdog retries failed restarts. The same protection covers restarting the running version after a backup or installer failure.
+
+Upgrade startup requires a confirmed process identity. If inspection keeps failing, admission is refused; the watchdog logs the inspection failure and retries without killing an unconfirmed PID, even after the health deadline. Check local process inspection permissions. After a completed upgrade, moving the config is allowed; a pending recovery or rollback pin still requires its recorded config destination.
+
+Under launchd, the watchdog asks `launchctl` to restart your job. Point the owner's plist at the stable path `$(brew --prefix)/bin/crew-assistant`, with the expanded absolute path in `ProgramArguments`; the formula does not supply a service block. The job label is accepted only when launchd is the daemon’s direct parent, excluding terminal application labels and the terminal sentinel 0. While rollback is in force, that Homebrew binary execs the saved previous one before reading state, on terminal starts too. An upgrade-failed decision explains the failure and how to clear it. The dedicated dashboard rollback banner is a follow-up.
+
+```sh
+crew-assistant upgrade status          # reads the record even with no daemon
+crew-assistant upgrade clear-rollback  # asks the running daemon to retry safely
+```
+
+Keep your usual `--state` and `--config` flags when using these commands. Clearing a rollback takes fresh backups and runs probation again; it does not simply remove the pin. The ordinary command refuses when no daemon is running. If the saved executable is missing, startup names the exceptional `upgrade clear-rollback --offline` recovery: with the daemon stopped, it restores both backups and removes the unusable pin without starting a process. This discards state and config changes since that backup. Install a working Homebrew binary and then start `serve`; the command refuses this rescue when the saved executable still exists.
+
+A signal during upgrade draining abandons the upgrade without installing. The first signal during installation lets Homebrew finish and leaves a durable record for the next start; a second signal cancels it. The dashboard remains available during installation. A stop during probation stands down the watchdog; a second probation start rolls back. A stop during restoration lets recovery finish restoring the backups without restarting the daemon. The record is read before config migration or opening state on every start, including through state-file aliases, and recovery can repeat an interrupted restore. If the recovery watchdog cannot start, the previous daemon reports this and still attempts direct recovery. Only the most recent successful attempt's backups are kept. Cleanup errors are reported and retried at startup without stopping a healthy daemon. An incomplete backup prevents installation, restarts the running version with a failure decision, and retains any existing rollback protection. Installer failures give an exit status and manual retry guidance; arbitrary installer stderr is deliberately excluded because hooks can print credentials.
+
+To upgrade by hand, run `brew upgrade shhac/tap/crew-assistant`, then restart. Standalone installs keep the manual release-download instructions and cannot self-install.
 
 ## Run it
 

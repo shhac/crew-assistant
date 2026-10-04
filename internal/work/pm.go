@@ -110,6 +110,7 @@ func (lp *Loop) pmTurn(ctx context.Context, projectID string, seat core.Role) er
 	// The PM reads only what its prompt carries: no repository, no writing.
 	// Its tools tidy tasks, link them and queue new ones.
 	spec := lp.baseSpec(seat, dir, base)
+	spec.Observer = lp.watchTurn(core.Task{ProjectID: p.ID}, core.RolePM, seat, dir, false)
 	lp.withTools(&spec, lp.managerTools(p.ID, seat).proposing(p.Playbook))
 	var answer core.PMAnswer
 	var questions []string
@@ -354,6 +355,7 @@ func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (string, 
 	pmTriage(&b, snap, p)
 	fmt.Fprintf(&b, "\nThe owner's assistant asks you:\n\n%s\n\nAnswer in a few plain sentences from what you know of the list. You change nothing by answering; say what you would change, if anything, and why.", question)
 	spec := lp.baseSpec(seat, dir, b.String())
+	spec.Observer = lp.watchTurn(core.Task{ProjectID: p.ID}, core.RolePM, seat, dir, false)
 	lp.withTools(&spec, lp.answerTools(p.ID, seat))
 	// The PM answers from its seat, which works on one thing at a time, and
 	// within its engine's bound on turns at once. The chat asking never

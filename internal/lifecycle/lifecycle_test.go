@@ -18,6 +18,69 @@ func ended(ctx context.Context) bool {
 	}
 }
 
+func TestUpgradeDrainWaitsForRunningWorkAndSignalOverridesReason(t *testing.T) {
+	signals := make(chan os.Signal, 2)
+	said := make(chan string, 2)
+	stop, cancel := Watch(context.Background(), signals, func(s string) { said <- s })
+	defer cancel()
+	child, cancelChild := stop.WithCancel()
+	defer cancelChild()
+	if !child.Drain("upgrade") || !ended(stop.Graceful) || stop.Reason() != "upgrade" {
+		t.Fatal("upgrade did not end admission", stop.Reason())
+	}
+	if stop.Force.Err() != nil || stop.Drain("other") {
+		t.Fatal("drain cancelled work or accepted a second request")
+	}
+	done := make(chan struct{})
+	returned := make(chan error, 1)
+	go func() { returned <- child.Await(done) }()
+	select {
+	case <-returned:
+		t.Fatal("drain did not wait for running work")
+	case <-time.After(20 * time.Millisecond):
+	}
+	signals <- syscall.SIGTERM
+	<-said
+	if stop.Reason() != "signal" || stop.Force.Err() != nil {
+		t.Fatal("signal should abandon upgrade and continue draining")
+	}
+	close(done)
+	if err := <-returned; err != nil {
+		t.Fatal(err)
+	}
+	signals <- syscall.SIGTERM
+	if !ended(stop.Force) {
+		t.Fatal("second signal did not force stop")
+	}
+}
+
+func TestCancelledChildCanDrainRoot(t *testing.T) {
+	stop, cancel := Watch(context.Background(), make(chan os.Signal), func(string) {})
+	defer cancel()
+	child, cancelChild := stop.WithCancel()
+	cancelChild()
+	if !child.Drain("upgrade") || !ended(stop.Graceful) || stop.Force.Err() != nil {
+		t.Fatal("child cancellation prevented a root drain")
+	}
+}
+
+func TestSignalEndsAdmissionBeforeSay(t *testing.T) {
+	signals := make(chan os.Signal, 1)
+	saying := make(chan struct{})
+	release := make(chan struct{})
+	stop, cancel := Watch(context.Background(), signals, func(string) {
+		close(saying)
+		<-release
+	})
+	defer cancel()
+	defer close(release)
+	signals <- syscall.SIGTERM
+	<-saying
+	if !stop.Stopping() || stop.Drain("upgrade") || stop.Reason() != "signal" {
+		t.Fatal("signal allowed an upgrade while reporting the stop")
+	}
+}
+
 func TestTheFirstSignalStopsNewWorkAndTheSecondEndsIt(t *testing.T) {
 	signals := make(chan os.Signal, 2)
 	var said []string

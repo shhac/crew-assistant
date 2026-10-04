@@ -73,7 +73,7 @@ func TestConfigKeysCoverTheFile(t *testing.T) {
 		{"models.suggestions.engine", "", []string{"claude", "codex", "grok", "openai-compatible"}},
 		{"assistant.seat", "", []string{"milo"}},
 		{"dashboard.tailscale", "", []string{"off", "serve"}},
-		{"upgrade.mode", "", []string{"ask", "off"}},
+		{"upgrade.mode", "", []string{"ask", "automatic", "off"}},
 		{"engines.claude.on_unknown_usage", "", []string{"allow", "pause"}},
 		{"assistant.theme", "da", []string{"dark"}},
 		{"engines.openai-compatible.api_key_env", "", nil},

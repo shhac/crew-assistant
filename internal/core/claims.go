@@ -215,6 +215,9 @@ type Wait struct {
 func (s *Service) Schedule(ctx context.Context, admit Admit) ([]Scheduled, error) {
 	var out []Scheduled
 	err := s.store.update(ctx, func(v *Snapshot) error {
+		if s.upgradeDraining {
+			return nil
+		}
 		now := s.now().UTC()
 		busy := busyPeople(v)
 		waits := map[string]*Wait{}
@@ -614,6 +617,9 @@ func rolesOf(roles []Role, kind string) []Role {
 func (s *Service) ClaimTask(ctx context.Context, taskID, step string) (Claim, error) {
 	var out Claim
 	err := s.store.update(ctx, func(v *Snapshot) error {
+		if s.upgradeDraining {
+			return ErrConflict
+		}
 		t := task(v, taskID)
 		if t == nil {
 			return ErrNotFound
@@ -636,6 +642,9 @@ func (s *Service) ClaimMessage(ctx context.Context, taskID, messageID string, ad
 	var out Scheduled
 	found := false
 	err := s.store.update(ctx, func(v *Snapshot) error {
+		if s.upgradeDraining {
+			return nil
+		}
 		t := task(v, taskID)
 		if t == nil {
 			return ErrNotFound
@@ -693,6 +702,9 @@ func (s *Service) claimPM(ctx context.Context, projectID, step string, admit Adm
 	var seat Role
 	found := false
 	err := s.store.update(ctx, func(v *Snapshot) error {
+		if s.upgradeDraining {
+			return nil
+		}
 		var err error
 		out, seat, found, err = s.takePM(v, projectID, step, admit)
 		return err

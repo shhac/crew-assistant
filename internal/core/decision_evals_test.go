@@ -37,12 +37,22 @@ func TestEveryDecisionKindIsEvaluatedWithAnswerAndAttribution(t *testing.T) {
 			t.Run(kind+"/"+disposition, func(t *testing.T) {
 				s, _ := fixture(t)
 				d := Decision{ID: "d", ProjectID: "p", TaskID: "t", Kind: kind, Title: "Title", Context: "Context", Choices: []string{"Yes", "No"}, Recommendation: "Yes", Status: DecisionOpen, CreatedAt: s.now()}
-				if err := s.store.update(testContext, func(v *Snapshot) error { v.Decisions = append(v.Decisions, d); return nil }); err != nil {
+				if kind == DecisionUpgradeAvailable {
+					d.Choices = []string{ChoiceUpgradeByHand, "Skip v2.0.0"}
+					d.Recommendation = ChoiceUpgradeByHand
+				}
+				if err := s.store.update(testContext, func(v *Snapshot) error {
+					if kind == DecisionUpgradeAvailable {
+						v.Update.DecisionVersion = "v2.0.0"
+					}
+					v.Decisions = append(v.Decisions, d)
+					return nil
+				}); err != nil {
 					t.Fatal(err)
 				}
 				var resolved Decision
 				var err error
-				by, answer := FromOwner, "Yes"
+				by, answer := FromOwner, d.Choices[0]
 				if disposition == DispositionChoice {
 					resolved, err = s.ChooseDecision(testContext, d.ID, answer, by)
 				} else {

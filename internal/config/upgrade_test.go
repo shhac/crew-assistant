@@ -17,15 +17,15 @@ func TestUpgradeSettingsDefaultsValidationAndExample(t *testing.T) {
 	if _, err := Load("../../config.example.json"); err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"off", "ask"} {
+	for _, mode := range []string{"off", "ask", "automatic"} {
 		c.Upgrade.Mode = mode
 		if err := c.Validate(); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, mode := range []string{"auto", "automatic"} {
+	for _, mode := range []string{"auto", "unknown"} {
 		c.Upgrade.Mode = mode
-		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "aren't available yet") {
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "off, ask or automatic") {
 			t.Fatal(err)
 		}
 	}

@@ -1010,6 +1010,10 @@ type askRunner struct {
 
 func (r *askRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
 	if r.onAsked != nil && strings.Contains(spec.Prompt, "The owner's assistant asks you") {
+		if spec.Observer != nil {
+			spec.Observer.Started()
+			defer spec.Observer.Ended()
+		}
 		r.onAsked()
 	}
 	if r.onRoute != nil && strings.Contains(spec.Prompt, "Decide where this task goes next") {
@@ -1066,6 +1070,10 @@ func TestTheAssistantsQuestionTakesThePMsSeatAndATurn(t *testing.T) {
 	defer chatting()
 	var seatFree, slotFree bool
 	runner.onAsked = func() {
+		turns := a.Turns()
+		if len(turns) != 1 || turns[0].Role != core.RolePM || turns[0].ProjectID != p.ID {
+			t.Error("assistant PM question is missing from upgrade waiting", turns)
+		}
 		_, _, seatFree, _ = a.Core.ClaimPM(ctx, p.ID, func(core.Role) string { return "" })
 		if slotFree = a.take("claude", true); slotFree {
 			a.free("claude")

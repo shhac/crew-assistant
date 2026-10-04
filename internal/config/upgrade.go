@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// UpgradeSettings controls notices only. Installation remains an owner action.
+// UpgradeSettings controls notices and Homebrew self-upgrades.
 type UpgradeSettings struct {
 	Mode          string `json:"mode"`
 	CheckInterval string `json:"check_interval"`
@@ -44,11 +44,8 @@ func (u UpgradeSettings) Interval() time.Duration {
 	return d
 }
 func (u UpgradeSettings) validate() error {
-	if u.Mode == "auto" || u.Mode == "automatic" {
-		return fmt.Errorf("upgrade.mode: automatic upgrades aren't available yet; choose off or ask")
-	}
-	if u.Mode != "off" && u.Mode != "ask" {
-		return fmt.Errorf("upgrade.mode must be off or ask")
+	if u.Mode != "off" && u.Mode != "ask" && u.Mode != "automatic" {
+		return fmt.Errorf("upgrade.mode must be off, ask or automatic")
 	}
 	if d, err := time.ParseDuration(u.CheckInterval); err != nil || d < 15*time.Minute {
 		return fmt.Errorf("upgrade.check_interval must be a duration of at least 15m")

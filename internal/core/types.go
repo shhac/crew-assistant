@@ -231,6 +231,8 @@ type PendingOperation struct {
 type Snapshot struct {
 	EnginePauses   map[string]EnginePause `json:"engine_pauses,omitempty"`
 	Update         UpdateStatus           `json:"update,omitzero"`
+	Upgrade        *UpgradeProgress       `json:"upgrade,omitempty"`
+	Rollback       *RollbackStatus        `json:"rollback,omitempty"`
 	ChatCheckpoint ChatCheckpoint         `json:"-"`
 	// ChatSession is the current conversation's model session.
 	ChatSession *ChatSession `json:"-"`

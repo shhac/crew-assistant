@@ -65,12 +65,19 @@ type App struct {
 	// message queued after it hears so rather than waiting for an answer.
 	chatClosed       atomic.Bool
 	dispatchDisabled atomic.Bool // Fixed by Run before integrations accept messages.
+	upgrading        atomic.Bool
+	upgradeEngine    *upgrade.Engine
+	requestUpgrade   func(string, bool) error
+	upgradeClock     upgrade.Clock
 }
 
 // Options are what the daemon decides about the app it builds.
 type Options struct {
-	Version string
-	Checker *upgrade.Checker
+	Version        string
+	Checker        *upgrade.Checker
+	UpgradeEngine  *upgrade.Engine
+	RequestUpgrade func(string, bool) error
+	UpgradeClock   upgrade.Clock
 	// Demo runs on sample data, with every model and integration off.
 	Demo bool
 	// Diagnostics records failures, the app's and its loop's; nil keeps the
@@ -85,6 +92,10 @@ func New(s *core.Service, cfg config.Config, path string, opts Options) *App {
 	a := &App{Diagnostics: opts.Diagnostics, connectionClient: connections.New(), Core: s, cfg: cfg, slackConfig: cfg.Slack, configPath: path, Demo: opts.Demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), summarize: engine.Complete, stop: lifecycle.Now(context.Background()), statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
 	a.Work = work.New(s, a.Config, opts.Demo)
 	a.version, a.checker = opts.Version, opts.Checker
+	a.upgradeEngine, a.requestUpgrade, a.upgradeClock = opts.UpgradeEngine, opts.RequestUpgrade, opts.UpgradeClock
+	if opts.RequestUpgrade != nil && !opts.Demo {
+		s.OnUpgradeRequested(func(version string) error { return a.RequestUpgrade(version, false) })
+	}
 	if a.checker != nil && !a.Demo {
 		s.OnReleaseRecorded(a.releaseRecorded)
 	}
@@ -236,6 +247,22 @@ func (a *App) Snapshot(ctx context.Context) (core.Snapshot, error) {
 	s.Update.Running, s.Update.Mode = a.version, cfg.Upgrade.Mode
 	s.Update.Unavailable = upgrade.Unavailable(a.version, a.Demo)
 	s.Stopping = a.Stopping()
+	if a.upgradeEngine != nil {
+		r, readErr := upgrade.ReadRecord(a.upgradeEngine.Path)
+		if readErr != nil {
+			return s, readErr
+		}
+		if r != nil {
+			s.Upgrade = &core.UpgradeProgress{Step: r.Step, From: r.From, To: r.To, Since: r.StepAt, WaitingOn: r.WaitingOn}
+			if r.Pinned {
+				version := r.To
+				if r.PinTo != "" {
+					version = r.PinTo
+				}
+				s.Rollback = &core.RollbackStatus{From: r.From, To: version, Failure: r.Failure, Clear: "crew-assistant upgrade clear-rollback"}
+			}
+		}
+	}
 	if a.Work != nil {
 		s.Turns = a.Work.Turns()
 	}

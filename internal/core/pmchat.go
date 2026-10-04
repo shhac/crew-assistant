@@ -107,6 +107,9 @@ func (s *Service) ClaimPMChat(ctx context.Context, projectID string, admit Admit
 	var seat Role
 	var ok bool
 	err := s.store.update(ctx, func(v *Snapshot) error {
+		if s.upgradeDraining {
+			return nil
+		}
 		p := project(v, projectID)
 		if p == nil {
 			return ErrNotFound

@@ -46,6 +46,9 @@ func (s *Service) DismissDecision(ctx context.Context, id, reason string) (Decis
 }
 func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, reason string, by string, splits ...*OwnerSplit) (Decision, error) {
 	var out Decision
+	var beforeUpgrade Decision
+	var afterCommit func() error
+	var upgradeTarget string
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		d := decision(v, id)
 		if d == nil {
@@ -56,6 +59,12 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 		}
 		if disposition == DispositionChoice && !slices.Contains(d.Choices, answer) {
 			return fmt.Errorf("%q is not one of this decision's choices: %w", answer, ErrConflict)
+		}
+		if d.Kind == DecisionUpgradeAvailable {
+			target := upgradeDecisionVersion(*d)
+			if target == "" || target != v.Update.DecisionVersion {
+				return fmt.Errorf("this update notice has been superseded: %w", ErrConflict)
+			}
 		}
 		var split *OwnerSplit
 		if len(splits) > 0 {
@@ -85,7 +94,24 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 			}
 		}
 		now := s.now().UTC()
-		if d.Kind == DecisionUpgradeAvailable && (disposition != DispositionChoice || answer != ChoiceUpgradeByHand) {
+		if disposition == DispositionChoice && (d.Kind == DecisionUpgradeAvailable && answer == UpgradeChoice(v.Update.DecisionVersion) || d.Kind == DecisionUpgradeFailed && strings.HasPrefix(answer, "Try ") && strings.HasSuffix(answer, " again")) {
+			version := v.Update.DecisionVersion
+			if d.Kind == DecisionUpgradeFailed {
+				version = strings.TrimSuffix(strings.TrimPrefix(answer, "Try "), " again")
+			}
+			hook := s.upgradeHook()
+			if hook == nil {
+				return errors.New("this install cannot self-upgrade; upgrade by hand")
+			}
+			if v.Update.PendingRequest != nil {
+				return fmt.Errorf("an upgrade request is already pending: %w", ErrConflict)
+			}
+			beforeUpgrade = *d
+			upgradeTarget = version
+			v.Update.PendingRequest = &UpgradeRequest{DecisionID: id, Version: version, Choice: answer, At: now}
+			afterCommit = func() error { return hook(version) }
+		}
+		if d.Kind == DecisionUpgradeAvailable && (disposition != DispositionChoice || answer != ChoiceUpgradeByHand && answer != UpgradeChoice(v.Update.DecisionVersion)) {
 			v.Update.Skipped = v.Update.DecisionVersion
 		}
 		if d.Kind == DecisionRelease || d.Kind == DecisionReleaseFailed {
@@ -140,6 +166,34 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 		out = *d
 		return nil
 	})
+	if err == nil && afterCommit != nil {
+		if hookErr := afterCommit(); hookErr != nil {
+			restoreErr := s.store.update(context.WithoutCancel(ctx), func(v *Snapshot) error {
+				d := decision(v, id)
+				if d != nil && d.Status == out.Status && d.Answer == out.Answer {
+					if d.Kind == DecisionUpgradeAvailable && v.Update.DecisionVersion != upgradeTarget {
+						d.Disposition = DispositionSuperseded
+						d.ResolutionReason = "Superseded by a newer update."
+					} else {
+						*d = beforeUpgrade
+						recordOn(v, s.now().UTC(), d.ProjectID, d.TaskID, "decision.opened", d.Title+": upgrade did not start")
+					}
+				}
+				if pending := v.Update.PendingRequest; pending != nil && pending.DecisionID == id {
+					v.Update.PendingRequest = nil
+				}
+				return nil
+			})
+			return beforeUpgrade, errors.Join(hookErr, restoreErr)
+		}
+		err = s.store.update(context.WithoutCancel(ctx), func(v *Snapshot) error {
+			if pending := v.Update.PendingRequest; pending != nil && pending.DecisionID == id {
+				v.Update.PendingRequest = nil
+			}
+			return nil
+		})
+
+	}
 	return out, err
 }
 

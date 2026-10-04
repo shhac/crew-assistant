@@ -72,8 +72,11 @@ func (lp *Loop) Turns() []core.Turn {
 }
 
 // watchTurn is how a role's turn on t reports itself while it runs.
-func (lp *Loop) watchTurn(t core.Task, kind string, r core.Role, workDir string, writes bool) roles.Observer {
+func (lp *Loop) watchTurn(t core.Task, kind string, r core.Role, workDir string, writes bool, message ...string) roles.Observer {
 	l := &liveTurn{reg: &lp.turns, workDir: workDir, writes: writes, who: core.Turn{ProjectID: t.ProjectID, TaskID: t.ID, Role: kind, Seat: r.Name, Member: r.Member}}
+	if len(message) > 0 {
+		l.who.MessageID = message[0]
+	}
 	l.steps = stepLog{who: core.TurnStep{TaskID: t.ID, Seat: r.Name, Member: r.Member, Role: kind}, keep: lp.keepStep}
 	return l
 }

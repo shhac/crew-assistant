@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -56,7 +58,58 @@ func NewAuth(dir, localURL, publicURL string, users []string) (*Auth, error) {
 	if err := statepath.WriteFileAtomic(filepath.Join(dir, "admin-token"), []byte(a.admin)); err != nil {
 		return nil, err
 	}
+	if err := a.loadHandover(dir); err != nil {
+		return nil, err
+	}
 	return a, nil
+}
+
+// SaveHandover snapshots sessions before installation and refreshes them after HTTP drains.
+// Cookies retain their original expiry; admin and pairing tokens are rotated.
+func (a *Auth) SaveHandover(dir string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	sessions := make(map[string]time.Time)
+	for token, expiry := range a.sessions {
+		if time.Now().Before(expiry) {
+			sessions[token] = expiry
+		}
+	}
+	b, err := json.Marshal(sessions)
+	if err != nil {
+		return err
+	}
+	if err := statepath.WriteFileAtomic(filepath.Join(dir, "upgrade-sessions.json"), b); err != nil {
+		return err
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
+func (a *Auth) loadHandover(dir string) error {
+	path := filepath.Join(dir, "upgrade-sessions.json")
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var sessions map[string]time.Time
+	if err = json.Unmarshal(b, &sessions); err != nil {
+		// Do not echo file contents, which are authentication credentials.
+		return errors.New("could not read browser sessions from upgrade handover")
+	}
+	for token, expiry := range sessions {
+		if time.Now().Before(expiry) {
+			a.sessions[token] = expiry
+		}
+	}
+	return nil
 }
 func Pair(dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {

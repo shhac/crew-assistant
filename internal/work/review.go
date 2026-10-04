@@ -356,6 +356,7 @@ func (lp *Loop) route(ctx context.Context, p core.Project, t core.Task, current 
 		return next, ""
 	}
 	spec := lp.baseSpec(seat, dir, routePrompt(p, t, current, options))
+	spec.Observer = lp.watchTurn(t, core.RolePM, seat, dir, false)
 	lp.withTools(&spec, lp.managerTools(p.ID, seat))
 	var choice routeChoice
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {

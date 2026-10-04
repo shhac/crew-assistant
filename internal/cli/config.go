@@ -78,7 +78,7 @@ func configKeys(o *options) []libcli.ConfigKey {
 		Doc:     &doc,
 	}
 	keys := []libcli.ConfigKey{
-		withValues(libcli.StringKey(b, "upgrade.mode", "Update notices: off or ask; automatic upgrades are not available yet", func(c *config.Config) *string { return &c.Upgrade.Mode }, nil), "off", "ask"),
+		withValues(libcli.StringKey(b, "upgrade.mode", "Updates: off, ask or automatic (wait for a quiet moment, at most 6h)", func(c *config.Config) *string { return &c.Upgrade.Mode }, nil), "off", "ask", "automatic"),
 		libcli.StringKey(b, "upgrade.check_interval", "How often releases are checked; at least 15m", func(c *config.Config) *string { return &c.Upgrade.CheckInterval }, nil),
 		libcli.StringKey(b, "upgrade.source_repo", "The release repository, owner/name", func(c *config.Config) *string { return &c.Upgrade.SourceRepo }, nil),
 		libcli.StringKey(b, "upgrade.formula", "The Homebrew formula, owner/tap/formula", func(c *config.Config) *string { return &c.Upgrade.Formula }, nil),

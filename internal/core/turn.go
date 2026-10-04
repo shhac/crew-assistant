@@ -5,6 +5,7 @@ import "time"
 // Turn is a role at work on a task right now, with what its session has
 // reported so far: the counts only go up while it is alive.
 type Turn struct {
+	MessageID string `json:"message_id,omitempty"`
 	ProjectID string `json:"project_id"`
 	TaskID    string `json:"task_id,omitempty"`
 	// Role is the kind of work, such as implementer; Seat is the seat's

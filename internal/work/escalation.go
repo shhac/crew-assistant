@@ -247,6 +247,7 @@ func (lp *Loop) judgeEscalation(ctx context.Context, p core.Project, t core.Task
 		return "", nil, ""
 	}
 	spec := lp.baseSpec(seat, dir, prompt)
+	spec.Observer = lp.watchTurn(t, core.RolePM, seat, dir, false)
 	lp.withTools(&spec, lp.answerTools(p.ID, seat))
 	var judged escalationJudgement
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
@@ -499,6 +500,7 @@ func (lp *Loop) judgeOwnerStep(ctx context.Context, p core.Project, t core.Task,
 		return nil, ""
 	}
 	spec := lp.baseSpec(seat, dir, ownerStepPrompt(p, t, u))
+	spec.Observer = lp.watchTurn(t, core.RolePM, seat, dir, false)
 	lp.withTools(&spec, lp.answerTools(p.ID, seat))
 	var judged ownerStepJudgement
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) error {

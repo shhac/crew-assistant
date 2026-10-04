@@ -201,6 +201,9 @@ func (s *Service) ClaimRelease(ctx context.Context, id, commit string, admit Adm
 	var seat Role
 	var ok bool
 	err := s.store.update(ctx, func(v *Snapshot) error {
+		if s.upgradeDraining {
+			return nil
+		}
 		p := project(v, id)
 		if p == nil {
 			return ErrNotFound

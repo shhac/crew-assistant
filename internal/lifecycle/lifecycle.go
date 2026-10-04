@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -17,6 +18,40 @@ import (
 // taken only while Graceful lasts; work already taken runs on Force.
 type Stop struct {
 	Graceful, Force context.Context
+	drain           *drainState
+}
+
+type drainState struct {
+	mu     sync.Mutex
+	reason string
+	end    context.CancelFunc
+	root   context.Context
+}
+
+// Drain ends admission but leaves running work on Force. A signal takes
+// precedence over a programmatic drain so an upgrade can be abandoned.
+// Derived stops drain the shared root even if the derived stop was cancelled.
+func (s Stop) Drain(reason string) bool {
+	if s.drain == nil {
+		return false
+	}
+	s.drain.mu.Lock()
+	defer s.drain.mu.Unlock()
+	if s.drain.root.Err() != nil || s.drain.reason == "signal" {
+		return false
+	}
+	s.drain.reason = reason
+	s.drain.end()
+	return true
+}
+
+func (s Stop) Reason() string {
+	if s.drain == nil {
+		return ""
+	}
+	s.drain.mu.Lock()
+	defer s.drain.mu.Unlock()
+	return s.drain.reason
 }
 
 // Stopping says whether new work should be refused. It is asked explicitly
@@ -44,7 +79,7 @@ var ForceDrain = 5 * time.Second
 func (s Stop) WithCancel() (Stop, context.CancelFunc) {
 	graceful, endGraceful := context.WithCancel(s.Graceful)
 	force, endForce := context.WithCancel(s.Force)
-	return Stop{Graceful: graceful, Force: force}, func() {
+	return Stop{Graceful: graceful, Force: force, drain: s.drain}, func() {
 		endGraceful()
 		endForce()
 	}
@@ -73,14 +108,18 @@ func (s Stop) Await(done <-chan struct{}) error {
 func Watch(ctx context.Context, signals <-chan os.Signal, say func(string)) (stop Stop, cancelAll func()) {
 	graceful, endGraceful := context.WithCancel(ctx)
 	stop, cancelAll = Stop{Graceful: graceful, Force: ctx}.WithCancel()
+	stop.drain = &drainState{end: endGraceful, root: stop.Graceful}
 	go func() {
 		defer cancelAll()
 		defer endGraceful()
 		if !signalled(stop.Force, signals) {
 			return
 		}
-		say("Stopping: finishing the work in progress; nothing new starts. Press Ctrl-C again to stop now.")
+		stop.drain.mu.Lock()
+		stop.drain.reason = "signal"
 		endGraceful()
+		stop.drain.mu.Unlock()
+		say("Stopping: finishing the work in progress; nothing new starts. Press Ctrl-C again to stop now.")
 		if !signalled(stop.Force, signals) {
 			return
 		}

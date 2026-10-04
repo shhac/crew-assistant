@@ -40,6 +40,10 @@ func (a *App) Run(stop lifecycle.Stop, noDispatch bool) (runErr error) {
 		<-stop.Graceful.Done()
 		return nil
 	}
+	if a.requestUpgrade != nil {
+		listeners.Add(1)
+		go func() { defer listeners.Done(); a.runAutomaticUpgrades(stop.Graceful) }()
+	}
 	listeners.Add(1)
 	go func() {
 		defer listeners.Done()

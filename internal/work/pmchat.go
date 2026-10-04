@@ -145,6 +145,7 @@ func (lp *Loop) pmChatTurn(ctx context.Context, projectID string, m core.PMChatM
 	tools := lp.managerTools(p.ID, seat).proposing(p.Playbook)
 	tools.chat = changes
 	spec := lp.baseSpec(seat, dir, b.String())
+	spec.Observer = lp.watchTurn(core.Task{ProjectID: p.ID}, core.RolePM, seat, dir, false, m.ID)
 	lp.withTools(&spec, tools)
 	result, err := lp.runRole(ctx, spec)
 	receipt := changes.snapshot()

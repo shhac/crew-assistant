@@ -1,4 +1,4 @@
-// Package upgrade checks installable releases. It never installs anything.
+// Package upgrade checks installable releases and provides self-upgrade recovery.
 package upgrade
 
 import (
@@ -39,6 +39,9 @@ type Clock interface {
 	NewTimer(time.Duration) Timer
 }
 type realClock struct{}
+
+func SystemClock() Clock { return realClock{} }
+
 type realTimer struct{ *time.Timer }
 
 func (realClock) Now() time.Time                 { return time.Now() }

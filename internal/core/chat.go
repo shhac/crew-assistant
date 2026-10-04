@@ -126,6 +126,9 @@ func conversationTurns(v *Snapshot) []ChatTurn {
 func (s *Service) StartNextChat(ctx context.Context, assistantEngine string) (ChatTurn, error) {
 	var out ChatTurn
 	err := s.store.update(ctx, func(v *Snapshot) error {
+		if s.upgradeDraining {
+			return ErrNotFound
+		}
 		for _, t := range v.ChatTurns {
 			if t.Status == "running" {
 				return ErrConflict

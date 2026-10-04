@@ -17,6 +17,7 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/upgrade"
 	libcli "github.com/shhac/lib-agent-cli/cli"
 	_ "github.com/shhac/lib-agent-cli/yaml"
 	output "github.com/shhac/lib-agent-output"
@@ -24,6 +25,7 @@ import (
 )
 
 type options struct {
+	upgradeIdentity       func(int) string // Injected process inspection for upgrade tests.
 	diagnostics           *diagnostics.Logger
 	configPath, statePath string
 	envFile               string
@@ -32,7 +34,11 @@ type options struct {
 	// daemon it came from.
 	version string
 	// transport replaces the network in tests; nil talks to the daemon.
-	transport http.RoundTripper
+	transport         http.RoundTripper
+	upgradeHost       *upgradeHost
+	upgradeExecutable func() (string, error)
+	upgradeExecer     func(string, []string) error
+	upgradeStarter    func(string, []string, string) error // Injected process starter; nil uses detached OS processes.
 }
 
 func Run(version string) { libcli.Run(NewRoot(version)) }
@@ -124,11 +130,17 @@ func NewRoot(version string) *cobra.Command {
 	registerModel(root, o)
 	registerTask(root, o)
 	registerEngine(root, o)
+	registerUpgrade(root, o)
 	registerCompletions(root, o)
 	return root
 }
-func (o *options) emit(v any) error   { return libcli.EmitItem(os.Stdout, o.globals.Format, v) }
-func (o *options) runtimeDir() string { return o.statePath + ".runtime" }
+func (o *options) emit(v any) error { return libcli.EmitItem(os.Stdout, o.globals.Format, v) }
+func (o *options) runtimeDir() string {
+	if path, err := upgrade.CanonicalPath(o.statePath); err == nil {
+		return path + ".runtime"
+	}
+	return o.statePath + ".runtime"
+}
 
 type runtimeInfo struct {
 	URL      string `json:"url"`
@@ -213,6 +225,9 @@ func daemonError(status int, data []byte) error {
 	return fmt.Errorf("daemon returned HTTP %d", status)
 }
 func (o *options) saveConfig(c config.Config) error {
+	if err := canonicalUpgradeOptions(o); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(o.statePath), 0700); err != nil {
 		return err
 	}

@@ -12,11 +12,23 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/dashboard"
+	"github.com/shhac/crew-assistant/internal/upgrade"
 	"github.com/shhac/lib-agent-harness/catalog"
 )
 
 func New(a *app.App, auth *Auth) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/upgrade", func(w http.ResponseWriter, r *http.Request) {
+		s, err := a.Core.Snapshot(r.Context())
+		if err != nil {
+			problem(w, err)
+			return
+		}
+		reply(w, 202, map[string]bool{"draining": true}, a.RequestUpgrade(s.Update.Available, false))
+	})
+	mux.HandleFunc("POST /api/upgrade/clear-rollback", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, 202, map[string]bool{"draining": true}, a.ClearRollback())
+	})
 	registerFilesystem(mux, a)
 	registerEnginePauses(mux, a)
 	mux.HandleFunc("GET /api/engines/codex/browser-bridge", browserBridgeHandler(a))
@@ -191,7 +203,15 @@ func New(a *app.App, auth *Auth) http.Handler {
 		}
 		files.ServeHTTP(w, r)
 	})
-	return auth.Middleware(mux)
+	authenticated := auth.Middleware(mux)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgradeRequest := r.URL.Path == "/api/upgrade" || r.URL.Path == "/api/upgrade/clear-rollback"
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.Method != http.MethodGet && r.Method != http.MethodHead && !upgradeRequest && a.Upgrading() {
+			fail(w, 503, "upgrading")
+			return
+		}
+		authenticated.ServeHTTP(w, r)
+	})
 }
 func problem(w http.ResponseWriter, err error) {
 	status := 400
@@ -203,6 +223,13 @@ func problem(w http.ResponseWriter, err error) {
 	}
 	if errors.Is(err, core.ErrConflict) {
 		status = 409
+	}
+	if errors.Is(err, upgrade.ErrInProgress) {
+		fail(w, 409, upgrade.ErrInProgress.Error())
+		return
+	}
+	if errors.Is(err, upgrade.ErrStopping) {
+		status = 503
 	}
 	if errors.Is(err, app.ErrStopping) {
 		status = http.StatusServiceUnavailable

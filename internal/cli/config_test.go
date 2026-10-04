@@ -33,7 +33,7 @@ func runConfig(t *testing.T, dir string, args ...string) (map[string]any, error)
 
 func TestConfigUpdateModeAndInterval(t *testing.T) {
 	dir := t.TempDir()
-	for _, mode := range []string{"off", "ask"} {
+	for _, mode := range []string{"off", "ask", "automatic"} {
 		if _, err := runConfig(t, dir, "set", "upgrade.mode", mode); err != nil {
 			t.Fatal(err)
 		}
@@ -41,7 +41,7 @@ func TestConfigUpdateModeAndInterval(t *testing.T) {
 			t.Fatal(got, err)
 		}
 	}
-	if _, err := runConfig(t, dir, "set", "upgrade.mode", "auto"); err == nil || !strings.Contains(err.Error(), "available yet") {
+	if _, err := runConfig(t, dir, "set", "upgrade.mode", "auto"); err == nil || !strings.Contains(err.Error(), "off, ask or automatic") {
 		t.Fatal(err)
 	}
 	if _, err := runConfig(t, dir, "set", "upgrade.check_interval", "14m"); err == nil {

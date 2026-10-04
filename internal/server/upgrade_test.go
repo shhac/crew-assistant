@@ -10,7 +10,7 @@ import (
 
 func TestDashboardUpdateModePersistsAndSnapshotCarriesStatus(t *testing.T) {
 	_, call := ownerApp(t)
-	for _, mode := range []string{"off", "ask"} {
+	for _, mode := range []string{"off", "ask", "automatic"} {
 		c := config.Default()
 		c.Upgrade.Mode = mode
 		body, _ := json.Marshal(c)
@@ -30,7 +30,7 @@ func TestDashboardUpdateModePersistsAndSnapshotCarriesStatus(t *testing.T) {
 	c := config.Default()
 	c.Upgrade.Mode = "auto"
 	body, _ := json.Marshal(c)
-	if w := call("PUT", "/api/config", string(body)); w.Code != 400 || !strings.Contains(w.Body.String(), "available yet") {
+	if w := call("PUT", "/api/config", string(body)); w.Code != 400 || !strings.Contains(w.Body.String(), "off, ask or automatic") {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }

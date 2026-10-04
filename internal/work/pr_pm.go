@@ -19,6 +19,7 @@ func (lp *Loop) answerPRAsPM(ctx context.Context, p core.Project, t core.Task, s
 		return err
 	}
 	spec := lp.baseSpec(seat, dir, prPMPrompt(p, t, m))
+	spec.Observer = lp.watchTurn(t, core.RolePM, seat, dir, false)
 	var answer core.PMOnPR
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) error {
 		if err := decodeReply(reply, &answer); err != nil {
