@@ -112,3 +112,40 @@ func TestALandingPolicyByPullRequestBecomesOneWithPullRequestsOn(t *testing.T) {
 		t.Fatalf("a push policy changed: %+v", got)
 	}
 }
+
+// A write that lands while state is being upgraded aborts the upgrade: the
+// upgraded copy never replaces state it was not made from.
+func TestUpgradeRefusesStateChangedMeanwhile(t *testing.T) {
+	saved := migrations
+	t.Cleanup(func() { migrations = saved })
+	path := filepath.Join(t.TempDir(), "state.db")
+	earlier := stateSchema - 1
+	concurrent := fmt.Sprintf(`{"schema":%d,"snapshot":{"projects":[],"tasks":[],"paused":true},"events":{},"model_calls":{}}`, earlier)
+	migrations = map[int]func(map[string]any) error{earlier: func(doc map[string]any) error {
+		other, err := sql.Open("sqlite", path)
+		if err != nil {
+			return err
+		}
+		defer other.Close()
+		_, err = other.Exec("UPDATE state SET payload=?, version=version+1 WHERE id=1", concurrent)
+		return err
+	}}
+	writeRawState(t, path, fmt.Sprintf(`{"schema":%d,"snapshot":{"projects":[],"tasks":[]},"events":{},"model_calls":{}}`, earlier))
+	s, err := Open(path)
+	if err == nil {
+		s.Close()
+		t.Fatal("an upgrade overwrote a concurrent write")
+	}
+	if !strings.Contains(err.Error(), "state changed while it was being upgraded") {
+		t.Fatalf("unexpected refusal: %v", err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var stored string
+	if err = db.QueryRow("SELECT payload FROM state WHERE id=1").Scan(&stored); err != nil || stored != concurrent {
+		t.Fatalf("the concurrent write was lost: %q %v", stored, err)
+	}
+}
