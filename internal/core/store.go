@@ -29,6 +29,7 @@ var ErrStateSchema = errors.New("state was written by an incompatible crew-assis
 
 type Store struct {
 	db             *sql.DB
+	autopilotNudge chan struct{}
 	mu             sync.Mutex
 	stateDirectory string
 	temporaryState bool
@@ -108,14 +109,23 @@ func Open(path string) (*Store, error) {
 		CREATE INDEX IF NOT EXISTS team_turns_task ON team_turns(task_id, admitted_at, id);
 		CREATE INDEX IF NOT EXISTS team_turns_member ON team_turns(member_id, admitted_at, id);
 		CREATE INDEX IF NOT EXISTS team_turns_claim ON team_turns(claim_token);
-		CREATE TABLE IF NOT EXISTS autopilot_actions (id TEXT PRIMARY KEY, source TEXT NOT NULL UNIQUE, project_id TEXT NOT NULL, task_id TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS autopilot_events (id TEXT PRIMARY KEY, kind TEXT NOT NULL, project_id TEXT NOT NULL, task_id TEXT NOT NULL, occurred_at TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS autopilot_events_kind_time ON autopilot_events(kind,occurred_at);
+        CREATE INDEX IF NOT EXISTS autopilot_events_pending ON autopilot_events(status,occurred_at,id);
+        CREATE TABLE IF NOT EXISTS autopilot_event_deliveries (event_id TEXT NOT NULL, function_id TEXT NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL, retry_at TEXT NOT NULL, detail TEXT NOT NULL, PRIMARY KEY(event_id,function_id));
+        CREATE TABLE IF NOT EXISTS autopilot_notifications (key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, retry_at TEXT NOT NULL, sent INTEGER NOT NULL, reported INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS autopilot_progress (key TEXT PRIMARY KEY, seq INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS autopilot_digests (local_date TEXT PRIMARY KEY, from_seq INTEGER NOT NULL, to_seq INTEGER NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS autopilot_actions (id TEXT PRIMARY KEY, source TEXT NOT NULL UNIQUE, project_id TEXT NOT NULL, task_id TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS autopilot_actions_pending ON autopilot_actions(status,id);
         CREATE TABLE IF NOT EXISTS autopilot_audit (seq INTEGER PRIMARY KEY AUTOINCREMENT, action_id TEXT NOT NULL, project_id TEXT NOT NULL, task_id TEXT NOT NULL, payload TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS autopilot_audit_action_seq ON autopilot_audit(action_id,seq);
         CREATE INDEX IF NOT EXISTS turn_steps_task ON turn_steps(task_id, seat, id);`)
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
-	s := &Store{db: db, stateDirectory: stateDirectory, temporaryState: temporaryState}
+	s := &Store{db: db, autopilotNudge: make(chan struct{}, 1), stateDirectory: stateDirectory, temporaryState: temporaryState}
 	if err = s.upgrade(context.Background(), path); err != nil {
 		db.Close()
 		return nil, err
@@ -203,7 +213,16 @@ func (s *Store) update(ctx context.Context, fn func(*Snapshot) error) error {
 // updateTransaction keeps local effects and their durable receipts in one commit.
 func (s *Store) updateTransaction(ctx context.Context, fn func(*Snapshot, *sql.Conn) error) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	committed := false
+	defer func() {
+		s.mu.Unlock()
+		if committed {
+			select {
+			case s.autopilotNudge <- struct{}{}:
+			default:
+			}
+		}
+	}()
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return err
@@ -221,6 +240,7 @@ func (s *Store) updateTransaction(ctx context.Context, fn func(*Snapshot, *sql.C
 	if err = checkFence(ctx, &state); err != nil {
 		return err
 	}
+	before := captureAutopilotState(state)
 	resolved := map[string]bool{}
 	for _, d := range state.Decisions {
 		resolved[d.ID] = d.Status == DecisionResolved
@@ -239,6 +259,10 @@ func (s *Store) updateTransaction(ctx context.Context, fn func(*Snapshot, *sql.C
 	// A task's status can pass through a value within one change; checking
 	// here, not by polling, means a wake waiting on it never misses it.
 	settleTaskWakes(&state, time.Now().UTC())
+	inserted := false
+	if err := captureAutopilotEvents(ctx, conn, before, state, time.Now().UTC(), &inserted); err != nil {
+		return err
+	}
 	stored := state
 	stored.Tasks = withoutRefs(state.Tasks)
 	data, err := json.Marshal(diskState{PMChats: state.PMChats, Schema: stateSchema, ChatCheckpoint: state.ChatCheckpoint, ChatSession: state.ChatSession, ConversationID: state.ConversationID, Conversations: state.Conversations, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: stored, ModelCalls: state.ModelCalls, ModelWindows: state.ModelWindows, Events: state.Events})
@@ -249,5 +273,6 @@ func (s *Store) updateTransaction(ctx context.Context, fn func(*Snapshot, *sql.C
 		return err
 	}
 	_, err = conn.ExecContext(ctx, "COMMIT")
+	committed = err == nil && inserted
 	return err
 }

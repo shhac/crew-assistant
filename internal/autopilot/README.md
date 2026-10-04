@@ -2,8 +2,7 @@
 
 CA-98 owns saved modes, checked execution and durable history. CA-103 consumes
 these interfaces for event delivery, recovery and summaries; CA-104 presents
-them. Actual function policies remain in CA-99/100/101. There is no new event
-loop, frontend or host-command tool here.
+them. Actual function policies remain in CA-99/100/101. There is no external watch loop, frontend or host-command tool here.
 
 The compiled catalog has eleven stable IDs. Routine and health functions default
 to `suggest`; `landing-release-operator` defaults to `off`. Empty/unset modes use
@@ -128,8 +127,112 @@ target/digest/commit, why, assistant identity at proposal time, approval/executo
 outcome and supported inverse survive restart and assistant renaming.
 
 Outcomes are `proposed`, `performed`, `failed`, `cancelled`, `refused`, `undone`
-and `uncertain`. Delivery, notifications, return/daily summaries and presentation
-acknowledgements belong to CA-103, not this coordinator.
+and `uncertain`.
+
+## Durable events and summaries (CA-103)
+
+State transactions capture `decision.opened:<id>`, `decision.resolved:<id>`,
+`task.landed:<task>:<revision>` and `release.completed:<project>:<version>` in
+`autopilot_events`. A failed capture rolls back the state mutation. After commit,
+a buffered nudge wakes the daemon consumer; startup and its minute ticker recover
+lost nudges. There is no external watch loop. The existing PR-check watcher feeds
+`Service.RecordCIEvent`; this is ingestion, not additional monitoring. CI identity
+hashes the provider, repository, ref, full commit, check and state, with bounded
+required fields. Independent checks cannot mask one another. Heartbeats use UTC
+30-minute buckets; recording the current bucket expires older pending heartbeats.
+Event-only ingestion, delivery receipts, completion marks, digest boundaries and
+presentation cursors use small SQLite transactions without rewriting project state.
+Transactions that also record Activity retain the atomic state-update path.
+Duplicate heartbeat ticks make no changes. Heartbeats and their delivery rows older
+than seven days are pruned; the newest heartbeat remains a watermark against replay.
+Other terminal events retain compact identity tombstones for durable deduplication;
+their delivery rows are pruned after seven days.
+CI capture failures are recorded in Activity and never prevent existing wakes firing.
+
+Trusted registered functions subscribe with `OnEvents(kinds, handler)`. Handlers
+return bounded proposals with unique stable keys, reasons and concrete actions.
+The consumer derives the source from the event ID, function ID and key and calls
+`SubmitEvent`. Current modes, policy and target authority are checked there. Each consumer pass
+caches a snapshot by the durable state revision, checking that revision before
+each handler and refreshing after committed effects or owner edits. Unchanged
+state is decoded once; submission revalidates authority inside its transaction.
+Temporary admission closures defer without writing a refusal. Ordinary `Submit`
+keeps its original semantics. Off consumes a wake without an effect; later mode
+changes do not replay it. No production function is registered by this task.
+
+Delivery marking follows submission. If marking fails or the process stops,
+recovery resubmits the same source and reads the durable receipt without another
+effect or audit transition. Changed content conflicts rather than overwriting a
+receipt. A conflicting proposal key is recorded in delivery detail; other keys
+are still submitted. Handler failures back off exponentially in minutes and terminate after
+five attempts, with Activity explaining failure or conflict. Storage failures
+leave delivery pending. Each pass takes at most 200 events in chronological keyset pages. The consumer
+rotates past paused and backoff rows and wraps after the last page, so held
+events cannot starve newer projects. Restart begins scanning from the oldest
+page again. It
+expires inputs over seven days old with an Activity record. Graceful stop takes
+no new event; force cancellation interrupts in-flight work. Pending suggestions
+remain in the existing action table across deferral, replay and restart.
+
+`Summary(SummaryQuery)` reduces immutable audit transitions at a fixed boundary,
+groups proposed, performed, failed (including uncertain), refused, undone and
+cancelled outcomes, and includes pending proposals and open owner decisions.
+It decodes at most 1000 audit copies, with a bounded outstanding-proposal scan;
+current summaries query indexed proposed actions rather than regrouping the full
+audit history. Historical boundaries still reduce immutable audit copies;
+truncation is explicit. An audit-truncated response advances only to the last
+scanned sequence. Histories remain `autopilot_actions` and `autopilot_audit`;
+events, cursors and digest boundaries are delivery state, not a second history.
+Text presentations show counts, three short examples per outcome and five owner
+decisions, retaining full details in the query and history. Unconfirmed effects
+keep their uncertain label. Operator landing pauses defer event proposals without
+changing ordinary submission or owner-action refusal semantics.
+
+`GET /api/autopilot/summary` defaults to the shared `owner_seen` cursor and accepts
+`after` and `project_id`. Reading, including the read-only `autopilot_summary`
+assistant tool and `autopilot summary` CLI command, does not acknowledge anything.
+`POST /api/autopilot/summary/ack {"boundary": n}` monotonically advances the shared
+cursor after successful presentation. Future boundaries are rejected. Concurrent
+presenters cannot regress the cursor or acknowledge newer entries accidentally.
+Only unfiltered summaries may advance this global cursor. Filtered responses
+have `acknowledgeable: false`; presenters must not acknowledge them. The ack
+route rejects a nonempty `project_id`.
+Dispatcher, summary-read, acknowledgement and notification errors appear in one
+Autopilot row in the owner snapshot. Each clears after its operation succeeds;
+unrelated successes do not hide remaining errors. With no errors, the row is
+omitted rather than advertising registered or ready functions.
+Summary read failures report status but do not block the owner's chat or advance
+progress. Owner-origin assistant turns include unseen summaries and acknowledge only after
+a completed, uncancelled turn and successful session save. Wake turns do not.
+
+The existing Slack notification channel batches actions using a separate durable
+`notified` cursor. A single `autopilot_notifications` row for action delivery
+reserves retries across restarts, including when the covering range grows. Retry
+delays are 2, 4, 8, 16, 32 and then 60 minutes, capped at an hour. Attempts do not
+create interrupted-operation claims; one Activity failure is recorded per outage.
+Successful presentation resets the backoff and commits its receipt with the
+notified cursor atomically. Failed sends and failed receipt commits cannot
+advance progress. Recovery reads only the durable notification reservation and
+its atomically committed cursor; no Events-map claims are created or read.
+If Slack accepts a message but its durable receipt cannot commit, recovery can
+send a duplicate covering message after backoff. Without Slack, the dashboard
+and assistant share the summary API.
+No model writes these summaries.
+
+Daily digests are disabled unless the owner enables `daily_digest`. The default
+time is 08:00 in the owner's local timezone. `PUT /api/autopilot/digest` takes
+`enabled`, `at` (HH:MM) and the expected `revision`; the CLI offers
+`autopilot digest on|off|at HH:MM` and the narrow JSON config key
+`autopilot.daily_digest`. Whole-config saves cannot overwrite a changed digest.
+There is no assistant setter. `RecordDigest` accepts an injected clock value and
+location, creates only today's digest at or after its configured time, and uses a
+unique local-calendar-date key across restarts, concurrency, DST and backwards
+clock changes. Repeated ticks read the existing date without taking the writer
+lock; concurrent first inserts still deduplicate transactionally. Its boundary starts at the previous digest's high-water mark.
+`GET /api/autopilot/digests?before=YYYY-MM-DD&limit=50` lists dated records with
+summaries computed from audit copies. Slack delivery uses one durable `digest:<date>` reservation and the same bounded
+backoff; a failed or interrupted send never regenerates the digest. Only today's record is sent;
+configuring Slack later never sends a backlog. Missed days are not backfilled.
 
 ## CLI
 

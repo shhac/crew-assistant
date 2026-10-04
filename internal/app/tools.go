@@ -193,6 +193,7 @@ var toolActions = map[string]toolAction{
 	"wake_me_when": with(func(a *App, ctx context.Context, in engine.WakeArgs) (any, error) {
 		return a.Work.WakeMeWhen(ctx, work.WakeRequest(in))
 	}),
+	"autopilot_summary": with(func(a *App, ctx context.Context, _ none) (any, error) { return a.Autopilot.UnseenSummary(ctx) }),
 	"list_wakes": with(func(a *App, ctx context.Context, _ none) (any, error) {
 		return a.Work.OpenWakes(ctx)
 	}),

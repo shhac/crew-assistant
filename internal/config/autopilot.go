@@ -48,3 +48,31 @@ func SetAutopilotMode(path, id string, mode autopilot.Mode, expected uint64) (Co
 	})
 	return out, err
 }
+
+// SetAutopilotDigest is owner-only, narrow and revision checked.
+func SetAutopilotDigest(path string, digest autopilot.DailyDigest, expected uint64) (Config, error) {
+	var out Config
+	err := Document(path).WithLock(func() error {
+		c, err := Load(path)
+		if err != nil {
+			return err
+		}
+		if c.Autopilot.DailyDigest.Revision != expected {
+			return errors.Join(ErrAutopilotUnchanged, ErrAutopilotConflict)
+		}
+		digest.Revision = expected + 1
+		if err := digest.Validate(); err != nil {
+			return errors.Join(ErrAutopilotUnchanged, err)
+		}
+		c.Autopilot.DailyDigest = digest
+		if _, err = upgradeLocked(path); err != nil {
+			return err
+		}
+		if err = Document(path).Save(c); err != nil {
+			return err
+		}
+		out = c
+		return nil
+	})
+	return out, err
+}

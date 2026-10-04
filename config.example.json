@@ -1,5 +1,6 @@
 {
   "autopilot": {
+    "daily_digest": {"enabled": false, "at": "08:00", "revision": 0},
     "modes": {
       "authorised-research": "suggest",
       "proposed-split": "suggest",

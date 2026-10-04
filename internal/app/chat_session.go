@@ -136,7 +136,21 @@ func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.
 			}
 		}
 	}
+	var summaryBoundary int64
 	text := turn.Message
+	if turn.Origin != core.OriginWake {
+		summary, err := a.Autopilot.UnseenSummary(ctx)
+		if err != nil {
+			a.autopilotStatus("autopilot-summary", err, "Unable to read return summary")
+		}
+		if err == nil {
+			a.autopilotStatus("autopilot-summary", nil, "")
+		}
+		if err == nil && summary.Boundary > summary.From {
+			text = summary.Text() + "\n\n" + text
+			summaryBoundary = summary.Boundary
+		}
+	}
 	// A conversation just started in the CLI is given the whole overview; any
 	// other turn is told what changed since the last, unless it is a wake-up,
 	// which says what happened itself.
@@ -179,14 +193,19 @@ func (a *App) runSessionTurn(ctx context.Context, turn core.ChatTurn, ec engine.
 	rec.SeenAt = started
 	usage := sessionUsage(result, rec)
 	a.recordWindow(ctx, ec, usage)
-	if err := a.Core.SaveChatSession(context.WithoutCancel(ctx), conversation, &rec); err != nil && !errors.Is(err, core.ErrConflict) {
-		runErr = errors.Join(runErr, err)
+	saveErr := a.Core.SaveChatSession(context.WithoutCancel(ctx), conversation, &rec)
+	if saveErr != nil && !errors.Is(saveErr, core.ErrConflict) {
+		runErr = errors.Join(runErr, saveErr)
 	}
 	if runErr != nil {
 		// A failed turn may have left the process in any state; the next turn
 		// resumes the conversation from what the CLI saved.
 		a.closeChat()
 		return engine.Result{Usage: usage, Actions: state.actions}, runErr
+	}
+	if saveErr == nil && ctx.Err() == nil && summaryBoundary > 0 {
+		err := a.Autopilot.AcknowledgeSummary(ctx, summaryBoundary)
+		a.autopilotStatus("autopilot-acknowledgement", err, "Summary presentation could not be acknowledged")
 	}
 	return engine.Result{Message: result.Text, Usage: usage, Actions: state.actions}, nil
 }

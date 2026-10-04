@@ -72,3 +72,30 @@ func TestAutopilotConfigKeysShareDefaultsAndNarrowUpdates(t *testing.T) {
 		t.Fatalf("unset: %v %v", got, err)
 	}
 }
+
+func TestDigestConfigKeyAndModeResetStayIndependent(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := runConfig(t, dir, "set", "autopilot.daily_digest", `{"enabled":true,"at":"09:00","revision":0}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runConfig(t, dir, "unset", "autopilot.modes"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Autopilot.DailyDigest.Enabled || cfg.Autopilot.DailyDigest.Revision != 1 {
+		t.Fatal("resetting modes changed digest")
+	}
+	if _, err := runConfig(t, dir, "set", "autopilot.daily_digest", `{"enabled":false,"revision":0}`); err == nil {
+		t.Fatal("stale digest accepted")
+	}
+	if _, err := runConfig(t, dir, "unset", "autopilot.daily_digest"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = config.Load(filepath.Join(dir, "config.json"))
+	if err != nil || cfg.Autopilot.DailyDigest.Enabled || cfg.Autopilot.DailyDigest.Revision != 2 {
+		t.Fatal("digest reset failed")
+	}
+}

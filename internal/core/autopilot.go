@@ -109,14 +109,16 @@ type LocalAction struct {
 }
 
 type AutopilotCoordinator struct {
-	service   *Service
-	mu        sync.Mutex
-	functions map[string]*AutopilotFunction
-	actions   map[string]LocalAction
-	admission func() error
-	closed    bool
-	blocked   bool
-	performed func(AutopilotAction)
+	eventMu                      sync.Mutex
+	eventAfterTime, eventAfterID string
+	service                      *Service
+	mu                           sync.Mutex
+	functions                    map[string]*AutopilotFunction
+	actions                      map[string]LocalAction
+	admission                    func() error
+	closed                       bool
+	blocked                      bool
+	performed                    func(AutopilotAction)
 }
 
 // OnPerformed observes newly committed local effects, never rollback or replay.
@@ -132,6 +134,7 @@ type AutopilotFunction struct {
 	id, version string
 	allowed     map[string]bool
 	policy      func(Snapshot, ConcreteAction) error
+	events      *eventSubscription
 }
 
 func NewAutopilotCoordinator(s *Service, admission func() error) *AutopilotCoordinator {
@@ -199,7 +202,7 @@ func (c *AutopilotCoordinator) Register(id, version string, kinds []string, poli
 		}
 		allowed[kind] = true
 	}
-	f := &AutopilotFunction{c, id, version, allowed, policy}
+	f := &AutopilotFunction{coordinator: c, id: id, version: version, allowed: allowed, policy: policy}
 	c.functions[id] = f
 	return f, nil
 }
@@ -266,15 +269,15 @@ func writeAutopilotAction(ctx context.Context, conn *sql.Conn, a AutopilotAction
 
 func (c *AutopilotCoordinator) check(v Snapshot, a AutopilotAction) error {
 	if c.closed || c.blocked {
-		return errors.New("autopilot admission is closed")
+		return autopilotDeferred{errors.New("autopilot admission is closed")}
 	}
 	if c.admission != nil {
 		if err := c.admission(); err != nil {
-			return err
+			return autopilotDeferred{err}
 		}
 	}
 	if c.service.upgradeDraining || v.Paused {
-		return errors.New("coordination is paused or upgrading")
+		return autopilotDeferred{errors.New("coordination is paused or upgrading")}
 	}
 	f := c.functions[a.Function]
 	if f == nil || f.version != a.RuleVersion || !f.allowed[a.Action.Kind] {
@@ -292,7 +295,7 @@ func (c *AutopilotCoordinator) check(v Snapshot, a AutopilotAction) error {
 		return ErrNotFound
 	}
 	if p.Paused {
-		return errors.New("project is paused")
+		return autopilotDeferred{errors.New("project is paused")}
 	}
 	if a.Action.TaskID != "" {
 		t := task(&v, a.Action.TaskID)
@@ -301,8 +304,11 @@ func (c *AutopilotCoordinator) check(v Snapshot, a AutopilotAction) error {
 		}
 	}
 	if a.Function == autopilot.Operator {
-		if !p.OperatorPermission.Allowed || p.OperatorPermission.Revision != a.Action.PermissionRevision || p.LandingPaused != nil {
+		if !p.OperatorPermission.Allowed || p.OperatorPermission.Revision != a.Action.PermissionRevision {
 			return errors.New("project operator authority is missing or stale")
+		}
+		if p.LandingPaused != nil {
+			return autopilotDeferred{errors.New("project operator authority is missing or stale")}
 		}
 	}
 	if err := f.policy(v, a.Action); err != nil {
@@ -311,7 +317,25 @@ func (c *AutopilotCoordinator) check(v Snapshot, a AutopilotAction) error {
 	return c.actions[a.Action.Kind].Check(v, a.Action)
 }
 
+var ErrAutopilotDeferred = errors.New("autopilot event deferred")
+
+// Preserve ordinary Submit/owner refusal text while identifying temporary gates.
+type autopilotDeferred struct{ cause error }
+
+func (e autopilotDeferred) Error() string        { return e.cause.Error() }
+func (e autopilotDeferred) Unwrap() error        { return e.cause }
+func (e autopilotDeferred) Is(target error) bool { return target == ErrAutopilotDeferred }
+
 func (f *AutopilotFunction) Submit(ctx context.Context, source, reason string, action ConcreteAction) (AutopilotAction, error) {
+	return f.submit(ctx, source, reason, action, false)
+}
+
+// SubmitEvent preserves pending work when admission is temporarily closed.
+func (f *AutopilotFunction) SubmitEvent(ctx context.Context, source, reason string, action ConcreteAction) (AutopilotAction, error) {
+	return f.submit(ctx, source, reason, action, true)
+}
+
+func (f *AutopilotFunction) submit(ctx context.Context, source, reason string, action ConcreteAction, event bool) (AutopilotAction, error) {
 	c := f.coordinator
 	c.mu.Lock()
 	var out AutopilotAction
@@ -347,6 +371,11 @@ func (f *AutopilotFunction) Submit(ctx context.Context, source, reason string, a
 		if !errors.Is(err, ErrNotFound) {
 			return err
 		}
+		if event {
+			if err := c.eventAdmission(*v, a.ProjectID); err != nil {
+				return err
+			}
+		}
 		mode, err := c.service.configuration().Autopilot.EffectiveMode(f.id)
 		if err != nil {
 			return err
@@ -361,13 +390,16 @@ func (f *AutopilotFunction) Submit(ctx context.Context, source, reason string, a
 		}
 		out = AutopilotAction{ID: uid(), Source: source, Function: f.id, RuleVersion: f.version, Revision: 1, Action: a, Reason: reason, AssistantID: seated.ID, AssistantName: seated.Name, ProposedAt: c.service.now().UTC(), Status: "proposed"}
 		if err := c.check(*v, out); err != nil {
+			if event && errors.Is(err, ErrAutopilotDeferred) {
+				return err
+			}
 			out.Status, out.Detail = "refused", err.Error()
 		}
 		if err := writeAutopilotAction(ctx, conn, out, out.AssistantID, AutopilotAssistant, c.service.now().UTC()); err != nil {
 			return err
 		}
 		if mode == autopilot.Act && out.Status == "proposed" {
-			if err := c.perform(ctx, conn, v, &out, out.AssistantID, AutopilotAssistant); err != nil {
+			if err := c.perform(ctx, conn, v, &out, out.AssistantID, AutopilotAssistant, event); err != nil {
 				return err
 			}
 			runExternal = out.Status == "uncertain"
@@ -387,8 +419,11 @@ func (f *AutopilotFunction) Submit(ctx context.Context, source, reason string, a
 	return out, nil
 }
 
-func (c *AutopilotCoordinator) perform(ctx context.Context, conn *sql.Conn, v *Snapshot, a *AutopilotAction, actor string, kind AutopilotActorKind) error {
+func (c *AutopilotCoordinator) perform(ctx context.Context, conn *sql.Conn, v *Snapshot, a *AutopilotAction, actor string, kind AutopilotActorKind, event bool) error {
 	if err := c.check(*v, *a); err != nil {
+		if event && errors.Is(err, ErrAutopilotDeferred) {
+			return err
+		}
 		a.Status, a.Detail = "refused", err.Error()
 	} else if c.actions[a.Action.Kind].external != nil {
 		a.ExecutorKind = kind
@@ -451,7 +486,7 @@ func (c *AutopilotCoordinator) OwnerAction(ctx context.Context, id string, revis
 				return nil
 			} // replay reads the durable result
 			out.Approver = "owner"
-			if err := c.perform(ctx, conn, v, &out, "owner", AutopilotOwner); err != nil {
+			if err := c.perform(ctx, conn, v, &out, "owner", AutopilotOwner, false); err != nil {
 				return err
 			}
 			runExternal = out.Status == "uncertain"
@@ -622,4 +657,19 @@ func projectRenameAction(s *Service) LocalAction {
 		record(v, p.UpdatedAt, p.ID, "project.renamed", "Undid autopilot rename")
 		return nil
 	}}
+}
+
+func (c *AutopilotCoordinator) eventAdmission(v Snapshot, projectID string) error {
+	if c.closed || c.blocked || c.service.upgradeDraining || v.Paused {
+		return ErrAutopilotDeferred
+	}
+	if c.admission != nil {
+		if err := c.admission(); err != nil {
+			return errors.Join(ErrAutopilotDeferred, err)
+		}
+	}
+	if p := project(&v, projectID); p != nil && p.Paused {
+		return ErrAutopilotDeferred
+	}
+	return nil
 }

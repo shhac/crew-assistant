@@ -291,6 +291,9 @@ func withLiveStatuses(list []core.Integration, live map[string]core.Integration,
 	if status, ok := live["chat"]; ok {
 		list = append(list, status)
 	}
+	if status, ok := live["autopilot"]; ok {
+		list = append(list, status)
+	}
 	for i, st := range list {
 		if status, ok := live[st.ID]; ok && !ignoreLive[st.ID] {
 			// A live status reports state, not relationships; keep the link

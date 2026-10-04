@@ -26,6 +26,9 @@ func configCommand(o *options) *cobra.Command {
 				key := args[0]
 				if verb.Name() == "unset" && key == "autopilot.modes" {
 					for _, setting := range autopilotConfigKeys(o) {
+						if !strings.HasPrefix(setting.Name, "autopilot.modes.") {
+							continue
+						}
 						if err := setting.Unset(); err != nil {
 							return err
 						}

@@ -5,17 +5,21 @@ package cli
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
-// The real process primitives behind the upgrade watchdog: a live child is
-// alive with a stable identity until it is killed, and then it is gone.
+// Exercise native lifecycle primitives on an owned child. Identity output is
+// synthetic: hosted sandboxes need not grant ps access to process metadata.
 func TestUpgradeProcessPrimitives(t *testing.T) {
-	// A sandbox may refuse to let ps inspect even this process; that is the
-	// hosted check's limit (LAH-29), not a defect here.
-	if upgradeProcessIdentity(os.Getpid()) == "" {
-		t.Skip("required capability process-inspection unavailable: ps cannot inspect processes here")
+	ps := filepath.Join(t.TempDir(), "ps")
+	if err := os.WriteFile(ps, []byte("#!/bin/sh\n[ \"$#\" -eq 4 ] && [ \"$1\" = '-o' ] && [ \"$2\" = 'lstart=' ] && [ \"$3\" = '-p' ] || exit 2\nkill -0 \"$4\" 2>/dev/null || exit 1\nprintf '  synthetic birth time  \\n'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	identityOf := func(pid int) string { return upgradeProcessIdentityWithCommand(pid, ps) }
+	if got := identityOf(os.Getpid()); got != "synthetic birth time" {
+		t.Fatalf("identity output not trimmed: %q", got)
 	}
 	if upgradePIDAlive(0) || upgradePIDAlive(-1) {
 		t.Fatal("a non-positive PID was alive")
@@ -29,8 +33,8 @@ func TestUpgradeProcessPrimitives(t *testing.T) {
 	if !upgradePIDAlive(pid) {
 		t.Fatal("a running child is not alive")
 	}
-	identity := upgradeProcessIdentity(pid)
-	if identity == "" || identity != upgradeProcessIdentity(pid) {
+	identity := identityOf(pid)
+	if identity == "" || identity != identityOf(pid) {
 		t.Fatalf("unstable identity %q", identity)
 	}
 	if err := killUpgradePID(pid); err != nil {
@@ -44,7 +48,7 @@ func TestUpgradeProcessPrimitives(t *testing.T) {
 	if upgradePIDAlive(pid) {
 		t.Fatal("a killed and reaped child is still alive")
 	}
-	if got := upgradeProcessIdentity(pid); got != "" {
+	if got := identityOf(pid); got != "" {
 		t.Fatalf("a gone process still has an identity: %q", got)
 	}
 }

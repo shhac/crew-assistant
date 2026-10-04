@@ -156,6 +156,11 @@ func (lp *Loop) checkWakes(ctx context.Context, now time.Time) error {
 		if !ok {
 			continue
 		}
+		if f.ci != nil {
+			if err := lp.Core.RecordCIEvent(ctx, *f.ci); err != nil {
+				_ = lp.Core.RecordActivity(ctx, w.ProjectID, "autopilot.ci.capture_failed", err.Error())
+			}
+		}
 		if _, err := lp.Core.FireWake(ctx, w.ID, f.observed, f.event, f.timedOut); err != nil && !errors.Is(err, core.ErrConflict) {
 			return err
 		}
@@ -170,6 +175,7 @@ func (lp *Loop) checkWakes(ctx context.Context, now time.Time) error {
 
 // firing is a change the watcher saw.
 type firing struct {
+	ci              *core.CIEvent
 	observed, event string
 	timedOut        bool
 }
@@ -194,7 +200,15 @@ func (lp *Loop) observe(ctx context.Context, snap core.Snapshot, w core.Wake, no
 			return firing{}, false
 		}
 		value := prValue(w.On, pr)
-		return firing{observed: value, event: prEvent(w, value)}, w.FiresOn(value)
+		f := firing{observed: value, event: prEvent(w, value)}
+		if w.On == core.WakeOnChecks && w.FiresOn(value) {
+			ref, err := github.ParsePRRef(w.Target)
+			if err != nil {
+				return firing{}, false
+			}
+			f.ci = &core.CIEvent{Provider: "github", Repo: ref.Repo, Ref: w.Target, Commit: pr.HeadRefOid, Check: "pr_checks", State: pr.CheckState(), URL: pr.URL, ProjectID: w.ProjectID}
+		}
+		return f, w.FiresOn(value)
 	case core.WakeOnBranch:
 		dir, err := projectRepo(snap, w.ProjectID)
 		if err != nil {

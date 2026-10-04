@@ -1,7 +1,10 @@
 // Package autopilot describes saved function choices, not execution authority.
 package autopilot
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type Mode string
 
@@ -38,12 +41,33 @@ func Catalog() []Function {
 	}
 }
 
+type DailyDigest struct {
+	Enabled  bool   `json:"enabled"`
+	At       string `json:"at,omitempty"`
+	Revision uint64 `json:"revision"`
+}
+
+func (d DailyDigest) Validate() error {
+	if d.At == "" {
+		return nil
+	}
+	t, err := time.Parse("15:04", d.At)
+	if err != nil || t.Format("15:04") != d.At {
+		return fmt.Errorf("digest time must be HH:MM")
+	}
+	return nil
+}
+
 type Settings struct {
-	Revisions map[string]uint64 `json:"revisions,omitempty"`
-	Modes     map[string]Mode   `json:"modes,omitempty"`
+	DailyDigest DailyDigest       `json:"daily_digest"`
+	Revisions   map[string]uint64 `json:"revisions,omitempty"`
+	Modes       map[string]Mode   `json:"modes,omitempty"`
 }
 
 func (s Settings) Validate() error {
+	if err := s.DailyDigest.Validate(); err != nil {
+		return err
+	}
 	for id, mode := range s.Modes {
 		if id == "" {
 			return fmt.Errorf("autopilot function ID is empty")

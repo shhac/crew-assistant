@@ -29,3 +29,26 @@ func (a *App) SetAutopilotMode(id string, mode autopilot.Mode, expected uint64) 
 	})
 	return out, err
 }
+
+func (a *App) SetAutopilotDigest(digest autopilot.DailyDigest, expected uint64) (config.Config, error) {
+	var out config.Config
+	err := a.Autopilot.SerializeSettings(func() error {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		cfg, err := config.SetAutopilotDigest(a.configPath, digest, expected)
+		if err != nil {
+			return err
+		}
+		effective := a.cfg
+		effective.Autopilot = cfg.Autopilot
+		if err := a.checkConfigLocked(effective); err != nil {
+			return err
+		}
+		if err := a.applyConfigLocked(effective); err != nil {
+			return err
+		}
+		out = effective
+		return nil
+	})
+	return out, err
+}

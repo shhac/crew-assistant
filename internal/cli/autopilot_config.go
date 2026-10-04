@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"github.com/shhac/crew-assistant/internal/autopilot"
 	"github.com/shhac/crew-assistant/internal/config"
 	libcli "github.com/shhac/lib-agent-cli/cli"
+	"io"
 )
 
 // Mode keys use the same narrow updates as the dedicated autopilot command,
@@ -31,5 +35,30 @@ func autopilotConfigKeys(o *options) []libcli.ConfigKey {
 			return string(mode), cfg.Autopilot.Modes[id] != ""
 		}, Set: func(value string) error { return set(autopilot.Mode(value)) }, Unset: func() error { return set("") }})
 	}
+	keys = append(keys, libcli.ConfigKey{Name: "autopilot.daily_digest", Description: "Owner-only daily digest settings: enabled, at (HH:MM), revision", Get: func() (string, bool) {
+		cfg, err := config.Load(o.configPath)
+		if err != nil {
+			return "", false
+		}
+		data, err := json.Marshal(cfg.Autopilot.DailyDigest)
+		return string(data), err == nil
+	}, Set: func(value string) error {
+		var d autopilot.DailyDigest
+		decoder := json.NewDecoder(bytes.NewBufferString(value))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&d); err != nil {
+			return err
+		}
+		if decoder.Decode(new(any)) != io.EOF {
+			return errors.New("expected one digest settings value")
+		}
+		return o.setAutopilotDigest(d)
+	}, Unset: func() error {
+		cfg, err := config.Load(o.configPath)
+		if err != nil {
+			return err
+		}
+		return o.setAutopilotDigest(autopilot.DailyDigest{Revision: cfg.Autopilot.DailyDigest.Revision})
+	}})
 	return keys
 }

@@ -40,6 +40,10 @@ func (a *App) Run(stop lifecycle.Stop, noDispatch bool) (runErr error) {
 		<-stop.Graceful.Done()
 		return nil
 	}
+	if !noDispatch {
+		listeners.Add(1)
+		go func() { defer listeners.Done(); a.runAutopilotEvents(stop) }()
+	}
 	if a.requestUpgrade != nil {
 		listeners.Add(1)
 		go func() { defer listeners.Done(); a.runAutomaticUpgrades(stop.Graceful) }()
@@ -104,6 +108,7 @@ func (a *App) Run(stop lifecycle.Stop, noDispatch bool) (runErr error) {
 	supervise := func() {
 		if slackClient != nil && !stop.Stopping() {
 			a.notifyProject(stop.Force, a.slackConfig.ProjectID, slackClient.Notify)
+			a.notifyAutopilot(stop.Force, slackClient.Notify)
 		}
 	}
 	supervise()

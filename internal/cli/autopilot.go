@@ -38,6 +38,13 @@ func (o *options) setAutopilotMode(id string, mode autopilot.Mode, revision uint
 
 func autopilotCommand(o *options) *cobra.Command {
 	cmd := &cobra.Command{Use: "autopilot", Short: "Inspect saved modes and checked assistant actions"}
+	cmd.AddCommand(&cobra.Command{Use: "summary", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		v, err := o.request("GET", "/api/autopilot/summary", nil)
+		if err != nil {
+			return err
+		}
+		return o.emit(v)
+	}})
 	cmd.AddCommand(&cobra.Command{Use: "catalog", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		// Offline catalog explicitly reports no runtime implementations.
 		if _, err := o.runtime(); err == nil {
@@ -145,6 +152,34 @@ func autopilotCommand(o *options) *cobra.Command {
 		}
 		return o.emit(v)
 	}
+	cmd.AddCommand(&cobra.Command{Use: "digest <on|off|at> [HH:MM]", Args: cobra.RangeArgs(1, 2), RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load(o.configPath)
+		if err != nil {
+			return err
+		}
+		d := cfg.Autopilot.DailyDigest
+		switch args[0] {
+		case "on", "off":
+			if len(args) != 1 {
+				return errors.New("on/off takes no time")
+			}
+			d.Enabled = args[0] == "on"
+		case "at":
+			if len(args) != 2 {
+				return errors.New("at requires HH:MM")
+			}
+			d.At = args[1]
+		default:
+			return errors.New("expected on, off or at")
+		}
+		if err := d.Validate(); err != nil {
+			return err
+		}
+		if err := o.setAutopilotDigest(d); err != nil {
+			return err
+		}
+		return o.emit(map[string]bool{"saved": true})
+	}})
 	cmd.AddCommand(pending)
 	var project, task, cursor string
 	var limit int
@@ -169,4 +204,28 @@ func autopilotCommand(o *options) *cobra.Command {
 	history.Flags().BoolVar(&forward, "forward", false, "Read oldest first for summaries")
 	cmd.AddCommand(history)
 	return cmd
+}
+
+func (o *options) setAutopilotDigest(d autopilot.DailyDigest) error {
+	if err := d.Validate(); err != nil {
+		return err
+	}
+	if err := canonicalUpgradeOptions(o); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(o.statePath), 0700); err != nil {
+		return err
+	}
+	lock := flock.New(o.statePath + ".lock")
+	ok, err := lock.TryLock()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		_, err = o.request("PUT", "/api/autopilot/digest", d)
+		return err
+	}
+	defer lock.Unlock()
+	_, err = config.SetAutopilotDigest(o.configPath, d, d.Revision)
+	return err
 }

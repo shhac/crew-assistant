@@ -154,3 +154,24 @@ func TestAutopilotCLIRequestsBindRevision(t *testing.T) {
 		}
 	}
 }
+
+func TestAutopilotCLISummaryReadsWithoutAcknowledging(t *testing.T) {
+	calls := 0
+	o := standIn(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != "GET" || r.URL.Path != "/api/autopilot/summary" {
+			t.Fatalf("summary mutated presentation state: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"from":0,"boundary":1,"groups":{},"counts":{},"decisions":[]}`))
+	}), "synthetic-token")
+	o.globals = &libcli.Globals{Format: string(output.FormatNDJSON)}
+	cmd := autopilotCommand(o)
+	cmd.SetArgs([]string{"summary"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatal("summary made an acknowledgement request")
+	}
+}

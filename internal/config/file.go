@@ -65,7 +65,7 @@ func Save(path string, c Config) error {
 			return err
 		}
 		_, statErr := os.Stat(path)
-		if !errors.Is(statErr, os.ErrNotExist) && (!maps.Equal(current.Autopilot.Modes, c.Autopilot.Modes) || !maps.Equal(current.Autopilot.Revisions, c.Autopilot.Revisions)) {
+		if !errors.Is(statErr, os.ErrNotExist) && (!maps.Equal(current.Autopilot.Modes, c.Autopilot.Modes) || !maps.Equal(current.Autopilot.Revisions, c.Autopilot.Revisions) || current.Autopilot.DailyDigest != c.Autopilot.DailyDigest) {
 			return ErrAutopilotConflict
 		}
 		return s.Save(c)

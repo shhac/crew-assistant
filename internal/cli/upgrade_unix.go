@@ -126,9 +126,15 @@ func protectInheritedUpgradeListener() {
 
 // Process birth time survives exec but changes when the kernel reuses a PID.
 func upgradeProcessIdentity(pid int) string {
+	return upgradeProcessIdentityWithCommand(pid, "/bin/ps")
+}
+
+// The command seam lets tests exercise output handling without requiring the
+// sandbox to inspect processes. Production always uses /bin/ps above.
+func upgradeProcessIdentityWithCommand(pid int, command string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "/bin/ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	output, err := exec.CommandContext(ctx, command, "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
 	if err != nil {
 		return ""
 	}
