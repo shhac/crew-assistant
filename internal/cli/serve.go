@@ -159,23 +159,8 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 	defer store.Close()
 	service := core.NewService(store, cfg)
 	if host.engine != nil {
-		r, err := upgrade.ReadRecord(host.engine.Path)
-		if err != nil {
+		if err := reconcileUpgradeRecord(stop.Force, service, host.engine.Path, o.version); err != nil {
 			return err
-		}
-		if err := service.ReconcileUpgradeRequests(stop.Force, o.version, r); err != nil {
-			return err
-		}
-	}
-	if host.engine != nil {
-		r, err := upgrade.ReadRecord(host.engine.Path)
-		if err != nil {
-			return err
-		}
-		if r != nil && r.Step == upgrade.Abandoned {
-			if err := service.ReofferAbandonedUpgrade(stop.Force, r.To); err != nil {
-				return err
-			}
 		}
 	}
 	if sampleDir != "" {
@@ -471,4 +456,21 @@ func awaitUpgradeDrain(stop lifecycle.Stop, done <-chan struct{}, path string, i
 		progressErr = errors.Join(progressErr, upgradeStopResult(err))
 	}
 	return errors.Join(drainErr, progressErr)
+}
+
+// reconcileUpgradeRecord brings the store in line with the upgrade record a
+// starting daemon finds: requests the record settled are settled, and an
+// abandoned upgrade is offered again.
+func reconcileUpgradeRecord(ctx context.Context, service *core.Service, path, version string) error {
+	r, err := upgrade.ReadRecord(path)
+	if err != nil {
+		return err
+	}
+	if err := service.ReconcileUpgradeRequests(ctx, version, r); err != nil {
+		return err
+	}
+	if r == nil || r.Step != upgrade.Abandoned {
+		return nil
+	}
+	return service.ReofferAbandonedUpgrade(ctx, r.To)
 }
