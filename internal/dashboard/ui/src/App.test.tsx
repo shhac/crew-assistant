@@ -42,7 +42,23 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: string, options?: RequestInit) => {
       calls.push({ path: input, options });
-      const result = respond(input, options);
+      const result = /\/team-turns(?:\?|$)/.test(input)
+        ? {
+            body: {
+              turns: [],
+              aggregate: {
+                terminal_turns: 0,
+                measured_turns: 0,
+                missing_input_turns: 0,
+                missing_cache_turns: 0,
+                partial_only_turns: 0,
+                input: 0,
+                cache_read: 0,
+                cache_read_share: null,
+              },
+            },
+          }
+        : respond(input, options);
       const status = result.status || 200;
       return {
         ok: status >= 200 && status < 300,
@@ -1927,6 +1943,8 @@ describe("the team", () => {
     expect((await screen.findByRole("alert")).textContent).toBe(
       "Ada already keeps 30 learnings; forget one first",
     );
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByText("No recorded team turns.")).toBeTruthy();
     expect(screen.getByLabelText("Learning")).toHaveProperty(
       "value",
       "One more.",

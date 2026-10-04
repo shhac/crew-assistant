@@ -228,6 +228,7 @@ export function RequestPanel({
             refresh={refresh}
           />
           <TaskLinear project={project} task={task} refresh={refresh} />
+          <TeamTurnHistory scope={{ project: project.id, task: task.id }} state={state} />
         </div>
       )}
       {task && seat && (
@@ -327,3 +328,4 @@ function RequestActions({
     </div>
   );
 }
+import { TeamTurnHistory } from "./TeamTurnHistory";

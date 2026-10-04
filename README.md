@@ -70,8 +70,18 @@ Missing accounting stays unknown; reported zero stays measured zero. Terminal
 usage, partial response observations and compaction accounting are retained
 separately and are never added together. Interrupted attempts whose launches
 cannot be confirmed gone stay held until recovery can settle them. Existing
-transcripts are not reconstructed; task and member dashboard histories are a
-separate follow-up.
+transcripts are not reconstructed. Task and member pages show recorded team
+turns, opening outcomes and fresh reasons, lifecycle outcomes and provider token
+counts. Member history spans projects, including project-only turns and recorded
+member identities. Expand a turn for details; Load more turns reads older attempts.
+Histories refresh with dashboard polling and retain loaded data when a read fails.
+Read errors remain visible during retries until a complete read succeeds.
+
+The weighted cache-read share comes from the server over the entire matching
+history, not just loaded rows. Coverage shows measured terminal turns, missing
+input/cache accounting and partial-only turns; missing categories can overlap.
+No percentage is shown without a valid input denominator. Unknown counts differ
+from measured zero, and partial observations remain separate from terminal usage.
 
 Terminal accounting writes retry without rerunning inference. If those writes
 remain unavailable, the admitted claim stays held instead of scheduling the

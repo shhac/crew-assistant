@@ -1,7 +1,53 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { normalizeState, revisionFiles, setTeam } from "./api";
+import {
+  normalizeState,
+  revisionFiles,
+  setTeam,
+  taskTeamTurns,
+  memberTeamTurns,
+} from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("encodes history scopes and exclusive cursors, forwards cancellation and preserves missing/zero counts", async () => {
+  const body = {
+    turns: [
+      {
+        terminal: {
+          usage: { input: null, cache_read: 0, cache_write: null, output: 0 },
+        },
+      },
+    ],
+    aggregate: { cache_read_share: null },
+  };
+  const fetch = stubFetch(body);
+  const signal = new AbortController().signal;
+  expect(await taskTeamTurns("p /", "t/1", "attempt/&", signal)).toEqual(body);
+  expect(fetch.mock.calls[0][0]).toBe(
+    "/api/projects/p%20%2F/tasks/t%2F1/team-turns?limit=50&before=attempt%2F%26",
+  );
+  expect(fetch.mock.calls[0][1]?.signal).toBe(signal);
+  await memberTeamTurns("m /", undefined, signal);
+  expect(fetch.mock.calls[1][0]).toBe(
+    "/api/members/m%20%2F/team-turns?limit=50",
+  );
+  expect(fetch.mock.calls[1][1]?.signal).toBe(signal);
+});
+
+it.each([400, 401, 404, 500])(
+  "propagates history read errors (%s)",
+  async (status) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status,
+        json: async () => ({ error: "Read refused" }),
+      })),
+    );
+    await expect(memberTeamTurns("m")).rejects.toMatchObject({ status });
+  },
+);
 
 function stubFetch(body: unknown) {
   const fetch = vi.fn(async (_path: string, _options?: RequestInit) => ({

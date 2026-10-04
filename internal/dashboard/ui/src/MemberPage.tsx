@@ -1,4 +1,5 @@
 import { ProviderIcon } from "./ProviderIcon";
+import { TeamTurnHistory } from "./TeamTurnHistory";
 import { useState } from "react";
 import { Avatar } from "./Avatar";
 import { MemberForm } from "./MemberForm";
@@ -51,6 +52,7 @@ export function MemberPage({
           </ul>
         </section>
       )}
+      <TeamTurnHistory scope={{ member: member.id }} state={state} />
       <Learnings member={member} state={state} refresh={refresh} />
       <DeleteMember member={member} projects={projects} refresh={refresh} />
     </div>

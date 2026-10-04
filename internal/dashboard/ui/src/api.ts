@@ -1719,6 +1719,78 @@ export function getCodexBrowserBridge() {
   return api<BrowserBridgeStatus>("/api/engines/codex/browser-bridge");
 }
 
+export interface TeamTurnUsage {
+  known: boolean;
+  cache_known: boolean;
+  final: boolean;
+  status: string;
+  input: number | null;
+  output: number | null;
+  cache_read: number | null;
+  cache_write: number | null;
+}
+export interface TeamTurn {
+  id: string;
+  project_id: string;
+  task_id?: string;
+  member_id?: string;
+  member_name?: string;
+  role: string;
+  seat: string;
+  engine: string;
+  model: string;
+  provider_default: boolean;
+  admitted_at: string;
+  opening: { at: string; resumed: boolean; fresh_reason?: string } | null;
+  lifecycle: string;
+  held: boolean;
+  terminal: {
+    outcome: string;
+    usage: TeamTurnUsage;
+    observed: TeamTurnUsage;
+  } | null;
+}
+export interface TeamTurnHistoryPage {
+  turns: TeamTurn[];
+  next_before?: string;
+  aggregate: {
+    terminal_turns: number;
+    measured_turns: number;
+    missing_input_turns: number;
+    missing_cache_turns: number;
+    partial_only_turns: number;
+    input: number;
+    cache_read: number;
+    cache_read_share: number | null;
+  };
+}
+function historyQuery(before?: string) {
+  const query = new URLSearchParams({ limit: "50" });
+  if (before) query.set("before", before);
+  return query.toString();
+}
+export function taskTeamTurns(
+  project: string,
+  task: string,
+  before?: string,
+  signal?: AbortSignal,
+) {
+  return api<TeamTurnHistoryPage>(
+    `${projectPath(project)}/tasks/${encodeURIComponent(task)}/team-turns?${historyQuery(before)}`,
+    { signal },
+  );
+}
+export function memberTeamTurns(
+  member: string,
+  before?: string,
+  signal?: AbortSignal,
+) {
+  return api<TeamTurnHistoryPage>(
+    `${memberPath(member)}/team-turns?${historyQuery(before)}`,
+    { signal },
+  );
+}
+
 export function setRelease(projectID: string, release: ReleasePolicy | null) {
   return api<Project>(`/api/projects/${projectID}/release`, {
     method: "PUT",
