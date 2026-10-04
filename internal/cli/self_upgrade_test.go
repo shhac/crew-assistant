@@ -67,11 +67,12 @@ func TestServeRunsRealBackupInstallerAndSessionHandover(t *testing.T) {
 	for _, mode := range []string{"ask", "automatic"} {
 		t.Run(mode, func(t *testing.T) {
 			l := upgradeTestListener(t)
+			address := l.Addr().String()
 			l.Close()
 			t.Setenv("HOMEBREW_NO_INSTALL_CLEANUP", "1")
 			dir := t.TempDir()
 			cfg := config.Default()
-			cfg.Dashboard.Addr = "127.0.0.1:0"
+			cfg.Dashboard.Addr = address
 			cfg.Upgrade.Mode = mode
 			o := &options{upgradeIdentity: func(int) string { return "fixture" }, configPath: filepath.Join(dir, "config.json"), statePath: filepath.Join(dir, "state.db"), version: "v1.0.0", globals: &libcli.Globals{Format: "ndjson"}}
 			if err := config.Save(o.configPath, cfg); err != nil {
@@ -123,7 +124,20 @@ func TestServeRunsRealBackupInstallerAndSessionHandover(t *testing.T) {
 				return nil
 			}
 			done := make(chan error, 1)
-			go func() { done <- serve(stop, o, cfg, false, "", false, true) }()
+			finished := make(chan struct{})
+			go func() {
+				defer close(finished)
+				done <- serve(stop, o, cfg, false, "", false, true)
+			}()
+			// A failed assertion must not leave a daemon changing the next test's listener environment.
+			defer func() {
+				cancel()
+				select {
+				case <-finished:
+				case <-time.After(12 * time.Second):
+					t.Error("daemon did not stop")
+				}
+			}()
 			var info runtimeInfo
 			if mode == "ask" {
 				info = waitUpgradeDaemon(t, o, done)
@@ -156,8 +170,10 @@ func TestServeRunsRealBackupInstallerAndSessionHandover(t *testing.T) {
 				if target != filepath.Join(h.prefix, "opt", "crew-assistant", "bin", "crew-assistant") {
 					t.Fatal(target)
 				}
-			case <-time.After(5 * time.Second):
-				t.Fatal("serve did not run upgrade")
+			// HTTP shutdown allows ten seconds, including newly accepted connections.
+			case <-time.After(12 * time.Second):
+				r, err := upgrade.ReadRecord(h.engine.Path)
+				t.Fatalf("serve did not run upgrade: record=%+v, error=%v", r, err)
 			}
 			if err := <-done; err != nil {
 				t.Fatal(err)
@@ -200,10 +216,11 @@ func TestServeRunsRealBackupInstallerAndSessionHandover(t *testing.T) {
 
 func TestServeFailedProbationRestoresBeforeExec(t *testing.T) {
 	l := upgradeTestListener(t)
+	address := l.Addr().String()
 	l.Close()
 	dir := t.TempDir()
 	cfg := config.Default()
-	cfg.Dashboard.Addr = "127.0.0.1:0"
+	cfg.Dashboard.Addr = address
 	o := &options{upgradeIdentity: func(int) string { return "fixture" }, configPath: filepath.Join(dir, "config.json"), statePath: filepath.Join(dir, "state.db"), version: "v2.0.0", globals: &libcli.Globals{Format: "ndjson"}}
 	o.upgradeStarter = func(string, []string, string) error { return nil }
 	if err := config.Save(o.configPath, cfg); err != nil {
@@ -406,7 +423,8 @@ func TestRealHostCloseFailureLeavesArmedRecovery(t *testing.T) {
 }
 func TestSavedInstallFailureStartupRetainsRealRetryCapability(t *testing.T) {
 	dir := t.TempDir()
-	saved := filepath.Join(dir, "saved")
+	// Real attempts use the canonical journal directory, even when /var is an alias.
+	saved := filepath.Join(filepath.Dir(upgrade.RecordPath(filepath.Join(dir, "state.db"))), "attempts", "fixture", "previous")
 	writeExecutableFixture(t, saved, "#!/bin/sh\nexit 0\n")
 	o := &options{upgradeIdentity: func(int) string { return "fixture" }, statePath: filepath.Join(dir, "state.db"), configPath: filepath.Join(dir, "config.json"), version: "v1.0.0", upgradeExecutable: func() (string, error) { return saved, nil }}
 	r := upgrade.Record{Step: upgrade.InstallFailed, From: o.version, To: "v2.0.0", SavedBinary: saved, Prefix: filepath.Join(dir, "homebrew"), Failure: "brew failed", StartedAt: time.Now()}

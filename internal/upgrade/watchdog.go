@@ -206,6 +206,11 @@ func (w *Watchdog) Run(ctx context.Context) error {
 	}
 	var reportedAt time.Time
 	for {
+		// A ready retry timer must not win over cancellation and start another
+		// recovery attempt after the caller has stopped the watchdog.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		done, err := w.Tick()
 		if err != nil {
 			if w.Report != nil && (reportedAt.IsZero() || clock.Now().Sub(reportedAt) >= time.Minute) {

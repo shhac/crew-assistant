@@ -25,7 +25,9 @@ func TestDemoShutdownReleasesStateAndRuntimeRecord(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- serve(lifecycle.Now(ctx), o, cfg, true, "", false, true) }()
+	// Startup resolves paths; the client must not share those mutable options.
+	daemonOptions := *o
+	go func() { done <- serve(lifecycle.Now(ctx), &daemonOptions, cfg, true, "", false, true) }()
 	deadline := time.After(5 * time.Second)
 	poll := time.NewTicker(10 * time.Millisecond)
 	defer poll.Stop()

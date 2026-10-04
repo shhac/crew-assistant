@@ -25,10 +25,13 @@ func TestFailureReceiverKeepsAddressDespiteUnavailableWatchdog(t *testing.T) {
 		t.Run(string(step), func(t *testing.T) {
 			l := upgradeTestListener(t)
 			address := l.Addr().String()
+			// Occupy the configured address so recovery must use the recorded one.
+			configured := upgradeTestListener(t)
+			defer configured.Close()
 			l.Close()
 			dir := t.TempDir()
 			cfg := config.Default()
-			cfg.Dashboard.Addr = "127.0.0.1:0"
+			cfg.Dashboard.Addr = configured.Addr().String()
 			cfg.Upgrade.Mode = "off"
 			o := &options{upgradeIdentity: func(int) string { return "fixture" }, configPath: filepath.Join(dir, "config.json"), statePath: filepath.Join(dir, "state.db"), version: "v1.0.0", globals: &libcli.Globals{Format: "ndjson"}}
 			if err := config.Save(o.configPath, cfg); err != nil {
@@ -39,7 +42,7 @@ func TestFailureReceiverKeepsAddressDespiteUnavailableWatchdog(t *testing.T) {
 				t.Fatal(err)
 			}
 			store.Close()
-			binary := filepath.Join(dir, "previous")
+			binary := filepath.Join(filepath.Dir(upgrade.RecordPath(o.statePath)), "attempts", "fixture", "previous")
 			writeExecutableFixture(t, binary, "fixture")
 			o.upgradeExecutable = func() (string, error) { return binary, nil }
 			attempts := 0
@@ -60,6 +63,17 @@ func TestFailureReceiverKeepsAddressDespiteUnavailableWatchdog(t *testing.T) {
 			o.upgradeHost = h
 			done := make(chan error, 1)
 			go func() { done <- serve(stop, o, cfg, false, "", false, true) }()
+			defer func() {
+				cancel()
+				select {
+				case err := <-done:
+					if err != nil && !errors.Is(err, context.Canceled) {
+						t.Error(err)
+					}
+				case <-time.After(12 * time.Second):
+					t.Error("receiver did not stop")
+				}
+			}()
 			info := waitUpgradeDaemon(t, o, done)
 			if info.LocalURL != "http://"+address || attempts == 0 {
 				t.Fatal(info, attempts)
@@ -69,15 +83,20 @@ func TestFailureReceiverKeepsAddressDespiteUnavailableWatchdog(t *testing.T) {
 				t.Fatal(err)
 			}
 			response.Body.Close()
-			got, err := upgrade.ReadRecord(h.engine.Path)
-			if err != nil || got.RestartPending {
-				t.Fatal(got, err)
-			}
-			cancel()
-			select {
-			case <-done:
-			case <-time.After(5 * time.Second):
-				t.Fatal("receiver did not stop")
+			// The API must serve its health probe before recovery can clear the journal.
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				got, err := upgrade.ReadRecord(h.engine.Path)
+				if err != nil || got == nil || got.Step != step {
+					t.Fatal(got, err)
+				}
+				if !got.RestartPending && !got.RecoveryStarting {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("receiver did not confirm recovery", got)
+				}
+				time.Sleep(5 * time.Millisecond)
 			}
 		})
 	}

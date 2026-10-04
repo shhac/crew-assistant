@@ -94,8 +94,12 @@ func TestInstallerUsesExecutablePrefixAndRemovesCleanupOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := HomebrewPrefix(link)
-	if err != nil || got != prefix {
-		t.Fatalf("%q %v", got, err)
+	resolvedPrefix, resolveErr := filepath.EvalSymlinks(prefix)
+	if resolveErr != nil {
+		t.Fatal(resolveErr)
+	}
+	if err != nil || got != resolvedPrefix {
+		t.Fatalf("prefix = %q, want %q: %v", got, resolvedPrefix, err)
 	}
 	if _, err := HomebrewPrefix(filepath.Join(prefix, "missing")); err == nil {
 		t.Fatal("missing binary accepted")
@@ -117,17 +121,17 @@ func TestInstallerUsesExecutablePrefixAndRemovesCleanupOverride(t *testing.T) {
 			t.Fatal(env)
 		}
 		if calls == 1 {
-			if name != filepath.Join(prefix, "bin", "brew") || !reflect.DeepEqual(args, []string{"upgrade", "fixture/tap/crew-assistant"}) {
+			if name != filepath.Join(resolvedPrefix, "bin", "brew") || !reflect.DeepEqual(args, []string{"upgrade", "fixture/tap/crew-assistant"}) {
 				t.Fatal(name, args)
 			}
 			return nil, nil
 		}
-		if name != filepath.Join(prefix, "opt", "crew-assistant", "bin", "crew-assistant") || !reflect.DeepEqual(args, []string{"--version"}) {
+		if name != filepath.Join(resolvedPrefix, "opt", "crew-assistant", "bin", "crew-assistant") || !reflect.DeepEqual(args, []string{"--version"}) {
 			t.Fatal(name, args)
 		}
 		return []byte("crew-assistant v2.0.0\n"), nil
 	}}
-	v, err := i.Install(context.Background(), prefix, "fixture/tap/crew-assistant", []string{"PATH=/wrong/bin", "HOMEBREW_NO_INSTALL_CLEANUP=1", "KEEP=yes"})
+	v, err := i.Install(context.Background(), got, "fixture/tap/crew-assistant", []string{"PATH=/wrong/bin", "HOMEBREW_NO_INSTALL_CLEANUP=1", "KEEP=yes"})
 	if err != nil || v != "v2.0.0" || calls != 2 {
 		t.Fatal(v, err, calls)
 	}

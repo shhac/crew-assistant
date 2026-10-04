@@ -80,15 +80,19 @@ func TestWatchdogReportsPersistentUnknownIdentityPastDeadline(t *testing.T) {
 	defer cancel()
 	clock := &automaticIdentityClock{at: time.Now()}
 	reports := []string{}
-	w := Watchdog{Path: e.Path, Attempt: r.StartedAt, Clock: clock, Alive: func(int) bool { return true }, Identity: func(int) string { return "" }, Kill: func(int) error { t.Fatal("killed unknown PID"); return nil }, Report: func(message string) {
+	inspections := 0
+	w := Watchdog{Path: e.Path, Attempt: r.StartedAt, Clock: clock, Alive: func(int) bool { return true }, Identity: func(int) string {
+		inspections++
+		return ""
+	}, Kill: func(int) error { t.Fatal("killed unknown PID"); return nil }, Report: func(message string) {
 		reports = append(reports, message)
 		if len(reports) == 2 {
 			cancel()
 		}
 	}}
-	_ = w.Run(ctx)
-	if len(reports) != 2 || !strings.Contains(reports[0], "process identity") {
-		t.Fatal(reports)
+	err := w.Run(ctx)
+	if !errors.Is(err, context.Canceled) || len(reports) != 2 || reports[0] != reports[1] || !strings.Contains(reports[0], "process identity") || inspections != 61 {
+		t.Fatal(reports, inspections, err)
 	}
 	got, _ := ReadRecord(e.Path)
 	if got.Step != Probation {
@@ -99,8 +103,8 @@ func TestWatchdogReportsPersistentUnknownIdentityPastDeadline(t *testing.T) {
 type automaticIdentityClock struct{ at time.Time }
 
 func (c *automaticIdentityClock) Now() time.Time { return c.at }
-func (c *automaticIdentityClock) NewTimer(time.Duration) Timer {
-	c.at = c.at.Add(time.Minute)
+func (c *automaticIdentityClock) NewTimer(d time.Duration) Timer {
+	c.at = c.at.Add(d)
 	ch := make(chan time.Time, 1)
 	ch <- c.at
 	return &readyIdentityTimer{ch}
