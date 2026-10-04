@@ -104,6 +104,7 @@ func (e *Engine) Request(r Record) error {
 		return errors.New("upgrade drain is not configured")
 	}
 	r.StartedAt = time.Now().UTC()
+	r.OwnerStopped = false
 	r.ProbationStarts = 0
 	e.probationReady = false
 	r.FailedDecisionOpened = false
@@ -271,7 +272,11 @@ func (e *Engine) rollback(r *Record, failure string) error {
 	if stopped {
 		return context.Canceled
 	}
-	return e.Exec(r.SavedBinary, r.Args)
+	err := e.Exec(r.SavedBinary, r.Args)
+	if err != nil && e.Interrupted != nil && e.Interrupted() {
+		return errors.Join(err, context.Canceled, e.suppressRecovery(r))
+	}
+	return err
 }
 
 // Probation holds dispatch in the host until this returns successfully. The
@@ -400,6 +405,12 @@ func (e *Engine) BeginProbation(pid int, identity string, args []string, bound t
 	if r == nil || r.ProbationStarts != 0 || (r.Step != Installing && r.Step != InstallFailed && r.Step != HandingOver && r.Step != Probation && r.Step != StoppedInProbation) {
 		return errors.New("probation has already started")
 	}
+	if e.Interrupted != nil && e.Interrupted() {
+		return errors.Join(context.Canceled, e.write(r, StoppedInProbation))
+	}
+	// An explicit start replaces the previous process's stop, under the same
+	// lock that serializes current stop handling and watchdog recovery.
+	r.OwnerStopped = false
 	r.PID, r.ProcessIdentity, r.Args = pid, identity, args
 	if r.Deadline.IsZero() {
 		r.Deadline = time.Now().Add(bound)
@@ -577,6 +588,10 @@ func (e *Engine) BeginRecovery(pid int, identity string, args []string, bound ti
 	if r == nil || !restartOutcome(r.Step) || !r.RestartPending {
 		return errors.New("no rollback restart pending")
 	}
+	if e.Interrupted != nil && e.Interrupted() {
+		return errors.Join(context.Canceled, e.suppressRecovery(r))
+	}
+	r.OwnerStopped = false
 	r.PID, r.ProcessIdentity, r.Args = pid, identity, args
 	r.RecoveryStarting = true
 	r.Deadline = time.Now().Add(bound)
@@ -594,6 +609,13 @@ func (e *Engine) ConfirmRecovery(ctx context.Context, bound time.Duration, probe
 	case <-probeCtx.Done():
 		err = probeCtx.Err()
 	}
+	// A parent stop cancels this probe; it is not a failed health deadline.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if e.Interrupted != nil && e.Interrupted() {
+		return context.Canceled
+	}
 	if err != nil {
 		return errors.New("the restored version did not answer its API health check within the bound")
 	}
@@ -608,11 +630,11 @@ func (e *Engine) ConfirmRecovery(ctx context.Context, bound time.Duration, probe
 	if err != nil {
 		return err
 	}
-	if r == nil || !restartOutcome(r.Step) || !r.RestartPending {
-		return ErrInProgress
-	}
 	if ctx.Err() != nil || e.Interrupted != nil && e.Interrupted() {
 		return context.Canceled
+	}
+	if r == nil || !restartOutcome(r.Step) || !r.RestartPending {
+		return ErrInProgress
 	}
 	r.RestartPending = false
 	r.RecoveryStarting = false
@@ -652,8 +674,34 @@ func (e *Engine) restartFailure(ctx context.Context, r *Record, binary string) e
 		}
 	}
 	if e.interrupted(ctx) {
-		r.RestartPending = false
-		return errors.Join(context.Canceled, e.write(r, r.Step))
+		return errors.Join(context.Canceled, e.suppressRecovery(r))
 	}
-	return e.Exec(binary, r.Args)
+	err := e.Exec(binary, r.Args)
+	if err != nil && e.interrupted(ctx) {
+		return errors.Join(err, context.Canceled, e.suppressRecovery(r))
+	}
+	return err
+}
+
+// Read the latest transition under the journal lock, preserving restoration
+// obligations and pins even if a receiver changed the record during exec.
+func (e *Engine) suppressRecovery(r *Record) error {
+	if !e.journalHeld {
+		release, err := LockRecord(e.Path)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
+	current, err := ReadRecord(e.Path)
+	if err != nil {
+		return err
+	}
+	if current == nil || !current.StartedAt.Equal(r.StartedAt) {
+		return ErrInProgress
+	}
+	current.OwnerStopped = true
+	current.RestartPending = false
+	current.RecoveryStarting = false
+	return writeRecord(e.Path, *current)
 }

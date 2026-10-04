@@ -28,6 +28,13 @@ func (e *Engine) Start(running, executable string) (StartResult, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var result StartResult
+	release, err := LockRecord(e.Path)
+	if err != nil {
+		return result, err
+	}
+	defer release()
+	e.journalHeld = true
+	defer func() { e.journalHeld = false }()
 	r, err := ReadRecord(e.Path)
 	if err != nil || r == nil {
 		return result, err
@@ -35,6 +42,14 @@ func (e *Engine) Start(running, executable string) (StartResult, error) {
 	if r.Step == RollingBack {
 		if e.Restore == nil {
 			return result, errors.New("startup restore is not configured")
+		}
+		// This explicit start owns restoration now. A former process's stop
+		// must not suppress retries, but a current signal takes precedence.
+		r.OwnerStopped = e.Interrupted != nil && e.Interrupted()
+		r.RestartPending = !r.OwnerStopped
+		r.RecoveryStarting = false
+		if err = e.write(r, RollingBack); err != nil {
+			return result, err
 		}
 		if err = e.Restore(*r); err != nil {
 			if e.Interrupted != nil && e.Interrupted() {
@@ -75,6 +90,9 @@ func (e *Engine) Start(running, executable string) (StartResult, error) {
 			return result, errors.New("rollback pin exec is not configured")
 		}
 		if err = e.Exec(pinBinary, r.Args); err != nil {
+			if e.Interrupted != nil && e.Interrupted() {
+				return result, errors.Join(err, context.Canceled, e.suppressRecovery(r))
+			}
 			return result, fmt.Errorf("saved rollback binary cannot start; keep the daemon stopped and run crew-assistant upgrade clear-rollback --offline after restoring a working Homebrew binary: %w", err)
 		}
 		return result, errors.New("rollback pin exec returned without replacing the process")
@@ -152,6 +170,9 @@ func (e *Engine) startRollback(r *Record, failure string) error {
 	if e.Interrupted != nil && e.Interrupted() {
 		return errors.Join(context.Canceled, e.write(r, StoppedInProbation))
 	}
+	// Start holds the journal lock: replace only the previous process's stop.
+	// rollback rechecks the current signal before committing its obligation.
+	r.OwnerStopped = false
 	if err := e.rollback(r, failure); err != nil {
 		return err
 	}

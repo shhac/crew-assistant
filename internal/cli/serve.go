@@ -112,8 +112,7 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 	defer func() {
 		if host.start.Probation && resultErr != nil && !errors.Is(resultErr, upgrade.ErrRolledBack) {
 			if stop.Reason() == "signal" {
-				_ = host.engine.StopProbation()
-				resultErr = nil
+				resultErr = errors.Join(upgradeStopResult(resultErr), host.engine.StopProbation())
 			} else {
 				r, err := upgrade.ReadRecord(host.engine.Path)
 				if err == nil && r != nil && r.Step == upgrade.Probation {
@@ -273,9 +272,7 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 				return probe(ctx, localURL, filepath.Join(o.runtimeDir(), "admin-token"))
 			}); err != nil {
 				if stop.Stopping() {
-					_ = host.engine.StopProbation()
-					_ = host.engine.Close()
-					return nil
+					return errors.Join(upgradeStopResult(err), host.engine.StopProbation(), host.engine.Close())
 				}
 				return err
 			}
@@ -304,8 +301,7 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 				return err
 			}
 			if stop.Stopping() {
-				_ = host.engine.Close()
-				return nil
+				return host.engine.Close()
 			}
 			a.SetUpgrading(false)
 			_ = os.Remove(filepath.Join(o.runtimeDir(), "upgrade-sessions.json"))
@@ -366,8 +362,8 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 				installCtx, endInstall := upgradeInstallContext(stop)
 				defer endInstall()
 				err := host.engine.FinishDrain(installCtx, stop.Reason())
-				if errors.Is(err, context.Canceled) && stop.Reason() == "signal" {
-					return nil
+				if stop.Reason() == "signal" {
+					return upgradeStopResult(err)
 				}
 				return err
 			}
@@ -384,6 +380,23 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 		_ = httpServer.Close()
 	}
 	return errors.Join(serveErr, shutdownErr, drainErr)
+}
+
+// Only cancellation alone is a successful signal stop. Joined exec, restore
+// and journal failures must reach the CLI even when cancellation is present.
+func upgradeStopResult(err error) error {
+	if err == context.Canceled {
+		return nil
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, cause := range joined.Unwrap() {
+			if upgradeStopResult(cause) != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return err
 }
 
 func registerDashboard(root *cobra.Command, o *options) {
@@ -455,9 +468,7 @@ func awaitUpgradeDrain(stop lifecycle.Stop, done <-chan struct{}, path string, i
 	if cancel != nil {
 		cancel()
 		err := <-observed
-		if err != nil && !errors.Is(err, context.Canceled) {
-			progressErr = errors.Join(progressErr, err)
-		}
+		progressErr = errors.Join(progressErr, upgradeStopResult(err))
 	}
 	return errors.Join(drainErr, progressErr)
 }

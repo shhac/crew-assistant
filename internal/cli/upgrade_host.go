@@ -110,7 +110,7 @@ func prepareUpgradeStart(o *options, stop lifecycle.Stop, demo bool) (_ *upgrade
 		return nil, readErr
 	}
 	if existing != nil {
-		if err = validateUpgradeConfig(*existing, o.configPath); err != nil {
+		if err = validateUpgradeStartConfig(*existing, o.configPath, o.version); err != nil {
 			return nil, err
 		}
 	}
@@ -134,7 +134,7 @@ func prepareUpgradeStart(o *options, stop lifecycle.Stop, demo bool) (_ *upgrade
 		}
 		if err != nil {
 			if stop.Reason() == "signal" {
-				_ = h.engine.StopProbation()
+				err = errors.Join(err, h.engine.StopProbation())
 			}
 			return nil, err
 		}
@@ -145,7 +145,9 @@ func prepareUpgradeStart(o *options, stop lifecycle.Stop, demo bool) (_ *upgrade
 		go func() {
 			<-stop.Graceful.Done()
 			if stop.Reason() == "signal" {
-				_ = h.engine.StopProbation()
+				if err := h.engine.StopProbation(); err != nil {
+					h.engine.Report("Could not record the owner stop; upgrade recovery may still restart the daemon. Check access to the upgrade record.")
+				}
 			}
 		}()
 		if err = h.arm(o, *r); err != nil {
@@ -385,6 +387,15 @@ func upgradeWatchdog(o *options, attempt time.Time) *upgrade.Watchdog {
 			return nil
 		},
 	}
+}
+
+func validateUpgradeStartConfig(r upgrade.Record, config, running string) error {
+	// Only the previous version makes an ordinary start from a completed
+	// failure. The target still needs the recorded destinations for probation.
+	if !r.Pinned && !r.RestartPending && !r.RecoveryStarting && (r.Step == upgrade.BackupFailed || r.Step == upgrade.InstallFailed) && strings.TrimPrefix(running, "v") == strings.TrimPrefix(r.From, "v") {
+		return nil
+	}
+	return validateUpgradeConfig(r, config)
 }
 
 func validateUpgradeConfig(r upgrade.Record, config string) error {
