@@ -94,7 +94,9 @@ func (l *liveTurn) Started() {
 	l.reg.running[l] = struct{}{}
 	l.reg.mu.Unlock()
 	if l.writes {
-		go l.countFiles()
+		// An observer can start again for a corrected request; each counter
+		// keeps the counter and end of the turn it was started for.
+		go l.countFiles(l.count, l.done)
 	}
 }
 
@@ -154,20 +156,25 @@ func edits(tool string) bool {
 
 // countFiles counts the turn's changed files every few seconds until it
 // ends.
-func (l *liveTurn) countFiles() {
+func (l *liveTurn) countFiles(count func(context.Context) (int, error), done <-chan struct{}) {
 	tick := time.NewTicker(countFilesEvery)
 	defer tick.Stop()
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), countFilesEvery)
-		n, err := l.count(ctx)
+		n, err := count(ctx)
 		cancel()
+		select {
+		case <-done:
+			return
+		default:
+		}
 		if err == nil {
 			l.reg.mu.Lock()
 			l.turn.FilesChanged = &n
 			l.reg.mu.Unlock()
 		}
 		select {
-		case <-l.done:
+		case <-done:
 			return
 		case <-tick.C:
 		}
