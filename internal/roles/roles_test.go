@@ -156,3 +156,22 @@ func TestAGrokRoleIsRefusedForWantOfASandbox(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A tool in an unreadable home folder crashes in the sandbox instead of
+// letting the search reach one it can run, so those folders are dropped.
+func TestCommandEnvDropsUnreadableHomeFoldersFromPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	nvm, modules := filepath.Join(home, ".nvm", "bin"), filepath.Join(home, "go", "pkg", "mod")
+	t.Setenv("PATH", strings.Join([]string{nvm, "/opt/homebrew/bin", filepath.Join(modules, "tool"), "/usr/bin"}, string(filepath.ListSeparator)))
+	var path string
+	for _, entry := range CommandEnv(nil, []string{modules}) {
+		if value, ok := strings.CutPrefix(entry, "PATH="); ok {
+			path = value
+		}
+	}
+	want := strings.Join([]string{"/opt/homebrew/bin", filepath.Join(modules, "tool"), "/usr/bin"}, string(filepath.ListSeparator))
+	if path != want {
+		t.Fatalf("PATH %q, want %q", path, want)
+	}
+}

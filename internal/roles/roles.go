@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -279,7 +280,7 @@ func options(spec Spec) session.Options {
 		o.Sandbox, o.Env, o.Browser = nil, nil, false
 		o.Workbench = &session.Workbench{Write: spec.Write}
 		if harness.Support(o.Provider.Engine, harness.Session, harness.Sandbox).Usable() {
-			o.Workbench.Commands = &session.Commands{Read: spec.Read, Loopback: spec.Loopback, Env: CommandEnv(spec.Env)}
+			o.Workbench.Commands = &session.Commands{Read: spec.Read, Loopback: spec.Loopback, Env: CommandEnv(spec.Env, spec.Read)}
 		}
 		o.Restriction = &session.Restriction{Tools: session.ToolHost{Server: "crew", Tools: spec.Tools, Handler: spec.Handler, MaxResultBytes: 128 << 10}}
 		o.Loop = session.Loop{MaxSteps: 1024, MaxRequestBytes: 64 << 20, RequestTimeout: 5 * time.Minute}
@@ -410,10 +411,14 @@ func VerifySandbox(ctx context.Context, spec Spec) error {
 // hosted commands. Only PATH and locale settings are inherited from the daemon;
 // HOME and TMPDIR belong to the harness's private scratch. Other caller
 // settings are passed whole so the harness refuses unsafe names before launch.
-func CommandEnv(extra []string) []string {
+// read is what the sandbox may read beyond its system set.
+func CommandEnv(extra, read []string) []string {
 	var env []string
 	for _, entry := range os.Environ() {
-		key, _, ok := strings.Cut(entry, "=")
+		key, value, ok := strings.Cut(entry, "=")
+		if key == "PATH" && ok {
+			entry = "PATH=" + readablePath(value, read)
+		}
 		if ok && (key == "PATH" || key == "LANG" || strings.HasPrefix(key, "LC_")) {
 			env = append(env, entry)
 		}
@@ -425,4 +430,27 @@ func CommandEnv(extra []string) []string {
 		}
 	}
 	return env
+}
+
+// readablePath drops PATH folders in the owner's home that the sandbox can't
+// read. The sandbox still lets their programs start, so a tool found there,
+// such as an nvm node behind a "#!/usr/bin/env node" script, crashes instead
+// of the search moving on to one it can run.
+func readablePath(path string, read []string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	var kept []string
+	for _, dir := range filepath.SplitList(path) {
+		if !within(home, dir) || slices.ContainsFunc(read, func(r string) bool { return within(r, dir) }) {
+			kept = append(kept, dir)
+		}
+	}
+	return strings.Join(kept, string(filepath.ListSeparator))
+}
+
+func within(root, dir string) bool {
+	rel, err := filepath.Rel(root, dir)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

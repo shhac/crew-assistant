@@ -127,7 +127,7 @@ func (lp *Loop) openCommands(ctx context.Context, opts sandbox.Options) (command
 	}
 	opts.Write = true
 	opts.Timeout = commandTimeout
-	opts.Env = roles.CommandEnv(opts.Env)
+	opts.Env = roles.CommandEnv(opts.Env, opts.Read)
 	opts.Background = harness.Support(harness.OpenAICompatible, harness.Session, harness.Background).Usable()
 	if lp.commands != nil {
 		box, err := lp.commands(ctx, opts)
