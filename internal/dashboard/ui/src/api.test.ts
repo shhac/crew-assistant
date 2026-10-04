@@ -47,3 +47,25 @@ describe("project API", () => {
     });
   });
 });
+
+it("preserves upgrade journals and rollback pins, including null waiting lists", () => {
+  const upgrade = {
+    step: "draining" as const,
+    from: "v1.0.0",
+    to: "v1.1.0",
+    since: "2026-10-04T10:00:00Z",
+    waiting_on: null,
+  };
+  const rollback = {
+    from: "v1.0.0",
+    to: "v1.1.0",
+    failure: "health check failed",
+    clear: "crew-assistant upgrade clear-rollback",
+  };
+  expect(normalizeState({ upgrade, rollback })).toMatchObject({
+    upgrade,
+    rollback,
+  });
+  expect(normalizeState({}).upgrade).toBeUndefined();
+  expect(normalizeState({}).rollback).toBeUndefined();
+});

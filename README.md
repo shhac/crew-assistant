@@ -29,9 +29,9 @@ Create Fish's completions directory first if needed. PowerShell scripts are also
 
 ## Staying up to date
 
-Settings → Updates offers **Ask me** (the default) or **Off**. Checks run every six hours and sooner after this project's own release. Ask me opens a decision with the versions and release notes. On a Homebrew install, its recommended choice is **Upgrade to vX**: it drains at once, finishes running work, then upgrades. Off keeps the version display without starting upgrades or opening decisions. Skipping a version hides its notice until a newer release appears. Development and demo builds do not check. Demo mode refuses a state file with an upgrade record; use a fresh state file for a demo.
+Settings → Updates offers **Automatic**, **Ask me** (the default) and **Off**. Checks run every six hours and sooner after this project's own release. Ask me opens a decision with the versions and release notes. On a Homebrew install, its recommended choice is **Upgrade to vX**: it drains at once, finishes running work, then upgrades. Off keeps the version display without starting upgrades or opening decisions. Skipping a version hides its notice until a newer release appears. Development and demo builds do not check. Demo mode refuses a state file with an upgrade record; use a fresh state file for a demo.
 
-Automatic mode is available through the CLI (its dashboard option is a follow-up):
+Automatic mode is available in Settings → Updates and through the CLI:
 
 ```sh
 crew-assistant config set upgrade.mode automatic
@@ -45,7 +45,7 @@ If startup fails, state and config are restored before the saved previous versio
 
 Upgrade startup requires a confirmed process identity. If inspection keeps failing, admission is refused; the watchdog logs the inspection failure and retries without killing an unconfirmed PID, even after the health deadline. Check local process inspection permissions. After a completed upgrade, moving the config is allowed; a pending recovery or rollback pin still requires its recorded config destination.
 
-Under launchd, the watchdog asks `launchctl` to restart your job. Point the owner's plist at the stable path `$(brew --prefix)/bin/crew-assistant`, with the expanded absolute path in `ProgramArguments`; the formula does not supply a service block. The job label is accepted only when launchd is the daemon’s direct parent, excluding terminal application labels and the terminal sentinel 0. While rollback is in force, that Homebrew binary execs the saved previous one before reading state, on terminal starts too. An upgrade-failed decision explains the failure and how to clear it. The dedicated dashboard rollback banner is a follow-up.
+Under launchd, the watchdog asks `launchctl` to restart your job. Point the owner's plist at the stable path `$(brew --prefix)/bin/crew-assistant`, with the expanded absolute path in `ProgramArguments`; the formula does not supply a service block. The job label is accepted only when launchd is the daemon’s direct parent, excluding terminal application labels and the terminal sentinel 0. While rollback is in force, that Homebrew binary execs the saved previous one before reading state, on terminal starts too. An upgrade-failed decision explains the failure and how to clear it. The sidebar and Settings → Updates show the rollback in force, its failure and the command to clear it.
 
 ```sh
 crew-assistant upgrade status          # reads the record even with no daemon

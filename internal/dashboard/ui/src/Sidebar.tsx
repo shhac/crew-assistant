@@ -3,7 +3,9 @@ import { byTitle, projectGroup, projectTasks } from "./stages";
 import { Avatar, hasFace } from "./Avatar";
 import { ErrorNotice, Icon } from "./ui";
 import { UsageStatus } from "./UsageStatus";
-import { versionLabel } from "./UpdatesSettings";
+import { versionLabel, RollbackNotice } from "./UpdatesSettings";
+import { span } from "./turns";
+import { counted } from "./ui";
 import type { State } from "./api";
 
 const dotTone = {
@@ -16,9 +18,59 @@ const dotTone = {
 const shownProjects = 8;
 
 // daemonStatus is what the sidebar says about the daemon, most pressing
-// first: unreachable, stopping, paused, then running.
+// first: unreachable, upgrade, stopping, paused, then running.
 function daemonStatus(state: State, offline: boolean) {
   if (offline) return { label: "Offline", color: "var(--block)", hint: "" };
+  const upgrade = state.upgrade;
+  if (upgrade) {
+    const target = versionLabel(upgrade.to);
+    let hint = "";
+    switch (upgrade.step) {
+      case "draining": {
+        const waiting = upgrade.waiting_on ?? [];
+        const longest = Math.max(
+          0,
+          ...waiting.map((item) => elapsed(item.started_at)),
+        );
+        hint = waiting.length
+          ? `Finishing ${counted(waiting.length, "step")}, longest ${Math.floor(longest / 60000)}m. Nothing new starts.`
+          : "Finishing 0 steps. No running work remains.";
+        break;
+      }
+      case "backing-up":
+        hint = "Backing up";
+        break;
+      case "installing":
+        hint = "Installing";
+        break;
+      case "handing-over":
+        hint = `Starting ${target}`;
+        break;
+      case "probation":
+        hint = `Checking ${target}`;
+        break;
+      case "rolling-back":
+        return {
+          label: "Restoring " + versionLabel(upgrade.from),
+          color: "var(--needs)",
+          hint: `Upgrade to ${target} failed. Restoring the previous version, state and config.`,
+        };
+      case "stopped-in-probation":
+        return {
+          label: "Upgrade interrupted",
+          color: "var(--needs)",
+          hint: `Stopped while checking ${target}. Health was not confirmed.`,
+        };
+      case "healthy":
+      case "abandoned":
+      case "backup-failed":
+      case "install-failed":
+      case "rolled-back":
+        break;
+    }
+    if (hint)
+      return { label: `Upgrading to ${target}`, color: "var(--needs)", hint };
+  }
   if (state.stopping)
     return {
       label: "Stopping",
@@ -32,6 +84,13 @@ function daemonStatus(state: State, offline: boolean) {
       hint: "Nothing new starts. Steps already running finish.",
     };
   return { label: "Running", color: "var(--done)", hint: "" };
+}
+
+function elapsed(at: string) {
+  const started = Date.parse(at);
+  return Number.isFinite(started) && started > 0
+    ? Math.max(0, Date.now() - started)
+    : 0;
 }
 
 export function Sidebar({
@@ -178,6 +237,15 @@ export function Sidebar({
           {status.label}
         </p>
         {status.hint && <p className="hint">{status.hint}</p>}
+        {!offline &&
+          state.upgrade?.step === "draining" &&
+          (state.upgrade.waiting_on ?? []).map((item, index) => (
+            <p className="hint" key={`${item.kind}:${item.ref}:${index}`}>
+              Waiting on {item.label || item.ref || item.kind} ({item.kind}) for{" "}
+              {span(elapsed(item.started_at))}
+            </p>
+          ))}
+        <RollbackNotice rollback={state.rollback} />
         {state.update?.running && (
           <p className="hint">{versionLabel(state.update.running)}</p>
         )}

@@ -340,9 +340,7 @@ describe("the shell", () => {
       expect(restored).toHaveProperty("value", "Also mention pricing");
       expect(panel.isConnected).toBe(true);
       expect(window.location.hash).toBe("#/projects/p1/requests/t1");
-      fireEvent.click(
-        within(panel).getByRole("button", { name: /^Close$/ }),
-      );
+      fireEvent.click(within(panel).getByRole("button", { name: /^Close$/ }));
       await vi.waitFor(() => expect(panel.isConnected).toBe(false));
       fireEvent.click(screen.getByText("Draft the note"));
       await vi.waitFor(() =>
@@ -2031,5 +2029,154 @@ describe("pairing", () => {
     expect(first).toBe(second);
     await first;
     expect(calls.filter((c) => c.path === "/api/session")).toHaveLength(1);
+  });
+});
+
+describe("upgrade state polling", () => {
+  const upgrade = (step: NonNullable<State["upgrade"]>["step"]) => ({
+    step,
+    from: "v1.0.0",
+    to: "v1.1.0",
+    since: "2026-10-04T10:00:00Z",
+    waiting_on: null,
+  });
+  const rollback = {
+    from: "v1.0.0",
+    to: "v1.1.0",
+    failure: "health check timed out",
+    clear: "crew-assistant upgrade clear-rollback",
+  };
+  it("follows journals through interruption, failure, restoration, pinned retry and health", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval"] });
+    try {
+      state = { ...initial(), stopping: true, upgrade: upgrade("draining") };
+      const view = render(<App />);
+      await vi.waitFor(() =>
+        expect(screen.getByText(/Finishing 0 steps/)).toBeTruthy(),
+      );
+      const stages = [
+        ["backing-up", "Backing up"],
+        ["installing", "Installing"],
+        ["handing-over", "Starting v1.1.0"],
+        ["probation", "Checking v1.1.0"],
+        ["stopped-in-probation", "Upgrade interrupted"],
+        ["backup-failed", "Stopping"],
+        ["install-failed", "Stopping"],
+        ["rolling-back", "Restoring v1.0.0"],
+      ] as const;
+      for (const [step, label] of stages) {
+        state = { ...state, upgrade: upgrade(step) };
+        await act(async () => {
+          vi.advanceTimersByTime(5000);
+        });
+        await vi.waitFor(() => expect(screen.getByText(label)).toBeTruthy());
+      }
+      state = {
+        ...state,
+        stopping: false,
+        upgrade: upgrade("rolled-back"),
+        rollback,
+      };
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+      await vi.waitFor(() =>
+        expect(screen.getByText(/Rollback is in force/)).toBeTruthy(),
+      );
+      state = { ...state, upgrade: upgrade("installing") };
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+      await vi.waitFor(() =>
+        expect(screen.getByText("Installing")).toBeTruthy(),
+      );
+      expect(screen.getByText(/Rollback is in force/)).toBeTruthy();
+      respond = (path) =>
+        path === "/api/state"
+          ? { status: 503, body: { error: "unreachable" } }
+          : { body: {} };
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+      await vi.waitFor(() => expect(screen.getByText("Offline")).toBeTruthy());
+      expect(screen.getByText(/Showing what it last sent/)).toBeTruthy();
+      expect(screen.getByText(/Rollback is in force/)).toBeTruthy();
+      state = { ...initial(), upgrade: upgrade("probation"), rollback };
+      respond = (path) => ({ body: path === "/api/state" ? state : {} });
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+      await vi.waitFor(() =>
+        expect(screen.getByText("Checking v1.1.0")).toBeTruthy(),
+      );
+      view.unmount();
+      render(<App />);
+      await vi.waitFor(() =>
+        expect(screen.getByText("Checking v1.1.0")).toBeTruthy(),
+      );
+      expect(screen.getByText(/Rollback is in force/)).toBeTruthy();
+      state = { ...initial(), upgrade: upgrade("healthy") };
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+      await vi.waitFor(() => expect(screen.getByText("Running")).toBeTruthy());
+      expect(screen.queryByText(/Rollback is in force/)).toBeNull();
+      expect(screen.queryByText(/Upgrading to/)).toBeNull();
+      expect(writes()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects an obsolete response that would undo new upgrade progress", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval"] });
+    try {
+      let release!: (value: unknown) => void;
+      let stateCalls = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (path: string) => {
+          if (path === "/api/state") {
+            stateCalls++;
+            if (stateCalls === 2)
+              return await new Promise((resolve) => {
+                release = resolve;
+              });
+            return {
+              ok: true,
+              json: async () => ({
+                ...initial(),
+                upgrade: upgrade(stateCalls === 1 ? "draining" : "probation"),
+              }),
+            };
+          }
+          return { ok: true, json: async () => ({}) };
+        }),
+      );
+      render(<App />);
+      await vi.waitFor(() =>
+        expect(screen.getByText(/Finishing 0 steps/)).toBeTruthy(),
+      );
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(release).toBeTypeOf("function");
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+      await vi.waitFor(() =>
+        expect(screen.getByText("Checking v1.1.0")).toBeTruthy(),
+      );
+      await act(async () =>
+        release({
+          ok: true,
+          json: async () => ({ ...initial(), upgrade: upgrade("installing") }),
+        }),
+      );
+      expect(screen.getByText("Checking v1.1.0")).toBeTruthy();
+      expect(screen.queryByText("Installing")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

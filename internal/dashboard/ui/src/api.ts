@@ -969,10 +969,38 @@ export interface UpdateStatus {
   error?: string;
   skipped?: string;
   decision_version?: string;
-  mode?: "off" | "ask";
+  mode?: "off" | "ask" | "automatic";
   unavailable?: string;
 }
+export interface UpgradeProgress {
+  step:
+    | "draining"
+    | "backing-up"
+    | "installing"
+    | "handing-over"
+    | "probation"
+    | "rolling-back"
+    | "stopped-in-probation"
+    | "healthy"
+    | "abandoned"
+    | "backup-failed"
+    | "install-failed"
+    | "rolled-back";
+  from: string;
+  to: string;
+  since: string;
+  waiting_on:
+    { kind: string; ref: string; label?: string; started_at: string }[] | null;
+}
+export interface RollbackStatus {
+  from: string;
+  to: string;
+  failure: string;
+  clear: string;
+}
 export interface State {
+  upgrade?: UpgradeProgress;
+  rollback?: RollbackStatus;
   engine_pauses?: Record<string, EnginePause>;
   update?: UpdateStatus;
   pending_operations: PendingOperation[];
@@ -1001,7 +1029,7 @@ export interface State {
 }
 export type Config = Record<string, unknown> & {
   upgrade?: {
-    mode: "off" | "ask";
+    mode: "off" | "ask" | "automatic";
     check_interval?: string;
     source_repo?: string;
     formula?: string;
@@ -1082,6 +1110,8 @@ export async function api<T>(
 export function normalizeState(raw: Partial<State>): State {
   return {
     update: raw.update,
+    upgrade: raw.upgrade,
+    rollback: raw.rollback,
     assistant: raw.assistant ?? { name: "", personality: "" },
     assistants: raw.assistants ?? [],
     pending_operations: raw.pending_operations ?? [],

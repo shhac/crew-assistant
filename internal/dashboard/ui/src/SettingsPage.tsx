@@ -192,6 +192,7 @@ export function Settings({
                 <UpdatesSettings
                   config={draft}
                   update={state.update}
+                  rollback={state.rollback}
                   onChange={setDraft}
                 />
               )}
