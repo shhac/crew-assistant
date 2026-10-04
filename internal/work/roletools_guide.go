@@ -86,7 +86,7 @@ func (r roleTools) Definitions() []session.ToolDefinition {
 
 	defs := r.definitions()
 	if r.checks != nil {
-		defs = append(defs, session.ToolDefinition{Name: "run_check", Description: "Run the project's check in a fresh workspace copy in a daemon-hosted sandbox. Each call waits at most 45 seconds; while still running, call again to wait for the same run. A call after its result starts a new check.", Schema: schema([]string{})})
+		defs = append(defs, session.ToolDefinition{Name: "run_check", Description: "Run the project's check in a fresh workspace copy in a daemon-hosted sandbox. Each call waits at most 45 seconds; while still running, call again to wait for the same run. If coverage.more is true, call again to collect the remaining skip evidence from that same check. A call after the final result page starts a new check.", Schema: schema([]string{})})
 	}
 	if r.lin != nil {
 		defs = append(defs, session.ToolDefinition{Name: "lin", Description: "Use this project’s linked Linear account. Give args or a shipped reference (commands or output).", Schema: map[string]any{"type": "object", "properties": map[string]any{"args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "reference": map[string]any{"type": "string"}}, "required": []string{"args", "reference"}, "additionalProperties": false}})

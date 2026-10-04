@@ -312,6 +312,34 @@ make build
 
 The Vite bundle in `internal/dashboard/assets/` is committed and embedded in Go. After UI changes, rebuild it. CI checks Go tests/races/vet, frontend tests/types, and bundle freshness. Tests use temporary SQLite files, fake providers, fake CLIs and a scripted role runner. No test needs live Slack, Linear, Tailscale, installed agent CLIs or paid inference.
 
+`make check` consumes Go's JSON test events and ends with the total skip count,
+test identities and reasons, even if a later frontend stage fails. Interrupts
+settle the check's child processes and report the active stage and incomplete
+coverage. Test fixtures that deliberately create separate process groups use
+parent-liveness pipes to settle those groups even when their test parent is
+forcibly killed. Invocation-specific progress is saved before exit; after a hosted
+timeout or forced cancellation the daemon recovers it before removing the copy.
+Cancelled turns retain coverage in their turn notes, batched below the note
+store's text limit. Collection stops with an incomplete-check failure before
+skip evidence exceeds its 256 KiB retention budget, keeping every observed
+identity and reason within the existing task-store limits. Diagnostic ingestion and
+individual reasons are bounded separately from test identities. Every skip is
+retained in the structured `coverage` result: when `coverage.more` is true, call
+`run_check` again for the remaining evidence before judging. These pages belong
+to the same check; a new check starts only after its final page. Unlisted test
+skips fail the check. The exact known-skip policy lives in
+`internal/checktest/report.go`: optional completion shells and named unsupported
+Windows tests are allowed and counted. Exceptions match the complete diagnostic,
+not phrases within fixture failures. Symlink fixtures skip only on Windows'
+confirmed missing-privilege error (ERROR_PRIVILEGE_NOT_HELD); other creation
+errors fail with their original diagnostic. Process-inspection exceptions, if needed,
+must identify the test, capability and upstream dependency LAH-29; CA-95 removes
+them when published harness support is available. Assertions never qualify.
+The project's hosted check must have `check_loopback` enabled through its team
+settings; do not widen sandbox permissions or use an unsandboxed fallback.
+QA verdicts quote the total skip count (including zero) and every actual known
+skip. Live Homebrew and launchd checks remain owner checks.
+
 Design rationale and earlier concepts are in [design-docs](design-docs/README.md). The current design is [project teams](design-docs/2026-09-23-project-teams.md); its decisions are in [design-docs/decisions](design-docs/decisions).
 
 ## Releasing

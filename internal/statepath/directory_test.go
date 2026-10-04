@@ -1,6 +1,7 @@
 package statepath
 
 import (
+	"github.com/shhac/crew-assistant/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,7 +26,7 @@ func TestEnsureDirectoryRefusesARootItCannotTrust(t *testing.T) {
 	target := t.TempDir()
 	link := filepath.Join(t.TempDir(), "link")
 	if err := os.Symlink(target, link); err != nil {
-		t.Skip("symlinks unavailable:", err)
+		testutil.RequireSymlinkResult(t, err)
 	}
 	if _, err := EnsureDirectory(link, "runtime"); err == nil {
 		t.Error("a symlinked root was accepted")
@@ -48,7 +49,7 @@ func TestEnsureDirectoryRefusesAComponentThatIsNotADirectory(t *testing.T) {
 		t.Error("a regular file was used as a directory")
 	}
 	if err := os.Symlink(t.TempDir(), filepath.Join(root, "link")); err != nil {
-		t.Skip("symlinks unavailable:", err)
+		testutil.RequireSymlinkResult(t, err)
 	}
 	if _, err := EnsureDirectory(root, "link"); err == nil {
 		t.Error("a symlinked component was followed")

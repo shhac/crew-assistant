@@ -6,7 +6,7 @@ NPM ?= $(NODE) "$$(command -v npm)"
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build dashboard test test-race check dev
+.PHONY: build dashboard test test-race check check-ui-types check-ui-bundle check-ui-tests dev
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/crew-assistant
 
@@ -24,10 +24,15 @@ test-race:
 	go test -race ./... -count=1 -timeout $(TEST_TIMEOUT)
 
 check:
-	go vet ./...
-	go test ./... -count=1 -timeout $(TEST_TIMEOUT)
+	TEST_TIMEOUT=$(TEST_TIMEOUT) go run ./cmd/check-project
+
+check-ui-types:
 	$(NPM) --prefix internal/dashboard/ui run check
+
+check-ui-bundle:
 	$(NPM) --prefix internal/dashboard/ui run check:bundle
+
+check-ui-tests:
 	$(NPM) --prefix internal/dashboard/ui test
 
 dev:

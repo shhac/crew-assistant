@@ -19,6 +19,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/roles"
+	"github.com/shhac/crew-assistant/internal/testutil"
 	harness "github.com/shhac/lib-agent-harness"
 )
 
@@ -403,9 +404,10 @@ func TestChecksSideBySideNeverShareAPort(t *testing.T) {
 	lp := testLoop(t)
 	qa := core.Role{Name: "QA", Kinds: []string{core.RoleQA}, Engine: "claude"}
 	playbook := &core.Playbook{Medium: core.MediumGit, Run: &testRecipe}
+	testutil.RequireLoopback(t)
 	one, err := lp.planApp(qa, playbook)
 	if err != nil {
-		t.Skipf("this machine can't listen on loopback here: %v", err)
+		t.Fatal(err)
 	}
 	two, err := lp.planApp(qa, playbook)
 	if err != nil {

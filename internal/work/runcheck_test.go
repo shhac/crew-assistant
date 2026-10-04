@@ -132,6 +132,9 @@ func TestRunCheckOnEveryEngineAndRole(t *testing.T) {
 					if opts.WorkDir == source || opts.WorkDir == "" || opts.Loopback != loopback || !opts.Write || opts.Timeout != commandTimeout {
 						t.Fatalf("sandbox options %+v", opts)
 					}
+					if !slices.Contains(opts.Env, "CREW_HOSTED_CHECK=1") {
+						t.Fatal("missing hosted-check marker")
+					}
 					if len(fake.runs) != 1 || fake.runs[0].Command != "make check" {
 						t.Fatalf("runs %+v", fake.runs)
 					}
@@ -335,6 +338,11 @@ func TestHostedCheckPromptsKeepCheckWithTeam(t *testing.T) {
 	p := core.Project{Playbook: &core.Playbook{Medium: core.MediumGit, Check: "make check"}}
 	task := core.Task{Objective: "feature"}
 	qa := checkerPrompt(p, task, core.Revision{}, core.Role{Kinds: []string{core.RoleQA}}, p.Playbook)
+	for _, want := range []string{"total skip count, including zero", "every actual known skip", "incomplete check cannot pass", "coverage.more", "collect all remaining run_check pages"} {
+		if !strings.Contains(qa, want) {
+			t.Fatal("missing QA skip guidance: " + want)
+		}
+	}
 	writer := writerPrompt(p, task, "", false)
 	pm := ownerStepPrompt(p, task, core.Unreachable{Criterion: "make check passes"})
 	for _, limit := range []string{"no general network", "access to the owner's machine", "browser access is available only when the owner allows it"} {

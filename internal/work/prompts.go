@@ -417,11 +417,13 @@ func checkerPrompt(p core.Project, t core.Task, r core.Revision, checker core.Ro
 		if playbook.Medium == core.MediumGit && playbook.Check != "" {
 			fmt.Fprintf(&b, "Use run_check for the project check (%s), once. Repeat calls while it says still running; they wait for the same run. Judge the exit code, timed_out flag and output it returns.\n\n", playbook.Check)
 			b.WriteString("Do not change, fix or commit anything; only use run_check and read its output.\n")
+			b.WriteString("When coverage.more is true, collect all remaining run_check pages before judging; those pages belong to the same check.\n")
 		} else {
 			fmt.Fprintf(&b, "Run exactly this from the repository root, once:\n%s\n\n", playbook.Check)
 			b.WriteString("Do not change, fix or commit anything; only run the check and read its output.\n")
 		}
 		b.WriteString(`Use "pass" only if it exits successfully without timing out. Otherwise use "revise", with one finding per failing test, build error or check, quoting the key lines of output in the note.
+Quote the total skip count, including zero, and every actual known skip with its test identity, reason, missing capability and upstream dependency. Required skips without an explicit known-skip exception require "revise"; an incomplete check cannot pass.
 Use "question" only if the check cannot run at all for a reason the implementer cannot fix (for example a missing tool), and say what is missing.`)
 		b.WriteString(sandboxGuide)
 		b.WriteString(verdictFormat(t))

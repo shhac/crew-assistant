@@ -13,21 +13,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
+
+	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
 func upgradeTestListener(t *testing.T) net.Listener {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if errors.Is(err, syscall.EPERM) && os.Getenv("CREW_REQUIRE_UPGRADE_LOOPBACK") != "1" {
-		t.Skip("loopback bind denied; set CREW_REQUIRE_UPGRADE_LOOPBACK=1 to require this test")
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	return l
+	return testutil.ListenLoopback(t)
 }
 
 func TestPreservedListenerAcceptsAndShutsDown(t *testing.T) {

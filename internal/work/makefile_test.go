@@ -33,7 +33,7 @@ func TestMakeFrontendCommandsInvokeNpmThroughNode(t *testing.T) {
 		}
 	}
 	log := filepath.Join(dir, "commands")
-	cmd := exec.Command("make", "-f", makefile, "VERSION=fixture", "check", "dashboard")
+	cmd := exec.Command("make", "-f", makefile, "VERSION=fixture", "check", "check-ui-types", "check-ui-bundle", "check-ui-tests", "dashboard")
 	cmd.Dir = dir
 	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin", "CREW_TEST_NPM_CLI=" + filepath.Join(bin, "npm"), "CREW_MAKE_LOG=" + log}
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -44,8 +44,7 @@ func TestMakeFrontendCommandsInvokeNpmThroughNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"go:vet ./...",
-		"go:test ./... -count=1 -timeout 30m",
+		"go:run ./cmd/check-project",
 		"npm:--prefix internal/dashboard/ui run check",
 		"npm:--prefix internal/dashboard/ui run check:bundle",
 		"npm:--prefix internal/dashboard/ui test",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/shhac/crew-assistant/internal/testutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,7 +119,7 @@ func TestSymlinkNavigationDoesNotReadFileContent(t *testing.T) {
 	root := t.TempDir()
 	target := t.TempDir()
 	if err := os.Symlink(target, filepath.Join(root, "linked")); err != nil {
-		t.Skip(err)
+		testutil.RequireSymlinkResult(t, err)
 	}
 	b := New(root)
 	list, err := b.List(context.Background(), Query{})

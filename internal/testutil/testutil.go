@@ -6,13 +6,15 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"runtime"
 	"syscall"
 	"testing"
 )
 
 // NewServer starts a local test server, or skips the test where listening on
-// loopback is forbidden, as it is inside a team role's sandbox. Those tests
-// still run everywhere else, including CI.
+// loopback is forbidden in an ordinary role session. A daemon-hosted required
+// check must execute it; denied capabilities fail rather than silently pass.
 func NewServer(t testing.TB, handler http.Handler) *httptest.Server {
 	t.Helper()
 	listener := listen(t)
@@ -44,9 +46,39 @@ func listen(t testing.TB) net.Listener {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
-			t.Skip("loopback networking is not permitted here, as inside a sandboxed check; this test runs outside it")
+			SkipRequired(t, "loopback", err.Error())
 		}
 		t.Fatal(err)
 	}
 	return listener
+}
+
+// SkipRequired identifies coverage that must execute in the hosted check.
+func SkipRequired(t testing.TB, capability, reason string) {
+	t.Helper()
+	if os.Getenv("CREW_HOSTED_CHECK") == "1" {
+		t.Fatalf("required hosted-check capability %s unavailable: %s", capability, reason)
+	}
+	t.Skipf("required capability %s unavailable: %s", capability, reason)
+}
+
+func ListenLoopback(t testing.TB) net.Listener { t.Helper(); return listen(t) }
+
+// RequireSymlinkResult permits only Windows' explicit missing symlink privilege.
+// Invalid fixture paths, exhausted disks and other creation errors are failures.
+func RequireSymlinkResult(t testing.TB, err error) {
+	t.Helper()
+	requireSymlinkResult(t, err, runtime.GOOS)
+}
+
+func requireSymlinkResult(t testing.TB, err error, platform string) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	link, ok := err.(*os.LinkError)
+	if platform == "windows" && ok && link.Op == "symlink" && link.Err == syscall.Errno(1314) {
+		t.Skipf("unsupported capability: Windows symlink privilege (ERROR_PRIVILEGE_NOT_HELD): %v", err)
+	}
+	t.Fatalf("create symlink fixture: %v", err)
 }

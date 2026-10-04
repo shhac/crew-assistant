@@ -322,6 +322,7 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 	spec.Observer = lp.watchTurn(t, kind, r, workDir, write)
 	if tools.checks != nil {
 		tools.checks.cleanupError = lp.commandCleanupFor(spec.Observer)
+		tools.checks.coverageNote = func(text string) { lp.commandNoteFor(spec.Observer, text) }
 	}
 	// Research is the one step that looks outward; nothing its shell runs
 	// reaches the network either way.

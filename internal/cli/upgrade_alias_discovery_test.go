@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"github.com/shhac/crew-assistant/internal/testutil"
 	"io"
 	"net/http"
 	"os"
@@ -61,7 +62,7 @@ func TestCommandsDiscoverDaemonAndUpgradeThroughAliases(t *testing.T) {
 					target = state
 				}
 				if err := os.Symlink(target, alias); err != nil {
-					t.Skip(err)
+					testutil.RequireSymlinkResult(t, err)
 				}
 				if !fileAlias {
 					alias = filepath.Join(alias, "state.db")

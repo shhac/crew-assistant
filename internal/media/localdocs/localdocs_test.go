@@ -2,6 +2,7 @@ package localdocs
 
 import (
 	"errors"
+	"github.com/shhac/crew-assistant/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -145,7 +146,7 @@ func TestLinksAreNotFollowed(t *testing.T) {
 	write(t, outside, "not a draft")
 	write(t, filepath.Join(d.Workspace("task"), "draft.md"), "draft")
 	if err = os.Symlink(outside, filepath.Join(d.Workspace("task"), "link.md")); err != nil {
-		t.Skip("symlinks unavailable")
+		testutil.RequireSymlinkResult(t, err)
 	}
 	files, _, err := d.Snapshot("task", 1)
 	if err != nil || len(files) != 1 {

@@ -3,6 +3,7 @@ package upgrade
 import (
 	"context"
 	"errors"
+	"github.com/shhac/crew-assistant/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -175,7 +176,7 @@ func TestStateAliasesShareJournalAndRestoreDestination(t *testing.T) {
 	}
 	alias := filepath.Join(t.TempDir(), "alias")
 	if err := os.Symlink(dir, alias); err != nil {
-		t.Skip(err)
+		testutil.RequireSymlinkResult(t, err)
 	}
 	fileAlias := filepath.Join(dir, "state-alias.db")
 	if err := os.Symlink(state, fileAlias); err != nil {

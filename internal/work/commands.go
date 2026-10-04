@@ -27,22 +27,28 @@ type commandSandbox interface {
 func (lp *Loop) commandCleanupFor(observer roles.Observer) func(error) {
 	return func(err error) {
 		lp.commandCleanup(err)
-		// Native observers have already ended when deferred command cleanup runs.
-		// Keep a note tied to their last turn instead of sending it to a closed stream.
-		if live, ok := observer.(*liveTurn); ok {
-			live.steps.mu.Lock()
-			step := live.steps.who
-			step.Turn = live.steps.run
-			live.steps.mu.Unlock()
-			if step.Turn == "" {
-				return
-			}
-			step.Item = fmt.Sprintf("command-cleanup-%d", time.Now().UnixNano())
-			step.Kind, step.At = core.StepNote, time.Now().UTC()
-			step.Text = "Command sandbox cleanup could not be confirmed; recovery state was kept for the next sandbox open: " + err.Error()
-			if step.TaskID != "" {
-				lp.keepStep(step)
-			}
+		lp.commandNoteFor(observer, "Command sandbox cleanup could not be confirmed; recovery state was kept for the next sandbox open: "+err.Error())
+	}
+}
+
+// A forced turn end has no live tool reply. Preserve recovered check coverage
+// beside that turn, without misclassifying ordinary cancellation as cleanup failure.
+func (lp *Loop) commandNoteFor(observer roles.Observer, text string) {
+	// Native observers have already ended when deferred command cleanup runs.
+	// Keep a note tied to their last turn instead of sending it to a closed stream.
+	if live, ok := observer.(*liveTurn); ok {
+		live.steps.mu.Lock()
+		step := live.steps.who
+		step.Turn = live.steps.run
+		live.steps.mu.Unlock()
+		if step.Turn == "" {
+			return
+		}
+		step.Item = fmt.Sprintf("command-note-%d", time.Now().UnixNano())
+		step.Kind, step.At = core.StepNote, time.Now().UTC()
+		step.Text = text
+		if step.TaskID != "" {
+			lp.keepStep(step)
 		}
 	}
 }

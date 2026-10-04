@@ -5,6 +5,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"github.com/shhac/crew-assistant/internal/testutil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -119,7 +120,7 @@ func TestAliasStartsEnforcePinRestoreAndStateLock(t *testing.T) {
 					target = state
 				}
 				if err := os.Symlink(target, alias); err != nil {
-					t.Skip(err)
+					testutil.RequireSymlinkResult(t, err)
 				}
 				if !fileAlias {
 					alias = filepath.Join(alias, "state.db")
