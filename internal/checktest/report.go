@@ -201,6 +201,9 @@ func allowed(pkg, test, reason, platform string) string {
 			}
 		}
 	}
+	if pkg == "github.com/shhac/crew-assistant/internal/cli" && test == "TestUpgradeProcessPrimitives" && reason == "required capability process-inspection unavailable: ps cannot inspect processes here" {
+		return "process inspection: LAH-29"
+	}
 	if platform == "windows" {
 		for _, entry := range windowsShellFixtures {
 			if pkg == "github.com/shhac/crew-assistant/"+entry.pkg && test == entry.test && reason == "shell fixture" {

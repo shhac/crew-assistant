@@ -220,3 +220,18 @@ func TestProgressRecoveryRejectsMixedKnownSkipReason(t *testing.T) {
 		}
 	}
 }
+
+// Only the upgrade primitives test's exact process-inspection refusal is a
+// known skip, and it names its upstream task.
+func TestProcessInspectionExceptionIsExact(t *testing.T) {
+	pkg, test := "github.com/shhac/crew-assistant/internal/cli", "TestUpgradeProcessPrimitives"
+	reason := "required capability process-inspection unavailable: ps cannot inspect processes here"
+	if got := allowed(pkg, test, reason, "darwin"); got != "process inspection: LAH-29" {
+		t.Fatalf("exception %q", got)
+	}
+	for _, c := range [][3]string{{pkg, test, reason + " (other)"}, {pkg, "TestOther", reason}, {"github.com/shhac/crew-assistant/internal/upgrade", test, reason}} {
+		if got := allowed(c[0], c[1], c[2], "darwin"); got != "" {
+			t.Errorf("%v: unexpected exception %q", c, got)
+		}
+	}
+}
