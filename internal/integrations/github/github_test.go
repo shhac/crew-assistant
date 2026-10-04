@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -214,5 +215,38 @@ func TestEveryPullRequestCommandRefusesAMalformedRepository(t *testing.T) {
 	}
 	if err := c.Edit(ctx, bad, 1, "T", "B"); err == nil {
 		t.Error("edit")
+	}
+}
+
+// FindOpen asks gh for exactly the open pull request from head, and reads its
+// answer strictly: none, one, or an error for anything unreadable.
+func TestFindOpenReadsGHsAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		name, out    string
+		number       int
+		url          string
+		found, fails bool
+	}{
+		{"none", `[]`, 0, "", false, false},
+		{"one", `[{"number":42,"url":"https://github.com/o/r/pull/42"}]`, 42, "https://github.com/o/r/pull/42", true, false},
+		{"unreadable", `not json`, 0, "", false, true},
+		{"not a list", `{"number":42}`, 0, "", false, true},
+	} {
+		var asked []string
+		c := Client{Run: func(_ context.Context, args ...string) ([]byte, error) {
+			asked = args
+			return []byte(tc.out), nil
+		}}
+		number, url, found, err := c.FindOpen(context.Background(), "o/r", "crew/x")
+		if (err != nil) != tc.fails || number != tc.number || url != tc.url || found != tc.found {
+			t.Errorf("%s: %d %q %v %v", tc.name, number, url, found, err)
+		}
+		if got := strings.Join(asked, " "); got != "pr list --repo o/r --head crew/x --state open --json number,url --limit 1" {
+			t.Errorf("%s: asked gh %q", tc.name, got)
+		}
+	}
+	failing := Client{Run: func(context.Context, ...string) ([]byte, error) { return nil, errors.New("gh failed") }}
+	if _, _, found, err := failing.FindOpen(context.Background(), "o/r", "crew/x"); err == nil || found {
+		t.Errorf("a failed gh reported %v %v", found, err)
 	}
 }
