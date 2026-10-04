@@ -187,6 +187,15 @@ func TestHostedCheckRecoversAfterForcedTermination(t *testing.T) {
 			if mode == "cancel" && !strings.Contains(strings.Join(notes, "\n"), "TestRequired") {
 				t.Fatal("turn cancellation lost recorded coverage", notes)
 			}
+			if strings.Count(strings.Join(notes, "\n"), "TestRequired") != 1 {
+				t.Fatal("interruption duplicated skip evidence", notes)
+			}
+			runs.close()
+			count := len(notes)
+			runs.close()
+			if len(notes) != count {
+				t.Fatal("repeated cleanup duplicated interruption notes")
+			}
 			if _, err := os.Stat(dir); !os.IsNotExist(err) {
 				t.Fatal("check copy remained after recovery")
 			}
@@ -361,7 +370,7 @@ func TestRunCheckPagesKeepAllSkipEvidenceAndStartFresh(t *testing.T) {
 	}
 	runs.close()
 	joined := strings.Join(notes, "\n")
-	for _, want := range []string{"TestRequired/149", "TestGeneratedShellCompletionSyntax/fish", "observed skip count: 154"} {
+	for _, want := range []string{"TestRequired/000", "TestRequired/149", "TestGeneratedShellCompletionSyntax/fish", "observed skip count: 154"} {
 		if !strings.Contains(joined, want) {
 			t.Fatal("turn end lost unread evidence:", want)
 		}

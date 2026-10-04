@@ -154,14 +154,28 @@ func (r *checkRuns) run(run *checkRun) {
 			run.result.Stdout += "\nRecovered hosted coverage:\n" + recovered.String()
 			run.result.Stdout += "Project check terminal stage: " + run.progress.Stage + "; coverage incomplete: " + fmt.Sprint(!run.progress.Done) + "\n"
 		}
-		if r.ctx.Err() != nil && r.coverageNote != nil {
-			r.noteCoverage(run.progress, 0, "Hosted check interrupted; coverage incomplete.")
+		if r.coverageNote != nil {
+			status := "Hosted check finished."
+			if r.ctx.Err() != nil || !run.progress.Done {
+				status = "Hosted check interrupted; coverage incomplete."
+			}
+			r.noteCoverage(run.progress, status)
+			r.mu.Lock()
 			run.noted = true
+			r.mu.Unlock()
 		}
 	}
 }
 func (r *checkRuns) close() {
 	r.mu.Lock()
+	if r.closed {
+		run := r.current
+		r.mu.Unlock()
+		if run != nil {
+			<-run.done
+		}
+		return
+	}
 	r.closed = true
 	r.cancel()
 	run := r.current
@@ -169,20 +183,25 @@ func (r *checkRuns) close() {
 	if run != nil {
 		<-run.done
 		r.mu.Lock()
-		p, offset, delivered, noted := run.progress, run.skipOffset, run.delivered, run.noted
-		run.noted = true
+		unread := !run.delivered && run.noted
 		r.mu.Unlock()
-		if p != nil && !delivered && !noted {
-			r.noteCoverage(p, offset, "Turn ended with unread check evidence; collect all skip evidence before judging.")
+		if unread {
+			r.coverageNote("Turn ended before all check evidence was read; full evidence was recorded when the hosted check finished.")
 		}
 	}
 }
 
-func (r *checkRuns) noteCoverage(p *checktest.Progress, offset int, status string) {
+func (r *checkRuns) noteCoverage(p *checktest.Progress, status string) {
 	if r.coverageNote == nil {
 		return
 	}
-	r.coverageNote(status + " Project check stage: " + p.Stage)
+	required := 0
+	for _, skip := range p.Report.Skips {
+		if skip.Exception == "" {
+			required++
+		}
+	}
+	r.coverageNote(fmt.Sprintf("%s Project check stage: %s; observed skip count: %d; required-skip failures: %d", status, p.Stage, len(p.Report.Skips), required))
 	if p.Report.EvidenceLimited {
 		r.coverageNote("Skip evidence retention budget reached; collection stopped with all observed skips retained; coverage incomplete.")
 	}
@@ -193,7 +212,7 @@ func (r *checkRuns) noteCoverage(p *checktest.Progress, offset int, status strin
 			note.Reset()
 		}
 	}
-	for _, skip := range p.Report.Skips[offset:] {
+	for _, skip := range p.Report.Skips {
 		var entry bytes.Buffer
 		skip.Write(&entry)
 		// Stay below RecordTurnStep's 16 KiB text limit without splitting
@@ -204,12 +223,6 @@ func (r *checkRuns) noteCoverage(p *checktest.Progress, offset int, status strin
 		note.Write(entry.Bytes())
 	}
 	flush()
-	required := 0
-	for _, skip := range p.Report.Skips {
-		if skip.Exception == "" {
-			required++
-		}
-	}
 	r.coverageNote(fmt.Sprintf("Go check observed skip count: %d; required-skip failures: %d; complete: %t", len(p.Report.Skips), required, p.Done && p.Report.Complete))
 }
 
