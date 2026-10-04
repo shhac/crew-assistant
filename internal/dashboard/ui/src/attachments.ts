@@ -10,7 +10,7 @@ import { exactSize } from "./composerAssets";
 /** Mirror core.MaxAttachmentBytes, MaxAttachmentsPerSet and MaxTaskAttachments. */
 export const ATTACHMENT_LIMIT_BYTES = 5 * 1024 * 1024;
 export const ATTACHMENTS_PER_NOTE = 10;
-export const TASK_ATTACHMENTS = 30;
+export const TASK_ATTACHMENTS = 120;
 
 /** Mirrors core's attachment types, by extension. */
 const extensions = new Set(

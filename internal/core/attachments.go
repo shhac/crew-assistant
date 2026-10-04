@@ -59,10 +59,12 @@ type NewFile struct {
 // Limits on attachments. The dashboard mirrors them, so it can refuse a
 // file with the same reason before sending it.
 const (
-	MaxAttachmentBytes     = 5 << 20
-	MaxAttachmentsPerSet   = 10
-	MaxTaskAttachments     = 30
-	MaxTaskAttachmentBytes = 50 << 20
+	MaxAttachmentBytes   = 5 << 20
+	MaxAttachmentsPerSet = 10
+	// A task producing assets keeps every frame, attempt and provenance
+	// record, so its room is generous; one note is still bounded above.
+	MaxTaskAttachments     = 120
+	MaxTaskAttachmentBytes = 250 << 20
 	maxAttachmentName      = 120
 	// maxImageSide keeps a hostile image from costing much to show.
 	maxImageSide = 10000

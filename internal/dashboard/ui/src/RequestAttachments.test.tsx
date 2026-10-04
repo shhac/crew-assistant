@@ -221,7 +221,7 @@ describe("a request's attachments", () => {
     expect(within(all).getByText("Design 2 · Current design")).toBeTruthy();
     expect(within(all).getByText("Design 1 · Superseded")).toBeTruthy();
     expect(
-      within(all).getByText("4 of 30 files this request can keep"),
+      within(all).getByText("4 of 120 files this request can keep"),
     ).toBeTruthy();
   });
 

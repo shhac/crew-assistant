@@ -19,7 +19,7 @@ func isMultipart(r *http.Request) bool {
 
 // maxNoteForm bounds a note with its files: the most a task can keep, and
 // room for the note's words and the form around them.
-const maxNoteForm = core.MaxTaskAttachmentBytes + 1<<20
+const maxNoteForm = core.MaxAttachmentsPerSet*core.MaxAttachmentBytes + 1<<20
 
 // noteForm reads a note's words and files from a multipart form: a "text"
 // field and any number of "files". Files are read up to the limit and

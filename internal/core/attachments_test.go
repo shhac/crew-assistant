@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"os"
@@ -169,20 +170,23 @@ func TestATaskKeepsAttachmentsOnlyUpToItsLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := add(counted.ID, 1, 10); err == nil || !strings.Contains(err.Error(), "at most 30 attachments, and this one has 30") {
-		t.Fatalf("a thirty-first file: %v", err)
+	if err := add(counted.ID, 1, 10); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("at most %d attachments, and this one has %d", MaxTaskAttachments, MaxTaskAttachments)) {
+		t.Fatalf("one file past the limit: %v", err)
 	}
 	if n := len(keptFiles(t, s, counted.ID)); n != MaxTaskAttachments {
 		t.Fatalf("%d files kept", n)
 	}
 	sized, _ := s.QueueTask(testContext, p.ID, TaskInput{Objective: "Large files"})
-	if err := add(sized.ID, MaxAttachmentsPerSet, MaxAttachmentBytes); err != nil {
-		t.Fatalf("up to the total limit: %v", err)
+	sets := MaxTaskAttachmentBytes / (MaxAttachmentsPerSet * MaxAttachmentBytes)
+	for range sets {
+		if err := add(sized.ID, MaxAttachmentsPerSet, MaxAttachmentBytes); err != nil {
+			t.Fatalf("up to the total limit: %v", err)
+		}
 	}
-	if err := add(sized.ID, 1, 1); err == nil || !strings.Contains(err.Error(), "at most 52,428,800 bytes of attachments") {
+	if err := add(sized.ID, 1, 1); err == nil || !strings.Contains(err.Error(), "at most "+ExactBytes(MaxTaskAttachmentBytes)+" of attachments") {
 		t.Fatalf("past the total limit: %v", err)
 	}
-	if n := len(keptFiles(t, s, sized.ID)); n != MaxAttachmentsPerSet {
+	if n := len(keptFiles(t, s, sized.ID)); n != sets*MaxAttachmentsPerSet {
 		t.Fatalf("%d files kept", n)
 	}
 }
