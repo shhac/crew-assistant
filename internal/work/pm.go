@@ -283,7 +283,7 @@ func pmTriage(b *strings.Builder, snap core.Snapshot, p core.Project) bool {
 		}
 		fmt.Fprintf(b, "- %s: %s\n", t.Label(), text.Clip(t.Objective, 300))
 		for _, c := range t.Criteria {
-			fmt.Fprintf(b, "  requirement: %s\n", text.Clip(c, 300))
+			fmt.Fprintf(b, "  requirement: %s\n", c)
 		}
 		for _, line := range blockerLines(t) {
 			fmt.Fprintf(b, "  %s\n", line)

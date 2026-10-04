@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -122,7 +123,24 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 	}
 	t.Revisions = append(t.Revisions, r)
 	t.AnswerDirection(h.Seen, r.N, h.Reply, r.At)
-	t.Unreachable = h.Unreachable
+	// The turn (or prepared handoff) can predate an owner-answer edit.
+	// Reconcile at commit against the current record, never its old snapshot.
+	t.Unreachable = slices.DeleteFunc(slices.Clone(h.Unreachable), func(u core.Unreachable) bool {
+		if slices.Contains(t.OwnerChecks, u.Criterion) || slices.Contains(t.OwnerSteps, u.Criterion) {
+			t.KeepSettledEvidence(u)
+			return true
+		}
+		if slices.Contains(t.Criteria, u.Criterion) || slices.Contains(p.Brief.Criteria, u.Criterion) {
+			return false
+		}
+		for _, edit := range t.Edits {
+			if slices.Contains(edit.Before.Criteria, u.Criterion) && !slices.Contains(edit.After.Criteria, u.Criterion) {
+				t.KeepSettledEvidence(u)
+				return true
+			}
+		}
+		return slices.Contains(t.OwnerTook, u.Criterion)
+	})
 	tookTurn(t, h)
 	t.Status, t.Detail = core.TaskReviewing, ""
 	if c := h.DraftCatchUp; c != nil {

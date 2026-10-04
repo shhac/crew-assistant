@@ -181,7 +181,7 @@ func pmLandingPrompt(snap core.Snapshot, p core.Project, t core.Task, r core.Rev
 	b.WriteString(ask)
 	fmt.Fprintf(&b, "\nThe change: %s (%s)\n", text.Clip(t.Objective, 300), t.Label())
 	for _, c := range t.Criteria {
-		fmt.Fprintf(&b, "- criterion: %s\n", text.Clip(c, 300))
+		fmt.Fprintf(&b, "- criterion: %s\n", c)
 	}
 	fmt.Fprintf(&b, "Draft %d: %s\n", r.N, text.Clip(r.Summary, 800))
 	for _, v := range t.Verdicts {

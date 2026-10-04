@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -147,8 +148,23 @@ func taskBrief(snap core.Snapshot, projectID string, t core.Task, designFiles st
 	for _, line := range blockerLines(t) {
 		fmt.Fprintf(&b, "- %s\n", line)
 	}
+	fmt.Fprintf(&b, "Text version: %d\n", t.TextVersion)
+	requirements, _ := json.Marshal(t.Criteria)
+	if t.Criteria == nil {
+		requirements = []byte("[]")
+	}
+	fmt.Fprintf(&b, "Requirements JSON: %s\n", requirements)
+	if len(t.OwnerChecks) > 0 {
+		checks, _ := json.Marshal(t.OwnerChecks)
+		fmt.Fprintf(&b, "Owner checks JSON: %s\n", checks)
+	}
+	for _, c := range t.OwnerChecks {
+		fmt.Fprintf(&b, "- owner check: %s\n", c)
+	}
 	for _, c := range t.Criteria {
-		fmt.Fprintf(&b, "- criterion: %s\n", text.Clip(c, 300))
+		// A rewriting role uses this text for version-fenced replacements.
+		// Summarizing it would silently weaken unrelated requirements.
+		fmt.Fprintf(&b, "- criterion: %s\n", c)
 	}
 	if n := len(t.Edits); n > 0 {
 		fmt.Fprintf(&b, "- title or requirements changed %d times, last by %s\n", n, t.Edits[n-1].By)

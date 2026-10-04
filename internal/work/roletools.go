@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/shhac/lib-agent-harness/session"
@@ -204,14 +205,58 @@ func (r roleTools) execute(ctx context.Context, name string, raw json.RawMessage
 		_, err := r.lp.ClearBlocker(ctx, r.projectID, taskID, in["blocker_id"], r.by, "cleared by the team")
 		return changed("Cleared.", err)
 	case "edit_task":
-		e := core.EditInput{Project: r.projectID, Task: taskID, By: r.name, Kind: r.kind, While: while, Objective: in["title"], Criteria: replacement(in["requirements"])}
+		var existing []string
+		if strings.TrimSpace(in["requirements"]) != "" {
+			snap, err := r.lp.Core.Snapshot(ctx)
+			if err != nil {
+				return "", err
+			}
+			t, ok := findTask(snap, r.projectID, taskID)
+			if !ok {
+				return "", errNoTask
+			}
+			existing = t.Criteria
+		}
+		criteria, err := replacement(in["requirements"], existing)
+		if err != nil {
+			return "", err
+		}
+		e := core.EditInput{Project: r.projectID, Task: taskID, By: r.name, Kind: r.kind, While: while, Objective: in["title"], Criteria: criteria}
+		if checks := in["owner_checks"]; checks != "" {
+			if !core.Rewrites(r.kind) {
+				return "", errors.New("only PM and researcher may add owner checks")
+			}
+			// Preserve quoted clauses, including punctuation and leading
+			// dashes, rather than parsing them as requirement bullets.
+			if jsonArrayInput(checks) {
+				if err := json.Unmarshal([]byte(checks), &e.OwnerChecks); err != nil {
+					return "", errors.New("owner_checks must be a JSON array of strings")
+				}
+			} else {
+				for _, clause := range strings.Split(checks, "\n") {
+					if clause = strings.TrimSpace(clause); clause != "" {
+						e.OwnerChecks = append(e.OwnerChecks, clause)
+					}
+				}
+			}
+			if len(e.OwnerChecks) == 0 {
+				return "", errors.New("owner_checks must contain quoted owner clauses")
+			}
+		}
+		if version := in["text_version"]; version != "" {
+			n, err := strconv.Atoi(version)
+			if err != nil || n < 0 {
+				return "", errors.New("text_version must be a nonnegative integer or empty")
+			}
+			e.TextVersion = &n
+		}
 		if add := strings.TrimSpace(in["add_requirement"]); add != "" {
 			e.Add = []string{add}
 		}
-		if strings.TrimSpace(e.Objective) == "" && e.Criteria == nil && e.Add == nil {
+		if strings.TrimSpace(e.Objective) == "" && e.Criteria == nil && e.Add == nil && e.OwnerChecks == nil {
 			return "", errors.New("say what to change")
 		}
-		_, err := r.lp.Core.EditTask(ctx, e)
+		_, err = r.lp.Core.EditTask(ctx, e)
 		return changed("Edited.", err)
 	case "add_note":
 		_, err := r.lp.Core.AddNote(ctx, core.NoteInput{Project: r.projectID, Task: taskID, By: r.name, Kind: r.kind, While: while, Text: in["text"]})
@@ -353,11 +398,47 @@ const clearAll = "none"
 
 // replacement is the requirements an edit puts in place: nil keeps them,
 // and an empty list, written as clearAll, removes them all.
-func replacement(s string) []string {
+func replacement(s string, existing []string) ([]string, error) {
 	if strings.EqualFold(strings.TrimSpace(s), clearAll) {
-		return []string{}
+		return []string{}, nil
 	}
-	return lines(s)
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	// A leading bracket can be ordinary text such as [Linux]. Only claim
+	// JSON-looking input, retaining the documented one-per-line format.
+	trimmed := strings.TrimSpace(s)
+	firstLine := strings.TrimSpace(strings.SplitN(trimmed, "\n", 2)[0])
+	if jsonArrayInput(s) && !slices.Contains(existing, firstLine) {
+		var out []string
+		if err := json.Unmarshal([]byte(s), &out); err != nil {
+			return nil, errors.New("requirements must be a JSON array of strings")
+		}
+		return out, nil
+	}
+	if slices.ContainsFunc(existing, func(c string) bool { return strings.Contains(c, "\n") }) {
+		return nil, errors.New("this task has multiline criteria; use Requirements JSON from read_task for a lossless replacement")
+	}
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			if slices.Contains(existing, line) {
+				// Literal stored options and punctuation are not bullets.
+				out = append(out, line)
+			} else {
+				// Keep accepting ordinary bulleted team instructions.
+				out = append(out, lines(line)...)
+			}
+		}
+	}
+	return out, nil
+}
+
+func jsonArrayInput(s string) bool {
+	s = strings.TrimSpace(s)
+	// Claim only a complete JSON value. An array followed by prose is a
+	// literal clause in the documented one-per-line format, even when new.
+	return strings.HasPrefix(s, "[") && json.Valid([]byte(s))
 }
 
 // hideProjects keeps a refusal from saying anything about tasks outside

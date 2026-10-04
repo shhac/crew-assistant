@@ -61,6 +61,9 @@ func TestSplitOwnerStepIsOneUndoableEdit(t *testing.T) {
 	if got.TextVersion != before.TextVersion+1 || len(got.Edits) != 1 || got.Edits[0].By != FromOwner || got.Status != TaskReviewing || got.DecisionID != "" || len(got.Unreachable) != 0 {
 		t.Fatalf("edit: %+v", got)
 	}
+	if !slices.Equal(got.Edits[0].Settled, []Unreachable{{Criterion: d.OwnerStep.Criterion, Revision: 1}}) {
+		t.Fatalf("missing settlement history: %+v", got.Edits[0])
+	}
 	again, err := s.SplitOwnerStep(testContext, before.ID, d.ID)
 	if err != nil || !reflect.DeepEqual(got, again) {
 		t.Fatalf("second application changed task: %+v %v", again, err)
@@ -248,5 +251,36 @@ func TestSplitSettlesOwnerCheckAddedWhileWaiting(t *testing.T) {
 		return a.TaskID == task.ID && a.Kind == "task.owner_split" && strings.Contains(a.Summary, "already an owner check")
 	}) {
 		t.Fatal("collision decision missing from activity")
+	}
+}
+
+func TestSplitUndoRestoresPendingEvidence(t *testing.T) {
+	s, task, d := splitFixture(t, "README; CI", true)
+	pending := []Unreachable{{Criterion: d.OwnerStep.Criterion, Revision: 1}, {Criterion: "First", Revision: 1}}
+	if _, err := s.UpdateTask(testContext, task.ID, func(t *Task, _ *Project) (string, error) {
+		t.Revisions = []Revision{{N: 1}}
+		t.Unreachable = slices.Clone(pending)
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ChooseDecision(testContext, d.ID, "Split it", FromOwner, &OwnerSplit{Team: "README", Owner: "CI"}); err != nil {
+		t.Fatal(err)
+	}
+	folded, err := s.SplitOwnerStep(testContext, task.ID, d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	undone, err := s.UndoTaskEdit(testContext, task.ProjectID, task.ID, folded.Edits[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(undone.Unreachable) != len(pending) {
+		t.Fatalf("pending: %+v", undone.Unreachable)
+	}
+	for _, u := range pending {
+		if !slices.Contains(undone.Unreachable, u) {
+			t.Fatalf("missing pending: %+v", u)
+		}
 	}
 }

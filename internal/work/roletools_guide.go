@@ -12,9 +12,17 @@ import (
 	"github.com/shhac/crew-assistant/internal/roles"
 )
 
+// ownerAnswerGuide is shared by the PM and planner in their existing turn.
+const ownerAnswerGuide = " When folding an owner's answer into a task, put clearly owner-performed work into edit_task.owner_checks, one quoted owner clause per line, preserving the owner's wording. Explicit undertakings such as 'After landing, I will run this', 'I will check outside the sandbox', 'I will test on another host', or 'I will do a live or visual review' are owner checks. For a mixed answer, keep the team portion in criteria and the owner portion in owner checks in one edit_task call. Preserve unrelated criteria and never change brief criteria. Prefer add_requirement to append team work. For replacements, read_task first, use its Requirements JSON array to preserve multiline criteria and literal punctuation, and supply its current text_version; reread after a stale-version refusal. Additive changes merge into current state; repeated owner checks add nothing. Ambiguous answers retain the existing requirement behavior: mentioning a sandbox, another host or a live check alone does not assign work to the owner. An owner undertaking retained in the original answer context is not a team requirement. Record new answer clauses with edit_task; plan.owner_checks remains only for moving exact existing task criteria."
+
+const ownerEditGuide = " requirements also accepts a JSON array of strings, copied from Requirements JSON in read_task; use this lossless form for multiline criteria.  owner_checks adds quoted owner clauses, one per line or a JSON array of strings for multiline wording, or empty. read_task includes Owner checks JSON for lossless replay. text_version is the current version from read_task when replacing requirements with owner checks, or empty for additive edits. add_requirement appends team work without replacing other criteria, or empty."
+
 // guide tells the role what its tools are for.
 func (r roleTools) guide() string {
 	guide := r.guideTools()
+	if core.Rewrites(r.kind) && !r.notesOnly {
+		guide += ownerAnswerGuide
+	}
 	if r.checks != nil {
 		guide += " Use run_check for the project's check; repeat while it says still running. The daemon hosts its sandbox, including localhost when the project allows it, whatever your engine."
 	}
@@ -114,7 +122,7 @@ func (r roleTools) definitions() []session.ToolDefinition {
 		return append(defs,
 			session.ToolDefinition{Name: "set_blocker", Description: "Hold a task on an external condition. kind is manual or daemon_includes; description is a short condition (required for manual); other_task_id names the same project task whose landing the running daemon must include, or empty for manual; holds is start or landing. Owner conditions stay under owner control.", Schema: schema([]string{"task_id", "kind", "description", "other_task_id", "holds"})},
 			session.ToolDefinition{Name: "clear_blocker", Description: "Clear an external blocker the team set, by its blocker_id.", Schema: schema([]string{"task_id", "blocker_id"})},
-			session.ToolDefinition{Name: "edit_task", Description: "Tidy an unfinished task of this project. task_id is its readable or canonical id. title replaces its title, or empty to keep it. requirements replaces all its requirements, one to a line; none removes them all; empty keeps them. Every change is kept and the owner can undo it.", Schema: schema([]string{"task_id", "title", "requirements"})},
+			session.ToolDefinition{Name: "edit_task", Description: "Tidy an unfinished task of this project. task_id is its readable or canonical id. title replaces its title, or empty to keep it. requirements replaces all its requirements, one to a line; none removes them all; empty keeps them. Every change is kept and the owner can undo it." + ownerEditGuide, Schema: schema([]string{"task_id", "title", "requirements", "add_requirement", "owner_checks", "text_version"})},
 			session.ToolDefinition{Name: "link_tasks", Description: "Link two of this project's tasks. relation is what task_id is to other_task_id: " + relationGuide([]string{core.RelationDependsOn, core.RelationBlocks, core.RelationRelatesTo}) + " A pair has one link; the owner's links stay as they are, and a task whose work has begun can't be made to wait.", Schema: schema([]string{"task_id", "relation", "other_task_id"})},
 			session.ToolDefinition{Name: "unlink_tasks", Description: "Take away a link between two of this project's tasks that the team set; links the owner or assistant set stay.", Schema: schema([]string{"task_id", "other_task_id"})},
 			session.ToolDefinition{Name: "queue_task", Description: "Ask for a new task in this project, such as part of a task split off or a sibling task. title is what it is for; requirements are its requirements, one to a line, or empty. depends_on is the ids of tasks it must wait for, separated by commas, or empty.", Schema: schema([]string{"title", "requirements", "depends_on"})},
@@ -132,7 +140,7 @@ func (r roleTools) definitions() []session.ToolDefinition {
 	}
 	edit := session.ToolDefinition{Name: "edit_task", Description: "Add a requirement your own task is missing. add_requirement is the requirement, in one line.", Schema: schema([]string{"add_requirement"})}
 	if core.Rewrites(r.kind) {
-		edit = session.ToolDefinition{Name: "edit_task", Description: "Change your own task's title and requirements. title replaces its title, or empty to keep it. requirements replaces all its requirements, one to a line; none removes them all; empty keeps them. add_requirement adds one, or empty. Every change is kept and the owner can undo it.", Schema: schema([]string{"title", "requirements", "add_requirement"})}
+		edit = session.ToolDefinition{Name: "edit_task", Description: "Change your own task's title and requirements. title replaces its title, or empty to keep it. requirements replaces all its requirements, one to a line; none removes them all; empty keeps them. add_requirement adds one, or empty. Every change is kept and the owner can undo it." + ownerEditGuide, Schema: schema([]string{"title", "requirements", "add_requirement", "owner_checks", "text_version"})}
 	}
 	defs = append(defs, edit,
 		session.ToolDefinition{Name: "add_note", Description: "Leave a note on your own task for the rest of the team and the owner to read.", Schema: schema([]string{"text"})},

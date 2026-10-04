@@ -63,6 +63,9 @@ func ownerSaid(t core.Task) string {
 	}
 	var b strings.Builder
 	b.WriteString("\nThe owner has also said:\n")
+	if len(t.OwnerChecks) > 0 {
+		b.WriteString("Owner undertakings recorded in the after-landing checklist are context, not team requirements; meet the team criteria above.\n")
+	}
 	for _, d := range t.Direction {
 		fmt.Fprintf(&b, "- %s\n", d)
 	}

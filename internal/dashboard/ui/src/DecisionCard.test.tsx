@@ -15,6 +15,38 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("owner answer hint", () => {
+  it("describes the answer field and keeps the submitted wording", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    render(
+      <DecisionCard decision={decision} task={task} refresh={async () => {}} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Request changes" }));
+    const field = screen.getByRole("textbox");
+    const hint = screen.getByText(/Explicit wording such as/);
+    expect(field.getAttribute("aria-describedby")).toBe(hint.id);
+    const answer = "Add a test; after landing, I will review it visually.";
+    fireEvent.change(field, { target: { value: answer } });
+    fireEvent.submit(field.closest("form")!);
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ answer });
+  });
+
+  it("does not describe dismissal forms as owner steps", () => {
+    render(<DecisionCard decision={decision} refresh={async () => {}} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close without deciding" }),
+    );
+    expect(screen.queryByText(/Explicit wording such as/)).toBeNull();
+    expect(
+      screen.getByRole("textbox").getAttribute("aria-describedby"),
+    ).toBeNull();
+  });
+});
+
 const project: Project = {
   id: "p1",
   title: "Service",

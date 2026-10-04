@@ -173,6 +173,11 @@ export function DecisionCard({
               maxLength={500}
               disabled={busy}
               rows={2}
+              aria-describedby={
+                mode === "answer"
+                  ? `owner-answer-hint-${decision.id}`
+                  : undefined
+              }
               required
             />
           </label>
@@ -185,6 +190,11 @@ export function DecisionCard({
               maxLength={500}
               disabled={busy}
               rows={2}
+              aria-describedby={
+                mode === "answer"
+                  ? `owner-answer-hint-${decision.id}`
+                  : undefined
+              }
               required
             />
           </label>
@@ -222,9 +232,20 @@ export function DecisionCard({
               maxLength={forms[mode].max}
               disabled={busy}
               rows={2}
+              aria-describedby={
+                mode === "answer"
+                  ? `owner-answer-hint-${decision.id}`
+                  : undefined
+              }
               required
             />
           </label>
+          {mode === "answer" && (
+            <p id={`owner-answer-hint-${decision.id}`}>
+              Explicit wording such as “After landing, I will ...” records an
+              owner step.
+            </p>
+          )}
           <div className="actions">
             <button
               className="btn btn-primary"

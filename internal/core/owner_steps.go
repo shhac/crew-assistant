@@ -159,7 +159,7 @@ func (s *Service) MakeOwnerStep(ctx context.Context, taskID, decisionID string) 
 		if !slices.Contains(t.OwnerTook, d.OwnerStep.Criterion) {
 			t.OwnerTook = append(t.OwnerTook, d.OwnerStep.Criterion)
 		}
-		t.SettleUnreachable(d.OwnerStep.Criterion)
+		settled := slices.DeleteFunc(slices.Clone(t.Unreachable), func(u Unreachable) bool { return u.Criterion != d.OwnerStep.Criterion })
 		t.DecisionID, t.UpdatedAt = "", now
 		t.Status, t.Detail = TaskDeciding, "Going on with the owner step"
 		recordTask(v, now, t, "task.owner_step", fmt.Sprintf("%s: left to you after it lands: %s", t.Objective, step))
@@ -167,8 +167,9 @@ func (s *Service) MakeOwnerStep(ctx context.Context, taskID, decisionID string) 
 			t.Status, t.Detail = TaskReviewing, "Checking again without the owner step"
 			after := t.text()
 			after.Criteria = slices.Delete(after.Criteria, i, i+1)
-			return s.applyEdit(v, t, TaskEdit{By: FromOwner, Kind: FromOwner, After: after}, &out)
+			return s.applyEdit(v, t, TaskEdit{By: FromOwner, Kind: FromOwner, After: after, Settled: settled}, &out)
 		}
+		t.SettleUnreachable(d.OwnerStep.Criterion)
 		derive(v, t)
 		out = *t
 		return nil
@@ -241,7 +242,7 @@ func (s *Service) SplitOwnerStep(ctx context.Context, taskID, decisionID string)
 		} else if !slices.Contains(t.TeamKept, d.Split.Team) {
 			t.TeamKept = append(t.TeamKept, d.Split.Team)
 		}
-		t.SettleUnreachable(original)
+		settled := slices.DeleteFunc(slices.Clone(t.Unreachable), func(u Unreachable) bool { return u.Criterion != original })
 		t.DecisionID, t.Status, t.Detail = "", TaskReviewing, "Checking again with the split requirement"
 		t.UpdatedAt = s.now().UTC()
 		after.Criteria = slices.DeleteFunc(after.Criteria, func(c string) bool { return slices.Contains(after.OwnerChecks, c) })
@@ -251,12 +252,13 @@ func (s *Service) SplitOwnerStep(ctx context.Context, taskID, decisionID string)
 		}
 		recordTask(v, t.UpdatedAt, t, "task.owner_split", activity)
 		if t.text().same(after) {
+			t.SettleUnreachable(original)
 			t.Status, t.Detail = TaskDeciding, "Going on with the split requirement"
 			derive(v, t)
 			out = *t
 			return nil
 		}
-		return s.applyEdit(v, t, TaskEdit{By: FromOwner, Kind: FromOwner, After: after}, &out)
+		return s.applyEdit(v, t, TaskEdit{By: FromOwner, Kind: FromOwner, After: after, Settled: settled}, &out)
 	})
 	return out, err
 }
