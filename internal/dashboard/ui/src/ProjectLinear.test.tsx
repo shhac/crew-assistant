@@ -7,7 +7,8 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { ProjectLinear, LinearSources } from "./ProjectLinear";
+import { ProjectLinear } from "./ProjectLinear";
+import { LinearSources } from "./LinearSources";
 import { BoardCard } from "./BoardCard";
 import type { Project, Task, LinearLink, LinearRef } from "./api";
 import boardCSS from "./styles/board.css?raw";

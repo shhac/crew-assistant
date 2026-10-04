@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { TaskWaits, hasWaits } from "./TaskWaits";
-import { LinearSources } from "./ProjectLinear";
+import { LinearSources } from "./LinearSources";
 import { requestHref } from "./router";
 import { pmLandingLine } from "./landing";
 import { atWork, memberOf, workingSeats } from "./members";

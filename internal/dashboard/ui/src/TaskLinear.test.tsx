@@ -7,7 +7,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { TaskLinear } from "./ProjectLinear";
+import { TaskLinear } from "./TaskLinear";
 import type { Project, Task, LinearRef } from "./api";
 const source: LinearRef = {
   id: "source",

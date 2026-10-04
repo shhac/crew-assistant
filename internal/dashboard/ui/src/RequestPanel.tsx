@@ -7,7 +7,7 @@ import { RequestAttachments } from "./RequestAttachments";
 import { RequestEdits, RequestNotes } from "./RequestNotes";
 import { RequestDesign, RequestPlan, RequestResearch } from "./RequestPlan";
 import { RequestRelations } from "./RequestRelations";
-import { TaskLinear } from "./ProjectLinear";
+import { TaskLinear } from "./TaskLinear";
 import { TaskActivity } from "./TaskActivity";
 import { TeamFlow } from "./TeamThread";
 import {
