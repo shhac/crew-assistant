@@ -8,76 +8,35 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/gofrs/flock"
 	"github.com/shhac/crew-assistant/internal/statepath"
+	"github.com/shhac/crew-assistant/internal/upgradestate"
 )
 
-type Step string
+// The persisted record types live in upgradestate so the domain store can
+// read and write them without importing the installer and its locks.
+type (
+	Step      = upgradestate.Step
+	Backups   = upgradestate.Backups
+	WaitingOn = upgradestate.WaitingOn
+	Record    = upgradestate.Record
+)
 
 const (
-	Draining           Step = "draining"
-	BackingUp          Step = "backing-up"
-	BackupFailed       Step = "backup-failed"
-	Installing         Step = "installing"
-	InstallFailed      Step = "install-failed"
-	HandingOver        Step = "handing-over"
-	Probation          Step = "probation"
-	Healthy            Step = "healthy"
-	RollingBack        Step = "rolling-back"
-	RolledBack         Step = "rolled-back"
-	Abandoned          Step = "abandoned"
-	StoppedInProbation Step = "stopped-in-probation"
+	Draining           = upgradestate.Draining
+	BackingUp          = upgradestate.BackingUp
+	BackupFailed       = upgradestate.BackupFailed
+	Installing         = upgradestate.Installing
+	InstallFailed      = upgradestate.InstallFailed
+	HandingOver        = upgradestate.HandingOver
+	Probation          = upgradestate.Probation
+	Healthy            = upgradestate.Healthy
+	RollingBack        = upgradestate.RollingBack
+	RolledBack         = upgradestate.RolledBack
+	Abandoned          = upgradestate.Abandoned
+	StoppedInProbation = upgradestate.StoppedInProbation
 )
-
-type Backups struct {
-	State  string `json:"state"`
-	Config string `json:"config"`
-}
-
-type WaitingOn struct {
-	Kind      string    `json:"kind"`
-	Ref       string    `json:"ref"`
-	Label     string    `json:"label,omitempty"`
-	StartedAt time.Time `json:"started_at"`
-}
-
-// Record lives outside SQLite because rollback replaces that database.
-type Record struct {
-	OwnerStopped         bool        `json:"owner_stopped,omitempty"`
-	RecoveryStarting     bool        `json:"recovery_starting,omitempty"`
-	CleanupPending       bool        `json:"cleanup_pending,omitempty"`
-	RestartAt            time.Time   `json:"restart_at,omitzero"`
-	ProcessIdentity      string      `json:"process_identity,omitempty"`
-	RestartPending       bool        `json:"restart_pending,omitempty"`
-	ConfigPath           string      `json:"config_path,omitempty"`
-	RunningBinary        string      `json:"running_binary,omitempty"`
-	FailedVersion        string      `json:"failed_version,omitempty"`
-	Automatic            bool        `json:"automatic,omitempty"`
-	PID                  int         `json:"pid,omitempty"`
-	Deadline             time.Time   `json:"deadline,omitzero"`
-	Address              string      `json:"address,omitempty"`
-	Step                 Step        `json:"step"`
-	From                 string      `json:"from"`
-	To                   string      `json:"to"`
-	Prefix               string      `json:"prefix"`
-	SavedBinary          string      `json:"saved_binary"`
-	Backups              Backups     `json:"backups"`
-	StartedAt            time.Time   `json:"started_at"`
-	StepAt               time.Time   `json:"step_at"`
-	LaunchdLabel         string      `json:"launchd_label,omitempty"`
-	Args                 []string    `json:"args"`
-	Failure              string      `json:"failure,omitempty"`
-	FailedDecisionOpened bool        `json:"failed_decision_opened,omitempty"`
-	ProbationStarts      int         `json:"probation_starts,omitempty"`
-	Pinned               bool        `json:"pinned,omitempty"`
-	PinBinary            string      `json:"pin_binary,omitempty"` // Previous pin retained until retry backups are complete.
-	PinBackups           Backups     `json:"pin_backups,omitzero"`
-	PinTo                string      `json:"pin_to,omitempty"`
-	DetachedLog          string      `json:"detached_log,omitempty"`
-	WaitingOn            []WaitingOn `json:"waiting_on,omitempty"`
-}
 
 // CanonicalPath resolves aliases, including ancestors of new destinations.
 // Locks, journals and restored files must all use the same identity.

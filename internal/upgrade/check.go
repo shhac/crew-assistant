@@ -16,6 +16,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/releaseversion"
+	"github.com/shhac/crew-assistant/internal/upgradestate"
 )
 
 const FastInterval = 2 * time.Minute
@@ -23,10 +24,7 @@ const FastWindow = time.Hour
 const NotesLimit = 16 * 1024
 const bodyLimit = 1024 * 1024
 
-type Result struct {
-	Available, Notes, URL, Error string
-	CheckedAt                    time.Time
-}
+type Result = upgradestate.Result
 type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
 }

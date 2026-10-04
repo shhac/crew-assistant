@@ -3,11 +3,11 @@ package core
 import (
 	"context"
 	"fmt"
-	"github.com/shhac/crew-assistant/internal/config"
 	"strings"
 	"time"
 
-	"github.com/shhac/crew-assistant/internal/upgrade"
+	"github.com/shhac/crew-assistant/internal/config"
+	"github.com/shhac/crew-assistant/internal/upgradestate"
 )
 
 const DecisionUpgradeAvailable = "upgrade-available"
@@ -17,7 +17,7 @@ const DecisionUpgradeFailed = "upgrade-failed"
 func UpgradeChoice(version string) string      { return "Upgrade to " + version }
 func RetryUpgradeChoice(version string) string { return "Try " + version + " again" }
 
-// OnUpgradeRequested is installed only when this daemon can self-upgrade.
+// OnUpgradeRequested is installed only when this daemon can self-upgradestate.
 func (s *Service) OnUpgradeRequested(fn func(string) error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -42,7 +42,7 @@ func (s *Service) AdmitUpgrade(ctx context.Context, request func(Snapshot, confi
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.upgradeDraining {
-		return false, upgrade.ErrInProgress
+		return false, upgradestate.ErrInProgress
 	}
 	v, err := s.store.Snapshot(ctx)
 	if err != nil {
@@ -72,11 +72,11 @@ func UpgradeWorkClaimed(v Snapshot) bool {
 }
 
 type UpgradeProgress struct {
-	Step      upgrade.Step        `json:"step"`
-	From      string              `json:"from"`
-	To        string              `json:"to"`
-	Since     time.Time           `json:"since"`
-	WaitingOn []upgrade.WaitingOn `json:"waiting_on"`
+	Step      upgradestate.Step        `json:"step"`
+	From      string                   `json:"from"`
+	To        string                   `json:"to"`
+	Since     time.Time                `json:"since"`
+	WaitingOn []upgradestate.WaitingOn `json:"waiting_on"`
 }
 type RollbackStatus struct {
 	From    string `json:"from"`
@@ -147,7 +147,7 @@ func closeUpgradeDecisions(v *Snapshot, now time.Time, disposition, reason strin
 
 // RecordUpdateCheck saves the result and its decision in a single transaction.
 // Failures preserve every prior result and decision except error and date.
-func (s *Service) RecordUpdateCheck(ctx context.Context, running string, result upgrade.Result) error {
+func (s *Service) RecordUpdateCheck(ctx context.Context, running string, result upgradestate.Result) error {
 	if !ValidVersion(running) {
 		return nil
 	}
@@ -205,7 +205,7 @@ func (s *Service) RecordUpdateCheck(ctx context.Context, running string, result 
 
 // RecordUpgradeFailure uses an attempt key to survive a crash between this
 // transaction and marking the external record. Notes never drive this decision.
-func (s *Service) RecordUpgradeFailure(ctx context.Context, r upgrade.Record) error {
+func (s *Service) RecordUpgradeFailure(ctx context.Context, r upgradestate.Record) error {
 	return s.store.update(ctx, func(v *Snapshot) error {
 		key := "upgrade-failed:" + r.StartedAt.UTC().Format(time.RFC3339Nano)
 		if v.Events[key] {
@@ -251,13 +251,13 @@ func (s *Service) ReofferAbandonedUpgrade(ctx context.Context, target string) er
 
 // The decision and intent are committed together. If no matching attempt was
 // started after that commit, startup reoffers the owner's original choice.
-func (s *Service) ReconcileUpgradeRequests(ctx context.Context, running string, r *upgrade.Record) error {
+func (s *Service) ReconcileUpgradeRequests(ctx context.Context, running string, r *upgradestate.Record) error {
 	return s.store.update(ctx, func(v *Snapshot) error {
 		pending := v.Update.PendingRequest
 		if pending == nil {
 			return nil
 		}
-		started := r != nil && r.To == pending.Version && !r.StartedAt.Before(pending.At) && r.Step != upgrade.Abandoned
+		started := r != nil && r.To == pending.Version && !r.StartedAt.Before(pending.At) && r.Step != upgradestate.Abandoned
 		if !started {
 			d := decision(v, pending.DecisionID)
 			if d != nil && d.Status == DecisionResolved && d.Answer == pending.Choice {

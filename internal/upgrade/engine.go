@@ -10,9 +10,10 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/releaseversion"
+	"github.com/shhac/crew-assistant/internal/upgradestate"
 )
 
-var ErrInProgress = errors.New("an upgrade is already under way")
+var ErrInProgress = upgradestate.ErrInProgress
 var ErrStopping = errors.New("the daemon is stopping")
 var ErrFailedVersion = errors.New("this version already failed; choose Try again to retry")
 var ErrRolledBack = errors.New("upgrade did not become healthy; rollback was requested")
