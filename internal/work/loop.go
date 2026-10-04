@@ -17,6 +17,7 @@ import (
 	"github.com/shhac/lib-agent-harness/sandbox"
 	"github.com/shhac/lib-agent-harness/session"
 
+	"github.com/shhac/crew-assistant/internal/bundledskills"
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
@@ -281,6 +282,9 @@ func checkLoopback(playbook *core.Playbook, r core.Role) bool {
 // from last only as long as the turn: run it before cleanup.
 func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m medium, prompt string, checkCopy *checkout, performed ...string) (spec roles.Spec, cleanup func(), err error) {
 	spec = lp.baseSpec(r, workDir, prompt)
+	if spec.PreparationError != nil {
+		return spec, nil, spec.PreparationError
+	}
 	spec.Write, spec.Env, spec.Read = write, m.env(t), m.readable()
 	learned, err := lp.prepareLearnings(t, r)
 	if err != nil {
@@ -300,6 +304,19 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 	kind := turnKind(t, r)
 	if len(performed) > 0 {
 		kind = performed[0]
+	}
+	var disabled []string
+	if t.Playbook != nil {
+		disabled = t.Playbook.DisabledBundledSkills
+	}
+	var digest string
+	spec.Skills, digest, err = bundledskills.Prepare(lp.Core.StateDirectory(), kind, disabled)
+	if err != nil {
+		learned.cleanup()
+		return spec, nil, err
+	}
+	if digest != "" {
+		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + bundledskills.Fingerprint(digest))
 	}
 	spec.ProjectID, spec.TaskID, spec.Role = t.ProjectID, t.ID, kind
 	tools := lp.toolsFor(t, kind, r)
@@ -383,7 +400,11 @@ func (lp *Loop) withTools(spec *roles.Spec, tools roleTools) {
 func (lp *Loop) baseSpec(r core.Role, workDir, prompt string) roles.Spec {
 	spec := roles.Spec{Seat: r.Name, MemberID: r.Member, FreshReason: core.FreshNoThread, Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Instructions: r.Instructions, Prompt: prompt}
 	if r.Member != "" {
-		if snap, err := lp.Core.Snapshot(context.Background()); err == nil {
+		snap, err := lp.Core.Snapshot(context.Background())
+		if err != nil {
+			spec.PreparationError = fmt.Errorf("reading member instruction retirement: %w", err)
+		} else {
+			spec.Instructions = snap.EffectiveSeatInstructions(r)
 			if member, ok := snap.Member(r.Member); ok {
 				spec.MemberName = member.Name
 			}

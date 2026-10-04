@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/shhac/crew-assistant/internal/app"
+	"github.com/shhac/crew-assistant/internal/bundledskills"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/work"
 )
@@ -11,6 +12,19 @@ import (
 // registerProjectWork serves the owner's direct controls over a project: its
 // brief, its team, and how its work is run and landed.
 func registerProjectWork(mux *http.ServeMux, a *app.App) {
+	mux.HandleFunc("GET /api/bundled-skills", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, 200, bundledskills.Catalog(), nil)
+	})
+	mux.HandleFunc("PUT /api/projects/{id}/bundled-skills/{skill}", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Enabled bool `json:"enabled"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Core.SetBundledSkill(r.Context(), r.PathValue("id"), r.PathValue("skill"), in.Enabled)
+		reply(w, 200, v, err)
+	})
 	mux.HandleFunc("PUT /api/projects/{id}/linear", func(w http.ResponseWriter, r *http.Request) {
 		var in core.LinearLink
 		if decode(w, r, &in) != nil {

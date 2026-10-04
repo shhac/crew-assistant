@@ -235,6 +235,7 @@ func chosenTeam(in TeamChoice, snap core.Snapshot, p core.Project) (core.Playboo
 	// so is how much each stage holds.
 	if p.Playbook != nil {
 		playbook.MaxActive = p.Playbook.MaxActive
+		playbook.DisabledBundledSkills = slices.Clone(p.Playbook.DisabledBundledSkills)
 		playbook.StageLimits = maps.Clone(p.Playbook.StageLimits)
 		playbook.Release = p.Playbook.Release
 	}

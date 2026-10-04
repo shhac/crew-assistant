@@ -163,6 +163,7 @@ export interface ReleaseRecord {
   note?: string;
 }
 export interface Playbook {
+  disabled_bundled_skills?: string[];
   release?: ReleasePolicy;
   template: string;
   medium: string;
@@ -1380,6 +1381,31 @@ export function setParallel(projectID: string, maxActive: number) {
     method: "PUT",
     body: JSON.stringify({ max_active: maxActive }),
   });
+}
+
+export interface BundledSkill {
+  name: string;
+  description: string;
+  role: string;
+}
+export async function bundledSkills() {
+  const catalog = await api<BundledSkill[]>("/api/bundled-skills");
+  if (!Array.isArray(catalog))
+    throw new Error("Bundled skills could not be loaded.");
+  return catalog;
+}
+export function setBundledSkill(
+  projectID: string,
+  name: string,
+  enabled: boolean,
+) {
+  return api<Project>(
+    `${projectPath(projectID)}/bundled-skills/${encodeURIComponent(name)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    },
+  );
 }
 /** Sets the most requests each working stage may hold; 0 or absent is no limit. */
 export function setStageLimits(

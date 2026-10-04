@@ -105,6 +105,7 @@ func pinTeam(v *Snapshot, p *Project, t *Task) {
 	pinned := *p.Playbook
 	pinned.Roles = append([]Role(nil), p.Playbook.Roles...)
 	pinned.Prepare = append([]string(nil), p.Playbook.Prepare...)
+	pinned.DisabledBundledSkills = append([]string(nil), p.Playbook.DisabledBundledSkills...)
 	t.Playbook = &pinned
 	t.Roles = withLearnings(v, p.Playbook.Roles)
 }

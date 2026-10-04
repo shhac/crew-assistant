@@ -1,10 +1,16 @@
 package work
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +21,89 @@ import (
 	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/session"
 )
+
+func TestSpriteFailedThenSuccessfulOriginalsSurviveHandoffAndRestart(t *testing.T) {
+	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{productionBlock(1)}, designs: []string{productionJSON(1, 1)}}
+	var failed, successful []byte
+	runner.onDesigner = func(spec roles.Spec) error {
+		assertBundledSkill(t, spec, core.RoleDesigner)
+		spec.Opened(session.Ref{Engine: harness.Codex, ID: firstThread})
+		defer spec.Ended(true)
+		for i, name := range []string{"failed-strip.png", "successful-strip.png"} {
+			dir := generatePNG(t, spec.RuntimeHome, firstThread, name)
+			pic := image.NewRGBA(image.Rect(0, 0, 4, 4))
+			pic.SetRGBA(0, 0, color.RGBA{R: uint8(i + 1), A: 255})
+			var original bytes.Buffer
+			if err := png.Encode(&original, pic); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, name), original.Bytes(), 0600); err != nil {
+				t.Fatal(err)
+			}
+			args := generatedArgs(name, name)
+			if i == 0 {
+				failed = bytes.Clone(original.Bytes())
+				args["rejected"] = "true"
+			} else {
+				successful = bytes.Clone(original.Bytes())
+				args["asset"] = "frame-01"
+			}
+			if result := callProductionTool(t, spec, args); result.IsError {
+				t.Fatal(result.Content)
+			}
+		}
+		return nil
+	}
+	var reopen func(*Loop) *Loop
+	lp, p, task := loopApp(t, runner, "", &reopen)
+	seatDesignerOn(t, lp, p.ID, "codex")
+	task = stepUntil(t, lp, task.ID, func(task core.Task) bool {
+		return len(task.Design) > 0 && task.Design[0].Production != nil && len(task.Design[0].Production.Delivered) == 1
+	})
+	verify := func(task core.Task) {
+		t.Helper()
+		prod := task.Design[0].Production
+		if task.Design[0].Open() || len(prod.Delivered) != 1 || len(prod.Turns) != 1 || prod.Provenance == "" {
+			t.Fatal("production did not complete", prod)
+		}
+		root := lp.Core.AttachmentsDirectory(task.ID)
+		data, err := os.ReadFile(filepath.Join(root, prod.Delivered[0].Attachment))
+		if err != nil || !bytes.Equal(data, successful) {
+			t.Fatal("successful original lost", err)
+		}
+		z, err := zip.OpenReader(filepath.Join(root, prod.Archive))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer z.Close()
+		if len(z.File) != 1 || !strings.HasSuffix(z.File[0].Name, "failed-strip.png") {
+			t.Fatal("failed original missing", z.File)
+		}
+		r, err := z.File[0].Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+		data, err = io.ReadAll(r)
+		if err != nil || !bytes.Equal(data, failed) {
+			t.Fatal("failed original bytes changed", err)
+		}
+	}
+	verify(task)
+	lp = reopen(lp)
+	task = settle(t, lp)
+	verify(task)
+	writers := writerTurns(runner)
+	prod := task.Design[0].Production
+	if len(writers) != 2 {
+		t.Fatal("implementer did not receive completed handoff", writers)
+	}
+	for _, id := range []string{prod.Delivered[0].Attachment, prod.Archive, prod.Provenance} {
+		if !strings.Contains(writers[1].Instructions, filepath.Join(lp.Core.AttachmentsDirectory(task.ID), id)) {
+			t.Fatal("original or provenance unavailable to implementer", id)
+		}
+	}
+}
 
 func productionBlock(count int) string {
 	var b strings.Builder
@@ -112,6 +201,7 @@ func TestProductionAssetsReachTheResumedImplementerAcrossARestart(t *testing.T) 
 	group := 0
 	runner.onDesigner = func(spec roles.Spec) error {
 		group++
+		assertBundledSkill(t, spec, core.RoleDesigner)
 		if group == 1 {
 			attachProductionGroup(t, spec, 1, 10, true)
 		} else if group == 2 {
@@ -141,6 +231,9 @@ func TestProductionAssetsReachTheResumedImplementerAcrossARestart(t *testing.T) 
 		t.Fatal(task.Design)
 	}
 	writers := writerTurns(runner)
+	for _, spec := range writers {
+		assertBundledSkill(t, spec, core.RoleImplementer)
+	}
 	if len(writers) != 2 || string(writers[1].Resume) != `{"engine":"claude","id":"writer"}` {
 		t.Fatal("implementer thread lost", writers)
 	}
@@ -228,6 +321,7 @@ func TestProductionBadDesignerProvenanceIsRetriedWithoutRecordingAPartialGroup(t
 	var originalSpec roles.Spec
 	runner.onDesigner = func(spec roles.Spec) error {
 		calls++
+		assertBundledSkill(t, spec, core.RoleDesigner)
 		if calls == 1 {
 			originalSpec = spec
 			attachProductionGroup(t, spec, 1, 1, true)

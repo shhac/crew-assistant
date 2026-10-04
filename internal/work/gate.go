@@ -267,6 +267,9 @@ func (f fencedTools) CallTool(ctx context.Context, call session.ToolCall) (sessi
 // in the slot its step claimed, or else once one is free. A turn for a
 // claim records its launch where a restart looks for it.
 func (lp *Loop) runRole(ctx context.Context, spec roles.Spec) (roles.Result, error) {
+	if spec.PreparationError != nil {
+		return roles.Result{}, spec.PreparationError
+	}
 	// A caller may handle a PM or message failure locally and continue its
 	// step. Once accounting failed, no further inference can be admitted in
 	// that step, even through a different role or fallback path.

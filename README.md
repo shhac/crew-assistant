@@ -302,6 +302,52 @@ reports, not cache-hit guarantees, cost estimates or reconstructed old usage.
 
 ## Development
 
+The binary bundles two prose-only skills: `sprite-atlas` for designer turns and
+`sprite-atlas-pipeline` for implementer turns. Designers generate and visually
+review art through the existing production hand-off; implementers slice, clean,
+compose, preview and integrate delivered assets with provenance. No artwork,
+scripts, new model requirements or processing permissions come with these skills.
+The guidance credits OpenAI's Apache-2.0 hatch-pet skill without copying its code.
+
+Team settings lets the owner disable each bundled skill for one project. Changes
+affect new requests; active requests keep their pinned selection until they adopt
+the current team. `GET /api/bundled-skills` lists the catalog, and owner-authenticated
+`PUT /api/projects/{id}/bundled-skills/{skill}` accepts `{"enabled":false}` (or
+`true`). Each change and its activity entry save together; repeated values are
+idempotent and independent changes preserve other team settings.
+
+The daemon publishes complete content-addressed skill directories under its state
+directory's `bundled-skills/`, outside workspaces and role runtime homes. Skill
+files are read-only, and the harness enforces role write boundaries. Composed
+delivery uses the published harness skill support without changing the existing
+global-skill policy or offering script tools. Published versions remain available
+across turns and restarts. Unsafe paths, corrupt contents, storage failures or
+harness admission failures stop the affected launch instead of omitting guidance.
+Only applicable, enabled content enters stable instructions as a digest; round
+numbers and extraction paths do not. Changing that content intentionally starts a
+fresh session; unchanged skills preserve resume compatibility. Mutable context
+delivery remains independent of this fingerprint.
+
+After an updated daemon has delivered the skills successfully, the owner can
+clear the two designers' instructions using the existing
+`PUT /api/members/{id}` after confirming each field still exactly matches the
+stopgap text. Send the existing member fields unchanged, `"instructions":""`,
+and `"expected_instructions"` containing the complete literal stopgap text.
+The optional precondition compares the current instructions inside the save
+transaction; a mismatch returns HTTP 409 without changing any member fields,
+retirement records or activity. A conditional save with an empty instructions
+field updates only instructions, preserving current name, roles, model, browser,
+personality and all other fields even if they changed after the owner's read.
+Leave edited instructions intact and reread on
+409, including after a lost response; an already-empty field can mean the earlier
+cleanup succeeded. An empty expected string matches only an empty current field;
+omitting the precondition keeps ordinary member saves unconditional.
+Saving an empty field in place
+of the exact legacy text records retirement independently of the member, so
+pinned seats suppress that exact derived block after deletion and restart.
+Historical records and unrelated instructions remain intact. Cleanup is an
+explicit post-rollout step, never proof of session delivery.
+
 ```sh
 npm ci --prefix internal/dashboard/ui
 make dashboard

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { FileSystemPicker } from "./FileSystemPicker";
 import { isCode } from "./landing";
 import {
@@ -9,7 +9,15 @@ import {
 import { teamChoice, teamWith } from "./members";
 import { projectKind } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
-import { setTeam, type Member, type Playbook, type Project } from "./api";
+import {
+  bundledSkills,
+  setBundledSkill,
+  setTeam,
+  type BundledSkill,
+  type Member,
+  type Playbook,
+  type Project,
+} from "./api";
 
 /**
  * The kind of team and how it works. Who fills each role is chosen on the
@@ -50,11 +58,70 @@ export function TeamSettings({
         </button>
       </div>
       {playbook ? (
-        <TeamFacts playbook={playbook} />
+        <>
+          <TeamFacts playbook={playbook} />
+          <BundledSkillSettings project={project} refresh={refresh} />
+        </>
       ) : (
         <p className="muted">No team yet, so nothing can be asked for.</p>
       )}
     </section>
+  );
+}
+
+function BundledSkillSettings({
+  project,
+  refresh,
+}: {
+  project: Project;
+  refresh: () => Promise<void>;
+}) {
+  const [catalog, setCatalog] = useState<BundledSkill[]>([]);
+  const [loadError, setLoadError] = useState("");
+  const { busy, error, run } = useAction();
+  useEffect(() => {
+    let active = true;
+    bundledSkills()
+      .then((skills) => {
+        if (active) setCatalog(skills);
+      })
+      .catch((err: unknown) => {
+        if (active)
+          setLoadError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  return (
+    <fieldset className="form" disabled={busy}>
+      <legend>Bundled skills</legend>
+      <p className="muted">
+        Guidance supplied with the app for each role. Changes apply to new
+        requests; existing requests keep their settings until they adopt the
+        current team.
+      </p>
+      {catalog.map((skill) => (
+        <label key={skill.name}>
+          <input
+            type="checkbox"
+            checked={
+              !project.playbook?.disabled_bundled_skills?.includes(skill.name)
+            }
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              void run(async () => {
+                await setBundledSkill(project.id, skill.name, enabled);
+                await refresh();
+              });
+            }}
+          />
+          {skill.name} ({skill.role})
+          <span className="muted"> {skill.description}</span>
+        </label>
+      ))}
+      <ErrorNotice error={loadError || error} />
+    </fieldset>
   );
 }
 

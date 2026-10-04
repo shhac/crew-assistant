@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/shhac/crew-assistant/internal/bundledskills"
 	"github.com/shhac/crew-assistant/internal/config"
 )
 
@@ -94,10 +95,11 @@ const (
 // schema, not a workflow language; a field is added only when a real project
 // needs it.
 type Playbook struct {
-	Template  string `json:"template"`
-	Medium    string `json:"medium"`
-	Roles     []Role `json:"roles"`
-	MaxRounds int    `json:"max_rounds"`
+	DisabledBundledSkills []string `json:"disabled_bundled_skills,omitempty"`
+	Template              string   `json:"template"`
+	Medium                string   `json:"medium"`
+	Roles                 []Role   `json:"roles"`
+	MaxRounds             int      `json:"max_rounds"`
 	// Deliver names who approves an outward delivery. Only the owner does, for
 	// now: trust is extended per playbook once there is evidence to extend it.
 	Deliver string `json:"deliver"`
@@ -193,6 +195,11 @@ var Templates = map[string]Playbook{
 }
 
 func (p Playbook) Validate() error {
+	for i, name := range p.DisabledBundledSkills {
+		if !bundledskills.Known(name) || slices.Contains(p.DisabledBundledSkills[:i], name) {
+			return fmt.Errorf("unknown or repeated bundled skill %q", name)
+		}
+	}
 	if p.Release != nil {
 		if err := p.Release.validate(p); err != nil {
 			return err
@@ -355,6 +362,7 @@ func (s *Service) EditPlaybook(ctx context.Context, projectID string, change fun
 			playbook = *p.Playbook
 			playbook.Roles = slices.Clone(playbook.Roles)
 			playbook.StageLimits = maps.Clone(playbook.StageLimits)
+			playbook.DisabledBundledSkills = slices.Clone(playbook.DisabledBundledSkills)
 		}
 		if err := change(v, p, &playbook); err != nil {
 			return err

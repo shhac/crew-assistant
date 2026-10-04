@@ -19,6 +19,7 @@ import (
 
 // Spec is one turn for one role.
 type Spec struct {
+	PreparationError                                    error
 	Engine, Model, Effort                               string
 	ProjectID, TaskID, Role, Seat, MemberID, MemberName string
 	PreviousID, RetryCause, FreshReason                 string
@@ -43,7 +44,9 @@ type Spec struct {
 	Env []string
 	// Read names directories outside WorkDir the role may read, such as a
 	// module cache its build needs.
-	Read         []string
+	Read []string
+	// Skills are supplied by the daemon, outside the role's write roots.
+	Skills       harness.Skills
 	Instructions string
 	Prompt       string
 	// Resume continues an earlier session of this role, when it still matches
@@ -172,6 +175,9 @@ func (h harnessSession) StartTurn(ctx context.Context, in session.Input) (turn, 
 }
 
 func (n Native) Run(ctx context.Context, spec Spec) (out Result, err error) {
+	if spec.PreparationError != nil {
+		return out, spec.PreparationError
+	}
 	if spec.Observer != nil {
 		spec.Observer.Started()
 		defer spec.Observer.Ended()
@@ -337,6 +343,7 @@ func options(spec Spec) session.Options {
 		Sandbox:     &session.Sandbox{Write: spec.Write, Read: spec.Read, Web: spec.Web, Loopback: spec.Loopback},
 		Env:         spec.Env,
 		Browser:     spec.Browser,
+		Skills:      spec.Skills,
 	}
 	if o.Provider.Engine.Transport() == harness.APITransport {
 		o.Provider = spec.Provider

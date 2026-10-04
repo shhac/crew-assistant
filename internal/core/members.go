@@ -46,16 +46,20 @@ type MemberInput struct {
 	Name  string   `json:"name"`
 	Kinds []string `json:"kinds"`
 	// Kind is the one kind older clients send; it counts as Kinds.
-	Kind         string         `json:"kind,omitempty"`
-	Provider     string         `json:"provider,omitempty"`
-	Engine       string         `json:"engine"`
-	Model        string         `json:"model"`
-	Effort       string         `json:"effort"`
-	Instructions string         `json:"instructions"`
-	Description  string         `json:"description"`
-	Personality  string         `json:"personality"`
-	Browser      Browser        `json:"browser"`
-	Avatar       *config.Avatar `json:"avatar,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	Provider     string `json:"provider,omitempty"`
+	Engine       string `json:"engine"`
+	Model        string `json:"model"`
+	Effort       string `json:"effort"`
+	Instructions string `json:"instructions"`
+	// ExpectedInstructions, when supplied, compares the current whole field
+	// inside the save transaction. A pointer distinguishes an empty expectation
+	// from an unconditional save; the precondition is never stored.
+	ExpectedInstructions *string        `json:"expected_instructions,omitempty"`
+	Description          string         `json:"description"`
+	Personality          string         `json:"personality"`
+	Browser              Browser        `json:"browser"`
+	Avatar               *config.Avatar `json:"avatar,omitempty"`
 }
 
 // MaxPersonality is the most characters a personality holds, a member's as
@@ -183,9 +187,25 @@ func (s *Service) SaveMember(ctx context.Context, id string, in MemberInput) (Me
 		if id != "" && m == nil {
 			return ErrNotFound
 		}
+		if in.ExpectedInstructions != nil && (m == nil || m.Instructions != *in.ExpectedInstructions) {
+			return fmt.Errorf("member instructions changed; refresh before saving: %w", ErrConflict)
+		}
 		if m == nil {
 			v.Members = append(v.Members, Member{ID: uid(), Avatar: config.DefaultAvatar(in.Name), Learnings: []Learning{}, CreatedAt: s.now().UTC()})
 			m = &v.Members[len(v.Members)-1]
+		}
+		// Only an explicit clearing of the exact stopgap retires it. Current
+		// kinds may have changed while teams retain their pinned designer seats.
+		if m.Instructions == LegacySpriteInstructions && in.Instructions == "" && !slices.Contains(v.RetiredSpriteMembers, m.ID) {
+			v.RetiredSpriteMembers = append(v.RetiredSpriteMembers, m.ID)
+			record(v, s.now().UTC(), "", "member.sprite_lessons_retired", "Replaced sprite lessons with bundled guidance for "+m.Name)
+		}
+		// A conditional clearing changes only instructions. The owner's read may
+		// predate edits to other fields even when the instructions still match.
+		if in.ExpectedInstructions != nil && in.Instructions == "" {
+			m.Instructions = ""
+			out = *m
+			return nil
 		}
 		m.Name, m.Kinds, m.Engine = strings.TrimSpace(in.Name), in.kinds(), in.Engine
 		m.Model, m.Effort, m.Instructions = strings.TrimSpace(in.Model), strings.TrimSpace(in.Effort), strings.TrimSpace(in.Instructions)

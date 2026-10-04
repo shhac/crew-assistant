@@ -187,6 +187,7 @@ func TestTheImplementerHandsTheTaskToTheDesignerAndGetsItBack(t *testing.T) {
 	if len(designer) != 1 || designer[0].Write {
 		t.Fatalf("one read-only designer turn: %+v", designer)
 	}
+	assertBundledSkill(t, designer[0], core.RoleDesigner)
 }
 
 func TestATeamWithoutADesignerNeverHandsATaskOver(t *testing.T) {
