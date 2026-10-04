@@ -190,6 +190,8 @@ func (w *Watchdog) Tick() (bool, error) {
 	return false, nil
 }
 
+// Run observes cancellation between ticks, before reports and retry scheduling.
+// An active synchronous Tick finishes its protected operation before Run stops.
 func (w *Watchdog) Run(ctx context.Context) error {
 	lock := flock.New(WatchdogLockPath(w.Path, w.Attempt))
 	ok, err := lock.TryLock()
@@ -212,6 +214,9 @@ func (w *Watchdog) Run(ctx context.Context) error {
 			return err
 		}
 		done, err := w.Tick()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			if w.Report != nil && (reportedAt.IsZero() || clock.Now().Sub(reportedAt) >= time.Minute) {
 				reportedAt = clock.Now()
@@ -222,6 +227,9 @@ func (w *Watchdog) Run(ctx context.Context) error {
 				}
 			}
 			done = false
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		if done {
 			return nil

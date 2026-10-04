@@ -3,6 +3,7 @@ package upgrade
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -71,14 +72,14 @@ func TestWatchdogIdentityNeverTurnsMismatchOrUnknownIntoKill(t *testing.T) {
 func TestWatchdogReportsPersistentUnknownIdentityPastDeadline(t *testing.T) {
 	e, r, _ := engineFixture(t)
 	r.Step, r.ProcessIdentity, r.PID = Probation, "original", 42
-	r.StartedAt = time.Now()
-	r.Deadline = time.Now().Add(-time.Second)
+	r.StartedAt = time.Unix(100, 0).UTC()
+	r.Deadline = r.StartedAt.Add(-time.Second)
 	if err := WriteRecord(e.Path, r); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	clock := &automaticIdentityClock{at: time.Now()}
+	clock := &automaticIdentityClock{at: r.StartedAt}
 	reports := []string{}
 	inspections := 0
 	w := Watchdog{Path: e.Path, Attempt: r.StartedAt, Clock: clock, Alive: func(int) bool { return true }, Identity: func(int) string {
@@ -95,15 +96,19 @@ func TestWatchdogReportsPersistentUnknownIdentityPastDeadline(t *testing.T) {
 		t.Fatal(reports, inspections, err)
 	}
 	got, _ := ReadRecord(e.Path)
-	if got.Step != Probation {
+	if !reflect.DeepEqual(got, &r) || clock.timers != 60 {
 		t.Fatal(got)
 	}
 }
 
-type automaticIdentityClock struct{ at time.Time }
+type automaticIdentityClock struct {
+	at     time.Time
+	timers int
+}
 
 func (c *automaticIdentityClock) Now() time.Time { return c.at }
 func (c *automaticIdentityClock) NewTimer(d time.Duration) Timer {
+	c.timers++
 	c.at = c.at.Add(d)
 	ch := make(chan time.Time, 1)
 	ch <- c.at

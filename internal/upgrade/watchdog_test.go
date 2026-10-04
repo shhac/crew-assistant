@@ -1,6 +1,7 @@
 package upgrade
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,153 @@ import (
 	"testing"
 	"time"
 )
+
+// NewTimer makes both select cases ready before Run can choose either one.
+type cancellingWatchdogClock struct {
+	automaticIdentityClock
+	cancel context.CancelFunc
+	stops  int
+}
+
+func (c *cancellingWatchdogClock) NewTimer(d time.Duration) Timer {
+	timer := c.automaticIdentityClock.NewTimer(d)
+	c.cancel()
+	return &cancellationWatchdogTimer{Timer: timer, stops: &c.stops}
+}
+
+type cancellationWatchdogTimer struct {
+	Timer
+	stops *int
+}
+
+func (t *cancellationWatchdogTimer) Stop() bool {
+	*t.stops++
+	return t.Timer.Stop()
+}
+
+func TestWatchdogCancellationBoundaries(t *testing.T) {
+	for _, boundary := range []string{"before tick", "ready timer", "identity report", "recovery report", "active tick"} {
+		t.Run(boundary, func(t *testing.T) {
+			e, r, _ := engineFixture(t)
+			r.Step, r.PID, r.ProcessIdentity = Probation, 42, "original"
+			r.StartedAt = time.Unix(100, 0).UTC()
+			r.Deadline = r.StartedAt.Add(-time.Second)
+			if err := WriteRecord(e.Path, r); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			clock := &cancellingWatchdogClock{automaticIdentityClock: automaticIdentityClock{at: r.StartedAt}, cancel: cancel}
+			inspections, reports := 0, 0
+			w := Watchdog{Path: e.Path, Attempt: r.StartedAt, Clock: clock,
+				Alive:         func(int) bool { inspections++; return true },
+				Identity:      func(int) string { return "" },
+				Kill:          func(int) error { t.Fatal("kill after cancellation"); return nil },
+				Acquire:       func() (func(), bool, error) { t.Fatal("unexpected recovery"); return nil, false, nil },
+				Restore:       func(Record) error { t.Fatal("unexpected restore"); return nil },
+				StartDetached: func(Record) error { t.Fatal("unexpected restart"); return nil },
+				Report: func(string) {
+					reports++
+					if boundary != "ready timer" {
+						cancel()
+					}
+				},
+			}
+			if boundary == "before tick" {
+				cancel()
+			}
+			if boundary == "recovery report" {
+				w.Alive = func(int) bool { inspections++; return false }
+				w.Acquire = func() (func(), bool, error) { return nil, false, errors.New("fixture lock failure") }
+			}
+			if boundary == "active tick" {
+				entered, resume := make(chan struct{}), make(chan struct{})
+				w.Identity = func(int) string { close(entered); <-resume; return "" }
+				go func() { <-entered; cancel(); close(resume) }()
+			}
+			if err := w.Run(ctx); !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
+			}
+			wantInspections, wantReports, wantTimers := 1, 1, 0
+			if boundary == "before tick" {
+				wantInspections, wantReports = 0, 0
+			}
+			if boundary == "active tick" {
+				wantReports = 0
+			}
+			if boundary == "ready timer" {
+				wantTimers = 1
+			}
+			if inspections != wantInspections || reports != wantReports || clock.timers != wantTimers || clock.stops > wantTimers {
+				t.Fatalf("inspections=%d reports=%d timers=%d stops=%d", inspections, reports, clock.timers, clock.stops)
+			}
+			got, err := ReadRecord(e.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if boundary == "recovery report" {
+				if got.Step != RollingBack || got.OwnerStopped || got.RestartPending != r.RestartPending {
+					t.Fatal(got)
+				}
+			} else if !reflect.DeepEqual(got, &r) {
+				t.Fatal(got)
+			}
+			// A subsequent helper for this attempt must acquire the released lease.
+			w.Alive = func(int) bool { inspections++; cancel(); return true }
+			w.Identity = func(int) string { return "" }
+			ctx, cancel = context.WithCancel(context.Background())
+			defer cancel()
+			before := inspections
+			if err := w.Run(ctx); !errors.Is(err, context.Canceled) || inspections != before+1 {
+				t.Fatal("lease not reusable", err, inspections)
+			}
+		})
+	}
+}
+
+func TestWatchdogCancellationDuringRestorePreservesPendingRestart(t *testing.T) {
+	e, r, _ := engineFixture(t)
+	r.Step, r.StartedAt = Probation, time.Unix(100, 0).UTC()
+	if err := WriteRecord(e.Path, r); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered, resume := make(chan struct{}), make(chan struct{})
+	go func() { <-entered; cancel(); close(resume) }()
+	clock := &automaticIdentityClock{at: r.StartedAt}
+	restores, starts, releases := 0, 0, 0
+	w := Watchdog{Path: e.Path, Attempt: r.StartedAt, Clock: clock,
+		Alive: func(int) bool { return false },
+		Acquire: func() (func(), bool, error) {
+			var once sync.Once
+			return func() { once.Do(func() { releases++ }) }, true, nil
+		},
+		Restore: func(Record) error {
+			restores++
+			close(entered)
+			<-resume
+			return nil
+		},
+		StartDetached: func(Record) error { starts++; return errors.New("fixture launch failure") },
+		Report:        func(string) { t.Fatal("reported after cancellation") },
+	}
+	if err := w.Run(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	got, err := ReadRecord(e.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restores != 1 || starts != 1 || releases != 1 || clock.timers != 0 || got.Step != RolledBack || !got.Pinned || !got.RestartPending || got.OwnerStopped || !got.RestartAt.IsZero() {
+		t.Fatal(restores, starts, releases, clock.timers, got)
+	}
+	// The durable obligation remains resumable by a later watchdog.
+	w.StartDetached = func(Record) error { starts++; return nil }
+	if done, err := w.Tick(); done || err != nil || restores != 1 || starts != 2 {
+		t.Fatal(done, err, restores, starts)
+	}
+}
 
 type watchdogClock struct{ at time.Time }
 
