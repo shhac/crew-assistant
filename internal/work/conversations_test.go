@@ -62,7 +62,7 @@ func TestTheImplementerStartsAfreshOrCompactsAtItsNextRound(t *testing.T) {
 			}
 			switch next {
 			case core.WriterFresh:
-				if len(after.Resume) != 0 || after.Compact {
+				if len(after.Resume) != 0 || after.Compact || after.FreshReason != core.FreshOwnerRequested {
 					t.Fatalf("the next round did not start afresh: %+v", after)
 				}
 			case core.WriterCompact:

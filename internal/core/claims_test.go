@@ -358,6 +358,39 @@ func TestAStaleTurnRecordsNothingAndARestartClearsClaims(t *testing.T) {
 	}
 }
 
+func TestAccountingHoldRetainsOnlyItsLiveClaim(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	tasks := queueAll(t, s, p, "A")
+	out, err := s.Schedule(testContext, anyone)
+	if err != nil || len(out) != 1 {
+		t.Fatalf("schedule %+v: %v", out, err)
+	}
+	c := out[0].Claim
+	if err := s.HoldClaim(testContext, tasks[0].ID, p.ID, c.Token, "accounting unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ := s.Snapshot(testContext)
+	held, _ := snap.FindTask(tasks[0].ID)
+	if len(held.Claims) != 1 || held.Claims[0].Held != "accounting unavailable" || held.Detail != "accounting unavailable" {
+		t.Fatalf("claim not held %+v", held)
+	}
+	if _, err := s.UpdateTask(testContext, held.ID, func(t *Task, _ *Project) (string, error) {
+		t.Status, t.Detail = TaskStopped, "owner stopped"
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.HoldClaim(testContext, held.ID, p.ID, c.Token, "late accounting failure"); err != nil {
+		t.Fatal(err)
+	}
+	snap, _ = s.Snapshot(testContext)
+	stopped, _ := snap.FindTask(held.ID)
+	if len(stopped.Claims) != 0 || stopped.Detail != "owner stopped" {
+		t.Fatalf("revoked claim changed stopped task %+v", stopped)
+	}
+}
+
 // pmWriter is a project whose one seat, Pim, both implements and keeps the
 // list, with task A under way in writing and the list due a look.
 func pmWriter(t *testing.T) (*Service, Project, Task) {

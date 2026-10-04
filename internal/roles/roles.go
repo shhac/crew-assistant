@@ -19,8 +19,12 @@ import (
 
 // Spec is one turn for one role.
 type Spec struct {
-	Engine, Model, Effort string
-	Provider              harness.Provider
+	Engine, Model, Effort                               string
+	ProjectID, TaskID, Role, Seat, MemberID, MemberName string
+	PreviousID, RetryCause, FreshReason                 string
+	Opening                                             func(session.Opened, session.Ref) error
+	Accepted                                            func() error
+	Provider                                            harness.Provider
 	// AccountIdentity distinguishes API provider selections and credential
 	// source names, even when they share an endpoint. It never holds a key.
 	AccountIdentity string
@@ -110,7 +114,13 @@ func Bridge() (session.Bridge, error) {
 }
 
 type Result struct {
-	Text string
+	Text             string
+	AttemptID        string
+	Opening          *session.Opened
+	Provider         session.Result
+	Compaction       session.Result
+	FailureStage     string
+	CleanupConfirmed bool
 	// Session resumes this role next time.
 	Session json.RawMessage
 }
@@ -123,7 +133,9 @@ type Runner interface {
 // the harness proves before launch.
 type Native struct {
 	// open starts or resumes a session; empty is the harness's own.
-	open func(ctx context.Context, o session.Options, resume json.RawMessage) (conversation, bool, error)
+	open func(ctx context.Context, o session.Options, resume json.RawMessage) (conversation, session.Opened, error)
+	// cleanupTimeout is overridden only by synthetic deadline tests.
+	cleanupTimeout time.Duration
 }
 
 // conversation is what a role's turn needs of its session.
@@ -159,7 +171,7 @@ func (h harnessSession) StartTurn(ctx context.Context, in session.Input) (turn, 
 	return t, nil
 }
 
-func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
+func (n Native) Run(ctx context.Context, spec Spec) (out Result, err error) {
 	if spec.Observer != nil {
 		spec.Observer.Started()
 		defer spec.Observer.Ended()
@@ -169,95 +181,148 @@ func (n Native) Run(ctx context.Context, spec Spec) (Result, error) {
 		opener = open
 	}
 	o := options(spec)
-	// The launch folder is kept while its harness can't be confirmed gone,
-	// so the next start finds it.
 	confirmed := false
+	out.FailureStage = "launch"
 	if o.Workbench != nil {
-		if err := os.MkdirAll(o.RuntimeHome, 0o700); err != nil {
-			return Result{}, err
+		if err = os.MkdirAll(o.RuntimeHome, 0o700); err != nil {
+			return
 		}
-		if err := os.Chmod(o.RuntimeHome, 0o700); err != nil {
-			return Result{}, err
+		if err = os.Chmod(o.RuntimeHome, 0o700); err != nil {
+			return
 		}
 	}
 	if len(spec.Tools) > 0 && o.Workbench == nil {
-		host, cleanup, err := toolHost(spec)
+		var host *session.ToolHost
+		var cleanup func(bool)
+		host, cleanup, err = toolHost(spec)
 		if err != nil {
-			return Result{}, err
+			return
 		}
 		defer func() { cleanup(confirmed) }()
 		o.Sandbox.Tools = host
 	}
-	s, resumed, err := opener(ctx, o, spec.Resume)
-	// Changed settings start a fresh session for both API and CLI roles.
+	out.FailureStage = "opening"
+	s, opening, err := opener(ctx, o, spec.Resume)
 	if len(spec.Resume) > 0 && errors.Is(err, session.ErrIncompatibleResume) {
-		s, resumed, err = opener(ctx, o, nil)
+		s, opening, err = opener(ctx, o, nil)
+		if err == nil {
+			opening.Fresh = session.FreshIncompatible
+		}
 	}
 	if err != nil {
-		return Result{}, err
+		if facts, ok := harness.ErrorFacts(err); (ok && facts.Phase == session.BeforeLaunch) || errors.Is(err, os.ErrNotExist) {
+			out.FailureStage = "launch"
+		}
+		return out, err
 	}
-	// Ended is told after the session is released or closed, and only of a
-	// session Opened was told of.
-	opened := false
+	out.Opening = &opening
+	out.Session, _ = json.Marshal(s.Ref())
+	var active, compaction turn
+	var heard chan struct{}
+	// Release on every opened-session path, even when persistence or submission fails.
 	defer func() {
-		if opened && spec.Ended != nil {
+		out.Session, _ = json.Marshal(s.Ref())
+		budget := n.cleanupTimeout
+		if budget == 0 {
+			budget = 10 * time.Second
+		}
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
+		defer cancel()
+		reclaimed, releaseErr := s.Release(releaseCtx)
+		confirmed = reclaimed.Confirmed
+		out.CleanupConfirmed = confirmed
+		// Cleanup may consume its budget. Evidence collection gets a fresh
+		// bounded opportunity to read already-settled provider accounting.
+		accountCtx, accountCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer accountCancel()
+		if compaction != nil && ctx.Err() != nil {
+			settled, _ := compaction.Wait(accountCtx)
+			if settled.Status != "" || settled.Usage.Known || settled.Observed.Known {
+				out.Compaction = settled
+			}
+		}
+		if active != nil && (ctx.Err() != nil || out.FailureStage == "acceptance_record") {
+			// Reclamation stops the session; collect the terminal evidence it
+			// can still provide without treating cancellation as measured zero.
+			settled, _ := active.Wait(accountCtx)
+			if settled.Status != "" || settled.Usage.Known || settled.Observed.Known {
+				out.Provider = settled
+			}
+			select {
+			case <-heard:
+			case <-accountCtx.Done():
+			}
+		}
+		if releaseErr != nil {
+			s.Close()
+			if err == nil {
+				err = releaseErr
+				out.FailureStage = "release"
+			}
+		}
+		if spec.Ended != nil {
 			spec.Ended(confirmed)
 		}
 	}()
-	released := false
-	defer func() {
-		if !released {
-			s.Close()
-		}
-	}()
-	if spec.Compact && resumed && harness.Support(o.Provider.Engine, harness.Session, harness.Compact).Usable() {
-		if err := compact(ctx, s); err != nil {
-			return Result{}, err
-		}
-	}
 	if spec.Opened != nil {
 		spec.Opened(s.Ref())
-		opened = true
+	}
+	if spec.Opening != nil {
+		if err = spec.Opening(opening, s.Ref()); err != nil {
+			out.FailureStage = "opening_record"
+			return
+		}
+	}
+	if spec.Compact && opening.Resumed && harness.Support(o.Provider.Engine, harness.Session, harness.Compact).Usable() {
+		out.FailureStage = "compaction"
+		out.Compaction, compaction, err = compact(ctx, s)
+		if err != nil {
+			return
+		}
 	}
 	prompt := spec.Prompt
-	if !resumed && spec.FreshPrompt != "" {
+	if !opening.Resumed && spec.FreshPrompt != "" {
 		prompt = spec.FreshPrompt
 	}
-	turn, err := s.StartTurn(ctx, session.Input{Text: prompt})
+	out.FailureStage = "start"
+	workTurn, err := s.StartTurn(ctx, session.Input{Text: prompt})
 	if err != nil {
-		return Result{}, err
+		return out, err
 	}
 	if spec.Observer != nil {
 		spec.Observer.Asked(prompt)
 	}
-	heard := make(chan struct{})
+	active = workTurn
+	heard = make(chan struct{})
 	go func() {
 		defer close(heard)
-		for e := range turn.Events() {
+		for e := range workTurn.Events() {
 			if spec.Observer != nil {
 				spec.Observer.Saw(e)
 			}
 		}
 	}()
-	result, err := turn.Wait(ctx)
-	// A finished turn has closed its events; one given up on may not have.
+	if spec.Accepted != nil {
+		if err = spec.Accepted(); err != nil {
+			out.FailureStage = "acceptance_record"
+			return
+		}
+	}
+	out.FailureStage = "wait"
+	out.Provider, err = workTurn.Wait(ctx)
 	if ctx.Err() == nil {
 		<-heard
 	}
-	ref, _ := json.Marshal(s.Ref())
-	released = true
-	reclaimed, releaseErr := s.Release(context.WithoutCancel(ctx))
-	confirmed = releaseErr == nil && reclaimed.Confirmed
-	if releaseErr != nil && err == nil {
-		err = releaseErr
-	}
 	if err != nil {
-		return Result{Session: ref}, err
+		return
 	}
-	if result.Status != "completed" {
-		return Result{Session: ref}, fmt.Errorf("the %s session ended its turn as %s", spec.Engine, result.Status)
+	if out.Provider.Status != "completed" {
+		err = fmt.Errorf("the %s session ended its turn as %s", spec.Engine, out.Provider.Status)
+		return
 	}
-	return Result{Text: result.Text, Session: ref}, nil
+	out.Text = out.Provider.Text
+	out.FailureStage = ""
+	return
 }
 
 // options preserves CLI settings and uses the API workbench for API roles.
@@ -352,7 +417,7 @@ func toolHost(spec Spec) (*session.ToolHost, func(confirmed bool), error) {
 // open resumes the recorded session when it can and otherwise starts a fresh
 // one, saying which. A changed model or engine, or a conversation the CLI no
 // longer has, means a fresh one; the prompt carries everything it needs.
-func open(ctx context.Context, o session.Options, resume json.RawMessage) (conversation, bool, error) {
+func open(ctx context.Context, o session.Options, resume json.RawMessage) (conversation, session.Opened, error) {
 	var ref *session.Ref
 	var stored session.Ref
 	if len(resume) > 0 && json.Unmarshal(resume, &stored) == nil {
@@ -360,29 +425,32 @@ func open(ctx context.Context, o session.Options, resume json.RawMessage) (conve
 	}
 	s, opened, err := session.Open(ctx, o, ref)
 	if err != nil {
-		return nil, false, err
+		return nil, session.Opened{}, err
 	}
-	return harnessSession{s}, opened.Resumed, nil
+	if len(resume) > 0 && ref == nil && !opened.Resumed {
+		opened.Fresh = session.FreshIncompatible
+	}
+	return harnessSession{s}, opened, nil
 }
 
 // compact runs the session's own context compaction to its end.
-func compact(ctx context.Context, s conversation) error {
-	turn, err := s.Compact(ctx)
+func compact(ctx context.Context, s conversation) (session.Result, turn, error) {
+	t, err := s.Compact(ctx)
 	if err != nil {
-		return fmt.Errorf("compacting the conversation: %w", err)
+		return session.Result{}, nil, fmt.Errorf("compacting the conversation: %w", err)
 	}
 	go func() {
-		for range turn.Events() {
+		for range t.Events() {
 		}
 	}()
-	result, err := turn.Wait(ctx)
+	result, err := t.Wait(ctx)
 	if err != nil {
-		return fmt.Errorf("compacting the conversation: %w", err)
+		return result, t, fmt.Errorf("compacting the conversation: %w", err)
 	}
 	if result.Status != "completed" {
-		return fmt.Errorf("compacting the conversation ended as %s", result.Status)
+		return result, t, fmt.Errorf("compacting the conversation ended as %s", result.Status)
 	}
-	return nil
+	return result, t, nil
 }
 
 // Permanent reports whether a failure will recur on retry: the installed CLI

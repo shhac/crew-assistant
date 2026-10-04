@@ -94,6 +94,10 @@ func TestAskingTheReviewerChecksTheLatestDraftNow(t *testing.T) {
 	}
 	task = settle(t, a)
 	d := openDecision(t, a, task)
+	turns, err := a.Core.TeamTurns(ctx, core.TeamTurnFilter{TaskID: task.ID})
+	if err != nil || len(turns) != 3 || turns[2].Role != core.RoleReviewer || turns[2].Seat != "Reviewer" || turns[2].ProjectID != p.ID {
+		t.Fatalf("approval message attribution: %+v %v", turns, err)
+	}
 	if len(task.Verdicts) != 1 || !strings.Contains(d.Context, "Too formal.") {
 		t.Fatalf("the failed check should be on the approval, not counted: %+v / %q", task.Verdicts, d.Context)
 	}

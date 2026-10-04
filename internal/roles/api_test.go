@@ -92,7 +92,7 @@ func TestAPIReviewerReadsAndCallsDaemonToolsAndResumesAfterSettingsChange(t *tes
 	// Exercise the read workbench independently of the OS command proof, as
 	// the library's read-workbench tests do. Production never removes commands
 	// after a failed proof; TestAPICommandProof covers that path separately.
-	n := Native{open: func(ctx context.Context, o session.Options, ref json.RawMessage) (conversation, bool, error) {
+	n := Native{open: func(ctx context.Context, o session.Options, ref json.RawMessage) (conversation, session.Opened, error) {
 		o.Workbench.Commands = nil
 		return open(ctx, o, ref)
 	}}
@@ -172,7 +172,7 @@ func TestAPIWorkbenchReferenceChangesOpenFreshWithoutInference(t *testing.T) {
 	o := options(spec)
 	o.Workbench.Commands = nil // Read-only library fixture, never a production fallback.
 	s, resumed, err := open(context.Background(), o, nil)
-	if err != nil || resumed {
+	if err != nil || resumed.Resumed {
 		t.Fatal(resumed, err)
 	}
 	ref := s.Ref()
@@ -183,11 +183,32 @@ func TestAPIWorkbenchReferenceChangesOpenFreshWithoutInference(t *testing.T) {
 	}
 	stored, _ := json.Marshal(ref)
 	s, resumed, err = open(context.Background(), o, stored)
-	if err != nil || !resumed || s.Ref().ConfigHash != ref.ConfigHash {
+	if err != nil || !resumed.Resumed || s.Ref().ConfigHash != ref.ConfigHash {
 		t.Fatal("unchanged workbench failed to resume", resumed, err)
 	}
 	if _, err := s.Release(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+
+	for _, saved := range []struct {
+		raw    json.RawMessage
+		reason string
+	}{
+		{json.RawMessage("invalid"), session.FreshIncompatible},
+		{func() json.RawMessage {
+			gone := ref
+			gone.ID = "00000000-0000-0000-0000-000000000001"
+			raw, _ := json.Marshal(gone)
+			return raw
+		}(), session.FreshUnavailable},
+	} {
+		fresh, opened, err := open(context.Background(), o, saved.raw)
+		if err != nil || opened.Resumed || opened.Fresh != saved.reason {
+			t.Fatalf("actual opening %+v: %v", opened, err)
+		}
+		if _, err := fresh.Release(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, change := range []string{"write", "model", "provider", "provider identity", "workspace"} {
 		t.Run(change, func(t *testing.T) {
@@ -212,7 +233,7 @@ func TestAPIWorkbenchReferenceChangesOpenFreshWithoutInference(t *testing.T) {
 			// The harness Open itself may start fresh on a mismatch. Native.Run
 			// also handles an opener returning the refusal, tested separately.
 			s, resumed, err := open(context.Background(), changed, stored)
-			if err != nil || resumed {
+			if err != nil || resumed.Resumed || resumed.Fresh != session.FreshIncompatible {
 				t.Fatal("settings change did not start fresh", resumed, err)
 			}
 

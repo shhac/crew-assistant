@@ -110,6 +110,7 @@ func (lp *Loop) pmTurn(ctx context.Context, projectID string, seat core.Role) er
 	// The PM reads only what its prompt carries: no repository, no writing.
 	// Its tools tidy tasks, link them and queue new ones.
 	spec := lp.baseSpec(seat, dir, base)
+	spec.ProjectID, spec.Role = p.ID, core.RolePM
 	spec.Observer = lp.watchTurn(core.Task{ProjectID: p.ID}, core.RolePM, seat, dir, false)
 	lp.withTools(&spec, lp.managerTools(p.ID, seat).proposing(p.Playbook))
 	var answer core.PMAnswer
@@ -325,7 +326,7 @@ func waitsLine(tasks []core.Task, t core.Task) string {
 // answer. The PM answers from what it keeps, the list with each task's plan
 // and what waits for what, so the assistant needn't carry any of it; asked
 // this way, it changes nothing.
-func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (string, error) {
+func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (answer string, err error) {
 	question = strings.TrimSpace(question)
 	if question == "" {
 		return "", errors.New("ask the PM something")
@@ -355,6 +356,7 @@ func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (string, 
 	pmTriage(&b, snap, p)
 	fmt.Fprintf(&b, "\nThe owner's assistant asks you:\n\n%s\n\nAnswer in a few plain sentences from what you know of the list. You change nothing by answering; say what you would change, if anything, and why.", question)
 	spec := lp.baseSpec(seat, dir, b.String())
+	spec.ProjectID, spec.Role = p.ID, core.RolePM
 	spec.Observer = lp.watchTurn(core.Task{ProjectID: p.ID}, core.RolePM, seat, dir, false)
 	lp.withTools(&spec, lp.answerTools(p.ID, seat))
 	// The PM answers from its seat, which works on one thing at a time, and
@@ -369,16 +371,25 @@ func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (string, 
 	if !ok {
 		return "", fmt.Errorf("%s is busy with other work right now; ask again shortly: %w", seat.Name, core.ErrConflict)
 	}
+	accounting := &accountingFailureState{}
 	defer func() {
 		taken.giveBack()
+		if accounting.failure != nil {
+			err = accounting.failure
+			if holdErr := lp.Core.HoldClaim(context.WithoutCancel(ctx), "", p.ID, c.Token, "Held: terminal team turn accounting could not be recorded"); holdErr != nil {
+				err = errors.Join(err, holdErr)
+			}
+			return
+		}
 		_ = lp.Core.ReleaseProjectClaim(context.WithoutCancel(ctx), p.ID, c.Token)
 	}()
 	ctx = context.WithValue(context.WithValue(core.FencedProject(ctx, p.ID, c.Token), slotKey{}, held.Engine), ownerAskedKey{}, true)
+	ctx = context.WithValue(ctx, accountingFailureKey{}, accounting)
 	result, err := lp.runRole(ctx, spec)
 	if err != nil {
 		return "", err
 	}
-	answer := text.Clip(strings.TrimSpace(result.Text), 4000)
+	answer = text.Clip(strings.TrimSpace(result.Text), 4000)
 	if answer == "" {
 		return "", fmt.Errorf("%s gave no answer", seat.Name)
 	}

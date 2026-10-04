@@ -60,6 +60,27 @@ To upgrade by hand, run `brew upgrade shhac/tap/crew-assistant`, then restart. S
 
 ## Run it
 
+Team turns are recorded prospectively in SQLite, one record per runner attempt,
+including PM turns, release QA and retries. Records retain project and member
+attribution, optional task attribution, actual resumed or fresh opening outcomes,
+fresh reasons and provider token counts across restarts. An unspecified CLI model
+means **provider default**, rather than a guessed resolved model.
+
+Missing accounting stays unknown; reported zero stays measured zero. Terminal
+usage, partial response observations and compaction accounting are retained
+separately and are never added together. Interrupted attempts whose launches
+cannot be confirmed gone stay held until recovery can settle them. Existing
+transcripts are not reconstructed; task and member dashboard histories are a
+separate follow-up.
+
+Terminal accounting writes retry without rerunning inference. If those writes
+remain unavailable, the admitted claim stays held instead of scheduling the
+work again, including when the assistant asks the PM directly. No-tools CLI
+and API turns have no durable harness process identity, so restart recovery
+preserves uncertain cleanup even after terminal accounting is recorded and
+when the launch marker is absent. Later cleanup confirmation is recorded
+separately without changing the terminal outcome or provider counts.
+
 Building requires Go 1.26.4 or newer. `make build` writes the gitignored `./crew-assistant` binary. Node is only needed when developing the dashboard; its compiled assets are committed.
 
 ```sh

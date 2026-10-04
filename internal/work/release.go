@@ -270,6 +270,7 @@ func (lp *Loop) checkRelease(ctx context.Context, p core.Project, m gitMedium, s
 	command := strings.ReplaceAll(r.Policy.Check, "{version}", r.Version)
 	prompt := fmt.Sprintf("Check release %s on landed commit %s. This command verifies only; publish nothing. Run exactly this from the repository root, once:\n%s\n%s\nReply only JSON: {\"outcome\":\"pass or fail\",\"exit_status\":0,\"output\":\"last 40 lines or 4 KB of output\"}. A nonzero exit must fail.\n", r.Version, r.Commit, command, c.note)
 	spec := lp.baseSpec(seat, c.workDir, prompt)
+	spec.ProjectID, spec.Role = p.ID, core.RoleQA
 	spec.Observer = lp.watchTurn(core.Task{ProjectID: p.ID}, core.RoleQA, seat, c.workDir, false)
 	// A release has no task; the globally unique project ID scopes its temporary
 	// learnings folder, shared only by this project turn and member.

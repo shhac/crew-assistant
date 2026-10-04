@@ -90,6 +90,7 @@ func TestThePMAnswersAPullRequestQuestionAndAsksTheOwner(t *testing.T) {
 	s.runner.mu.Unlock()
 	s.review(t, "Put this behind a flag.", time.Now())
 	task := s.current(t)
+	assertTaskPMAccounting(t, s.a, task)
 	comments := s.gh.postsOf("comment")
 	if len(comments) != 1 || !strings.Contains(argAfter(comments[0], "--body"), "Thanks; checking scope with the owner.\n\n— Pim, for crew-assistant") {
 		t.Fatalf("comments %v", comments)

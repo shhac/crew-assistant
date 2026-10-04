@@ -70,6 +70,8 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 	}
 	// Like its look at the list, the PM reads only what its prompt carries.
 	spec := lp.baseSpec(seat, dir, pmLandingPrompt(snap, p, t, r))
+	spec.ProjectID, spec.Role = p.ID, core.RolePM
+	spec.TaskID = t.ID
 	spec.Observer = lp.watchTurn(t, core.RolePM, seat, dir, false)
 	lp.withTools(&spec, lp.managerTools(p.ID, seat))
 	var decided core.LandDecision

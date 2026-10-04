@@ -43,7 +43,7 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 	}
 	seen := len(t.Direction)
 	guide := learnedGuide(writer, false) + handOnGuide(t, core.RoleImplementer, "")
-	spec, cleanup, err := lp.roleSpec(t, writer, m.workspace(t), true, m, writerPrompt(p, t, caughtUp, false)+prompt+guide, nil)
+	spec, cleanup, err := lp.roleSpec(t, writer, m.workspace(t), true, m, writerPrompt(p, t, caughtUp, false)+prompt+guide, nil, core.RoleImplementer)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
@@ -54,9 +54,11 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 	// another member's. Starting afresh, whether asked to or because it
 	// can't carry it on, it gets the task's record in its place.
 	spec.Resume = t.Resumable(core.RoleImplementer, writer)
+	spec.FreshReason = writerFreshReason(t, writer)
 	switch t.WriterNext {
 	case core.WriterFresh:
 		spec.Resume = nil
+		spec.FreshReason = core.FreshOwnerRequested
 	case core.WriterCompact:
 		spec.Compact = true
 	}
@@ -88,6 +90,8 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 		spec.Prompt = writerPrompt(p, t, caughtUp, false) + prompt + guide + correction
 		spec.FreshPrompt = fresh + correction
 		spec.Resume = result.Session
+		spec.FreshReason = core.FreshNoThread
+		spec.PreviousID, spec.RetryCause = result.AttemptID, "malformed_production"
 	}
 	return lp.recordDraft(ctx, p, t, m, writer.Name, result, seen, integration)
 }
@@ -283,4 +287,22 @@ func noChangeNeeded(t *core.Task, h core.Handoff) string {
 	}
 	t.Status, t.Detail = core.TaskLanding, "No change needed: "+text.Clip(h.Reply, 300)
 	return fmt.Sprintf("%s: no change needed for the pull request's feedback", t.Objective)
+}
+
+// writerFreshReason observes thread selection without changing Resumable.
+func writerFreshReason(t core.Task, writer core.Role) string {
+	if t.WriterNext == core.WriterFresh {
+		return core.FreshOwnerRequested
+	}
+	th, ok := t.Thread(core.RoleImplementer, writer)
+	if !ok {
+		return core.FreshNoThread
+	}
+	if th.Engine != writer.Engine {
+		return core.FreshEngineChanged
+	}
+	if th.Model != writer.Model {
+		return core.FreshModelChanged
+	}
+	return core.FreshNoThread
 }

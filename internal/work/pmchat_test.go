@@ -52,6 +52,10 @@ func TestPMChatRepliesInProjectWhilePaused(t *testing.T) {
 			if err != nil || len(log) != 2 || log[1].Text != "The note comes first." || log[0].Status != "answered" {
 				t.Fatal(log, err)
 			}
+			turns, err := lp.Core.TeamTurns(ctx, core.TeamTurnFilter{ProjectID: p.ID})
+			if err != nil || len(turns) != 1 || turns[0].TaskID != "" || turns[0].Role != core.RolePM || turns[0].Terminal == nil {
+				t.Fatalf("PM chat attribution: %+v %v", turns, err)
+			}
 			log, _ = lp.Core.PMChat(ctx, other.ID)
 			if len(log) != 0 {
 				t.Fatal(log)

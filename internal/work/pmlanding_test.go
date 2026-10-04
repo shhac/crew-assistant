@@ -153,6 +153,7 @@ func TestThePMLandsASignedOffChangeOnAPushProject(t *testing.T) {
 	}
 	// The PM decided once, reading only its prompt, which carried the change
 	// and its checks.
+	assertTaskPMAccounting(t, w.a, task)
 	if w.asked() != 1 {
 		t.Fatalf("the PM was asked %d times", w.asked())
 	}

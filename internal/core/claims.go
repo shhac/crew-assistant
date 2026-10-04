@@ -775,6 +775,32 @@ func (s *Service) ReleaseClaim(ctx context.Context, taskID, token string) error 
 	})
 }
 
+// HoldClaim retains an admitted step after accounting failed. A revoked claim
+// stays revoked; startup reconciliation settles its incomplete turn records.
+func (s *Service) HoldClaim(ctx context.Context, taskID, projectID, token, why string) error {
+	return s.store.update(ctx, func(v *Snapshot) error {
+		var claims []Claim
+		var heldTask *Task
+		if taskID != "" {
+			if t := task(v, taskID); t != nil {
+				claims = t.Claims
+				heldTask = t
+			}
+		} else if p := project(v, projectID); p != nil {
+			claims = p.Claims
+		}
+		for i := range claims {
+			if claims[i].Token == token {
+				claims[i].Held = why
+				if heldTask != nil {
+					heldTask.Detail = why
+				}
+			}
+		}
+		return nil
+	})
+}
+
 // RecoverClaims clears the claims a stopped daemon left, in one change,
 // and moves each such task on to an attempt of its own, so every old token
 // is dead. A restart is no one's failure, so none is counted. held names

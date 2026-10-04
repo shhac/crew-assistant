@@ -45,7 +45,7 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 		}
 	}
 	base := researcherPrompt(p, t, otherWork(snap, t), snap.Projects) + learnedGuide(researcher, true) + handOnGuide(t, core.RoleResearcher, "")
-	spec, cleanup, err := lp.roleSpec(t, researcher, m.workspace(t), false, m, base, nil)
+	spec, cleanup, err := lp.roleSpec(t, researcher, m.workspace(t), false, m, base, nil, core.RoleResearcher)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}

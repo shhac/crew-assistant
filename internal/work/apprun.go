@@ -148,6 +148,12 @@ type screenshots struct {
 	omitted int
 }
 
+func (s *screenshots) Attempt(id string) {
+	if next, ok := s.next.(interface{ Attempt(string) }); ok {
+		next.Attempt(id)
+	}
+}
+
 func (s *screenshots) Started() {
 	if s.next != nil {
 		s.next.Started()

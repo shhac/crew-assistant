@@ -330,6 +330,11 @@ func TestOnlyTheSameMemberOnTheSameEngineAndModelCarriesOnAConversation(t *testi
 	}
 	fresh(3, "another model")
 	fresh(4, "another engine")
+	for i, want := range []string{core.FreshNoThread, core.FreshNoThread, core.FreshNoThread, core.FreshModelChanged, core.FreshEngineChanged} {
+		if writes[i].FreshReason != want {
+			t.Fatalf("round %d fresh reason %q, want %q", i+1, writes[i].FreshReason, want)
+		}
+	}
 	if len(done.Threads) != 2 {
 		t.Fatalf("threads %+v", done.Threads)
 	}
@@ -411,5 +416,24 @@ func TestARestartCarriesEachTaskOnInItsOwnConversation(t *testing.T) {
 	}
 	if n := len(runner.writerTurns("Harbour note")); n != 3 {
 		t.Fatalf("the harbour's cut-off round should run once more: %d turns", n)
+	}
+	turns, err := a.Core.TeamTurns(ctx, core.TeamTurnFilter{TaskID: harbour.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupted := 0
+	for _, turn := range turns {
+		if turn.Terminal == nil {
+			t.Fatalf("restart left an incomplete attempt: %+v", turn)
+		}
+		if turn.Terminal.Outcome == "interrupted" {
+			interrupted++
+			if turn.Terminal.Usage.Known {
+				t.Fatal("restart invented accounting")
+			}
+		}
+	}
+	if interrupted != 1 {
+		t.Fatalf("restart interruption records: %d", interrupted)
 	}
 }

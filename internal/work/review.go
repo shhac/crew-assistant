@@ -122,7 +122,11 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 		checkoutNote = c.hostedNote
 	}
 	base := checkerPrompt(p, t, r, checker, playbook) + checkoutNote + appPrompt(app) + note + learnedGuide(checker, true) + handOnGuide(t, checker.Working(), t.CheckerGroup(checker.Name))
-	spec, cleanupLearnings, err := lp.roleSpec(t, checker, c.workDir, c.write, m, base, &c)
+	kind := core.RoleReviewer
+	if checker.Holds(core.RoleQA) {
+		kind = core.RoleQA
+	}
+	spec, cleanupLearnings, err := lp.roleSpec(t, checker, c.workDir, c.write, m, base, &c, kind)
 	if err != nil {
 		return core.Verdict{}, core.Screenshots{}, core.TurnEnd{}, err
 	}
@@ -197,6 +201,7 @@ func (lp *Loop) askForJSON(ctx context.Context, spec roles.Spec, parse func(repl
 				return reply, learned, parseErr, err
 			}
 		}
+		spec.PreviousID, spec.RetryCause = result.AttemptID, "malformed_reply"
 	}
 	return reply, learned, parseErr, nil
 }
@@ -356,6 +361,8 @@ func (lp *Loop) route(ctx context.Context, p core.Project, t core.Task, current 
 		return next, ""
 	}
 	spec := lp.baseSpec(seat, dir, routePrompt(p, t, current, options))
+	spec.ProjectID, spec.Role = p.ID, core.RolePM
+	spec.TaskID = t.ID
 	spec.Observer = lp.watchTurn(t, core.RolePM, seat, dir, false)
 	lp.withTools(&spec, lp.managerTools(p.ID, seat))
 	var choice routeChoice

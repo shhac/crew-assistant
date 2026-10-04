@@ -247,6 +247,8 @@ func (lp *Loop) judgeEscalation(ctx context.Context, p core.Project, t core.Task
 		return "", nil, ""
 	}
 	spec := lp.baseSpec(seat, dir, prompt)
+	spec.ProjectID, spec.Role = p.ID, core.RolePM
+	spec.TaskID = t.ID
 	spec.Observer = lp.watchTurn(t, core.RolePM, seat, dir, false)
 	lp.withTools(&spec, lp.answerTools(p.ID, seat))
 	var judged escalationJudgement
@@ -500,6 +502,8 @@ func (lp *Loop) judgeOwnerStep(ctx context.Context, p core.Project, t core.Task,
 		return nil, ""
 	}
 	spec := lp.baseSpec(seat, dir, ownerStepPrompt(p, t, u))
+	spec.ProjectID, spec.Role = p.ID, core.RolePM
+	spec.TaskID = t.ID
 	spec.Observer = lp.watchTurn(t, core.RolePM, seat, dir, false)
 	lp.withTools(&spec, lp.answerTools(p.ID, seat))
 	var judged ownerStepJudgement

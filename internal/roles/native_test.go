@@ -87,8 +87,8 @@ func (s *fakeSession) Close() { s.calls = append(s.calls, "close") }
 
 // native runs roles on s, which opens as resumed or fresh.
 func native(s *fakeSession, resumed bool) Native {
-	return Native{open: func(context.Context, session.Options, json.RawMessage) (conversation, bool, error) {
-		return s, resumed, nil
+	return Native{open: func(context.Context, session.Options, json.RawMessage) (conversation, session.Opened, error) {
+		return s, session.Opened{Resumed: resumed}, nil
 	}}
 }
 
@@ -98,23 +98,23 @@ func TestChangedAPISettingsOpenFreshAndCarryTheFreshPrompt(t *testing.T) {
 	for _, problem := range []error{fmt.Errorf("changed workbench: %w", session.ErrIncompatibleResume), errors.New("provider unavailable")} {
 		s := &fakeSession{confirmed: true, ref: &session.Ref{Engine: harness.OpenAICompatible, ID: "fresh", ConfigHash: "new-workbench"}}
 		calls := 0
-		n := Native{open: func(_ context.Context, o session.Options, ref json.RawMessage) (conversation, bool, error) {
+		n := Native{open: func(_ context.Context, o session.Options, ref json.RawMessage) (conversation, session.Opened, error) {
 			calls++
 			if calls == 1 {
 				if len(ref) == 0 || o.Workbench == nil {
 					t.Fatal("missing stored API reference or workbench")
 				}
-				return nil, false, problem
+				return nil, session.Opened{}, problem
 			}
 			if len(ref) != 0 {
 				t.Fatal("fresh open retained the incompatible reference")
 			}
-			return s, false, nil
+			return s, session.Opened{}, nil
 		}}
 		spec := Spec{Engine: "openai-compatible", RuntimeHome: t.TempDir(), Resume: json.RawMessage(`{"engine":"openai-compatible","id":"old"}`), Prompt: "Continue", FreshPrompt: "The task and its latest revision", Compact: true}
 		result, err := n.Run(context.Background(), spec)
 		if errors.Is(problem, session.ErrIncompatibleResume) {
-			if err != nil || calls != 2 || len(result.Session) == 0 || !slices.Contains(s.calls, "turn: "+spec.FreshPrompt) || slices.Contains(s.calls, "compact") {
+			if err != nil || result.Opening == nil || result.Opening.Fresh != session.FreshIncompatible || calls != 2 || len(result.Session) == 0 || !slices.Contains(s.calls, "turn: "+spec.FreshPrompt) || slices.Contains(s.calls, "compact") {
 				t.Fatalf("%+v %v %v", result, err, s.calls)
 			}
 		} else if err != problem || calls != 1 || len(s.calls) != 0 {
@@ -129,7 +129,7 @@ func TestAPIRuntimeHomeIsPrivateBecauseTheLibraryNeedsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &fakeSession{confirmed: true}
-	n := Native{open: func(_ context.Context, o session.Options, _ json.RawMessage) (conversation, bool, error) {
+	n := Native{open: func(_ context.Context, o session.Options, _ json.RawMessage) (conversation, session.Opened, error) {
 		info, err := os.Stat(o.RuntimeHome)
 		if err != nil || info.Mode().Perm() != 0700 || o.RuntimeHome != home {
 			t.Fatalf("API transcript home: %v %v", info, err)
@@ -137,7 +137,7 @@ func TestAPIRuntimeHomeIsPrivateBecauseTheLibraryNeedsIt(t *testing.T) {
 		if o.Sandbox != nil || o.Restriction.Tools.Dir != "" || o.Restriction.Tools.Bridge.Path != "" {
 			t.Fatal("API got CLI launch state", o)
 		}
-		return s, false, nil
+		return s, session.Opened{}, nil
 	}}
 	launch := filepath.Join(t.TempDir(), "must-not-be-created")
 	if _, err := n.Run(context.Background(), Spec{Engine: "openai-compatible", RuntimeHome: home, LaunchDir: launch, Tools: []session.ToolDefinition{{Name: "read_task"}}}); err != nil {
@@ -233,12 +233,11 @@ func TestATurnHearsItsSessionBeforeItStartsAndWhetherItEnded(t *testing.T) {
 	}
 }
 
-// A turn given up on, such as one stopped, closes its session without
-// confirming it gone, and its tools hear so.
-func TestATurnGivenUpOnIsNotConfirmedEnded(t *testing.T) {
+// A failed submission still releases its session and reports confirmed cleanup.
+func TestAFailedSubmissionReportsReclamation(t *testing.T) {
 	s := &fakeSession{confirmed: true}
-	n := Native{open: func(context.Context, session.Options, json.RawMessage) (conversation, bool, error) {
-		return failingStart{s}, false, nil
+	n := Native{open: func(context.Context, session.Options, json.RawMessage) (conversation, session.Opened, error) {
+		return failingStart{s}, session.Opened{}, nil
 	}}
 	spec := codexRound
 	spec.Opened = func(session.Ref) {}
@@ -247,7 +246,7 @@ func TestATurnGivenUpOnIsNotConfirmedEnded(t *testing.T) {
 	if _, err := n.Run(context.Background(), spec); err == nil {
 		t.Fatal("the turn did not fail")
 	}
-	if !slices.Equal(ended, []bool{false}) || !slices.Equal(s.calls, []string{"close"}) {
+	if !slices.Equal(ended, []bool{true}) || !slices.Equal(s.calls, []string{"release"}) {
 		t.Fatalf("ended %v, calls %q", ended, s.calls)
 	}
 }
@@ -297,8 +296,8 @@ func TestAFailedCompactionStopsTheTurnFromStarting(t *testing.T) {
 					t.Fatalf("the work turn started: %q", s.calls)
 				}
 			}
-			// The session is closed, not kept for the next round.
-			if s.calls[len(s.calls)-1] != "close" {
+			// The failed session is released before returning.
+			if s.calls[len(s.calls)-1] != "release" {
 				t.Fatalf("got %q", s.calls)
 			}
 		})
@@ -311,9 +310,9 @@ func TestAFailedCompactionStopsTheTurnFromStarting(t *testing.T) {
 func TestATurnsToolsAreHostedForThatTurnOnly(t *testing.T) {
 	var seen session.Options
 	s := &fakeSession{}
-	n := Native{open: func(_ context.Context, o session.Options, _ json.RawMessage) (conversation, bool, error) {
+	n := Native{open: func(_ context.Context, o session.Options, _ json.RawMessage) (conversation, session.Opened, error) {
 		seen = o
-		return s, false, nil
+		return s, session.Opened{}, nil
 	}}
 	spec := Spec{Engine: "claude", WorkDir: t.TempDir(), Prompt: "Plan it", Web: true, Tools: []session.ToolDefinition{{Name: "list_tasks"}}, Handler: session.ToolHandlerFunc(func(context.Context, session.ToolCall) (session.ToolResult, error) {
 		return session.ToolResult{}, nil

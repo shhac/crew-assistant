@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"sync"
@@ -266,6 +267,12 @@ func (f fencedTools) CallTool(ctx context.Context, call session.ToolCall) (sessi
 // in the slot its step claimed, or else once one is free. A turn for a
 // claim records its launch where a restart looks for it.
 func (lp *Loop) runRole(ctx context.Context, spec roles.Spec) (roles.Result, error) {
+	// A caller may handle a PM or message failure locally and continue its
+	// step. Once accounting failed, no further inference can be admitted in
+	// that step, even through a different role or fallback path.
+	if state, ok := ctx.Value(accountingFailureKey{}).(*accountingFailureState); ok && state.failure != nil {
+		return state.failure.result, state.failure
+	}
 	if held, _ := ctx.Value(slotKey{}).(string); held != spec.Engine {
 		if err := lp.waitAdmit(ctx, spec.Engine); err != nil {
 			return roles.Result{}, err
@@ -294,7 +301,11 @@ func (lp *Loop) runRole(ctx context.Context, spec roles.Spec) (roles.Result, err
 	if spec.Browser && spec.Engine == "codex" && spec.BridgeHome == "" {
 		spec.BridgeHome = lp.Config().Engines.BridgeHome(spec.Engine)
 	}
-	result, err := lp.runner.Run(ctx, spec)
+	result, err := lp.runAttempt(ctx, spec)
+	var accounting *teamAccountingFailure
+	if errors.As(err, &accounting) {
+		return result, err
+	}
 	reason, unusable := roles.BrowserUnusable(err, spec.BridgeHome)
 	if err == nil || !spec.Browser || !unusable {
 		return result, err
@@ -308,7 +319,8 @@ func (lp *Loop) runRole(ctx context.Context, spec roles.Spec) (roles.Result, err
 	spec.BridgeHome = ""
 	spec.Observer = browserFallbackObserver{Observer: spec.Observer, note: "Ran without the browser. " + reason}
 	spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + noBrowserNote + " " + reason)
-	return lp.runner.Run(ctx, spec)
+	spec.PreviousID, spec.RetryCause = result.AttemptID, "browser_unavailable"
+	return lp.runAttempt(ctx, spec)
 }
 
 // noBrowserNote takes back the browser a turn was told it had.
@@ -318,6 +330,12 @@ const noBrowserNote = "The browser couldn't be reached this turn, so you have no
 type browserFallbackObserver struct {
 	roles.Observer
 	note string
+}
+
+func (o browserFallbackObserver) Attempt(id string) {
+	if observer, ok := o.Observer.(interface{ Attempt(string) }); ok {
+		observer.Attempt(id)
+	}
 }
 
 func (o browserFallbackObserver) Started() {

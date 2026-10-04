@@ -28,8 +28,9 @@ type stepLog struct {
 	keep func(core.TurnStep)
 	// who is the turn's task and seat; run names this run of it, since a
 	// turn that has to ask again runs twice.
-	who core.TurnStep
-	run string
+	who     core.TurnStep
+	run     string
+	attempt string
 	// open are the steps still changing, by item: a reply streaming in, a
 	// tool not yet finished. None are open between runs.
 	open  map[string]*openStep
@@ -59,6 +60,9 @@ func (s *stepLog) start() {
 	var b [8]byte
 	rand.Read(b[:])
 	s.run, s.open, s.items = hex.EncodeToString(b[:]), map[string]*openStep{}, 0
+	if s.attempt != "" {
+		s.run = s.attempt
+	}
 }
 
 func (s *stepLog) asked(prompt string) {

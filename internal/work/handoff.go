@@ -171,6 +171,9 @@ func (lp *Loop) resume(ctx context.Context) error {
 		return err
 	}
 	held, running := lp.reclaimTurns(ctx, snap)
+	if why := held[""]; why != "" {
+		return errors.New(why)
+	}
 	// Generated images are kept only while the turn that made them runs, and
 	// only its tools, which stopped with the daemon, could attach them: any
 	// left were left by a turn that never finished. Which session made which

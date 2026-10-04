@@ -105,6 +105,12 @@ func (l *liveTurn) Started() {
 
 func (l *liveTurn) Note(text string) { l.steps.note(text) }
 
+func (l *liveTurn) Attempt(id string) {
+	l.steps.mu.Lock()
+	l.steps.attempt = id
+	l.steps.mu.Unlock()
+}
+
 func (l *liveTurn) Asked(prompt string) { l.steps.asked(prompt) }
 
 func (l *liveTurn) Saw(e session.Event) {

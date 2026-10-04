@@ -88,7 +88,7 @@ func (lp *Loop) design(ctx context.Context, p core.Project, t core.Task, m mediu
 		turn = request.Production.Turns[len(request.Production.Turns)-1].N
 	}
 	base := designerPrompt(p, t, *request, generatesImages(designer)) + learnedGuide(designer, true)
-	spec, cleanup, err := lp.roleSpec(t, designer, m.workspace(t), false, m, base, nil)
+	spec, cleanup, err := lp.roleSpec(t, designer, m.workspace(t), false, m, base, nil, core.RoleDesigner)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
@@ -107,7 +107,7 @@ func (lp *Loop) design(ctx context.Context, p core.Project, t core.Task, m mediu
 			turn = request.Production.Turns[len(request.Production.Turns)-1].N
 			prompt := designerPrompt(p, t, *request, generatesImages(designer)) + learnedGuide(designer, true)
 			prompt += "\n\nYour previous reply could not be used (" + reason.Error() + "). Its unfinished asset group was discarded. Regenerate the remaining assets with fresh provenance in this new production turn; do not reuse the discarded attachments. Reply with only the JSON object."
-			fresh, freshCleanup, err := lp.roleSpec(t, designer, m.workspace(t), false, m, prompt, nil)
+			fresh, freshCleanup, err := lp.roleSpec(t, designer, m.workspace(t), false, m, prompt, nil, core.RoleDesigner)
 			if err != nil {
 				return roles.Spec{}, err
 			}

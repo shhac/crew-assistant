@@ -89,6 +89,7 @@ func TestThePMJudgesWhatRemainsAtTheRoundLimit(t *testing.T) {
 			if !strings.Contains(d.Context, "Soften the opening") || !strings.Contains(d.Context, "Send the note round") {
 				t.Fatalf("the context should carry what remains and what waits on it: %s", d.Context)
 			}
+			assertTaskPMAccounting(t, a, task)
 			asked := turns(runner, "Judge what remains at the round limit")
 			if len(asked) != 1 || asked[0].Write {
 				t.Fatalf("the PM should judge once, reading only: %d", len(asked))
@@ -300,6 +301,7 @@ func sandboxRequirementBecomesAnOwnerStep(t *testing.T, first string) {
 	if d.Recommendation != choiceOwnerStep+": only the owner has a browser" || !strings.Contains(d.Context, "There is no browser in my sandbox.") || !strings.Contains(d.Context, "- [ ] Open the page in your browser") {
 		t.Fatalf("owner step decision %q: %s", d.Recommendation, d.Context)
 	}
+	assertTaskPMAccounting(t, a, task)
 	asked := turns(runner, "Judge whether a requirement the implementer can't meet")
 	if len(asked) != 1 || !strings.Contains(asked[0].Prompt, "There is no browser in my sandbox.") {
 		t.Fatalf("the PM should judge the requirement once: %d", len(asked))

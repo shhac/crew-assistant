@@ -104,6 +104,10 @@ func Open(path string) (*Store, error) {
 	_, err = db.Exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1);
 		CREATE TABLE IF NOT EXISTS turn_steps (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, seat TEXT NOT NULL, turn TEXT NOT NULL, item TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(turn, item));
 		CREATE TABLE IF NOT EXISTS decision_evaluations (decision_id TEXT PRIMARY KEY, resolved_at TEXT NOT NULL, payload TEXT NOT NULL);
+		CREATE TABLE IF NOT EXISTS team_turns (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, task_id TEXT NOT NULL, member_id TEXT NOT NULL, claim_token TEXT NOT NULL, admitted_at TEXT NOT NULL, payload TEXT NOT NULL);
+		CREATE INDEX IF NOT EXISTS team_turns_task ON team_turns(task_id, admitted_at, id);
+		CREATE INDEX IF NOT EXISTS team_turns_member ON team_turns(member_id, admitted_at, id);
+		CREATE INDEX IF NOT EXISTS team_turns_claim ON team_turns(claim_token);
 		CREATE INDEX IF NOT EXISTS turn_steps_task ON turn_steps(task_id, seat, id);`)
 	if err != nil {
 		db.Close()

@@ -157,6 +157,8 @@ func (lp *Loop) run(ctx context.Context, c claimed, waited bool, step, release f
 		if c.seat.Name != "" {
 			ctx = context.WithValue(ctx, slotKey{}, c.seat.Engine)
 		}
+		accounting := &accountingFailureState{}
+		ctx = context.WithValue(ctx, accountingFailureKey{}, accounting)
 		err := step(ctx)
 		cancel()
 		lp.jobs.mu.Lock()
@@ -166,7 +168,14 @@ func (lp *Loop) run(ctx context.Context, c claimed, waited bool, step, release f
 			lp.free(c.seat.Engine)
 		}
 		event := diagnostics.Event{Component: "daemon", Stage: "task_loop", ProjectID: c.project}
-		if releaseErr := release(context.WithoutCancel(ctx)); releaseErr != nil {
+		settle := release
+		if accounting.failure != nil {
+			err = accounting.failure
+			settle = func(ctx context.Context) error {
+				return lp.Core.HoldClaim(ctx, c.task, c.project, token, "Held: terminal team turn accounting could not be recorded")
+			}
+		}
+		if releaseErr := settle(context.WithoutCancel(ctx)); releaseErr != nil {
 			lp.Diagnostics.Failure(event, releaseErr)
 		}
 		switch {
@@ -281,6 +290,8 @@ func (lp *Loop) launchRoot() string {
 // confirmed ended, so what such a turn may still be using must stay.
 func (lp *Loop) reclaimTurns(ctx context.Context, snap core.Snapshot) (held map[string]string, running bool) {
 	held = map[string]string{}
+	confirmed := map[string]bool{}
+	defer func() { running = lp.recoverTeamTurns(ctx, held, confirmed) || running }()
 	entries, err := os.ReadDir(lp.launchRoot())
 	if err != nil {
 		return held, false
@@ -303,8 +314,12 @@ func (lp *Loop) reclaimTurns(ctx context.Context, snap core.Snapshot) (held map[
 	}
 	for _, e := range entries {
 		dir := filepath.Join(lp.launchRoot(), e.Name())
-		_, err := reclaim(ctx, dir)
-		if errors.Is(err, session.ErrUnreclaimed) || errors.Is(err, session.ErrUncertainLaunch) {
+		result, err := reclaim(ctx, dir)
+		confirmed[dir] = result.Confirmed
+		if !confirmed[dir] {
+			if err == nil {
+				err = session.ErrUnreclaimed
+			}
 			lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_reclaim"}, err)
 			if token, ok := byDir[e.Name()]; ok {
 				held[token] = err.Error()

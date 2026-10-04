@@ -98,6 +98,8 @@ type Loop struct {
 	// checked, when set, is told a checker's turn is over, before its
 	// verdict is recorded. Set in tests.
 	checked func(taskID, checker string)
+	// finishTeamTurn injects accounting-only storage failures in tests.
+	finishTeamTurn func(context.Context, string, core.TeamTurnTerminal) error
 	// slept replaces how long the machine slept since a time. Set in tests.
 	slept func(start time.Time) time.Duration
 	// parked is told a turn is waiting for the owner's use to end. Set in tests.
@@ -277,7 +279,7 @@ func checkLoopback(playbook *core.Playbook, r core.Role) bool {
 
 // roleSpec is how a role runs for one turn. The files it reads its learnings
 // from last only as long as the turn: run it before cleanup.
-func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m medium, prompt string, checkCopy *checkout) (spec roles.Spec, cleanup func(), err error) {
+func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m medium, prompt string, checkCopy *checkout, performed ...string) (spec roles.Spec, cleanup func(), err error) {
 	spec = lp.baseSpec(r, workDir, prompt)
 	spec.Write, spec.Env, spec.Read = write, m.env(t), m.readable()
 	learned, err := lp.prepareLearnings(t, r)
@@ -296,6 +298,10 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\n" + attachmentsIndex(t, dir))
 	}
 	kind := turnKind(t, r)
+	if len(performed) > 0 {
+		kind = performed[0]
+	}
+	spec.ProjectID, spec.TaskID, spec.Role = t.ProjectID, t.ID, kind
 	tools := lp.toolsFor(t, kind, r)
 	tools.workDir = workDir
 	// The researcher, having read the repository, may propose how QA runs
@@ -374,7 +380,14 @@ func (lp *Loop) withTools(spec *roles.Spec, tools roleTools) {
 // engine uses, its instructions and the prompt, and the browser where its
 // member allows one.
 func (lp *Loop) baseSpec(r core.Role, workDir, prompt string) roles.Spec {
-	spec := roles.Spec{Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Instructions: r.Instructions, Prompt: prompt}
+	spec := roles.Spec{Seat: r.Name, MemberID: r.Member, FreshReason: core.FreshNoThread, Engine: r.Engine, Model: r.Model, Effort: r.Effort, WorkDir: workDir, Instructions: r.Instructions, Prompt: prompt}
+	if r.Member != "" {
+		if snap, err := lp.Core.Snapshot(context.Background()); err == nil {
+			if member, ok := snap.Member(r.Member); ok {
+				spec.MemberName = member.Name
+			}
+		}
+	}
 	spec.Binary, spec.Home = lp.Config().Engines.Binary(r.Engine)
 	spec.RuntimeHome = lp.runtimeHome(r.Engine)
 	if harness.Engine(r.Engine).Transport() == harness.APITransport {

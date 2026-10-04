@@ -155,7 +155,7 @@ func TestBrowserDoesNotRetryNonBrowserError(t *testing.T) {
 	failure := errors.New("ordinary failure")
 	runner := &scriptedRunner{fail: []error{failure}}
 	lp, _ := browserTeam(t, runner)
-	_, err := lp.runRole(context.Background(), roles.Spec{Engine: "claude", Browser: true})
+	_, err := lp.runRole(context.Background(), roles.Spec{ProjectID: "project", Role: core.RoleQA, Seat: "QA", Engine: "claude", Browser: true})
 	if !errors.Is(err, failure) || len(runner.seen) != 1 {
 		t.Fatalf("%v, %d runs", err, len(runner.seen))
 	}
@@ -189,7 +189,7 @@ func TestCodexQABrowserGetsBridgeHomeAtLaunch(t *testing.T) {
 			cfg.Engines.Codex.BrowserBridgeHome = t.TempDir()
 		}
 		lp.Config = func() config.Config { return cfg }
-		spec := roles.Spec{Engine: "codex", WorkDir: t.TempDir()}
+		spec := roles.Spec{ProjectID: "project", Role: core.RoleQA, Seat: "QA", Engine: "codex", WorkDir: t.TempDir()}
 		app := appRun{recipe: &core.RunRecipe{Start: "npm start", URL: "http://localhost:{port}/"}, port: 43001, browser: core.Browser{On: true}}
 		app.apply(&spec)
 		if _, err := lp.runRole(context.Background(), spec); err != nil {

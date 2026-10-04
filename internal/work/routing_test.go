@@ -117,6 +117,9 @@ func TestThePMChoosesWhereATaskGoesWhenACheckerRecommendsOtherwise(t *testing.T)
 			if len(task.Revisions) != c.drafts {
 				t.Fatalf("%d drafts, want %d", len(task.Revisions), c.drafts)
 			}
+			if c.pm {
+				assertTaskPMAccounting(t, a, task)
+			}
 			asked := turns(runner, "Decide where this task goes next")
 			if c.pm != (len(asked) > 0) {
 				t.Fatalf("the PM was asked %d times", len(asked))

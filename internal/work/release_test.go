@@ -708,6 +708,26 @@ func TestReleasePromptUsesClockAndLatestDeclineOnly(t *testing.T) {
 		t.Fatal(prompt)
 	}
 }
+
+func TestReleaseQAAndPMHaveDurableProjectOnlyAttribution(t *testing.T) {
+	a, p, runner, _, _, _ := releaseFixture(t, "", false, false, 0)
+	proposeFromPM(t, a, p)
+	chooseRelease(t, a, p.ID, "Release v1.1.0")
+	releasePass(t, a)
+	turns, err := a.Core.TeamTurns(context.Background(), core.TeamTurnFilter{ProjectID: p.ID})
+	if err != nil || len(turns) != len(runner.specs) || len(turns) != 2 {
+		t.Fatalf("%+v %v", turns, err)
+	}
+	for i, got := range turns {
+		spec := runner.specs[i]
+		if got.TaskID != "" || got.Role != spec.Role || got.Seat != spec.Seat || got.MemberID != spec.MemberID || got.Engine != spec.Engine || got.Model != spec.Model || got.Terminal == nil {
+			t.Fatalf("project-only attribution: %+v", got)
+		}
+	}
+	if turns[0].Role != core.RolePM || turns[1].Role != core.RoleQA {
+		t.Fatal(turns)
+	}
+}
 func TestReleaseActiveCheckDoesNotReportWaitingOnItself(t *testing.T) {
 	t.Parallel()
 	a, p, r, _, _, _ := releaseFixture(t, "pm", false, false, 0)

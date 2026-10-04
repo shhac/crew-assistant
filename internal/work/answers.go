@@ -19,10 +19,16 @@ import (
 // then brings the owner one decision. A sandbox or login problem will not
 // clear by itself and goes to the owner at once.
 func (lp *Loop) roleFailed(ctx context.Context, t core.Task, role string, cause error) error {
-	if roles.KeychainLocked(cause) {
+	var accounting *teamAccountingFailure
+	if errors.As(cause, &accounting) {
+		if _, scheduled := ctx.Value(accountingFailureKey{}).(*accountingFailureState); scheduled {
+			return cause // the scheduler holds this claim instead of replaying inference
+		}
+	}
+	if accounting == nil && roles.KeychainLocked(cause) {
 		return lp.awaitKeychain(ctx, t)
 	}
-	permanent := roles.Permanent(cause)
+	permanent := roles.Permanent(cause) || accounting != nil
 	var failures int
 	updated, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Failures++

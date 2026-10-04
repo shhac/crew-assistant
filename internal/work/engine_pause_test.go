@@ -284,7 +284,7 @@ func TestEnginePauseClaimedStepCanFinishItsLaterTurns(t *testing.T) {
 	}
 	defer a.free("claude")
 	claimed := context.WithValue(ctx, slotKey{}, "claude")
-	spec := roles.Spec{Engine: "claude"}
+	spec := roles.Spec{ProjectID: "project", Role: core.RolePM, Seat: "PM", Engine: "claude"}
 	if _, err := a.runRole(claimed, spec); err != nil {
 		t.Fatal(err)
 	}
