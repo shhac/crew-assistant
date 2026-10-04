@@ -60,9 +60,8 @@ func (lp *Loop) watchPR(ctx context.Context, t core.Task, repo string, pr github
 		}
 	}
 	for on, baseline := range map[string]string{core.WakeOnChecks: prChecksValue(pr), core.WakeOnReview: prReviewValue(pr)} {
-		if have[on] {
-			continue
-		}
+		// RegisterWake refreshes an existing loop watch without extending its
+		// timeout, so cancellation is visible even before the next poll.
 		if _, err = lp.Core.RegisterWake(ctx, core.WakeInput{Owner: core.WakeLoop, TaskID: t.ID, ProjectID: t.ProjectID, On: on, Target: target, Baseline: baseline, Timeout: core.MaxWakeFor}); err != nil {
 			return err
 		}
@@ -81,13 +80,13 @@ func (lp *Loop) watchPR(ctx context.Context, t core.Task, repo string, pr github
 // prChecksValue changes when the checks, the head, mergeability or the pull
 // request's own state do: a pull request closed on GitHub wakes the task too.
 func prChecksValue(pr github.PR) string {
-	return pr.CheckState() + "@" + text.Short(pr.HeadRefOid) + "/" + pr.MergeStateStatus + "/" + pr.State
+	return fmt.Sprintf("%s@%s/%s/%s/merge:%t", pr.CheckState(), text.Short(pr.HeadRefOid), pr.MergeStateStatus, pr.State, pr.MergeInFlight)
 }
 
 // prReviewValue changes with any review, comment or thread comment, the
 // review decision, or a thread resolved or reopened.
 func prReviewValue(pr github.PR) string {
-	return fmt.Sprintf("%s/%s/%d", pr.Latest().UTC().Format(time.RFC3339), pr.ReviewDecision, pr.Unresolved())
+	return fmt.Sprintf("%s/%s/%d/merge:%t", pr.Latest().UTC().Format(time.RFC3339), pr.ReviewDecision, pr.Unresolved(), pr.MergeInFlight)
 }
 
 // viewPR reads a pull request named as owner/name#number.

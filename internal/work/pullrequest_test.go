@@ -4,6 +4,7 @@ package work
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,197 @@ import (
 	"github.com/shhac/crew-assistant/internal/integrations/github"
 	"github.com/shhac/crew-assistant/internal/text"
 )
+
+func TestPRMergeIntentSurvivesAssetReactivationAndRestart(t *testing.T) {
+	for _, mergedBeforeCrash := range []bool{false, true} {
+		t.Run(fmt.Sprint(mergedBeforeCrash), func(t *testing.T) {
+			s := newPRScenario(t, 4)
+			task := s.open(t)
+			seatDesigner(t, s.a, s.p.ID)
+			var err error
+			task, err = s.a.Core.UpdateTask(s.ctx, task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+				task.Status, task.Criteria = core.TaskLanding, []string{"Icons"}
+				task.Design = []core.DesignRequest{{ID: "icons", AnsweredAt: time.Now(), IntegrationPending: true, AssetReports: []core.Unreachable{{ID: "icons", Criterion: "Icons", Bound: "task"}}, Production: &core.Production{Delivered: []core.DeliveredAsset{{Attachment: "asset"}}, Provenance: "provenance"}}}
+				return "", nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			task, err = s.a.Core.EditTask(s.ctx, core.EditInput{Project: s.p.ID, Task: task.ID, By: "PM", Kind: core.RolePM, Criteria: []string{}})
+			if err != nil || task.NeedsAssetIntegration() {
+				t.Fatal("production did not suspend", task, err)
+			}
+			held, err := s.a.beginDelivering(s.ctx, task.ID, task.Revisions[0])
+			if err != nil || len(held) > 0 {
+				t.Fatal(held, err)
+			}
+			task, err = s.a.Core.UndoTaskEdit(s.ctx, s.p.ID, task.ID, task.Edits[len(task.Edits)-1].ID)
+			if err != nil || task.Delivering == nil || !task.NeedsAssetIntegration() {
+				t.Fatal("reactivation interrupted or lost the recorded intent", task, err)
+			}
+			s.gh.set(func() { s.gh.checks, s.gh.decision = "SUCCESS", "APPROVED" })
+			if !mergedBeforeCrash {
+				s.gh.set(func() { s.gh.queued = true; s.gh.merges = append(s.gh.merges, []string{"queued"}) })
+			}
+			if mergedBeforeCrash {
+				if err = s.a.github.Merge(s.ctx, "o/r", task.Proposal.Number, "squash", task.Revisions[0].Ref); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s.a = restart(t, s.a)
+			s.a.github = github.Client{Run: s.gh.run}
+			s.a.githubURL = func(string) string { return s.remote }
+			if !mergedBeforeCrash {
+				got := s.current(t)
+				if got.Status != core.TaskAwaiting || !got.PRMergePending() {
+					t.Fatal(got)
+				}
+				s.gh.set(func() { s.gh.merged = task.Revisions[0].Ref })
+				if err := s.a.checkWakes(s.ctx, time.Now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := s.current(t)
+			if got.Status != core.TaskLanded || got.Delivering != nil || len(s.gh.merges) != 1 || !got.NeedsAssetIntegration() {
+				t.Fatal("recorded merge stranded, repeated, or erased integration evidence", got, s.gh.merges)
+			}
+			s.a = restart(t, s.a)
+			if got = s.current(t); got.Status != core.TaskLanded || len(s.gh.merges) != 1 {
+				t.Fatal("completed merge repeated after restart", got)
+			}
+		})
+	}
+}
+
+func TestQueuedPRMergeKeepsIntentUntilObservedAcrossRestart(t *testing.T) {
+	s := newPRScenario(t, 4)
+	task := s.open(t)
+	s.gh.set(func() { s.gh.checks, s.gh.decision = "SUCCESS", "APPROVED" })
+	queued := func(ctx context.Context, args ...string) ([]byte, error) {
+		if len(args) > 1 && args[0] == "pr" && args[1] == "merge" {
+			s.gh.set(func() { s.gh.merges = append(s.gh.merges, args); s.gh.queued = true })
+			return nil, nil
+		}
+		return s.gh.run(ctx, args...)
+	}
+	s.a.github = github.Client{Run: queued}
+	if _, err := s.a.Core.UpdateTask(s.ctx, task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+		task.Status = core.TaskLanding
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := s.current(t)
+	if got.Status != core.TaskAwaiting || got.Delivering != nil || !got.PRMergePending() || len(s.gh.merges) != 1 {
+		t.Fatal("queued merge request was repeated or lost its intent", got)
+	}
+	seatDesigner(t, s.a, s.p.ID)
+	if _, err := s.a.Core.UpdateTask(s.ctx, task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+		task.Design = []core.DesignRequest{{ID: "frames", AnsweredAt: time.Now(), IntegrationSuspended: true, AssetReports: []core.Unreachable{{ID: "frames", Criterion: "Frames", Bound: "brief"}}, Production: &core.Production{Delivered: []core.DeliveredAsset{{Attachment: "asset"}}, Provenance: "provenance"}}}
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.a.Core.UpdateBrief(s.ctx, s.p.ID, core.BriefInput{Goal: "Assets", Criteria: []string{"Frames"}}); err != nil {
+		t.Fatal(err)
+	}
+	got = s.current(t)
+	if got.Status != core.TaskAwaiting || !got.NeedsAssetIntegration() || len(got.Revisions) != 1 {
+		t.Fatal("asset reactivation interrupted an acknowledged merge", got)
+	}
+	s.a = restart(t, s.a)
+	s.a.github, s.a.githubURL = github.Client{Run: queued}, func(string) string { return s.remote }
+	// A fresh ready observation must not submit the acknowledged request again.
+	if _, err := s.a.Core.UpdateTask(s.ctx, task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+		task.Status = core.TaskLanding
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got = s.current(t)
+	if got.Status != core.TaskAwaiting || got.Delivering != nil || !got.PRMergePending() || len(s.gh.merges) != 1 {
+		t.Fatal("restart repeated the queued merge", got)
+	}
+	s.gh.set(func() { s.gh.merged = task.Revisions[0].Ref })
+	if err := s.a.checkWakes(s.ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got = s.current(t)
+	if got.Status != core.TaskLanded || got.Delivering != nil || len(s.gh.merges) != 1 {
+		t.Fatal("merge observation did not reconcile exactly once", got)
+	}
+}
+
+func TestAwaitingPRReactivatesAssetIntegrationThroughRestart(t *testing.T) {
+	for _, source := range []string{"undo", "brief", "owner checks"} {
+		t.Run(source, func(t *testing.T) {
+			s := newPRScenario(t, 8)
+			task := s.open(t)
+			seatDesigner(t, s.a, s.p.ID)
+			if source == "brief" {
+				if _, err := s.a.Core.UpdateBrief(s.ctx, s.p.ID, core.BriefInput{Goal: "Assets", Criteria: []string{"Frames"}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			task, err := s.a.Core.UpdateTask(s.ctx, task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+				task.Criteria = []string{"Frames"}
+				task.Design = []core.DesignRequest{{ID: "frames", AnsweredAt: time.Now(), IntegrationPending: true, AssetReports: []core.Unreachable{{ID: "frames", Criterion: "Frames", Bound: "task"}}, Production: &core.Production{Delivered: []core.DeliveredAsset{{Attachment: "synthetic-asset"}}, Provenance: "synthetic-provenance"}}}
+				return "", nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			edit := core.EditInput{Project: s.p.ID, Task: task.ID, By: "Owner", Kind: core.RolePM, Criteria: []string{}, TextVersion: &task.TextVersion}
+			if source == "owner checks" {
+				edit.OwnerChecks = []string{"Frames"}
+			}
+			task, err = s.a.Core.EditTask(s.ctx, edit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if source == "brief" {
+				if _, err = s.a.Core.UpdateBrief(s.ctx, s.p.ID, core.BriefInput{Goal: "Assets"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s.a = restart(t, s.a)
+			if source == "brief" {
+				_, err = s.a.Core.UpdateBrief(s.ctx, s.p.ID, core.BriefInput{Goal: "Assets", Criteria: []string{"Frames"}})
+			} else {
+				_, err = s.a.Core.UndoTaskEdit(s.ctx, s.p.ID, task.ID, task.Edits[len(task.Edits)-1].ID)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.a = restart(t, s.a)
+			// Restart preserves the fake adapter as well as the durable record.
+			s.a.github = github.Client{Run: s.gh.run}
+			s.a.githubURL = func(string) string { return s.remote }
+			snap, _ := s.a.Core.Snapshot(s.ctx)
+			restored, _ := snap.FindTask(task.ID)
+			if restored.Status != core.TaskWriting || !restored.NeedsAssetIntegration() {
+				t.Fatal("PR restoration did not request integration", restored)
+			}
+			s.runner.onEdit = func(dir string, _ int) bool {
+				for name, content := range map[string]string{"frame.png": "synthetic asset", "provenance.json": "{}"} {
+					if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return true
+			}
+			got := s.current(t)
+			if got.Status != core.TaskAwaiting || got.NeedsAssetIntegration() || len(got.Revisions) != 2 || got.Proposal.Pushed == task.Proposal.Pushed {
+				t.Fatal("PR loop did not integrate and publish a new draft", got)
+			}
+			for _, name := range []string{"frame.png", "provenance.json"} {
+				if ownerGit(t, s.remote, "show", got.Proposal.Pushed+":"+name) == "" {
+					t.Fatal("integrated file missing", name)
+				}
+			}
+		})
+	}
+}
 
 func TestAPullRequestIsBabysatThroughReviewAndCIUntilItMerges(t *testing.T) {
 	t.Parallel()

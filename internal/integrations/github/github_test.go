@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -97,6 +98,21 @@ func TestMergeIsPinnedToTheCheckedHeadAndOpenReadsTheNumber(t *testing.T) {
 	}
 }
 
+func TestViewReadsMergeQueueAndAutomaticMerge(t *testing.T) {
+	for _, fields := range []string{`"mergeQueueEntry":{"id":"entry"}`, `"autoMergeRequest":{"enabledAt":"2026-10-04T00:00:00Z"}`, `"mergeQueueEntry":null,"autoMergeRequest":null`} {
+		c := Client{Run: func(_ context.Context, args ...string) ([]byte, error) {
+			if args[0] == "api" {
+				return []byte(`{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"abc",` + fields + `,"reviewThreads":{"nodes":[]}}}}}`), nil
+			}
+			return []byte(`{"number":7,"state":"OPEN"}`), nil
+		}}
+		pr, err := c.View(context.Background(), "o/r", 7)
+		if err != nil || pr.MergeInFlight != !strings.Contains(fields, "null") {
+			t.Fatal(fields, pr, err)
+		}
+	}
+}
+
 func TestAPullRequestRefRoundTripsAndRefusesAnythingElse(t *testing.T) {
 	ref, err := ParsePRRef("o/r#12")
 	if err != nil || ref != (PRRef{Repo: "o/r", Number: 12}) || ref.String() != "o/r#12" {
@@ -112,7 +128,7 @@ func TestAPullRequestRefRoundTripsAndRefusesAnythingElse(t *testing.T) {
 // View reads the review threads gh's pull request view leaves out, and an
 // unresolved one keeps the pull request from being ready.
 func TestViewReadsReviewThreadsAndAnUnresolvedOneHoldsReadiness(t *testing.T) {
-	threads := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
+	threads := `{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"abc","reviewThreads":{"nodes":[
 		{"id":"T1","isResolved":false,"isOutdated":false,"path":"main.go","line":12,"comments":{"nodes":[{"author":{"login":"alice"},"authorAssociation":"COLLABORATOR","body":"Rename this?","createdAt":"2026-10-01T09:05:00Z"}]}},
 		{"id":"T2","isResolved":true,"path":"a.go","line":1,"comments":{"nodes":[{"author":{"login":"bob"},"authorAssociation":"NONE","body":"done","createdAt":"2026-10-01T09:00:00Z"}]}}]}}}}}`
 	var asked [][]string

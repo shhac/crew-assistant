@@ -15,11 +15,14 @@ import (
 // returns to that step with the input, which is kept here so everyone who
 // works on the task afterwards reads the same words.
 type DesignRequest struct {
-	IntegrationPending bool          `json:"integration_pending,omitempty"`
-	ID                 string        `json:"id"`
-	Production         *Production   `json:"production,omitempty"`
-	Requirements       []string      `json:"requirements,omitempty"`
-	AssetReports       []Unreachable `json:"asset_reports,omitempty"`
+	// Pending is the active obligation; suspended retains an unintegrated
+	// hand-back while linked requirements are inactive. Both false is settled.
+	IntegrationPending   bool          `json:"integration_pending,omitempty"`
+	IntegrationSuspended bool          `json:"integration_suspended,omitempty"`
+	ID                   string        `json:"id"`
+	Production           *Production   `json:"production,omitempty"`
+	Requirements         []string      `json:"requirements,omitempty"`
+	AssetReports         []Unreachable `json:"asset_reports,omitempty"`
 	// N numbers the designer's input on the task, from 1, as everyone
 	// names it: design 2. A request with no input has none.
 	N int `json:"n,omitempty"`
@@ -342,6 +345,17 @@ func (t Task) DesignInputsAt(step string) int {
 		}
 	}
 	return n
+}
+
+// PendingAssetDesigns captures completed production visible to a draft turn.
+func (t Task) PendingAssetDesigns() []string {
+	var ids []string
+	for _, r := range t.Design {
+		if r.IntegrationPending && r.Production != nil && len(r.Production.Delivered) > 0 && !r.Open() {
+			ids = append(ids, r.ID)
+		}
+	}
+	return ids
 }
 
 // NeedsAssetIntegration holds delivered files for an implementer draft, never

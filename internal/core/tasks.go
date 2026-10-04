@@ -28,6 +28,7 @@ type Task struct {
 	Criteria    []string `json:"criteria"`
 	OwnerChecks []string `json:"owner_checks,omitempty"`
 	Status      string   `json:"status"`
+	PRSwitchBy  string   `json:"pr_switch_by,omitempty"` // Deferred until the recorded PR delivery is reconciled.
 	// SentOn is a triaged task waiting for room in To do, never triaged again.
 	SentOn bool `json:"sent_on,omitempty"`
 	// Stage is where the task sits on its project's board, derived from the
@@ -285,6 +286,9 @@ type Proposal struct {
 	// is ready, by the owner or the PM: apart from Task.Approved, which
 	// approved it opening.
 	MergeApproved int `json:"merge_approved,omitempty"`
+	// MergeRequested is the commit whose merge GitHub acknowledged. Watch
+	// its outcome before submitting another request or changing its draft.
+	MergeRequested string `json:"merge_requested,omitempty"`
 	// Outbox is what the team has to say on the pull request, posted once
 	// the revision it came with has been pushed.
 	Outbox []PRPost `json:"outbox,omitempty"`
@@ -350,6 +354,10 @@ func (t *Task) Describe(text PRText) {
 
 // PROpen reports a task with a pull request open for it.
 func (t Task) PROpen() bool { return t.UsesPRs() && t.Proposal != nil && t.Proposal.Number > 0 }
+
+func (t Task) PRMergePending() bool {
+	return t.Proposal != nil && t.Proposal.MergeRequested != ""
+}
 
 // UsesPRs reports a task that lands through a pull request, as its team had
 // it when it started.

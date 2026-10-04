@@ -24,7 +24,7 @@ func (lp *Loop) handOff(ctx context.Context, t core.Task, m medium, h core.Hando
 	t, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		// A draft recorded meanwhile, such as the owner's by hand, is newer
 		// than the one this built on, and this one never replaces it.
-		if len(t.Revisions) != h.Revision.N-1 {
+		if t.Delivering != nil || t.PRMergePending() || len(t.Revisions) != h.Revision.N-1 {
 			return "", fmt.Errorf("draft %d was recorded while the implementer worked: %w", len(t.Revisions), core.ErrConflict)
 		}
 		t.Attempt++
@@ -54,7 +54,7 @@ func (lp *Loop) commitHandoff(ctx context.Context, taskID, name string) error {
 			return "", nil
 		}
 		t.Handoff = nil
-		if len(t.Revisions) != h.Revision.N-1 {
+		if t.Delivering != nil || t.PRMergePending() || len(t.Revisions) != h.Revision.N-1 {
 			conflict = fmt.Errorf("draft %d was recorded while the implementer worked: %w", len(t.Revisions), core.ErrConflict)
 			return "", nil
 		}
@@ -123,9 +123,18 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 	}
 	t.Revisions = append(t.Revisions, r)
 	t.AnswerDirection(h.Seen, r.N, h.Reply, r.At)
+	// A prepared draft cannot erase PM evidence recorded or corrected after
+	// its turn began. Classification-only turns settle that evidence explicitly.
+	reports := slices.Clone(h.Unreachable)
+	for _, u := range t.Unreachable {
+		if u.Source == "landing" {
+			u.Revision = r.N
+			reports = core.MergeReports(reports, []core.Unreachable{u})
+		}
+	}
 	// The turn (or prepared handoff) can predate an owner-answer edit.
 	// Reconcile at commit against the current record, never its old snapshot.
-	t.Unreachable = slices.DeleteFunc(slices.Clone(h.Unreachable), func(u core.Unreachable) bool {
+	t.Unreachable = slices.DeleteFunc(reports, func(u core.Unreachable) bool {
 		if slices.Contains(t.OwnerChecks, u.Criterion) || slices.Contains(t.OwnerSteps, u.Criterion) {
 			t.KeepSettledEvidence(u)
 			return true
@@ -146,7 +155,10 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 		return slices.Contains(t.OwnerTook, u.Criterion)
 	})
 	for i := range t.Design {
-		t.Design[i].IntegrationPending = false
+		if slices.Contains(h.IntegratedDesign, t.Design[i].ID) {
+			t.Design[i].IntegrationPending = false
+			t.Design[i].IntegrationSuspended = false
+		}
 	}
 	tookTurn(t, h)
 	t.Status, t.Detail = core.TaskReviewing, ""

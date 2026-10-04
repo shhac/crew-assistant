@@ -35,7 +35,7 @@ type Unreachable struct {
 // NeedsAssetReply includes confirmed assets left pending by a partial spec,
 // as well as an explicit route awaiting production or classification.
 func (u Unreachable) NeedsAssetReply() bool {
-	return u.Routed != "" || u.AssetCreation != nil && *u.AssetCreation
+	return u.Routed != "" || u.AssetCreation != nil && *u.AssetCreation || u.Source == "landing" && u.AssetCreation == nil
 }
 
 // OwnerStep is a requirement a decision proposes leaving to the owner: the
@@ -50,7 +50,7 @@ type OwnerStep struct {
 func (t Task) Pending(n int) []Unreachable {
 	var out []Unreachable
 	for _, u := range t.Unreachable {
-		if u.Revision == n && u.Source != "review" {
+		if u.Revision == n && u.Source != "review" && !(u.Source == "landing" && u.AssetCreation != nil && !*u.AssetCreation) {
 			out = append(out, u)
 		}
 	}

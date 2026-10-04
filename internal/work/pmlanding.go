@@ -48,6 +48,10 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 	if t.NeedsAssetIntegration() {
 		return lp.setStatus(ctx, t.ID, core.TaskWriting, "Integrate delivered assets and provenance in a new draft")
 	}
+	if pendingLandingAssets(t) {
+		_, err := lp.Core.RetainLandingAssets(ctx, t, nil, "PM", true, p.Brief.Version)
+		return err
+	}
 	if len(core.LandingHeld(&p, t)) > 0 {
 		return nil
 	}
@@ -80,11 +84,21 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 	lp.withTools(&spec, lp.managerTools(p.ID, seat))
 	var decided core.LandDecision
 	var sendBack string
-	var blocked *core.Unreachable
+
 	assetReported := false
+	unreadableAsset := false
+	var persistErr error
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
-		// Presence is independent of the typed reply contract. A malformed
-		// classification is still an asset report that needs correction.
+		defer func() {
+			if err == nil {
+				return
+			}
+			for _, u := range t.Unreachable {
+				if u.Source == "landing" && (u.AssetCreation == nil || *u.AssetCreation) {
+					err = fmt.Errorf("%w; pending report_id %s: %s (%s). Only asset_creation:false identifying this report clears it; omission or another report's classification leaves it pending", err, u.ID, u.Criterion, u.Finding)
+				}
+			}
+		}()
 		var fields map[string]json.RawMessage
 		if decodeReply(reply, &fields) == nil && hasProductionDesigner(t) {
 			_, nested := fields["blocked_asset"]
@@ -93,40 +107,36 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 		}
 		candidate, assetErr := parseLandingAsset(p, t, reply)
 		if candidate != nil {
-			blocked = candidate
+			assetReported = true
+			unreadableAsset = false
+			t, persistErr = lp.Core.RetainLandingAssets(ctx, t, []core.Unreachable{*candidate}, seat.Name, false, p.Brief.Version)
+			if persistErr != nil {
+				return persistErr
+			}
+		} else if assetErr != nil && assetReported {
+			unreadableAsset = true
 		}
 		if assetErr != nil {
 			return assetErr
 		}
-		if assetReported && candidate == nil && hasProductionDesigner(t) {
-			var fields map[string]json.RawMessage
-			_ = decodeReply(reply, &fields)
-			var classified *bool
-			_ = json.Unmarshal(fields["asset_creation"], &classified)
-			var nested *ownerStepEntry
-			_ = json.Unmarshal(fields["blocked_asset"], &nested)
-			if nested != nil {
-				classified = nested.AssetCreation
-			}
-			if classified == nil || *classified {
-				return errors.New("previous asset obstacle requires explicit classification correction")
-			}
-			blocked = nil
+		if unreadableAsset && candidate == nil {
+			return errors.New("previous asset obstacle requires an explicit readable classification correction")
 		}
 		decided, sendBack, err = parsePMLanding(reply)
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	})
+	if persistErr != nil {
+		return persistErr
+	}
+	if pendingLandingAssets(t) {
+		_, err := lp.Core.RetainLandingAssets(ctx, t, nil, seat.Name, true, p.Brief.Version)
+		return err
+	}
 	if why := errors.Join(err, parseErr); why != nil {
 		if assetReported {
 			return lp.roleFailed(ctx, t, seat.Name, why)
 		}
 		return lp.askOwnerToLand(ctx, p, t, r, m, core.DecisionInput{Context: fmt.Sprintf("%s couldn't decide whether it lands: %s.", seat.Name, text.Clip(why.Error(), 300))})
-	}
-	if blocked != nil {
-		return lp.routeAsset(ctx, p, t, *blocked, seat.Name)
 	}
 	// A ready pull request the PM wants more done on goes back to the
 	// implementer, not to the owner.
@@ -332,30 +342,91 @@ func parseLandingAsset(p core.Project, t core.Task, reply string) (*core.Unreach
 	if !hasProductionDesigner(t) {
 		return nil, nil
 	}
-	var in struct {
-		Land          bool            `json:"land"`
-		Blocked       *ownerStepEntry `json:"blocked_asset"`
-		AssetCreation *bool           `json:"asset_creation"`
-		Requirement   string          `json:"requirement"`
-		Reason        string          `json:"reason"`
-	}
-	if err := decodeReply(reply, &in); err != nil {
+
+	var fields map[string]json.RawMessage
+	if err := decodeReply(reply, &fields); err != nil {
 		return nil, err
 	}
-	if in.Blocked == nil && in.AssetCreation != nil && *in.AssetCreation {
-		in.Blocked = &ownerStepEntry{Requirement: in.Requirement, Why: in.Reason, AssetCreation: in.AssetCreation}
+	raw, nested := fields["blocked_asset"]
+	if nested && string(raw) == "null" {
+		nested = false
 	}
-	if in.Blocked == nil {
+	if !nested && len(fields["requirement"]) == 0 && string(fields["asset_creation"]) == "false" {
 		return nil, nil
 	}
-	e := in.Blocked
-	if e.AssetCreation == nil || strings.TrimSpace(e.Requirement) == "" || strings.TrimSpace(e.Why) == "" {
-		return nil, errors.New("blocked_asset needs requirement, why and asset_creation")
+	if !nested {
+		if _, ok := fields["asset_creation"]; !ok && len(fields["requirement"]) == 0 {
+			return nil, nil
+		}
+		// Read obstacle text independently of malformed land/how fields.
+		if _, ok := fields["why"]; !ok {
+			fields["why"] = fields["reason"]
+		}
+		if len(fields["why"]) == 0 {
+			fields["why"] = json.RawMessage(`"PM reported blocked asset work"`)
+		}
+		raw, _ = json.Marshal(fields)
 	}
-	if !*e.AssetCreation {
-		return nil, nil
+	var obstacle map[string]json.RawMessage
+	var e ownerStepEntry
+	readable := func(raw json.RawMessage) bool {
+		e = ownerStepEntry{}
+		obstacle = nil
+		return json.Unmarshal(raw, &obstacle) == nil &&
+			json.Unmarshal(obstacle["requirement"], &e.Requirement) == nil &&
+			json.Unmarshal(obstacle["why"], &e.Why) == nil &&
+			strings.TrimSpace(e.Requirement) != "" && strings.TrimSpace(e.Why) != ""
+	}
+	if !readable(raw) {
+		// An unreadable nested form cannot hide independent top-level evidence.
+		if _, ok := fields["why"]; !ok {
+			fields["why"] = fields["reason"]
+		}
+		top, _ := json.Marshal(fields)
+		if !nested || !readable(top) {
+			return nil, errors.New("blocked_asset needs readable requirement and why")
+		}
+	}
+	// Other reply fields cannot erase readable obstacle text. A malformed ID
+	// cannot classify an existing obstacle, but its finding remains evidence.
+	var identityErr error
+	if id, ok := obstacle["report_id"]; ok {
+		identityErr = json.Unmarshal(id, &e.ReportID)
+	}
+	if identityErr == nil {
+		if json.Unmarshal(obstacle["asset_creation"], &e.AssetCreation) != nil {
+			e.AssetCreation = nil
+		}
+	} else {
+		u := reviewReport(p, t, finding{Role: "PM landing", Criterion: e.Requirement, Note: e.Why}, nil)
+		u.Source = "landing"
+		u.ID = "landing-unmatched-" + u.ID
+		return &u, errors.New("blocked_asset needs a readable report_id")
+	}
+	var matches []core.Unreachable
+	for _, old := range t.Unreachable {
+		if old.Source == "landing" && (e.ReportID != "" && old.ID == e.ReportID || e.ReportID == "" && old.Criterion == e.Requirement) {
+			matches = append(matches, old)
+		}
+	}
+	if e.ReportID != "" && (len(matches) != 1 || matches[0].Criterion != e.Requirement) || e.ReportID == "" && len(matches) > 1 {
+		u := reviewReport(p, t, finding{Role: "PM landing", Criterion: e.Requirement, Note: e.Why}, nil)
+		u.Source = "landing"
+		u.ID = "landing-unmatched-" + u.ID
+		return &u, errors.New("identify exactly one obstacle with report_id")
 	}
 	u := reviewReport(p, t, finding{Role: "PM landing", Criterion: e.Requirement, Note: e.Why}, e.AssetCreation)
 	u.Source = "landing"
+	if len(matches) == 1 {
+		u = matches[0]
+		u.AssetCreation = e.AssetCreation
+	}
+	if e.AssetCreation == nil {
+		return &u, errors.New("blocked_asset needs explicit asset_creation classification; use report_id to correct the matching obstacle")
+	}
 	return &u, nil
+}
+
+func pendingLandingAssets(t core.Task) bool {
+	return t.NeedsLandingAssetReply()
 }

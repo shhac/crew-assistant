@@ -36,6 +36,70 @@ func pushTask(t *testing.T) (*Loop, core.Project, core.Task, string) {
 	return a, p, task, source
 }
 
+func TestInterruptedPushReconcilesBeforeTargetCatchUp(t *testing.T) {
+	for _, conflict := range []bool{false, true} {
+		for _, assets := range []bool{false, true} {
+			name := map[bool]string{false: "clean", true: "conflict"}[conflict] + map[bool]string{false: "/code", true: "/assets"}[assets]
+			t.Run(name, func(t *testing.T) {
+				a, p, task, source := pushTask(t)
+				ctx := context.Background()
+				if _, err := a.Core.UpdateTask(ctx, task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+					task.Status, task.DecisionID, task.Approved = core.TaskLanding, "", 1
+					return "", nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if held, err := a.beginDelivering(ctx, task.ID, task.Revisions[0]); err != nil || len(held) != 0 {
+					t.Fatal(held, err)
+				}
+				if assets {
+					if _, err := a.Core.UpdateTask(ctx, task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+						task.Design = []core.DesignRequest{{ID: "frames", AnsweredAt: time.Now(), IntegrationSuspended: true, AssetReports: []core.Unreachable{{ID: "frames", Criterion: "Frames", Bound: "brief"}}, Production: &core.Production{Delivered: []core.DeliveredAsset{{Attachment: "asset"}}, Provenance: "provenance"}}}
+						return "", nil
+					}); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := a.Core.UpdateBrief(ctx, p.ID, core.BriefInput{Goal: p.Brief.Goal, Criteria: []string{"Frames"}}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				file := "owner.go"
+				if conflict {
+					file = "feature.go"
+				}
+				target := ownerCommits(t, source, file, "package main\n\n// Owner version.\nfunc Feature() {}\n", "owner target movement")
+				if conflict && assets {
+					// Recover an older interrupted conflict transition too: writing
+					// cannot run while the original outward intent remains uncertain.
+					if err := a.setStatus(ctx, task.ID, core.TaskWriting, "Interrupted conflict catch-up"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				a = restart(t, a)
+				step(t, a)
+				got := taskByID(t, a, task.ID)
+				if got.Delivering != nil || got.Status == core.TaskWaiting || got.Status == core.TaskLanding || got.Finished() {
+					t.Fatal("interrupted push stranded catch-up", got)
+				}
+				if assets && (got.Status != core.TaskWriting || !got.NeedsAssetIntegration() || len(got.Revisions) != 1) {
+					t.Fatal("reconciliation bypassed restored integration", got)
+				}
+				if ownerGit(t, source, "rev-parse", "main") != target {
+					t.Fatal("recovery pushed an obsolete draft")
+				}
+				if got.Status == core.TaskWriting {
+					got = stepUntil(t, a, task.ID, func(task core.Task) bool { return len(task.Revisions) > 1 || task.Status == core.TaskWaiting })
+					if len(got.Revisions) != 2 || got.Delivering != nil || got.Base != target {
+						t.Fatal("writer could not commit catch-up after reconciliation", got)
+					}
+				} else if len(got.Revisions) != 2 {
+					t.Fatal("clean catch-up was not committed", got)
+				}
+			})
+		}
+	}
+}
+
 // stopMidLanding records the landing's intent for the task's latest draft,
 // as a landing does before pushing, with how the change is to land, and then
 // stops the task.

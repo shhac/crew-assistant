@@ -121,6 +121,8 @@ func (s *Service) UseProjectTeam(ctx context.Context, projectID, taskID string) 
 		switch {
 		case t.ProjectID != projectID:
 			return "", ErrNotFound
+		case t.Delivering != nil || t.PRMergePending():
+			return "", fmt.Errorf("reconcile the recorded delivery before taking on another team or delivery policy: %w", ErrConflict)
 		case (t.Status != TaskWaiting && t.Status != TaskQueued) || len(t.Claims) > 0:
 			return "", fmt.Errorf("a request takes on the project's team only while it waits, for you or in the queue, and no one is working on it: %w", ErrConflict)
 		case t.Status == TaskQueued && t.Playbook == nil:

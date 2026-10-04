@@ -164,7 +164,7 @@ func releaseHeld(v *Snapshot, p *Project) string {
 		return "landing is paused"
 	}
 	for _, t := range v.Tasks {
-		if t.ProjectID == p.ID && (t.Status == TaskLanding || t.Delivering != nil) {
+		if t.ProjectID == p.ID && (t.Status == TaskLanding || t.Delivering != nil || t.PRMergePending()) {
 			return "a landing is in progress"
 		}
 	}

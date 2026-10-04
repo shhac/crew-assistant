@@ -34,6 +34,7 @@ type fakeGitHub struct {
 	merged   string
 	merges   [][]string
 	closed   bool
+	queued   bool
 	// threads are the review threads gh's GraphQL answers with; posts are
 	// the comments, replies, resolves and edits the loop made.
 	threads []map[string]any
@@ -48,7 +49,20 @@ func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
 	switch strings.Join(args[:2], " ") {
 	case "api graphql":
 		if strings.Contains(args[3], "reviewThreads") {
-			return json.Marshal(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"reviewThreads": map[string]any{"nodes": f.threads}}}}})
+			var queue any
+			if f.queued {
+				queue = map[string]string{"id": "queue"}
+			}
+			state := "OPEN"
+			var commit any
+			if f.merged != "" {
+				state, commit = "MERGED", map[string]string{"oid": f.merged}
+			}
+			if f.closed {
+				state = "CLOSED"
+			}
+			head := ownerGit(f.t, f.remote, "rev-parse", "refs/heads/"+f.head)
+			return json.Marshal(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"state": state, "headRefOid": head, "mergeCommit": commit, "mergeQueueEntry": queue, "reviewThreads": map[string]any{"nodes": f.threads}}}}})
 		}
 		f.posts = append(f.posts, args)
 		return []byte("{}"), nil

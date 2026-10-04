@@ -49,7 +49,7 @@ func (s *Service) EndPullRequests(ctx context.Context, projectID string) error {
 		_, pm := p.PMSeat()
 		for i := range v.Tasks {
 			t := &v.Tasks[i]
-			if t.ProjectID != projectID || t.Finished() || !t.UsesPRs() || slices.Contains(p.PRChoices, t.ID) || openPRFlowDecision(v, t.ID) {
+			if t.ProjectID != projectID || t.Finished() || !t.UsesPRs() || t.PRSwitchBy != "" || slices.Contains(p.PRChoices, t.ID) || openPRFlowDecision(v, t.ID) {
 				continue
 			}
 			if pm {
@@ -92,12 +92,20 @@ func choosePRFlow(v *Snapshot, taskID string, keep bool, by string, now time.Tim
 	}
 	p.PRChoices = slices.DeleteFunc(p.PRChoices, func(id string) bool { return id == taskID })
 	if t.Finished() || !t.UsesPRs() || p.Playbook == nil || p.Playbook.Land.PullRequests {
+		t.PRSwitchBy = ""
 		return
 	}
 	if keep {
+		t.PRSwitchBy = ""
 		recordTask(v, now, t, "task.pr_flow", fmt.Sprintf("%s kept %s on its pull request", by, t.Objective))
 		return
 	}
+	if t.Delivering != nil || t.PRMergePending() {
+		t.PRSwitchBy = by
+		recordTask(v, now, t, "task.pr_flow", "Waiting to reconcile the recorded merge before changing delivery policy")
+		return
+	}
+	t.PRSwitchBy = ""
 	if t.PROpen() {
 		t.ClosePR = &PRClose{Repo: t.Playbook.Land.GitHub, Number: t.Proposal.Number, Note: "This change will land another way, so this pull request is closed."}
 	}

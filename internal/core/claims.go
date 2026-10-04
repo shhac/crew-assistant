@@ -224,6 +224,30 @@ func (s *Service) Schedule(ctx context.Context, admit Admit) ([]Scheduled, error
 			return nil
 		}
 		now := s.now().UTC()
+		// Recover asset work before stage capacity and delivery blocker gates.
+		// Never interrupt a live turn or an outward action awaiting reconciliation.
+		for i := range v.Tasks {
+			t := &v.Tasks[i]
+			if !t.Finished() && !v.ProjectPaused(t.ProjectID) && len(t.Claims) == 0 && (t.PRMergePending() || t.Delivering != nil) && t.Status != TaskAwaiting && t.Status != TaskWaiting {
+				t.Status, t.Detail = TaskLanding, "Reconcile the recorded delivery before continuing"
+			}
+			if t.Finished() || len(t.Claims) > 0 || t.Handoff != nil || t.Delivering != nil || t.PRMergePending() || v.ProjectPaused(t.ProjectID) {
+				continue
+			}
+			before := t.Status
+			if t.PRSwitchBy != "" {
+				choosePRFlow(v, t.ID, false, t.PRSwitchBy, now)
+			}
+			reconcileAssetIntegration(t, project(v, t.ProjectID))
+			if t.Status == TaskWriting || t.Status == TaskDeciding || t.Status == TaskLanding || t.Status == TaskAwaiting && t.PROpen() {
+				routeLandingAssets(t, project(v, t.ProjectID), "PM")
+			}
+			if t.Status != before {
+				t.UpdatedAt = now
+				recordTask(v, now, t, "task.asset_recovered", t.Detail)
+				derive(v, t)
+			}
+		}
 		busy := busyPeople(v)
 		waits := map[string]*Wait{}
 		stages := holdings(v)
@@ -531,7 +555,7 @@ func offer(v *Snapshot, t *Task, busy map[string]busyWork, admit Admit, now time
 			}
 		}
 	case TaskLanding:
-		if why := landingStepHeld(project(v, t.ProjectID), *t); len(why) > 0 && t.Delivering == nil {
+		if why := landingStepHeld(project(v, t.ProjectID), *t); len(why) > 0 && t.Delivering == nil && !t.PRMergePending() {
 			return nil, &Wait{Kind: "blocker", On: strings.Join(why, "; ")}
 		}
 		// One landing at a time, counting one a stop cut off whose delivery
@@ -540,7 +564,7 @@ func offer(v *Snapshot, t *Task, busy map[string]busyWork, admit Admit, now time
 			if o.ProjectID != t.ProjectID || o.ID == t.ID {
 				return false
 			}
-			return (o.Finished() && o.Delivering != nil) || slices.ContainsFunc(o.Claims, func(c Claim) bool { return c.Step == TaskLanding })
+			return (o.Finished() && (o.Delivering != nil || o.PRMergePending())) || slices.ContainsFunc(o.Claims, func(c Claim) bool { return c.Step == TaskLanding })
 		}) {
 			return nil, nil
 		}

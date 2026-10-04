@@ -212,7 +212,7 @@ func (s *Service) ReopenPrerequisite(ctx context.Context, projectID, taskID, id,
 		return Task{}, errors.New("the explicit owner instruction is required")
 	}
 	return s.editTaskRecord(ctx, projectID, taskID, func(t *Task, v *Snapshot) error {
-		if t.Finished() || t.Delivering != nil {
+		if t.Finished() || t.Delivering != nil || t.PRMergePending() {
 			return ErrConflict
 		}
 		recoverPrerequisiteAnswers(v, t)
@@ -287,7 +287,7 @@ func (s *Service) reopenPrerequisiteAnswer(ctx context.Context, v *Snapshot, d D
 		return nil
 	}
 	t := task(v, d.TaskID)
-	if t == nil || t.Finished() || t.Delivering != nil {
+	if t == nil || t.Finished() || t.Delivering != nil || t.PRMergePending() {
 		return nil
 	}
 	recoverPrerequisiteAnswers(v, t)

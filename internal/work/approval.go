@@ -21,6 +21,13 @@ func (lp *Loop) approve(ctx context.Context, t core.Task) error {
 // through its open pull request, and moves the task on to landing.
 func (lp *Loop) approveMerge(ctx context.Context, t core.Task) error {
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.NeedsAssetIntegration() || t.NeedsLandingAssetReply() {
+			t.Status, t.Detail = core.TaskWriting, "Integrate delivered assets and provenance in a new draft"
+			if t.NeedsLandingAssetReply() {
+				t.Detail = "Supply production or classification for the pending asset obstacles"
+			}
+			return t.Detail, nil
+		}
 		if len(t.Revisions) > 0 && t.Proposal != nil {
 			t.Proposal.MergeApproved = t.Revisions[len(t.Revisions)-1].N
 		}
@@ -34,6 +41,13 @@ func (lp *Loop) approveMerge(ctx context.Context, t core.Task) error {
 // approveLatest approves a task's latest revision, within a change, and
 // says so.
 func approveLatest(t *core.Task) string {
+	if t.NeedsAssetIntegration() || t.NeedsLandingAssetReply() {
+		t.Status, t.Detail = core.TaskWriting, "Integrate delivered assets and provenance in a new draft"
+		if t.NeedsLandingAssetReply() {
+			t.Detail = "Supply production or classification for the pending asset obstacles"
+		}
+		return t.Detail
+	}
 	if len(t.Revisions) > 0 {
 		t.Approved = t.Revisions[len(t.Revisions)-1].N
 	}

@@ -46,6 +46,43 @@ func TestWakesWaitInParallelAndAreCancelledByHandle(t *testing.T) {
 	}
 }
 
+func TestLoopPRWatchRefreshPreservesExpiryAndFiredEvidence(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	task, err := s.QueueTask(testContext, p.ID, TaskInput{Objective: "Watch merge"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return clock }
+	for _, on := range []string{WakeOnChecks, WakeOnReview} {
+		in := WakeInput{Owner: WakeLoop, TaskID: task.ID, ProjectID: p.ID, On: on, Target: "example/repo#1", Baseline: "merge:false", Timeout: time.Hour}
+		first, err := s.RegisterWake(testContext, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		clock = clock.Add(time.Minute)
+		in.Baseline = "merge:true"
+		refreshed, err := s.RegisterWake(testContext, in)
+		if err != nil || refreshed.ID != first.ID || refreshed.Baseline != in.Baseline || !refreshed.CreatedAt.Equal(first.CreatedAt) || !refreshed.ExpiresAt.Equal(first.ExpiresAt) || !refreshed.FiresOn("merge:false") {
+			t.Fatal("observation did not refresh the original watch", refreshed, err)
+		}
+		if _, err := s.FireWake(testContext, first.ID, "merge:false", "cancelled", false); err != nil {
+			t.Fatal(err)
+		}
+		next, err := s.RegisterWake(testContext, in)
+		if err != nil || next.ID == first.ID {
+			t.Fatal("refresh erased a fired watch", next, err)
+		}
+		snap, _ := s.Snapshot(testContext)
+		for _, w := range snap.Wakes {
+			if w.ID == first.ID && (w.Status != WakeFired || w.Observed != "merge:false" || w.Event != "cancelled") {
+				t.Fatal("lost fired evidence", w)
+			}
+		}
+	}
+}
+
 func TestAssistantWakesArriveTogetherWithTheirOwnTimes(t *testing.T) {
 	s, _ := fixture(t)
 	clock := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)

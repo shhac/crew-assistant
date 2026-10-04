@@ -194,7 +194,7 @@ func addressee(team []Role, to string) (Role, error) {
 // moves the task on so the implementer sees it: at once when the task was
 // waiting on the owner or on a pull request, otherwise in its next round.
 func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
-	if t.Status == TaskLanding {
+	if t.Status == TaskLanding && t.Delivering == nil && !t.PRMergePending() {
 		return fmt.Errorf("it is landing right now; message the implementer once it has landed or is waiting on its pull request: %w", ErrConflict)
 	}
 	var open *Decision
@@ -203,6 +203,9 @@ func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
 	}
 	m.Direction = t.AddDirection(open, m.Text)
 	t.DirectionPending++
+	if t.Delivering != nil || t.PRMergePending() {
+		return nil // Keep direction durable until the recorded merge is reconciled.
+	}
 	switch {
 	case open != nil && open.Kind == DecisionFailure:
 		// A retry that would go straight back to landing must not land

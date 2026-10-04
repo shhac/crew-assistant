@@ -29,11 +29,16 @@ type ThreadComment struct {
 	CreatedAt   time.Time
 }
 
-// threadsQuery reads up to 100 review threads and 50 comments in each: a
+// threadsQuery reads merge enrollment plus up to 100 threads and 50 comments in each: a
 // pull request with more is beyond what the team answers in one look.
 const threadsQuery = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
+      state
+      headRefOid
+      mergeCommit { oid }
+      autoMergeRequest { enabledAt }
+      mergeQueueEntry { id }
       reviewThreads(first: 100) {
         nodes {
           id
@@ -50,7 +55,7 @@ const threadsQuery = `query($owner: String!, $name: String!, $number: Int!) {
   }
 }`
 
-func (c Client) threads(ctx context.Context, repo string, number int) ([]Thread, error) {
+func (c Client) threads(ctx context.Context, repo string, number int, pr *PR) ([]Thread, error) {
 	owner, name, _ := strings.Cut(repo, "/")
 	out, err := c.Run(ctx, "api", "graphql", "-f", "query="+threadsQuery, "-f", "owner="+owner, "-f", "name="+name, "-F", "number="+strconv.Itoa(number))
 	if err != nil {
@@ -60,7 +65,12 @@ func (c Client) threads(ctx context.Context, repo string, number int) ([]Thread,
 		Data struct {
 			Repository struct {
 				PullRequest struct {
-					ReviewThreads struct {
+					State            string           `json:"state"`
+					HeadRefOid       string           `json:"headRefOid"`
+					MergeCommit      json.RawMessage  `json:"mergeCommit"`
+					AutoMergeRequest *json.RawMessage `json:"autoMergeRequest"`
+					MergeQueueEntry  *json.RawMessage `json:"mergeQueueEntry"`
+					ReviewThreads    struct {
 						Nodes []struct {
 							ID         string `json:"id"`
 							IsResolved bool   `json:"isResolved"`
@@ -84,6 +94,19 @@ func (c Client) threads(ctx context.Context, repo string, number int) ([]Thread,
 	if err = json.Unmarshal(out, &answer); err != nil {
 		return nil, fmt.Errorf("gh gave unreadable review threads: %w", err)
 	}
+	snapshot := answer.Data.Repository.PullRequest
+	if snapshot.State == "" || snapshot.HeadRefOid == "" {
+		return nil, errors.New("gh gave an incomplete pull request delivery observation")
+	}
+	// State, head, merge commit and enrollment must describe the same read.
+	pr.State, pr.HeadRefOid = snapshot.State, snapshot.HeadRefOid
+	pr.MergeCommit = nil
+	if len(snapshot.MergeCommit) > 0 {
+		if err := json.Unmarshal(snapshot.MergeCommit, &pr.MergeCommit); err != nil {
+			return nil, err
+		}
+	}
+	pr.MergeInFlight = snapshot.AutoMergeRequest != nil || snapshot.MergeQueueEntry != nil
 	var threads []Thread
 	for _, n := range answer.Data.Repository.PullRequest.ReviewThreads.Nodes {
 		th := Thread{ID: n.ID, Resolved: n.IsResolved, Outdated: n.IsOutdated, Path: n.Path, Line: n.Line}

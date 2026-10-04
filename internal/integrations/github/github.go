@@ -113,6 +113,8 @@ func (c Check) Pending() bool {
 }
 
 type PR struct {
+	// MergeInFlight includes automatic merge and merge queue enrollment.
+	MergeInFlight    bool      `json:"-"`
 	Number           int       `json:"number"`
 	URL              string    `json:"url"`
 	State            string    `json:"state"`
@@ -294,7 +296,7 @@ func (c Client) View(ctx context.Context, repo string, number int) (PR, error) {
 	if err = json.Unmarshal(out, &pr); err != nil {
 		return PR{}, fmt.Errorf("gh gave an unreadable pull request: %w", err)
 	}
-	if pr.Threads, err = c.threads(ctx, repo, number); err != nil {
+	if pr.Threads, err = c.threads(ctx, repo, number, &pr); err != nil {
 		return PR{}, err
 	}
 	return pr, nil

@@ -25,7 +25,8 @@ type Wake struct {
 	Match string `json:"match,omitempty"`
 	// Prompt is the continuation the agent wrote for itself.
 	Prompt string `json:"prompt,omitempty"`
-	// Baseline is what the daemon saw when the wake was registered.
+	// Baseline is what the daemon saw when the wake was registered, or
+	// the latest observation for a loop-owned pull-request watch.
 	Baseline    string     `json:"baseline"`
 	Status      string     `json:"status"`
 	Observed    string     `json:"observed,omitempty"`
@@ -71,6 +72,7 @@ type WakeInput struct {
 var wakeKinds = map[string]bool{WakeOnTask: true, WakeOnBranch: true, WakeOnChecks: true, WakeOnReview: true, WakeOnTime: true}
 
 // RegisterWake records a new wake with the baseline the caller observed.
+// Waiting loop-owned PR watches are refreshed in place without extending expiry.
 func (s *Service) RegisterWake(ctx context.Context, in WakeInput) (Wake, error) {
 	if !wakeKinds[in.On] {
 		return Wake{}, fmt.Errorf("cannot wait on %q; use task, branch, pr_checks, pr_review or time", in.On)
@@ -101,6 +103,18 @@ func (s *Service) RegisterWake(ctx context.Context, in WakeInput) (Wake, error) 
 				return ErrNotFound
 			}
 			out.TaskID = t.ID
+		}
+		// Loop-owned PR watches follow the latest observation, including merge
+		// enrollment seen between polls. Keep the handle and original expiry.
+		if out.Owner == WakeLoop && (out.On == WakeOnChecks || out.On == WakeOnReview) {
+			for i := range v.Wakes {
+				w := &v.Wakes[i]
+				if w.Status == WakeWaiting && w.Owner == out.Owner && w.TaskID == out.TaskID && w.On == out.On && w.Target == out.Target && w.Match == out.Match {
+					w.Baseline = out.Baseline
+					out = *w
+					return nil
+				}
+			}
 		}
 		waiting := 0
 		for _, w := range v.Wakes {

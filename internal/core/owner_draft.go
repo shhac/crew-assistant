@@ -20,6 +20,8 @@ const DraftByOwner = "owner"
 func (s *Service) AdoptDraft(ctx context.Context, taskID string, r Revision, approve bool) (Task, error) {
 	return s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		switch {
+		case t.Delivering != nil || t.PRMergePending():
+			return fmt.Errorf("reconcile the recorded merge before adopting another draft: %w", ErrConflict)
 		case t.Finished():
 			return fmt.Errorf("“%s” has finished: %w", t.Objective, ErrConflict)
 		case len(t.Revisions) == 0:

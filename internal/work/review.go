@@ -212,6 +212,10 @@ func (lp *Loop) askForJSON(ctx context.Context, spec roles.Spec, parse func(repl
 // or a draft every reviewer passed. It is deterministic, except where a
 // checker recommends another step and the PM chooses; see route.
 func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
+	if pendingLandingAssets(t) {
+		_, err := lp.Core.RetainLandingAssets(ctx, t, nil, "PM", true, p.Brief.Version)
+		return err
+	}
 	r := t.Revisions[len(t.Revisions)-1]
 	var current []core.Verdict
 	for _, v := range t.Verdicts {

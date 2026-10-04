@@ -276,7 +276,8 @@ func TestSuccessfulMergeRequestReleasesDeliveryMarkAndKeepsBlockersEffective(t *
 	if _, err := lp.SetBlocker(ctx, core.BlockerInput{Project: p.ID, Task: task.ID, Kind: core.BlockerManual, Description: "a new build", LandingOnly: true, By: core.LinkedByPM}); err != nil {
 		t.Fatalf("team still thinks it is delivering: %v", err)
 	}
-	// The stale queued-merge observation must not bypass the newly added condition.
+	// The observed in-flight request must not be submitted again.
+	pr.MergeInFlight = true
 	if err := lp.reactTo(ctx, p, fresh, m, fresh.Revisions[0], prop, pr); err != nil {
 		t.Fatal(err)
 	}

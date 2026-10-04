@@ -18,6 +18,9 @@ import (
 // it produced. The workspace is first reset to the last revision, so nothing
 // a crashed or failed turn left behind is ever mistaken for a draft.
 func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium, writer core.Role) error {
+	if t.Delivering != nil || t.PRMergePending() {
+		return nil
+	}
 	if writer.Name == "" {
 		return lp.stopTask(ctx, t, "This task's team has no writer")
 	}
@@ -183,7 +186,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	if ok {
 		lp.recordLearned(ctx, p, t, r, m, in.learned)
 	}
-	h := core.Handoff{HandOnWhy: why, DraftCatchUp: integration, Writer: writer, Session: result.Session, Seen: seen, Reply: in.reply, Request: t.WriterRequest, WakeErrors: wakeErrors, PR: prText, Posts: posts}
+	h := core.Handoff{IntegratedDesign: t.PendingAssetDesigns(), HandOnWhy: why, DraftCatchUp: integration, Writer: writer, Session: result.Session, Seen: seen, Reply: in.reply, Request: t.WriterRequest, WakeErrors: wakeErrors, PR: prText, Posts: posts}
 	if ok {
 		r.Learnings = nil
 		h.Seat = &r
@@ -256,7 +259,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	// and review classifications survive omission; correction turns above
 	// explicitly merge all reports instead.
 	retained := slices.DeleteFunc(slices.Clone(t.Unreachable), func(u core.Unreachable) bool {
-		return !u.NeedsAssetReply() && u.Source != "review"
+		return !u.NeedsAssetReply() && u.Source != "review" && u.Source != "landing"
 	})
 	h.Unreachable = core.MergeReports(retained, bindWriterReports(p, t, h.Unreachable))
 	for i := range h.Unreachable {
@@ -361,6 +364,12 @@ func noChangeNeeded(t *core.Task, h core.Handoff) string {
 	}
 	tookTurn(t, h)
 	t.AnswerDirection(h.Seen, 0, "No change needed: "+h.Reply, time.Now().UTC())
+	// Requirements may have reactivated after this unchanged turn began.
+	// Judge the durable obligation here, not only the turn's old snapshot.
+	if t.NeedsAssetIntegration() || t.NeedsLandingAssetReply() {
+		t.Status, t.Detail = core.TaskWriting, "Finish the outstanding asset work in a new draft"
+		return t.Detail
+	}
 	if t.DirectionPending > 0 {
 		t.ReviseWithDirection()
 		return fmt.Sprintf("%s: no change needed for the pull request; revising with your note", t.Objective)

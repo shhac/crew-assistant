@@ -65,7 +65,72 @@ func (s *Service) RouteAsset(ctx context.Context, expected Task, u Unreachable, 
 }
 
 func sameAssetRecord(t, expected Task) bool {
-	return t.TextVersion == expected.TextVersion && reflect.DeepEqual(t.Revisions, expected.Revisions) && reflect.DeepEqual(t.Unreachable, expected.Unreachable)
+	return t.TextVersion == expected.TextVersion && reflect.DeepEqual(t.Revisions, expected.Revisions) && reflect.DeepEqual(t.Unreachable, expected.Unreachable) && reflect.DeepEqual(t.Design, expected.Design)
+}
+
+// RetainLandingAssets records readable PM obstacles before another correction,
+// or routes the entire pending set together. Omitted reports remain durable.
+func (s *Service) RetainLandingAssets(ctx context.Context, expected Task, reports []Unreachable, reporter string, route bool, briefVersion int) (Task, error) {
+	return s.editTaskRecord(ctx, "", expected.ID, func(t *Task, v *Snapshot) error {
+		if (t.Status != TaskDeciding && t.Status != TaskLanding) || !sameAssetRecord(*t, expected) || !assetBriefCurrent(v, *t, briefVersion) {
+			return ErrConflict
+		}
+		if _, ok := t.Designer(); !ok {
+			return ErrConflict
+		}
+		for _, u := range reports {
+			if u.Source != "landing" || u.ID == "" || u.Criterion == "" || u.Why == "" {
+				return ErrConflict
+			}
+			i := slices.IndexFunc(t.Unreachable, func(old Unreachable) bool { return ReportKey(old) == ReportKey(u) })
+			if i < 0 {
+				if u.AssetCreation == nil || *u.AssetCreation {
+					if slices.Contains(t.Criteria, u.Criterion) {
+						u.Bound = "task"
+					} else if p := project(v, t.ProjectID); p != nil && slices.Contains(p.Brief.Criteria, u.Criterion) {
+						u.Bound = "brief"
+					}
+					t.Unreachable = append(t.Unreachable, u)
+				}
+			} else if t.Unreachable[i].Source != "landing" || t.Unreachable[i].Criterion != u.Criterion {
+				return ErrConflict
+			} else if u.AssetCreation != nil {
+				t.Unreachable[i].AssetCreation = u.AssetCreation
+				if !*u.AssetCreation {
+					t.Unreachable[i].Routed = ""
+				}
+			}
+		}
+		if route {
+			routeLandingAssets(t, project(v, t.ProjectID), reporter)
+		}
+		t.UpdatedAt = s.now().UTC()
+		recordTask(v, s.now().UTC(), t, "task.landing_assets", reporter+": retained asset obstacle evidence")
+		derive(v, t)
+		return nil
+	})
+}
+
+// routeLandingAssets recovers evidence retained before a lost correction turn.
+func routeLandingAssets(t *Task, p *Project, reporter string) {
+	if _, ok := t.Designer(); !ok {
+		return
+	}
+	t.Unreachable = slices.DeleteFunc(t.Unreachable, func(u Unreachable) bool {
+		if u.Source == "landing" && obsoleteAssetReport(*t, p, u) {
+			t.KeepSettledEvidence(u)
+			return true
+		}
+		return false
+	})
+	for i := range t.Unreachable {
+		u := &t.Unreachable[i]
+		if u.Source != "landing" || u.AssetCreation != nil && !*u.AssetCreation || obsoleteAssetReport(*t, p, *u) {
+			continue
+		}
+		u.Routed = reporter + ": supply a production spec or classify this report explicitly"
+		t.Status, t.Detail = TaskWriting, u.Routed
+	}
 }
 
 // ReportKey distinguishes review findings even when they quote the same criterion.
@@ -74,6 +139,16 @@ func ReportKey(u Unreachable) string {
 		return u.ID
 	}
 	return u.Criterion
+}
+
+// NeedsLandingAssetReply survives a lost PM correction conversation.
+func (t Task) NeedsLandingAssetReply() bool {
+	if _, designer := t.Designer(); !designer {
+		return false
+	}
+	return slices.ContainsFunc(t.Unreachable, func(u Unreachable) bool {
+		return u.Source == "landing" && (u.AssetCreation == nil || *u.AssetCreation)
+	})
 }
 
 func reportFor(reports []Unreachable, key string) *Unreachable {
@@ -193,11 +268,12 @@ func (s *Service) RecordAssetClassification(ctx context.Context, expected Task, 
 // including after a restart or an owner changes the task's team.
 func (s *Service) PrepareAssetWriting(ctx context.Context, expected Task) (Task, error) {
 	return s.editTaskRecord(ctx, "", expected.ID, func(t *Task, v *Snapshot) error {
-		if t.Status != TaskWriting || !sameAssetRecord(*t, expected) {
+		if t.Status != TaskWriting || t.Delivering != nil || t.PRMergePending() || !sameAssetRecord(*t, expected) {
 			return ErrConflict
 		}
 		p := project(v, t.ProjectID)
 		now := s.now().UTC()
+		routeLandingAssets(t, p, "PM")
 		t.Unreachable = slices.DeleteFunc(t.Unreachable, func(u Unreachable) bool {
 			if !u.NeedsAssetReply() {
 				return false
@@ -299,15 +375,17 @@ func (s *Service) RestoreUnfinishedProduction(ctx context.Context, expected Task
 	return out, err
 }
 
-// Retain historical reports and files when their integration obligation ends.
+// Suspend inactive obligations reversibly; completed integration stays settled.
 func reconcileAssetIntegration(t *Task, p *Project) {
 	for i := range t.Design {
 		r := &t.Design[i]
-		if !r.IntegrationPending || len(r.AssetReports) == 0 {
+		if (!r.IntegrationPending && !r.IntegrationSuspended) || len(r.AssetReports) == 0 {
 			continue
 		}
-		if !slices.ContainsFunc(r.AssetReports, func(u Unreachable) bool { return !obsoleteAssetReport(*t, p, u) }) {
-			r.IntegrationPending = false
-		}
+		active := slices.ContainsFunc(r.AssetReports, func(u Unreachable) bool { return !obsoleteAssetReport(*t, p, u) })
+		r.IntegrationPending, r.IntegrationSuspended = active, !active
+	}
+	if t.NeedsAssetIntegration() && (t.Status == TaskDeciding || t.Status == TaskLanding || t.Status == TaskAwaiting && t.PROpen()) && t.Delivering == nil && !t.PRMergePending() {
+		t.Status, t.Detail = TaskWriting, "Integrate delivered assets and provenance in a new draft"
 	}
 }

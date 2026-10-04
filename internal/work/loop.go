@@ -211,6 +211,9 @@ func (lp *Loop) loopStep(ctx context.Context, noDispatch bool) (bool, error) {
 // no revision to work from, or has direction it has not yet had in view. It
 // reports whether it did.
 func (lp *Loop) backToWriter(ctx context.Context, t core.Task) (bool, error) {
+	if t.Delivering != nil || t.PRMergePending() {
+		return false, nil
+	}
 	switch {
 	case t.Status != core.TaskReviewing && t.Status != core.TaskDeciding && t.Status != core.TaskLanding:
 		return false, nil
@@ -486,7 +489,7 @@ func (lp *Loop) runtimeHome(engine string) string {
 // or landing without it.
 func (lp *Loop) takeDirection(ctx context.Context, t core.Task) error {
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.DirectionPending == 0 {
+		if t.DirectionPending == 0 || t.Delivering != nil || t.PRMergePending() {
 			return "", nil
 		}
 		t.ReviseWithDirection()

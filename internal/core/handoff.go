@@ -10,6 +10,8 @@ import "encoding/json"
 // drops it. It carries everything the turn's outcome changes on the task, so
 // finishing it never runs the turn again.
 type Handoff struct {
+	// IntegratedDesign identifies completed production visible to this turn.
+	IntegratedDesign []string `json:"integrated_design,omitempty"`
 	// Name is the ref the revision is kept under, unique to this attempt.
 	Name string `json:"name"`
 	// Revision is what is appended, with Ref the commit being handed over.

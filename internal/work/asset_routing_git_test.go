@@ -4,16 +4,105 @@ package work
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/roles"
 )
+
+func TestIntegrationRestorationKeepsUnclassifiedLandingObstacle(t *testing.T) {
+	for _, source := range []string{"undo", "brief"} {
+		t.Run(source, func(t *testing.T) {
+			a, _, p, task := codeTask(t, pass, pass)
+			ctx := context.Background()
+			seatDesignerOn(t, a, p.ID, "codex")
+			task = stepUntil(t, a, task.ID, func(task core.Task) bool { return len(task.Revisions) > 0 })
+			var err error
+			task, err = a.Core.UpdateTask(ctx, task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+				task.Status, task.Criteria = core.TaskDeciding, []string{"Frames", "Icons"}
+				task.Design = []core.DesignRequest{{ID: "icons", AnsweredAt: time.Now(), IntegrationPending: true, AssetReports: []core.Unreachable{{ID: "icons", Criterion: "Icons", Bound: "task"}}, Production: &core.Production{Delivered: []core.DeliveredAsset{{Attachment: "asset"}}, Provenance: "provenance"}}}
+				return "", nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			task, err = a.Core.EditTask(ctx, core.EditInput{Project: p.ID, Task: task.ID, Kind: core.RolePM, By: "PM", Criteria: []string{"Frames"}})
+			if err != nil || !task.Design[0].IntegrationSuspended {
+				t.Fatal(task, err)
+			}
+			u := core.Unreachable{ID: "frames", Source: "landing", Criterion: "Frames", Why: "generator unavailable", Finding: "original", Revision: 1}
+			task, err = a.Core.RetainLandingAssets(ctx, task, []core.Unreachable{u}, "PM", false, p.Brief.Version)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeRestoration := task
+			if source == "undo" {
+				_, err = a.Core.UndoTaskEdit(ctx, p.ID, task.ID, task.Edits[len(task.Edits)-1].ID)
+			} else {
+				_, err = a.Core.UpdateBrief(ctx, p.ID, core.BriefInput{Goal: p.Brief.Goal, Criteria: []string{"Icons"}})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = a.Core.RetainLandingAssets(ctx, beforeRestoration, nil, "PM", true, p.Brief.Version); !errors.Is(err, core.ErrConflict) {
+				t.Fatal("routing write did not detect intervening restoration", err)
+			}
+			a = restart(t, a)
+			steps, err := a.Core.Schedule(ctx, func(core.Role) string { return "" })
+			if err != nil || len(steps) != 1 || steps[0].Claim.Step != core.TaskWriting {
+				t.Fatal("restoration did not schedule a writer", steps, err)
+			}
+			task = steps[0].Task
+			if len(task.Unreachable) != 1 || task.Unreachable[0].Routed == "" || task.Unreachable[0].ID != "frames" {
+				t.Fatal("writing skipped PM obstacle recovery", task.Unreachable)
+			}
+			turn := core.Fenced(ctx, task.ID, steps[0].Claim.Token)
+			snap, _ := a.Core.Snapshot(ctx)
+			p, _ = findProject(snap, p.ID)
+			m, _ := a.testMedium(t, p.ID, task.ID)
+			writer := task.RolesOf(core.RoleImplementer)[0].Name
+			if err = a.recordDraft(turn, p, task, m, writer, roles.Result{Text: "Ordinary draft"}, 0, nil); err != nil {
+				t.Fatal(err)
+			}
+			snap, _ = a.Core.Snapshot(ctx)
+			task, _ = snap.FindTask(task.ID)
+			if len(task.Revisions) != 1 || len(task.Unreachable) != 1 || task.Unreachable[0].ID != "frames" || task.Unreachable[0].AssetCreation != nil {
+				t.Fatal("ordinary draft dropped the unresolved PM obstacle", task)
+			}
+			if err = a.recordDraft(turn, p, task, m, writer, roles.Result{Text: "```owner-step\n[{\"report_id\":\"frames\",\"requirement\":\"Frames\",\"why\":\"code only\",\"asset_creation\":false}]\n```"}, 0, nil); err != nil {
+				t.Fatal(err)
+			}
+			snap, _ = a.Core.Snapshot(ctx)
+			task, _ = snap.FindTask(task.ID)
+			if err = m.reset(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			for name, content := range map[string]string{"icons.png": "synthetic asset", "provenance.json": "{}"} {
+				if err = os.WriteFile(filepath.Join(m.workspace(task), name), []byte(content), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err = a.recordDraft(turn, p, task, m, writer, roles.Result{Text: "Integrated icons and provenance"}, 0, nil); err != nil {
+				t.Fatal(err)
+			}
+			snap, _ = a.Core.Snapshot(ctx)
+			got, _ := snap.FindTask(task.ID)
+			if len(got.Revisions) != 2 || got.NeedsAssetIntegration() || len(got.Pending(2)) != 0 || len(got.Unreachable) != 1 || got.Unreachable[0].ID != "frames" || got.Unreachable[0].AssetCreation == nil || *got.Unreachable[0].AssetCreation {
+				t.Fatal("draft commit lost the explicit settlement or integration", got)
+			}
+			if err = a.Core.ReleaseClaim(ctx, task.ID, steps[0].Claim.Token); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestRoutedAssetHandBackIsCopiedIntoTheRecordedCommit(t *testing.T) {
 	a, runner, p, task := codeTask(t, pass, pass)
@@ -330,7 +419,7 @@ func TestMalformedPMLandingAssetReportDoesNotBecomeOwnerHold(t *testing.T) {
 			}
 			snap, _ = w.a.Core.Snapshot(ctx)
 			task, _ = snap.FindTask(task.ID)
-			if task.DecisionID != "" || task.Failures != 1 || len(task.Design) != 0 || task.LandDecision != nil {
+			if task.DecisionID != "" || len(task.Design) != 0 || task.LandDecision != nil || (len(task.Unreachable) == 0 && task.Failures != 1) || (len(task.Unreachable) > 0 && task.Status != core.TaskWriting) {
 				t.Fatal(task)
 			}
 		})
@@ -397,7 +486,7 @@ func TestPMLandingCorrectionCannotOmitAssetObstacle(t *testing.T) {
 			}
 			snap, _ = w.a.Core.Snapshot(ctx)
 			task, _ = snap.FindTask(task.ID)
-			if task.DecisionID != "" || task.Failures != 1 || len(task.Design) != 0 || task.LandDecision != nil {
+			if task.DecisionID != "" || len(task.Design) != 0 || task.LandDecision != nil || (len(task.Unreachable) == 0 && task.Failures != 1) || (len(task.Unreachable) > 0 && task.Status != core.TaskWriting) {
 				t.Fatal(task)
 			}
 		})
@@ -405,7 +494,7 @@ func TestPMLandingCorrectionCannotOmitAssetObstacle(t *testing.T) {
 }
 
 func TestRetiredProductionAllowsUnchangedPR(t *testing.T) {
-	for _, restart := range []bool{false, true} {
+	for _, reopen := range []bool{false, true} {
 		for _, pr := range []bool{true} {
 			a, runner, p, task := codeTask(t, pass, pass)
 			seatDesignerOn(t, a, p.ID, "codex")
@@ -437,7 +526,7 @@ func TestRetiredProductionAllowsUnchangedPR(t *testing.T) {
 			if err = a.design(ctx, p, task, m, designer); err != nil {
 				t.Fatal(err)
 			}
-			if restart {
+			if reopen {
 				next := New(a.Core, a.Config, false)
 				next.runner, next.meter = runner, a.meter
 				a = next
@@ -461,7 +550,7 @@ func TestRetiredProductionAllowsUnchangedPR(t *testing.T) {
 			}
 			snap, _ = a.Core.Snapshot(ctx)
 			task, _ = snap.FindTask(task.ID)
-			if restart {
+			if reopen {
 				next := New(a.Core, a.Config, false)
 				next.runner, next.meter = runner, a.meter
 				a = next
@@ -481,6 +570,62 @@ func TestRetiredProductionAllowsUnchangedPR(t *testing.T) {
 			task, _ = snap.FindTask(task.ID)
 			if task.Failures != 0 || len(task.Revisions) != 1 || task.Status != core.TaskLanding {
 				t.Fatal(task)
+			}
+			// Undo retirement after the unchanged PR reply and restart.
+			if _, err = a.Core.UndoTaskEdit(ctx, p.ID, task.ID, task.Edits[len(task.Edits)-1].ID); err != nil {
+				t.Fatal(err)
+			}
+			a = restart(t, a)
+			snap, _ = a.Core.Snapshot(ctx)
+			task, _ = snap.FindTask(task.ID)
+			if !task.NeedsAssetIntegration() || task.Status != core.TaskWriting {
+				t.Fatal("undo did not restore integration", task)
+			}
+			p, _ = findProject(snap, p.ID)
+			if err = m.reset(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			if err = a.recordDraft(ctx, p, task, m, writer.Name, roles.Result{Text: "No change"}, 0, nil); err != nil {
+				t.Fatal(err)
+			}
+			snap, _ = a.Core.Snapshot(ctx)
+			task, _ = snap.FindTask(task.ID)
+			if !task.NeedsAssetIntegration() || len(task.Revisions) != 1 || task.Status != core.TaskWriting {
+				t.Fatal("unchanged reply bypassed restored integration", task)
+			}
+			if err = a.recordDraft(ctx, p, task, m, writer.Name, roles.Result{Text: "\x60\x60\x60owner-step\n[{\"requirement\":\"Decode images\",\"why\":\"code only\",\"asset_creation\":false}]\n\x60\x60\x60"}, 0, nil); err != nil {
+				t.Fatal(err)
+			}
+			snap, _ = a.Core.Snapshot(ctx)
+			task, _ = snap.FindTask(task.ID)
+			if !task.NeedsAssetIntegration() || len(task.Revisions) != 1 {
+				t.Fatal("classification bypassed integration", task)
+			}
+			if err = m.reset(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			prod := task.Design[0].Production
+			for name, id := range map[string]string{"frame.png": prod.Delivered[0].Attachment, "provenance.json": prod.Provenance} {
+				data, err := os.ReadFile(filepath.Join(a.Core.AttachmentsDirectory(task.ID), id))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = os.WriteFile(filepath.Join(m.workspace(task), name), data, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err = a.recordDraft(ctx, p, task, m, writer.Name, roles.Result{Text: "Integrated returned assets and provenance"}, 0, nil); err != nil {
+				t.Fatal(err)
+			}
+			snap, _ = a.Core.Snapshot(ctx)
+			task, _ = snap.FindTask(task.ID)
+			if task.NeedsAssetIntegration() || len(task.Revisions) != 2 || task.Status != core.TaskReviewing {
+				t.Fatal(task)
+			}
+			for _, name := range []string{"frame.png", "provenance.json"} {
+				if ownerGit(t, m.workspace(task), "show", task.Revisions[1].Ref+":"+name) == "" {
+					t.Fatal("missing integrated file", name)
+				}
 			}
 		}
 	}
@@ -582,7 +727,7 @@ func TestPMLandingCorrectionCannotNullAssetObstacle(t *testing.T) {
 			}
 			snap, _ = w.a.Core.Snapshot(ctx)
 			task, _ = snap.FindTask(task.ID)
-			if task.DecisionID != "" || task.Failures != 1 || len(task.Design) != 0 || task.LandDecision != nil {
+			if task.DecisionID != "" || len(task.Design) != 0 || task.LandDecision != nil || (len(task.Unreachable) == 0 && task.Failures != 1) || (len(task.Unreachable) > 0 && task.Status != core.TaskWriting) {
 				t.Fatal(task)
 			}
 		})

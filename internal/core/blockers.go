@@ -73,6 +73,16 @@ func (p *Project) pausedLanding() string {
 // blockers, and p's landing pause, which holds a pull request only from
 // merging, never from opening or from the team answering its reviews.
 func LandingHeld(p *Project, t Task) []string {
+	if t.NeedsAssetIntegration() {
+		return []string{"Integrate delivered assets and provenance in a new draft"}
+	}
+	if _, designer := t.Designer(); designer {
+		for _, u := range t.Unreachable {
+			if u.Source == "landing" && (u.AssetCreation == nil || *u.AssetCreation) && !obsoleteAssetReport(t, p, u) {
+				return []string{"Supply production or classification for pending PM asset obstacles"}
+			}
+		}
+	}
 	out := BlockerReasons(t)
 	if paused := p.pausedLanding(); paused != "" && (!t.UsesPRs() || t.PROpen()) {
 		out = append(out, paused)

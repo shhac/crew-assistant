@@ -65,8 +65,9 @@ func (branchWay) deliver(ctx context.Context, m gitMedium, t core.Task, r core.R
 	return m.repo.Deliver(ctx, r.Ref, m.branchName(t))
 }
 
-func (branchWay) alreadyLanded(context.Context, gitMedium, core.Task, core.Revision) (bool, error) {
-	return false, nil
+func (branchWay) alreadyLanded(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (bool, error) {
+	_, there, err := m.repo.Delivered(ctx, r.Ref, m.branchName(t))
+	return there, err
 }
 
 func (branchWay) note(m gitMedium, t core.Task) string {
