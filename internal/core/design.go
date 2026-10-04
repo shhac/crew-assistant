@@ -14,7 +14,8 @@ import (
 // returns to that step with the input, which is kept here so everyone who
 // works on the task afterwards reads the same words.
 type DesignRequest struct {
-	ID string `json:"id"`
+	ID         string      `json:"id"`
+	Production *Production `json:"production,omitempty"`
 	// N numbers the designer's input on the task, from 1, as everyone
 	// names it: design 2. A request with no input has none.
 	N int `json:"n,omitempty"`
@@ -82,6 +83,7 @@ func (t Task) nextDesignNumber() int {
 
 // DesignAsk is a hand-off the loop asks for.
 type DesignAsk struct {
+	Assets   []WantedAsset
 	From     string
 	For      string
 	Question string
@@ -145,12 +147,20 @@ func (t *Task) DesignDecision(decisionID string) *DesignRequest {
 // the owner as a decision instead. A task no longer at a step that can ask,
 // such as one stopped meanwhile, is left as it is.
 func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk, ends ...TurnEnd) (Task, error) {
+	if ask.Assets != nil {
+		if err := validateWanted(ask.Assets); err != nil {
+			return Task{}, err
+		}
+	}
 	if err := ask.Owner.validTaskDecision(); err != nil {
 		return Task{}, err
 	}
 	return s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		if t.Status != TaskResearching && t.Status != TaskWriting {
 			return fmt.Errorf("the task is no longer researching or being written: %w", ErrConflict)
+		}
+		if ask.Assets != nil && t.Status != TaskWriting {
+			return errors.New("only the writing step can request production assets")
 		}
 		designer, ok := t.Designer()
 		if !ok {
@@ -163,6 +173,9 @@ func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk, e
 		}
 		now := s.now().UTC()
 		r := DesignRequest{ID: uid(), From: ask.From, For: ask.For, Step: t.Status, Round: t.Round, Question: text.Clip(ask.Question, 4000), At: now}
+		if ask.Assets != nil {
+			r.Production = &Production{Assets: append([]WantedAsset(nil), ask.Assets...)}
+		}
 		if ask.Also != nil {
 			ask.Also(t)
 		}
@@ -191,6 +204,9 @@ func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk, e
 
 // DesignReply is what the designer answered a request with.
 type DesignReply struct {
+	Turn            int
+	Delivered       []string
+	Provenance      []DeliveredAsset
 	Designer, Input string
 	// Current is which design becomes the task's current one: CurrentThis
 	// for this input, an earlier design's number to keep or restore it, or
@@ -212,6 +228,9 @@ const CurrentThis = -1
 // instead, and the task goes back once it is answered. A task stopped while
 // the designer worked stays stopped.
 func (s *Service) RecordDesign(ctx context.Context, taskID, requestID string, reply DesignReply) (Task, error) {
+	if reply.Turn > 0 {
+		return s.recordProduction(ctx, taskID, requestID, reply)
+	}
 	designer, escalate := reply.Designer, reply.Escalate
 	if escalate != nil {
 		if err := escalate.validTaskDecision(); err != nil {
@@ -222,6 +241,9 @@ func (s *Service) RecordDesign(ctx context.Context, taskID, requestID string, re
 		r := t.OpenDesign()
 		if t.Status != TaskDesigning || r == nil || r.ID != requestID {
 			return fmt.Errorf("the task is no longer with the designer: %w", ErrConflict)
+		}
+		if r.Production != nil {
+			return errors.New("production replies need a turn")
 		}
 		now := s.now().UTC()
 		r.Designer, r.Input = designer, text.Clip(reply.Input, 6000)

@@ -47,6 +47,11 @@ type Attachment struct {
 	Note    string `json:"note,omitempty"`
 	Design  string `json:"design,omitempty"`
 	Verdict string `json:"verdict,omitempty"`
+	// Asset and Turn identify the wanted asset and its producing designer turn.
+	Asset string `json:"asset,omitempty"`
+	Turn  int    `json:"turn,omitempty"`
+	// Production selects the separate limits for finished assets and their records.
+	Production bool `json:"production,omitempty"`
 }
 
 // NewFile is a file to attach, as it arrived.
@@ -248,18 +253,36 @@ func (s *Service) writeFiles(ctx context.Context, taskRef string, files []NewFil
 // withinLimits refuses records that would take a task past what it can
 // keep in all.
 func withinLimits(t *Task, kept []Attachment) error {
-	count, total := len(t.Attachments), int64(0)
-	for _, a := range t.Attachments {
-		total += a.Size
+	count, total := 0, int64(0)
+	ordinaryKept := 0
+	productionCount, productionTotal := 0, int64(0)
+	for setIndex, set := range [][]Attachment{t.Attachments, kept} {
+		for _, a := range set {
+			if a.Production {
+				if a.Asset != "" {
+					productionCount++
+					productionTotal += a.Size
+				}
+				continue
+			}
+			count++
+			if setIndex == 1 {
+				ordinaryKept++
+			}
+			total += a.Size
+		}
 	}
-	for _, a := range kept {
-		count, total = count+1, total+a.Size
+	if productionCount > MaxProductionAssets {
+		return fmt.Errorf("a task can keep at most %d production asset files", MaxProductionAssets)
+	}
+	if productionTotal > MaxProductionBytes {
+		return fmt.Errorf("a task can keep at most %s of production assets", ExactBytes(MaxProductionBytes))
 	}
 	switch {
 	case count > MaxTaskAttachments:
-		return fmt.Errorf("a task can keep at most %d attachments, and this one has %d", MaxTaskAttachments, len(t.Attachments))
+		return fmt.Errorf("a task can keep at most %d ordinary attachments, separately from production files, and this one has %d", MaxTaskAttachments, count-ordinaryKept)
 	case total > MaxTaskAttachmentBytes:
-		return fmt.Errorf("a task can keep at most %s of attachments, and these would bring it to %s", ExactBytes(MaxTaskAttachmentBytes), ExactBytes(total))
+		return fmt.Errorf("a task can keep at most %s of ordinary attachments, separately from production files, and these would bring it to %s", ExactBytes(MaxTaskAttachmentBytes), ExactBytes(total))
 	}
 	return nil
 }
@@ -313,6 +336,9 @@ func (s *Service) AttachToDesign(ctx context.Context, in DesignFiles) ([]Attachm
 			return fmt.Errorf("the task has moved on, so this changes nothing more: %w", ErrConflict)
 		case t.Status != TaskDesigning || r == nil || r.ID != in.Design:
 			return fmt.Errorf("that design input has been given, so nothing more can be attached to it: %w", ErrConflict)
+		}
+		if r.Production != nil {
+			return errors.New("use asset or rejected for production attachments")
 		}
 		already := 0
 		for _, a := range t.Attachments {

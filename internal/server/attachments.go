@@ -120,6 +120,8 @@ func serveAttachment(w http.ResponseWriter, r *http.Request, a core.Attachment, 
 // rather than downloaded.
 func servedAs(a core.Attachment) (string, bool) {
 	switch {
+	case a.Type == "application/zip":
+		return a.Type, false
 	case a.Type == "text/html":
 		return "text/html; charset=utf-8", false
 	case a.Type == "application/pdf":

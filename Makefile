@@ -1,4 +1,8 @@
 BINARY := crew-assistant
+# Invoke npm through Node: env-based npm launchers can fail in a command sandbox.
+# Both commands remain configurable; npm's CLI is resolved from PATH.
+NODE ?= node
+NPM ?= $(NODE) "$$(command -v npm)"
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
@@ -11,7 +15,7 @@ build:
 TEST_TIMEOUT ?= 30m
 
 dashboard:
-	npm --prefix internal/dashboard/ui run build
+	$(NPM) --prefix internal/dashboard/ui run build
 
 test:
 	go test ./... -count=1 -timeout $(TEST_TIMEOUT)
@@ -22,9 +26,9 @@ test-race:
 check:
 	go vet ./...
 	go test ./... -count=1 -timeout $(TEST_TIMEOUT)
-	npm --prefix internal/dashboard/ui run check
-	npm --prefix internal/dashboard/ui run check:bundle
-	npm --prefix internal/dashboard/ui test
+	$(NPM) --prefix internal/dashboard/ui run check
+	$(NPM) --prefix internal/dashboard/ui run check:bundle
+	$(NPM) --prefix internal/dashboard/ui test
 
 dev:
 	go run ./cmd/crew-assistant $(ARGS)

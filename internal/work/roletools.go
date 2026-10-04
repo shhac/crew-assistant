@@ -13,6 +13,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/roles"
 )
 
 // roleTools are what a role can look up about its project while it works,
@@ -50,6 +51,7 @@ type roleTools struct {
 	// only: attach_file keeps files with it, reading any it names from
 	// workDir.
 	design, workDir string
+	productionTurn  int
 	engine          string
 	// generated is where a Codex designer's generated images are found this
 	// turn, which attach_file may keep too; nil on an engine that can't
@@ -77,6 +79,9 @@ func (lp *Loop) toolsFor(t core.Task, kind string, r core.Role) roleTools {
 	tools := roleTools{engine: r.Engine, lp: lp, projectID: t.ProjectID, taskID: t.ID, status: t.Status, by: core.TeamLinker(r.Member, kind), name: seatName(r, kind), kind: kind, relations: relationsFor(kind)}
 	if open := t.OpenDesign(); kind == core.RoleDesigner && t.Status == core.TaskDesigning && open != nil {
 		tools.design = open.ID
+		if open.Production != nil && len(open.Production.Turns) > 0 {
+			tools.productionTurn = open.Production.Turns[len(open.Production.Turns)-1].N
+		}
 		if generatesImages(r) {
 			tools.generated = &generatedImages{home: lp.runtimeHome(r.Engine)}
 		}
@@ -216,7 +221,7 @@ func (r roleTools) execute(ctx context.Context, name string, raw json.RawMessage
 		_, err := r.lp.Core.ProposeRunRecipe(ctx, r.projectID, r.name, recipe, in["why"])
 		return changed("Proposed. The owner decides whether QA uses it; nothing changes until they do.", err)
 	case "attach_file":
-		return r.attach(ctx, in["name"], in["content"], in["path"], in["generated"])
+		return r.attach(ctx, in["name"], in["content"], in["path"], in["generated"], in["asset"], in["rejected"])
 	case "queue_task":
 		return r.queue(ctx, in["title"], in["requirements"], in["depends_on"])
 	default:
@@ -260,7 +265,23 @@ func (r roleTools) queue(ctx context.Context, title, requirements, dependsOn str
 // attach keeps a file with the design input the designer is giving: text
 // it wrote out, a file in its workspace, which is only ever read, or an
 // image it generated in this turn.
-func (r roleTools) attach(ctx context.Context, name, content, path, generated string) (string, error) {
+func (r roleTools) attach(ctx context.Context, name, content, path, generated string, production ...string) (string, error) {
+	if len(content) > roles.MaxInlineAttachmentBytes || content == roles.OversizedInlineAttachment {
+		return "", errors.New(roles.InlineAttachmentGuide)
+	}
+	asset, rejected := "", ""
+	if len(production) == 2 {
+		asset, rejected = production[0], production[1]
+	}
+	if r.productionTurn == 0 && (asset != "" || rejected != "") {
+		return "", errors.New("asset and rejected are only offered for production requests")
+	}
+	if r.productionTurn > 0 && ((asset == "") == (rejected == "")) {
+		return "", errors.New("give either a wanted asset name or rejected: true")
+	}
+	if rejected != "" && rejected != "true" {
+		return "", errors.New("rejected must be true or empty")
+	}
 	var data []byte
 	made := "from the workspace"
 	given := 0
@@ -296,7 +317,19 @@ func (r roleTools) attach(ctx context.Context, name, content, path, generated st
 			name = filepath.Base(path)
 		}
 	}
-	kept, err := r.lp.Core.AttachToDesign(ctx, core.DesignFiles{Project: r.projectID, Task: r.taskID, By: r.name, Kind: r.kind, While: r.status, Design: r.design, Files: []core.NewFile{{Name: name, Made: made, Data: data}}})
+	in := core.DesignFiles{Project: r.projectID, Task: r.taskID, By: r.name, Kind: r.kind, While: r.status, Design: r.design, Files: []core.NewFile{{Name: name, Made: made, Data: data}}}
+	var kept []core.Attachment
+	var err error
+	switch {
+	case rejected != "":
+		var archive core.Attachment
+		archive, err = r.lp.Core.AddRejected(ctx, in, r.productionTurn)
+		kept = []core.Attachment{archive}
+	case asset != "":
+		kept, err = r.lp.Core.AttachAsset(ctx, in, asset, r.productionTurn)
+	default:
+		kept, err = r.lp.Core.AttachToDesign(ctx, in)
+	}
 	if err != nil {
 		return "", hideProjects(err)
 	}

@@ -8,6 +8,8 @@ import (
 	"image/png"
 	"mime/multipart"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,6 +17,20 @@ import (
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 )
+
+func TestAProductionZipIsDownloadedWithSandboxHeaders(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "archive")
+	data := []byte("synthetic archive bytes")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	serveAttachment(w, httptest.NewRequest("GET", "/archive", nil), core.Attachment{Type: "application/zip", Name: "rejected-variants.zip"}, path)
+	h := w.Header()
+	if w.Code != 200 || h.Get("Content-Type") != "application/zip" || h.Get("Content-Disposition") != "attachment; filename=rejected-variants.zip" || h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Content-Security-Policy") != "sandbox; default-src 'none'" || !bytes.Equal(w.Body.Bytes(), data) {
+		t.Fatal(w.Code, h, w.Body.String())
+	}
+}
 
 type formFile struct {
 	name string

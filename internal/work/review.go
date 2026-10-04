@@ -174,7 +174,9 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 // still use as written, and that reply's learned block, so what a role
 // learned is recorded once. parseErr is why the last reply couldn't be read;
 // runErr is the role failing to run at all.
-func (lp *Loop) askForJSON(ctx context.Context, spec roles.Spec, parse func(reply string) error) (reply, learned string, parseErr, runErr error) {
+// retry, when supplied, refreshes a role's state before its correction. Roles
+// that already attached unfinished work can discard it and rebuild their tools.
+func (lp *Loop) askForJSON(ctx context.Context, spec roles.Spec, parse func(reply string) error, retry ...func(roles.Spec, error) (roles.Spec, error)) (reply, learned string, parseErr, runErr error) {
 	base := spec.Prompt
 	for attempt := 0; attempt < 2; attempt++ {
 		result, err := lp.runRole(ctx, spec)
@@ -189,6 +191,12 @@ func (lp *Loop) askForJSON(ctx context.Context, spec roles.Spec, parse func(repl
 			return reply, learned, nil, nil
 		}
 		spec.Prompt = base + "\n\nYour previous reply could not be used (" + parseErr.Error() + "). Reply with only the JSON object."
+		if attempt == 0 && len(retry) > 0 && retry[0] != nil {
+			spec, err = retry[0](spec, parseErr)
+			if err != nil {
+				return reply, learned, parseErr, err
+			}
+		}
 	}
 	return reply, learned, parseErr, nil
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/integrations/connections"
+	"github.com/shhac/crew-assistant/internal/roles"
 )
 
 // guide tells the role what its tools are for.
@@ -59,9 +60,15 @@ func (r roleTools) guideTools() string {
 	}
 	guide += " add_note leaves a note on your task for the rest of the team and the owner, such as something whoever works on it next should know; it sits beside your reply and never replaces it."
 	if r.design != "" {
-		guide += fmt.Sprintf(" attach_file keeps a file with the design input you are giving, such as a mockup: at most %d files of up to %d MB each, and only %s.", core.MaxAttachmentsPerSet, core.MaxAttachmentBytes>>20, core.AttachmentKinds)
+		if r.productionTurn > 0 {
+			guide += " " + roles.InlineAttachmentGuide
+			guide += fmt.Sprintf(" In production, attach_file keeps at most %d asset files per turn, each up to %d MB, and only %s. Name each wanted asset with asset; use rejected: true instead for rejected variants. The daemon builds their zip archive (up to %d MB). A task can keep %d production asset files and %d MB of assets, separately from ordinary attachments. Return provenance for every delivered asset. Attachments write nothing to the repository.", core.MaxAttachmentsPerSet, core.MaxAttachmentBytes>>20, core.AttachmentKinds, core.MaxRejectedBytes>>20, core.MaxProductionAssets, core.MaxProductionBytes>>20)
+		} else {
+			guide += " " + roles.InlineAttachmentGuide
+			guide += fmt.Sprintf(" attach_file keeps a file with the design input you are giving, such as a mockup: at most %d files of up to %d MB each, and only %s.", core.MaxAttachmentsPerSet, core.MaxAttachmentBytes>>20, core.AttachmentKinds)
+		}
 		if r.generated != nil {
-			guide += " It can also keep an image you generated in this turn, named by its file name in generated, within the same limits."
+			guide += " It can also keep an image you generated in this turn, named by its file name in generated, within the same limits. Use generated instead of inline content for large images."
 		}
 	}
 	return guide
@@ -81,6 +88,14 @@ func (r roleTools) Definitions() []session.ToolDefinition {
 	}
 	if r.proposes && !r.notesOnly {
 		defs = append(defs, session.ToolDefinition{Name: "propose_run_recipe", Description: "Propose how QA starts this code project's app to use it, for the owner to accept; nothing changes until they do, and one proposal waits at a time. setup runs once first, offline, since dependencies come in through the project's prepare folders; or empty. start is the command that starts the app, which reads its port from the PORT environment variable. url is where it answers: http on 127.0.0.1, localhost or [::1], with {port} as its port and nowhere else, such as http://127.0.0.1:{port}/. ready is a command that succeeds once the app is ready, or empty to wait until url answers. why is one line on what you found that makes this the way to run it.", Schema: schema([]string{"setup", "start", "url", "ready", "why"})})
+	}
+	if r.design != "" {
+		for i := range defs {
+			if defs[i].Name == "attach_file" {
+				props := defs[i].Schema["properties"].(map[string]any)
+				props["content"].(map[string]any)["maxLength"] = roles.MaxInlineAttachmentBytes
+			}
+		}
 	}
 	return defs
 }
@@ -128,7 +143,19 @@ func (r roleTools) definitions() []session.ToolDefinition {
 			attach.Description = "Attach a file, such as a mockup, to the design input you are giving; everyone who works on the task afterwards can open it. Give one of content, path or generated. name is the file's name, with an extension saying its type (.svg, .html, .md, .txt, .json, .csv, .png, .jpg, .gif, .webp or .pdf), or empty to use the path's or the generated image's. content is the whole text of a text file you write out, such as an SVG or HTML mockup, or empty. path names a file already in the current directory, relative to it, or empty. generated is the file name of an image you generated in this turn with your image generation tool, or empty."
 			attach.Schema = schema([]string{"name", "content", "path", "generated"})
 		}
+		attach.Description += " " + roles.InlineAttachmentGuide
+		if r.generated != nil {
+			attach.Description += " Use generated for large generated images."
+		}
 		defs = append(defs, attach)
+		if r.productionTurn > 0 {
+			fields := []string{"name", "content", "path", "asset", "rejected"}
+			if r.generated != nil {
+				fields = append(fields, "generated")
+			}
+			defs[len(defs)-1].Schema = schema(fields)
+			defs[len(defs)-1].Description += " Production: asset names the wanted asset, or empty; rejected is true to archive a rejected variant, or empty. Give either asset or rejected."
+		}
 	}
 	return defs
 }

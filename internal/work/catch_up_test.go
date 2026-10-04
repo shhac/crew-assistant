@@ -359,3 +359,83 @@ func (r failingCatchUpRunner) Run(ctx context.Context, spec roles.Spec) (roles.R
 	}
 	return r.Runner.Run(ctx, spec)
 }
+
+func TestInvalidProductionRetryRecreatesMainIntegration(t *testing.T) {
+	t.Parallel()
+	source := ownerRepo(t)
+	start := ownerGit(t, source, "rev-parse", "main")
+	reviews := append([]string{revise}, passes(10)...)
+	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: reviews}}
+	var moved sync.Once
+	landed := ""
+	runner.onCheck = func() {
+		moved.Do(func() {
+			landed = ownerCommits(t, source, "other.go", "package main\n\nfunc Other() {}\n", "owner work")
+		})
+	}
+	var mu sync.Mutex
+	var roundTwoHead, roundTwoParents string
+	otherInWorkspace := false
+	runner.onEdit = func(dir string, n int) bool {
+		if n == 2 {
+			if err := os.WriteFile(filepath.Join(dir, "discard.txt"), []byte("failed request"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n == 3 {
+			if _, err := os.Stat(filepath.Join(dir, "discard.txt")); !os.IsNotExist(err) {
+				t.Fatal("failed turn retained", err)
+			}
+			mu.Lock()
+			roundTwoHead = gitOut(dir, "rev-parse", "HEAD")
+			roundTwoParents = gitOut(dir, "log", "-1", "--format=%P", "HEAD")
+			_, err := os.Stat(filepath.Join(dir, "other.go"))
+			otherInWorkspace = err == nil
+			mu.Unlock()
+		}
+		return true
+	}
+	runner.ending = func(n int) string {
+		if n == 2 {
+			return "\n\x60\x60\x60production\n\n\x60\x60\x60"
+		}
+		return ""
+	}
+	a, p := pushProjectApp(t, runner, source)
+	seatDesigner(t, a, p.ID)
+	task, err := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add Feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settle(t, a)
+	task = taskByID(t, a, task.ID)
+	if landed == "" || len(task.Revisions) < 2 {
+		t.Fatalf("main should have moved during round one's checks and a second round followed: %+v", task)
+	}
+
+	first, second := task.Revisions[0], task.Revisions[1]
+	mu.Lock()
+	defer mu.Unlock()
+	if !otherInWorkspace {
+		t.Fatal("the revision round's workspace does not hold what landed")
+	}
+	if parents := strings.Fields(roundTwoParents); len(parents) != 2 || parents[0] != first.Ref || parents[1] != landed {
+		t.Fatalf("the workspace should be reset to a merge of draft 1 (%s) and main (%s); HEAD %s has parents %v", first.Ref, landed, roundTwoHead, parents)
+	}
+	if task.Base != landed || task.From != "main" {
+		t.Fatalf("the task should be measured from main's new tip %s, not its start %s: base %s from %s", landed, start, task.Base, task.From)
+	}
+	clone := filepath.Join(p.ScratchDirectory, "clone")
+	if err := exec.Command("git", "-C", clone, "merge-base", "--is-ancestor", landed, second.Ref).Run(); err != nil {
+		t.Fatalf("draft 2 (%s) does not include the landed commit %s", second.Ref, landed)
+	}
+	if err := exec.Command("git", "-C", clone, "merge-base", "--is-ancestor", roundTwoHead, second.Ref).Run(); err != nil {
+		t.Fatalf("draft 2 was not built on the merge %s", roundTwoHead)
+	}
+	if !activityHas(t, a, "Implementer finished version 2 of Add Feature, including what landed: main moved on since this request started (it is now at "+landed[:7]+")") {
+		t.Fatal("clean integration missing from draft activity")
+	}
+	if !implementerTold(runner, "main moved on", "merged into this branch for you without conflicts") {
+		t.Fatal("the implementer was not told what was merged in")
+	}
+}

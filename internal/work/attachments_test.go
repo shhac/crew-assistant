@@ -229,3 +229,32 @@ func TestEveryRoleIsToldWhichDesignIsCurrent(t *testing.T) {
 		t.Fatalf("with no current design, none was named: %s", prompt)
 	}
 }
+
+func TestEveryDesignerAttachmentToolAdvertisesAndEnforcesInlineLimit(t *testing.T) {
+	for _, engine := range []string{"claude", "codex"} {
+		t.Run(engine, func(t *testing.T) {
+			runner := &scriptedRunner{writerReplies: []string{askDesign}}
+			a, p, task := loopApp(t, runner, "")
+			seatDesignerOn(t, a, p.ID, engine)
+			held := stepUntil(t, a, task.ID, withDesigner)
+			tools := designerTools(t, a, held, t.TempDir())
+			for _, def := range tools.Definitions() {
+				if def.Name == "attach_file" {
+					content := def.Schema["properties"].(map[string]any)["content"].(map[string]any)
+					if content["maxLength"] != roles.MaxInlineAttachmentBytes || !strings.Contains(def.Description, roles.InlineAttachmentGuide) {
+						t.Fatal(def)
+					}
+				}
+			}
+			if !strings.Contains(tools.guide(), roles.InlineAttachmentGuide) {
+				t.Fatal(tools.guide())
+			}
+			if result := callTool(t, tools, "attach_file", attachArgs("big.txt", strings.Repeat("é", roles.MaxInlineAttachmentBytes/2+1), "")); !result.IsError || !strings.Contains(result.Content, "64 KiB") {
+				t.Fatal(result)
+			}
+			if result := callTool(t, tools, "attach_file", attachArgs("small.txt", "valid", "")); result.IsError {
+				t.Fatal(result)
+			}
+		})
+	}
+}

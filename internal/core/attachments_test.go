@@ -170,7 +170,7 @@ func TestATaskKeepsAttachmentsOnlyUpToItsLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := add(counted.ID, 1, 10); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("at most %d attachments, and this one has %d", MaxTaskAttachments, MaxTaskAttachments)) {
+	if err := add(counted.ID, 1, 10); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("at most %d ordinary attachments, separately from production files, and this one has %d", MaxTaskAttachments, MaxTaskAttachments)) {
 		t.Fatalf("one file past the limit: %v", err)
 	}
 	if n := len(keptFiles(t, s, counted.ID)); n != MaxTaskAttachments {
@@ -183,7 +183,7 @@ func TestATaskKeepsAttachmentsOnlyUpToItsLimits(t *testing.T) {
 			t.Fatalf("up to the total limit: %v", err)
 		}
 	}
-	if err := add(sized.ID, 1, 1); err == nil || !strings.Contains(err.Error(), "at most "+ExactBytes(MaxTaskAttachmentBytes)+" of attachments") {
+	if err := add(sized.ID, 1, 1); err == nil || !strings.Contains(err.Error(), "at most "+ExactBytes(MaxTaskAttachmentBytes)+" of ordinary attachments") {
 		t.Fatalf("past the total limit: %v", err)
 	}
 	if n := len(keptFiles(t, s, sized.ID)); n != sets*MaxAttachmentsPerSet {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -27,6 +28,7 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 	if held, err := lp.holdForUsage(ctx, t, writer); held || err != nil {
 		return err
 	}
+	beforeCatchUp := t
 	t, caughtUp, integration, err := lp.takeInLanded(ctx, t, m)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
@@ -64,9 +66,28 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 	} else {
 		spec.FreshPrompt = fresh
 	}
-	result, err := lp.runRole(ctx, spec)
-	if err != nil {
-		return lp.roleFailed(ctx, t, writer.Name, err)
+	var result roles.Result
+	for attempt := 0; attempt < 2; attempt++ {
+		result, err = lp.runRole(ctx, spec)
+		if err != nil {
+			return lp.roleFailed(ctx, t, writer.Name, err)
+		}
+		in := parseWriterReply(result.Text, designsFor(t, writer))
+		if in.productionError == nil || attempt == 1 {
+			break
+		}
+		if err := m.reset(ctx, beforeCatchUp); err != nil {
+			return lp.roleFailed(ctx, t, "The workspace", err)
+		}
+		t, caughtUp, integration, err = lp.takeInLanded(ctx, beforeCatchUp, m)
+		if err != nil {
+			return lp.roleFailed(ctx, t, "The workspace", err)
+		}
+		fresh = writerPrompt(p, t, caughtUp, true) + prompt + guide
+		correction := "\n\nYour production request could not be used (" + in.productionError.Error() + "). Reply with only a valid production block."
+		spec.Prompt = writerPrompt(p, t, caughtUp, false) + prompt + guide + correction
+		spec.FreshPrompt = fresh + correction
+		spec.Resume = result.Session
 	}
 	return lp.recordDraft(ctx, p, t, m, writer.Name, result, seen, integration)
 }
@@ -98,6 +119,9 @@ func (lp *Loop) prepareWorkspace(ctx context.Context, t core.Task, m medium) (co
 func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m medium, writer string, result roles.Result, seen int, integration *core.DraftCatchUp) error {
 	r, ok := t.Role(writer)
 	in := parseWriterReply(result.Text, ok && designsFor(t, r))
+	if in.productionError != nil {
+		return lp.roleFailed(ctx, t, writer, in.productionError)
+	}
 	why, handProblems := parseHandOn(in.handOn)
 	wakeErrors := lp.applyWakeBlock(ctx, p, t, in.wake)
 	wakeErrors = append(wakeErrors, handProblems...)
@@ -127,7 +151,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	// changed is set aside when the workspace is next reset, and its session
 	// resumes with the answer.
 	if in.question != "" {
-		return lp.askDesign(ctx, t, writer, in.question, func(t *core.Task) {
+		return lp.askDesignAssets(ctx, t, writer, in.question, "", in.assets, func(t *core.Task) {
 			t.WakeErrors = wakeErrors
 			if why != "" {
 				t.WakeErrors = append(t.WakeErrors, "hand-on ignored during a design question; ask again when this round finishes")
@@ -189,6 +213,8 @@ func draftSummary(reply string, kept []core.Unreachable) string {
 // blocks it may end with.
 type writerReply struct {
 	reply, learned, wake, unmet, prReply, pr, question, handOn string
+	assets                                                     []core.WantedAsset
+	productionError                                            error
 }
 
 // parseWriterReply takes an implementer's reply apart; designs is whether
@@ -202,9 +228,43 @@ func parseWriterReply(text string, designs bool) writerReply {
 	in.reply, in.prReply = splitBlock(in.reply, "pr-reply")
 	in.reply, in.pr = splitBlock(in.reply, "pr")
 	if designs {
+		var production string
+		hadProduction := strings.Contains(in.reply, "```production\n")
+		in.reply, production = splitBlock(in.reply, "production")
 		in.reply, in.question = splitBlock(in.reply, "design")
+		if hadProduction {
+			if in.question != "" {
+				in.productionError = errors.New("ask with either a production block or a design block")
+			} else {
+				in.assets, in.question, in.productionError = parseProduction(production)
+			}
+		}
 	}
 	return in
+}
+
+// parseProduction reads named assets, followed by optional notes after a blank line.
+func parseProduction(block string) ([]core.WantedAsset, string, error) {
+	parts := strings.SplitN(strings.TrimSpace(block), "\n\n", 2)
+	var assets []core.WantedAsset
+	seen := map[string]bool{}
+	for _, line := range strings.Split(parts[0], "\n") {
+		name, want, ok := strings.Cut(line, ":")
+		name, want = strings.TrimSpace(name), strings.TrimSpace(want)
+		if !ok || name == "" || want == "" || seen[name] || len(name) > 120 || len(want) > 4000 {
+			return nil, "", errors.New("production needs unique assets, one per line: name: what it is")
+		}
+		seen[name] = true
+		assets = append(assets, core.WantedAsset{Name: name, Want: want})
+	}
+	if len(assets) > core.MaxProductionAssets {
+		return nil, "", fmt.Errorf("production can request at most %d assets", core.MaxProductionAssets)
+	}
+	question := "Produce the named assets."
+	if len(parts) > 1 {
+		question += "\n" + parts[1]
+	}
+	return assets, question, nil
 }
 
 // noChangeNeeded records, within a change, an implementer's round on an

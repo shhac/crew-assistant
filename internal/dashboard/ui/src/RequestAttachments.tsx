@@ -1,6 +1,6 @@
 import { sinceLabel } from "./ui";
 import { sizeLabel } from "./composerAssets";
-import { isImage, TASK_ATTACHMENTS } from "./attachments";
+import { isImage } from "./attachments";
 import {
   attachmentURL,
   type Attachment,
@@ -99,7 +99,8 @@ export function RequestAttachments({ task }: { task: Task }) {
       <h3>Attachments</h3>
       <AttachmentList task={task} attachments={attachments} context={context} />
       <p className="muted small">
-        {attachments.length} of {TASK_ATTACHMENTS} files this request can keep
+        {attachments.length} {attachments.length === 1 ? "file" : "files"}{" "}
+        attached
       </p>
     </section>
   );

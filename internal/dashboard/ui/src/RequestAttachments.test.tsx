@@ -220,9 +220,48 @@ describe("a request's attachments", () => {
     expect(within(all).getAllByText("With your note")).toHaveLength(2);
     expect(within(all).getByText("Design 2 · Current design")).toBeTruthy();
     expect(within(all).getByText("Design 1 · Superseded")).toBeTruthy();
+    expect(within(all).getByText("4 files attached")).toBeTruthy();
+  });
+
+  it("counts a 29-frame hand-over and its records without an ordinary ceiling", () => {
+    const attachments = [
+      ...Array.from({ length: 29 }, (_, i) => ({
+        ...task.attachments![2],
+        id: `frame-${i}`,
+        name: `frame-${i}.png`,
+      })),
+      {
+        ...task.attachments![2],
+        id: "provenance",
+        name: "provenance.json",
+        type: "application/json",
+      },
+      {
+        ...task.attachments![2],
+        id: "archive",
+        name: "rejected-variants.zip",
+        type: "application/zip",
+      },
+    ];
+    render(<RequestAttachments task={{ ...task, attachments }} />);
+    const all = screen.getByRole("region", { name: "Attachments" });
+    expect(within(all).getByText("31 files attached")).toBeTruthy();
+    expect(within(all).queryByText(/files this request can keep/)).toBeNull();
     expect(
-      within(all).getByText("4 of 120 files this request can keep"),
+      within(all).getByRole("link", { name: "provenance.json" }),
     ).toBeTruthy();
+    expect(
+      within(all).getByRole("link", { name: "rejected-variants.zip" }),
+    ).toBeTruthy();
+  });
+
+  it("uses the singular count for one attachment", () => {
+    render(
+      <RequestAttachments
+        task={{ ...task, attachments: [task.attachments![0]] }}
+      />,
+    );
+    expect(screen.getByText("1 file attached")).toBeTruthy();
   });
 
   it("shows no attachments area for a request without files", () => {

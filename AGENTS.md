@@ -6,6 +6,8 @@ Go daemon, CLI and embedded dashboard for a personal assistant that runs project
 
 The project follows the design in `design-docs/2026-09-23-project-teams.md`; phases 0 to 2 are built, with landing and wake-ups from `design-docs/2026-09-24-landing-and-wakes.md`, boards and messaging the team from `design-docs/2026-09-24-dashboard-and-boards.md`, and the assistant's drawn profile and team members from `design-docs/2026-09-24-profile-and-members.md`. Where design attachments live, and how the current design is marked across rounds, is recorded in `design-docs/2026-09-28-design-attachments.md`. `design-docs/reference/2026-09-23-first-real-runs.md` records the first real runs, `2026-09-23-code-teams.md` corrects its instruction-file finding and records what code work under the sandbox needs, and `2026-09-24-first-landings.md` records the first changes landed on main. Decisions made for it: `design-docs/decisions/2026-09-crew-prefix.md`, `2026-09-clean-break-state.md` and `2026-09-role-sandbox-trust.md`. Build order: (1) a writer and reviewer loop on local documents, (2) the git adapter, (3) a separate PM tier and concurrent projects. Each phase finishes with real use, not tests alone.
 
+Finished design assets and their production hand-over are recorded in `design-docs/2026-10-03-design-production.md`.
+
 The owner's core complaint about v1 was that it added mental load and was over-engineered. Prefer the smallest loop that works, and add machinery only when a real run needs it.
 
 ## Architecture and boundaries

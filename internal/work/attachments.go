@@ -48,6 +48,26 @@ func attachedWith(t core.Task, a core.Attachment) string {
 		if r.ID != a.Design {
 			continue
 		}
+		if r.Production != nil {
+			context := "with production request " + r.ID
+			if r.ID == t.CurrentDesign {
+				context = "with the current design and the target"
+			} else if r.Marked {
+				context = "superseded: not current and not the target"
+			}
+			for _, d := range r.Production.Delivered {
+				if d.Attachment == a.ID {
+					return productionAssetText(d) + "; " + context
+				}
+			}
+			if a.ID == r.Production.Archive {
+				return "rejected variants archive for production request " + r.ID
+			}
+			if a.ID == r.Production.Provenance {
+				return "daemon provenance record for production request " + r.ID
+			}
+			return fmt.Sprintf("unfinished production asset %s from turn %d; not handed over", a.Asset, a.Turn)
+		}
 		switch {
 		case r.ID == t.CurrentDesign:
 			return fmt.Sprintf("with design %d, the current design and the target", r.N)

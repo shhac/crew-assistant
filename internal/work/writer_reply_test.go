@@ -1,6 +1,7 @@
 package work
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -11,7 +12,7 @@ func TestAnImplementersReplyIsTakenApartIntoItsBlocks(t *testing.T) {
 	text := "Did it.\n```learned\nL\n```\n```wake\nW\n```\n```owner-step\nO\n```\n```pr-reply\nR\n```\n```pr\nP\n```\n```design\nD\n```"
 	got := parseWriterReply(text, true)
 	want := writerReply{reply: "Did it.", learned: "L", wake: "W", unmet: "O", prReply: "R", pr: "P", question: "D"}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%+v", got)
 	}
 	// Only an implementer who may ask the designer has its design block read.
