@@ -476,6 +476,18 @@ func TestTheRecipeAndQAsBrowserAreProjectSettings(t *testing.T) {
 	if qa, _ = seatHolding(p, core.RoleQA); qa.Browser != (core.Browser{On: true}) {
 		t.Fatalf("the project's own setting: %+v", qa)
 	}
+	// Loopback for the check changes only that setting, never the seats.
+	extra, err := a.AddToRole(ctx, p.ID, core.RoleReviewer, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seats := len(extra.Playbook.Roles)
+	if p, err = a.SetCheckLoopback(ctx, p.ID, true); err != nil || !p.Playbook.CheckLoopback || len(p.Playbook.Roles) != seats {
+		t.Fatalf("turning check loopback on: %+v %v", p.Playbook, err)
+	}
+	if p, err = a.SetCheckLoopback(ctx, p.ID, false); err != nil || p.Playbook.CheckLoopback || len(p.Playbook.Roles) != seats {
+		t.Fatalf("turning check loopback off: %+v %v", p.Playbook, err)
+	}
 }
 
 func seatHolding(p core.Project, kind string) (core.Role, bool) {

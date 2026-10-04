@@ -84,3 +84,14 @@ func (lp *Loop) SetSeatBrowser(ctx context.Context, projectID string, browser co
 		return nil
 	})
 }
+
+// SetCheckLoopback sets whether the project's check may bind and reach this
+// machine's own addresses, for tests that start a local server, and changes
+// nothing else: the team's seats stay as they are. Tasks already under way
+// keep the setting they started with.
+func (lp *Loop) SetCheckLoopback(ctx context.Context, projectID string, on bool) (core.Project, error) {
+	return lp.editPlaybook(ctx, projectID, "a check is for code teams; choose a code team first", func(_ *core.Snapshot, _ *core.Project, playbook *core.Playbook) error {
+		playbook.CheckLoopback = on
+		return nil
+	})
+}
