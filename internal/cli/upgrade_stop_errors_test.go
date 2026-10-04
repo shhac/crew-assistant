@@ -22,10 +22,10 @@ func TestServeReportsFailedStopPersistenceAfterRecoveryExec(t *testing.T) {
 		t.Run(string(step), func(t *testing.T) {
 			listener := upgradeTestListener(t)
 			listener.Close()
-			dir := t.TempDir()
+			dir := canonicalTempDir(t)
 			o := &options{statePath: filepath.Join(dir, "state.db"), configPath: filepath.Join(dir, "config.json"), version: "v1.0.0", globals: &libcli.Globals{Format: "ndjson"}}
 			cfg := config.Default()
-			cfg.Dashboard.Addr, cfg.Dashboard.Tailscale, cfg.Upgrade.Mode = "127.0.0.1:0", "off", "off"
+			cfg.Dashboard.Addr, cfg.Dashboard.Tailscale, cfg.Upgrade.Mode = listener.Addr().String(), "off", "off"
 			if err := config.Save(o.configPath, cfg); err != nil {
 				t.Fatal(err)
 			}
@@ -110,9 +110,9 @@ func TestServeSignalDuringRecoveryConfirmation(t *testing.T) {
 			t.Run(string(step)+"/"+outcome, func(t *testing.T) {
 				listener := upgradeTestListener(t)
 				listener.Close()
-				dir := t.TempDir()
+				dir := canonicalTempDir(t)
 				cfg := config.Default()
-				cfg.Dashboard.Addr, cfg.Dashboard.Tailscale, cfg.Upgrade.Mode = "127.0.0.1:0", "off", "off"
+				cfg.Dashboard.Addr, cfg.Dashboard.Tailscale, cfg.Upgrade.Mode = listener.Addr().String(), "off", "off"
 				binary := filepath.Join(dir, "previous")
 				writeExecutableFixture(t, binary, "synthetic saved binary")
 				o := &options{statePath: filepath.Join(dir, "state.db"), configPath: filepath.Join(dir, "config.json"), version: "v1.0.0", globals: &libcli.Globals{Format: "ndjson"}, upgradeIdentity: func(int) string { return "fixture" }, upgradeExecutable: func() (string, error) { return binary, nil }, upgradeStarter: func(string, []string, string) error { return nil }}
@@ -228,4 +228,15 @@ func TestServeSignalDuringRecoveryConfirmation(t *testing.T) {
 			})
 		}
 	}
+}
+
+// canonicalTempDir resolves macOS's /var symlink, as the upgrade journal
+// does, so a fixture's saved binary matches the running executable's path.
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
