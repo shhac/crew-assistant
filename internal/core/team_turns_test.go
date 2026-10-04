@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -17,6 +18,220 @@ import (
 
 func admittedTurn(id string) TeamTurn {
 	return TeamTurn{ID: id, ProjectID: "project", TaskID: "task", Role: RoleImplementer, Seat: "Writer", MemberID: "member", MemberName: "Writer", Engine: "codex", ClaimToken: "claim", AdmittedAt: time.Date(2026, 10, 4, 10, 0, 0, 0, time.UTC)}
+}
+
+func TestTeamTurnHistoryWeightedCoverageAndPages(t *testing.T) {
+	s, _ := fixture(t)
+	usages := []session.Usage{
+		{Usage: harness.Usage{Known: true, CacheKnown: true, Input: 100, CacheRead: 80}, Final: true},
+		{Usage: harness.Usage{Known: true, CacheKnown: true, Input: 900, CacheRead: 90}, Final: true},
+		{Usage: harness.Usage{Known: true, CacheKnown: true}, Final: true},
+		{Usage: harness.Usage{Known: true, Input: 1000}, Final: true},
+		{},
+		{Usage: harness.Usage{Known: true, CacheKnown: true, Input: 500, CacheRead: 500}},
+	}
+	for i, u := range usages {
+		turn := admittedTurn(fmt.Sprint(i))
+		if err := s.AdmitTeamTurn(testContext, turn); err != nil {
+			t.Fatal(err)
+		}
+		terminal := TeamTurnTerminal{At: turn.AdmittedAt, Outcome: "failed", Usage: u, Observed: session.Usage{Usage: harness.Usage{Known: true, Input: 999}}, CompactionUsage: session.Usage{Usage: harness.Usage{Known: true, CacheKnown: true, Input: 100, CacheRead: 100}, Final: true}}
+		if err := s.FinishTeamTurn(testContext, turn.ID, terminal); err != nil {
+			t.Fatal(err)
+		}
+	}
+	filter := TeamTurnFilter{TaskID: "task"}
+	first, err := s.TeamTurnHistory(testContext, filter, 2, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := first.Aggregate
+	if first.Turns[0].ID != "5" || first.NextBefore != "4" || a.TerminalTurns != 6 || a.MeasuredTurns != 3 || a.MissingInputTurns != 2 || a.MissingCacheTurns != 3 || a.PartialOnlyTurns != 2 || a.Input != 1000 || a.CacheRead != 170 || a.CacheReadShare == nil || *a.CacheReadShare != 0.17 {
+		t.Fatalf("history: %+v %+v", first, a)
+	}
+	// A new admission never shifts the older-page boundary.
+	turn := admittedTurn("new")
+	turn.AdmittedAt = turn.AdmittedAt.Add(time.Second)
+	if err := s.AdmitTeamTurn(testContext, turn); err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.TeamTurnHistory(testContext, filter, 2, first.NextBefore)
+	if err != nil || second.Turns[0].ID != "3" || second.NextBefore != "2" || !reflect.DeepEqual(second.Aggregate, a) {
+		t.Fatalf("second: %+v %v", second, err)
+	}
+	last, err := s.TeamTurnHistory(testContext, filter, 2, second.NextBefore)
+	if err != nil || last.Turns[0].ID != "1" || last.Turns[1].ID != "0" || last.NextBefore != "" || !reflect.DeepEqual(last.Aggregate, a) {
+		t.Fatalf("last: %+v %v", last, err)
+	}
+	for _, limit := range []int{-1, 201} {
+		if _, err := s.TeamTurnHistory(testContext, filter, limit, ""); !errors.Is(err, ErrTeamTurnPage) {
+			t.Fatal(err)
+		}
+	}
+	for _, cursor := range []string{"missing", "new"} {
+		if _, err := s.TeamTurnHistory(testContext, TeamTurnFilter{MemberID: "other"}, 2, cursor); !errors.Is(err, ErrTeamTurnPage) {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(testContext)
+	cancel()
+	if _, err := s.TeamTurnHistory(ctx, filter, 2, ""); err == nil {
+		t.Fatal("cancelled read succeeded")
+	}
+}
+
+func TestTeamTurnHistoryLimitsZeroAndOverflow(t *testing.T) {
+	s, _ := fixture(t)
+	h, err := s.TeamTurnHistory(testContext, TeamTurnFilter{}, 0, "")
+	if err != nil || h.Aggregate.CacheReadShare != nil || len(h.Turns) != 0 {
+		t.Fatal(h, err)
+	}
+	for i := 0; i < 201; i++ {
+		turn := admittedTurn(fmt.Sprintf("%03d", i))
+		if err := s.AdmitTeamTurn(testContext, turn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct{ limit, want int }{{0, 50}, {200, 200}} {
+		h, err := s.TeamTurnHistory(testContext, TeamTurnFilter{}, tc.limit, "")
+		if err != nil || len(h.Turns) != tc.want || h.Turns[0].ID != "200" || h.NextBefore == "" {
+			t.Fatal(h, err)
+		}
+	}
+	finish := func(id string, input int64) {
+		t.Helper()
+		turn := admittedTurn(id)
+		if err := s.FinishTeamTurn(testContext, id, TeamTurnTerminal{At: turn.AdmittedAt, Outcome: "completed", Usage: session.Usage{Usage: harness.Usage{Known: true, CacheKnown: true, Input: input}, Final: true}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	finish("000", 0)
+	h, err = s.TeamTurnHistory(testContext, TeamTurnFilter{}, 1, "")
+	if err != nil || h.Aggregate.MeasuredTurns != 1 || h.Aggregate.CacheReadShare != nil {
+		t.Fatal(h, err)
+	}
+	finish("001", math.MaxInt64)
+	finish("002", 1)
+	if _, err := s.TeamTurnHistory(testContext, TeamTurnFilter{}, 1, ""); err == nil {
+		t.Fatal("overflow succeeded")
+	}
+}
+
+func TestTeamTurnHistoryConcurrentFinalization(t *testing.T) {
+	s, _ := fixture(t)
+	turn := admittedTurn("concurrent")
+	if err := s.AdmitTeamTurn(testContext, turn); err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		if err := s.FinishTeamTurn(testContext, turn.ID, TeamTurnTerminal{At: turn.AdmittedAt, Outcome: "completed", Usage: session.Usage{Usage: harness.Usage{Known: true, CacheKnown: true, Input: 10, CacheRead: 5}, Final: true}}); err != nil {
+			t.Error(err)
+		}
+	}()
+	close(start)
+	for i := 0; i < 20; i++ {
+		h, err := s.TeamTurnHistory(testContext, TeamTurnFilter{}, 1, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (h.Turns[0].Terminal != nil) != (h.Aggregate.MeasuredTurns == 1) {
+			t.Fatalf("mixed lifecycle versions: %+v", h)
+		}
+	}
+	wg.Wait()
+}
+
+func TestTeamTurnHistoryDecodeFailure(t *testing.T) {
+	s, _ := fixture(t)
+	turn := admittedTurn("bad")
+	if err := s.AdmitTeamTurn(testContext, turn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.db.Exec("UPDATE team_turns SET payload='broken'"); err != nil {
+		t.Fatal(err)
+	}
+	if h, err := s.TeamTurnHistory(testContext, TeamTurnFilter{}, 1, ""); err == nil || len(h.Turns) != 0 {
+		t.Fatal("partial success", h, err)
+	}
+}
+
+func TestTeamTurnHistoryRestartBetweenLifecycleWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewService(st, config.Default())
+	defer func() { st.Close() }()
+	turn := admittedTurn("original")
+	if err := s.AdmitTeamTurn(testContext, turn); err != nil {
+		t.Fatal(err)
+	}
+	reopen := func() TeamTurnHistory {
+		t.Helper()
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
+		st, err = Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s = NewService(st, config.Default())
+		h, err := s.TeamTurnHistory(testContext, TeamTurnFilter{TaskID: turn.TaskID}, 1, "")
+		if err != nil || len(h.Turns) != 1 || h.Turns[0].ID != turn.ID {
+			t.Fatal(h, err)
+		}
+		return h
+	}
+	h := reopen()
+	if h.Turns[0].Opening != nil || h.Aggregate.TerminalTurns != 0 {
+		t.Fatal(h)
+	}
+	if err := s.OpenTeamTurn(testContext, turn.ID, TeamTurnOpening{At: turn.AdmittedAt, FreshReason: FreshOwnerRequested}); err != nil {
+		t.Fatal(err)
+	}
+	h = reopen()
+	if h.Turns[0].Opening.FreshReason != FreshOwnerRequested {
+		t.Fatal(h)
+	}
+	if err := s.AcceptTeamTurn(testContext, turn.ID, turn.AdmittedAt); err != nil {
+		t.Fatal(err)
+	}
+	h = reopen()
+	if h.Turns[0].AcceptedAt == nil || h.Turns[0].Terminal != nil {
+		t.Fatal(h)
+	}
+	if err := s.FinishTeamTurn(testContext, turn.ID, TeamTurnTerminal{At: turn.AdmittedAt, Outcome: "failed", Usage: session.Usage{Usage: harness.Usage{Known: true, CacheKnown: true, Input: 10, CacheRead: 5}, Final: true}}); err != nil {
+		t.Fatal(err)
+	}
+	h = reopen()
+	if h.Aggregate.MeasuredTurns != 1 || *h.Aggregate.CacheReadShare != 0.5 {
+		t.Fatal(h)
+	}
+	retry := turn
+	retry.ID = "retry"
+	retry.PreviousID = turn.ID
+	retry.RetryCause = "malformed_reply"
+	retry.AdmittedAt = retry.AdmittedAt.Add(time.Second)
+	if err := s.AdmitTeamTurn(testContext, retry); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.TeamTurnHistory(testContext, TeamTurnFilter{TaskID: turn.TaskID}, 50, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := s.TeamTurnHistory(testContext, TeamTurnFilter{MemberID: turn.MemberID}, 50, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(task, member) || len(task.Turns) != 2 || task.Turns[0].PreviousID != turn.ID || task.Aggregate.MeasuredTurns != 1 {
+		t.Fatal(task, member)
+	}
 }
 
 func TestTeamTurnsRecoverCleanupWithoutRewritingTerminalAccounting(t *testing.T) {

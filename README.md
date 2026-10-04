@@ -229,6 +229,65 @@ crew-assistant --env-file /path/to/.env.local serve --open
 
 ## Diagnostics
 
+### Team-turn history API
+
+Owner-authenticated `GET /api/projects/{id}/tasks/{task}/team-turns` and
+`GET /api/members/{id}/team-turns` expose the prospective durable attempts
+recorded by the team runner. Tasks accept canonical or readable task IDs within
+the specified project; members require a current canonical member ID. Unknown,
+deleted or incorrectly scoped identities return 404. Existing identities with
+no recorded attempts return `turns: []`. Member histories span projects,
+including project-only PM/release turns whose `task_id` is omitted. Attribution
+uses recorded member names, seats and IDs, unaffected by later renaming or
+reseating. Task history retains attribution after a member is removed.
+
+Responses contain `turns`, `aggregate` and, when another page exists,
+`next_before`. Pagination uses `limit` (default 50, range 1–200) and
+`before=<attempt_id>` (exclusive). Turns are newest first by immutable admission
+time, then attempt ID descending. Invalid limits, empty/unknown cursors and
+cursors outside the requested history return 400. Insertions do not shift older
+page boundaries. Each response reads its matching records once; separate page
+requests may see newer lifecycle evidence and totals. Responses use `no-store`;
+database/decode/accounting-overflow failures return a generic 500, never partial
+history. Reads do not modify records.
+
+Each turn includes its attempt `id`, recorded project/task/member attribution,
+role, seat, engine, configured `model` and explicit `provider_default` flag
+(true for an empty configured model), retry `previous_id`/`retry_cause`,
+admission/acceptance/cleanup timestamps, `held`, and `lifecycle`
+(`admitted`, `opened`, `accepted`, `terminal`). `opening: null` means the actual
+opening is unknown; otherwise `resumed` and `fresh_reason` report the recorded
+outcome, not the requested resume. Fresh reasons are `no_saved_thread`,
+`engine_changed`, `model_changed`, `owner_requested`, `harness_incompatible`,
+and `harness_unavailable`. Terminal metadata retains the lifecycle outcome,
+failure stage, provider status/turn ID and cleanup evidence. Claim tokens and
+launch paths are excluded. Terminal outcomes remain visible while cleanup is
+held or unconfirmed; interrupted attempts can have unknown usage.
+
+Terminal `usage`, `observed`, `compaction_usage` and `compaction_observed` are
+separate objects. Each has `known`, `cache_known`, `final`, `status`
+(`unknown`, `partial`, `final`) and nullable `input`, `output`, `cache_read`,
+`cache_write`. Missing counts are null; measured zero is 0. `known` controls
+input/output availability and `cache_known` controls cache split availability.
+Observations are always labelled partial even if their source final flag is
+set; they never replace or add to terminal usage. Compaction stays separate.
+Input already includes cache reads and writes; output includes reasoning.
+
+`aggregate` covers the **entire matching history**, regardless of cursor or
+page size. `cache_read_share` is the fraction `sum(cache_read)/sum(input)` over
+terminal attempts with final usage, known input and known cache accounting,
+including failed/interrupted terminal outcomes with reported final usage.
+Empty or zero denominators produce null, not a percentage. `input` and
+`cache_read` are those eligible sums; `measured_turns` counts eligible attempts
+(including measured zero), and `terminal_turns` is the coverage denominator.
+`missing_input_turns` counts terminal attempts without final known input;
+`missing_cache_turns` counts those without final known cache accounting. These
+counts can overlap. `partial_only_turns` counts attempts lacking final known
+input but carrying partial usage or observations. Unfinished attempts,
+observations and compaction are excluded from eligible sums. Retries are
+distinct recorded attempts, never collapsed or double-added. These are provider
+reports, not cache-hit guarantees, cost estimates or reconstructed old usage.
+
 `crew-assistant serve` writes structured NDJSON errors to stderr through `lib-agent-output`, including failing stage, project, engine and diagnostic code. Prompts, tool output, credentials and provider stderr are never copied into these logs. Capture them with `2>crew-assistant-errors.ndjson`.
 
 ## Development

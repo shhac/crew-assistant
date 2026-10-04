@@ -38,6 +38,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 	registerPMChat(mux, a)
 	registerProjectWork(mux, a)
 	registerProjectTasks(mux, a)
+	registerTeamTurns(mux, a)
 	registerMembers(mux, a, models)
 	mux.HandleFunc("GET /api/decisions/evaluations.jsonl", decisionEvaluationHandler(a.Core.ExportDecisionEvaluations))
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {

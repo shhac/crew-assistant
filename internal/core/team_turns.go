@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"time"
 
@@ -248,6 +249,86 @@ func (s *Service) TeamTurns(ctx context.Context, filter TeamTurnFilter) ([]TeamT
 		}
 	}
 	return out, rows.Err()
+}
+
+// ErrTeamTurnPage includes cursors belonging to another history.
+var ErrTeamTurnPage = errors.New("invalid team-turn page")
+
+type TeamTurnAggregate struct {
+	TerminalTurns     int      `json:"terminal_turns"`
+	MeasuredTurns     int      `json:"measured_turns"`
+	MissingInputTurns int      `json:"missing_input_turns"`
+	MissingCacheTurns int      `json:"missing_cache_turns"`
+	PartialOnlyTurns  int      `json:"partial_only_turns"`
+	Input             int64    `json:"input"`
+	CacheRead         int64    `json:"cache_read"`
+	CacheReadShare    *float64 `json:"cache_read_share"`
+}
+
+type TeamTurnHistory struct {
+	Turns      []TeamTurn
+	NextBefore string
+	Aggregate  TeamTurnAggregate
+}
+
+// TeamTurnHistory reads once: the page and aggregate see the same committed
+// lifecycle evidence. Separate pages do not freeze subsequent updates.
+func (s *Service) TeamTurnHistory(ctx context.Context, filter TeamTurnFilter, limit int, before string) (TeamTurnHistory, error) {
+	if limit == 0 {
+		limit = 50
+	}
+	if limit < 1 || limit > 200 {
+		return TeamTurnHistory{}, ErrTeamTurnPage
+	}
+	turns, err := s.TeamTurns(ctx, filter)
+	if err != nil {
+		return TeamTurnHistory{}, err
+	}
+	h := TeamTurnHistory{Turns: []TeamTurn{}}
+	end, found := len(turns), before == ""
+	for i, t := range turns {
+		if t.ID == before {
+			end, found = i, true
+		}
+		if t.Terminal == nil {
+			continue
+		}
+		a := &h.Aggregate
+		a.TerminalTurns++
+		u := t.Terminal.Usage
+		if !u.Final || !u.Known {
+			a.MissingInputTurns++
+		}
+		if !u.Final || !u.CacheKnown {
+			a.MissingCacheTurns++
+		}
+		if (!u.Final || !u.Known) && (u.Known || u.CacheKnown || t.Terminal.Observed.Known || t.Terminal.Observed.CacheKnown) {
+			a.PartialOnlyTurns++
+		}
+		if !u.Final || !u.Known || !u.CacheKnown {
+			continue
+		}
+		if u.Input < 0 || u.CacheRead < 0 || a.Input > math.MaxInt64-u.Input || a.CacheRead > math.MaxInt64-u.CacheRead {
+			return TeamTurnHistory{}, errors.New("team-turn aggregate overflow")
+		}
+		a.MeasuredTurns++
+		a.Input += u.Input
+		a.CacheRead += u.CacheRead
+	}
+	if !found {
+		return TeamTurnHistory{}, ErrTeamTurnPage
+	}
+	if h.Aggregate.Input > 0 {
+		share := float64(h.Aggregate.CacheRead) / float64(h.Aggregate.Input)
+		h.Aggregate.CacheReadShare = &share
+	}
+	for i := end - 1; i >= 0 && len(h.Turns) < limit; i-- {
+		h.Turns = append(h.Turns, turns[i])
+	}
+	if end > limit {
+		h.NextBefore = h.Turns[len(h.Turns)-1].ID
+	}
+	return h, nil
 }
 
 func (s *Store) changeTeamTurn(ctx context.Context, id string, change func(*TeamTurn) (*TeamTurn, error)) error {
