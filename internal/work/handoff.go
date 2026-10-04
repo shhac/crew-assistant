@@ -145,6 +145,9 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 		}
 		return slices.Contains(t.OwnerTook, u.Criterion)
 	})
+	for i := range t.Design {
+		t.Design[i].IntegrationPending = false
+	}
 	tookTurn(t, h)
 	t.Status, t.Detail = core.TaskReviewing, ""
 	if c := h.DraftCatchUp; c != nil {

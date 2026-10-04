@@ -21,7 +21,20 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 	if writer.Name == "" {
 		return lp.stopTask(ctx, t, "This task's team has no writer")
 	}
-	t, err := lp.prepareWorkspace(ctx, t, m)
+	var err error
+	if slices.ContainsFunc(t.Unreachable, func(u core.Unreachable) bool { return u.NeedsAssetReply() }) {
+		t, err = lp.Core.PrepareAssetWriting(ctx, t)
+		if errors.Is(err, core.ErrConflict) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if t.Status != core.TaskWriting {
+			return nil
+		}
+	}
+	t, err = lp.prepareWorkspace(ctx, t, m)
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
@@ -69,15 +82,30 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 		spec.FreshPrompt = fresh
 	}
 	var result roles.Result
+	var correctingUnmet string
 	for attempt := 0; attempt < 2; attempt++ {
 		result, err = lp.runRole(ctx, spec)
 		if err != nil {
 			return lp.roleFailed(ctx, t, writer.Name, err)
 		}
-		in := parseWriterReply(result.Text, designsFor(t, writer))
+		in := parseWriterReply(result.Text, hasProductionDesigner(t))
+		if in.productionError == nil {
+			in.unmet, in.productionError = mergeWriterReports(t, correctingUnmet, in)
+		}
+		if in.productionError == nil {
+			in.productionError = writerAssetError(t, in)
+		}
 		if in.productionError == nil || attempt == 1 {
+			result.Text, _ = splitBlock(result.Text, "owner-step")
+			if in.unmet != "" {
+				result.Text += "\n```owner-step\n" + in.unmet + "\n```"
+			}
+			if in.productionError != nil {
+				return lp.roleFailed(ctx, t, writer.Name, in.productionError)
+			}
 			break
 		}
+		correctingUnmet = in.unmet
 		if err := m.reset(ctx, beforeCatchUp); err != nil {
 			return lp.roleFailed(ctx, t, "The workspace", err)
 		}
@@ -86,10 +114,13 @@ func (lp *Loop) write(ctx context.Context, p core.Project, t core.Task, m medium
 			return lp.roleFailed(ctx, t, "The workspace", err)
 		}
 		fresh = writerPrompt(p, t, caughtUp, true) + prompt + guide
-		correction := "\n\nYour production request could not be used (" + in.productionError.Error() + "). Reply with only a valid production block."
+		correction := "\n\nYour production request could not be used (" + in.productionError.Error() + "). Correct the classification or reply with only a valid production block, giving names/count, format, dimensions, references and generation constraints."
 		spec.Prompt = writerPrompt(p, t, caughtUp, false) + prompt + guide + correction
 		spec.FreshPrompt = fresh + correction
 		spec.Resume = result.Session
+		// A correction is a new turn. Its observer must not reuse the file
+		// counter still winding down from the rejected reply.
+		spec.Observer = lp.watchTurn(t, core.RoleImplementer, writer, m.workspace(t), true)
 		spec.FreshReason = core.FreshNoThread
 		spec.PreviousID, spec.RetryCause = result.AttemptID, "malformed_production"
 	}
@@ -122,7 +153,13 @@ func (lp *Loop) prepareWorkspace(ctx context.Context, t core.Task, m medium) (co
 // much of the owner's direction its prompt carried.
 func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m medium, writer string, result roles.Result, seen int, integration *core.DraftCatchUp) error {
 	r, ok := t.Role(writer)
-	in := parseWriterReply(result.Text, ok && designsFor(t, r))
+	in := parseWriterReply(result.Text, hasProductionDesigner(t))
+	if in.productionError == nil {
+		in.unmet, in.productionError = mergeWriterReports(t, "", in)
+	}
+	if in.productionError == nil {
+		in.productionError = writerAssetError(t, in)
+	}
 	if in.productionError != nil {
 		return lp.roleFailed(ctx, t, writer, in.productionError)
 	}
@@ -155,7 +192,9 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	// changed is set aside when the workspace is next reset, and its session
 	// resumes with the answer.
 	if in.question != "" {
-		return lp.askDesignAssets(ctx, t, writer, in.question, "", in.assets, func(t *core.Task) {
+		reports, _ := parseOwnerSteps(in.unmet, len(t.Revisions), append(slices.Clone(t.Criteria), p.Brief.Criteria...), t.OwnersAlready(), t.TeamKept)
+		reports = bindWriterReports(p, t, reports)
+		return lp.askDesignAssets(ctx, t, writer, in.question, "", in.assets, reports, productionLinks(in, reports), p.Brief.Version, func(t *core.Task) {
 			t.WakeErrors = wakeErrors
 			if why != "" {
 				t.WakeErrors = append(t.WakeErrors, "hand-on ignored during a design question; ask again when this round finishes")
@@ -168,7 +207,30 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 			}
 		})
 	}
+	if in.unmet != "" && len(t.Revisions) > 0 && slices.ContainsFunc(t.Unreachable, func(u core.Unreachable) bool { return u.NeedsAssetReply() }) {
+		reports, _ := parseOwnerSteps(in.unmet, len(t.Revisions), append(slices.Clone(t.Criteria), p.Brief.Criteria...), t.OwnersAlready(), t.TeamKept)
+		reports = bindWriterReports(p, t, reports)
+		_, err := lp.Core.RecordAssetClassification(ctx, t, reports, writer, result.Session, p.Brief.Version)
+		if errors.Is(err, core.ErrConflict) {
+			return nil
+		}
+		return err
+	}
 	revision, err := m.snapshot(ctx, t, n)
+	if errors.Is(err, gitrepo.ErrNoChange) && in.unmet != "" && len(t.Revisions) > 0 {
+		reports, _ := parseOwnerSteps(in.unmet, len(t.Revisions), append(slices.Clone(t.Criteria), p.Brief.Criteria...), t.OwnersAlready(), t.TeamKept)
+		reports = bindWriterReports(p, t, reports)
+		if len(reports) > 0 {
+			_, err = lp.Core.RecordAssetClassification(ctx, t, reports, writer, result.Session, p.Brief.Version)
+			if errors.Is(err, core.ErrConflict) {
+				return nil
+			}
+			return err
+		}
+	}
+	if errors.Is(err, gitrepo.ErrNoChange) && t.NeedsAssetIntegration() {
+		return lp.roleFailed(ctx, t, writer, errors.New("delivered assets and provenance require a new draft"))
+	}
 	if errors.Is(err, gitrepo.ErrNoChange) && proposed(t) {
 		_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			return noChangeNeeded(t, h), nil
@@ -190,6 +252,18 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	// carries the round's whole outcome until then.
 	var kept []core.Unreachable
 	h.Unreachable, kept = parseOwnerSteps(in.unmet, n, append(slices.Clone(t.Criteria), p.Brief.Criteria...), t.OwnersAlready(), t.TeamKept)
+	// A completed rewrite replaces ordinary obstacles. Only durable routes
+	// and review classifications survive omission; correction turns above
+	// explicitly merge all reports instead.
+	retained := slices.DeleteFunc(slices.Clone(t.Unreachable), func(u core.Unreachable) bool {
+		return !u.NeedsAssetReply() && u.Source != "review"
+	})
+	h.Unreachable = core.MergeReports(retained, bindWriterReports(p, t, h.Unreachable))
+	for i := range h.Unreachable {
+		if h.Unreachable[i].Source != "review" {
+			h.Unreachable[i].Revision = n
+		}
+	}
 	revision.Summary = draftSummary(in.reply, kept)
 	h.Revision = revision
 	return lp.handOff(ctx, t, m, h)
@@ -219,6 +293,7 @@ type writerReply struct {
 	reply, learned, wake, unmet, prReply, pr, question, handOn string
 	assets                                                     []core.WantedAsset
 	productionError                                            error
+	requirements                                               []string
 }
 
 // parseWriterReply takes an implementer's reply apart; designs is whether
@@ -241,6 +316,11 @@ func parseWriterReply(text string, designs bool) writerReply {
 				in.productionError = errors.New("ask with either a production block or a design block")
 			} else {
 				in.assets, in.question, in.productionError = parseProduction(production)
+				for _, line := range strings.Split(in.question, "\n") {
+					if q, ok := strings.CutPrefix(line, "Requirement:"); ok {
+						in.requirements = append(in.requirements, strings.TrimSpace(q))
+					}
+				}
 			}
 		}
 	}

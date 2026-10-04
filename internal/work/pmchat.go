@@ -115,7 +115,7 @@ func pmTeamLine(p core.Project) string {
 	}
 	line := "\nTeam: " + strings.Join(names, "; ") + "\n"
 	if p.Playbook != nil {
-		line += imageGenerators(p.Playbook.Roles) + "\n"
+		line += imageGenerators(p.Playbook.Roles) + "\n" + assetRule(core.Task{Roles: p.Playbook.Roles})
 	}
 	return line
 }

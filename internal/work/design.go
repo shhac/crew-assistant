@@ -30,15 +30,19 @@ func (lp *Loop) askDesign(ctx context.Context, t core.Task, from, question strin
 
 // askDesignFor pins a researcher's request to the named designer, when given.
 func (lp *Loop) askDesignFor(ctx context.Context, t core.Task, from, question, designer string, also func(*core.Task), ends ...core.TurnEnd) error {
-	return lp.askDesignAssets(ctx, t, from, question, designer, nil, also, ends...)
+	return lp.askDesignAssets(ctx, t, from, question, designer, nil, nil, nil, 0, also, ends...)
 }
 
-func (lp *Loop) askDesignAssets(ctx context.Context, t core.Task, from, question, designer string, assets []core.WantedAsset, also func(*core.Task), ends ...core.TurnEnd) error {
+func (lp *Loop) askDesignAssets(ctx context.Context, t core.Task, from, question, designer string, assets []core.WantedAsset, reports []core.Unreachable, requirements []string, briefVersion int, also func(*core.Task), ends ...core.TurnEnd) error {
 	_, err := lp.Core.AskDesign(ctx, t.ID, core.DesignAsk{
-		Assets:   assets,
-		From:     from,
-		For:      designer,
-		Question: question,
+		Expected:     &t,
+		BriefVersion: briefVersion,
+		Requirements: requirements,
+		Reports:      reports,
+		Assets:       assets,
+		From:         from,
+		For:          designer,
+		Question:     question,
 		Owner: core.DecisionInput{
 			Title:          fmt.Sprintf("%s wants more design input on “%s”", from, t.Objective),
 			Context:        fmt.Sprintf("%s\n\n%s has already had design input %d times at this step.", question, from, core.DesignLimit),
@@ -60,6 +64,17 @@ func (lp *Loop) askDesignAssets(ctx context.Context, t core.Task, from, question
 // has one.
 func (lp *Loop) design(ctx context.Context, p core.Project, t core.Task, m medium, designer core.Role) error {
 	request := t.OpenDesign()
+	if designer.Name == "" && request != nil && request.Production != nil {
+		restored, err := lp.Core.RestoreUnfinishedProduction(ctx, t)
+		if errors.Is(err, core.ErrConflict) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		_, err = lp.Core.PrepareAssetWriting(ctx, restored)
+		return err
+	}
 	if designer.Name == "" || request == nil {
 		// Nothing to ask the designer: go back to whichever step can go on.
 		back := core.TaskWriting
@@ -420,8 +435,8 @@ func designGuide(t core.Task, asker core.Role, step string, how string) string {
 		}
 		abilities += "\nNo designer on this team can generate raster art; if it is needed, note that in " + note + "."
 	}
-	if n := t.DesignsAt(step); n >= core.DesignLimit {
-		return abilities + fmt.Sprintf("\n\nYou have had design input from %s %d times at this step, the most it allows. Go on with what you have; asking again brings the question to the owner instead.", designer.Name, n)
+	if n := t.DesignInputsAt(step); n >= core.DesignLimit {
+		return abilities + fmt.Sprintf("\n\nYou have had design input from %s %d times at this step, the most it allows. Go on with what you have; asking again for ordinary design input brings the question to the owner instead. Production requests remain available without this limit.", designer.Name, n)
 	}
 	if step == core.TaskResearching && len(t.RolesOf(core.RoleDesigner)) > 1 {
 		var names []string

@@ -197,7 +197,11 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string, fresh bool) stri
 	} else {
 		b.WriteString("\nOnly change files in the working directory. Do not send, publish or deliver anything anywhere; the owner approves delivery.\nEnd your reply with two sentences on what you wrote or changed" + account)
 	}
-	return b.String()
+	reply := b.String()
+	if hasProductionDesigner(t) {
+		reply = strings.ReplaceAll(reply, "\"requirement\": \"the requirement, quoted\"", "\"requirement\": \"the requirement, quoted\", \"asset_creation\": false")
+	}
+	return reply + assetRule(t)
 }
 
 // checkBeforeFinishing asks the implementer to hold its work up to the plan

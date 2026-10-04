@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -44,6 +45,9 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 	if fresh, ok := findTask(snap, p.ID, t.ID); ok {
 		t = fresh
 	}
+	if t.NeedsAssetIntegration() {
+		return lp.setStatus(ctx, t.ID, core.TaskWriting, "Integrate delivered assets and provenance in a new draft")
+	}
 	if len(core.LandingHeld(&p, t)) > 0 {
 		return nil
 	}
@@ -76,12 +80,53 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 	lp.withTools(&spec, lp.managerTools(p.ID, seat))
 	var decided core.LandDecision
 	var sendBack string
+	var blocked *core.Unreachable
+	assetReported := false
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
+		// Presence is independent of the typed reply contract. A malformed
+		// classification is still an asset report that needs correction.
+		var fields map[string]json.RawMessage
+		if decodeReply(reply, &fields) == nil && hasProductionDesigner(t) {
+			_, nested := fields["blocked_asset"]
+			_, classified := fields["asset_creation"]
+			assetReported = assetReported || nested || classified
+		}
+		candidate, assetErr := parseLandingAsset(p, t, reply)
+		if candidate != nil {
+			blocked = candidate
+		}
+		if assetErr != nil {
+			return assetErr
+		}
+		if assetReported && candidate == nil && hasProductionDesigner(t) {
+			var fields map[string]json.RawMessage
+			_ = decodeReply(reply, &fields)
+			var classified *bool
+			_ = json.Unmarshal(fields["asset_creation"], &classified)
+			var nested *ownerStepEntry
+			_ = json.Unmarshal(fields["blocked_asset"], &nested)
+			if nested != nil {
+				classified = nested.AssetCreation
+			}
+			if classified == nil || *classified {
+				return errors.New("previous asset obstacle requires explicit classification correction")
+			}
+			blocked = nil
+		}
 		decided, sendBack, err = parsePMLanding(reply)
-		return err
+		if err != nil {
+			return err
+		}
+		return nil
 	})
 	if why := errors.Join(err, parseErr); why != nil {
+		if assetReported {
+			return lp.roleFailed(ctx, t, seat.Name, why)
+		}
 		return lp.askOwnerToLand(ctx, p, t, r, m, core.DecisionInput{Context: fmt.Sprintf("%s couldn't decide whether it lands: %s.", seat.Name, text.Clip(why.Error(), 300))})
+	}
+	if blocked != nil {
+		return lp.routeAsset(ctx, p, t, *blocked, seat.Name)
 	}
 	// A ready pull request the PM wants more done on goes back to the
 	// implementer, not to the owner.
@@ -209,7 +254,10 @@ func pmLandingPrompt(snap core.Snapshot, p core.Project, t core.Task, r core.Rev
 	}
 	b.WriteString(pmToldText(snap, p))
 	b.WriteString(reply)
-	return b.String()
+	if hasProductionDesigner(t) {
+		b.WriteString("\nWhen holding because asset creation is blocked, add blocked_asset: {\"requirement\": \"the exact criterion\", \"why\": \"the creation obstacle\", \"asset_creation\": true}. This returns to the implementer for a production spec before any owner hold. Leave blocked_asset absent for an ordinary hold.\n")
+	}
+	return b.String() + assetRule(t)
 }
 
 // parsePMLanding reads the PM's land-or-hold answer, and what it sends back
@@ -276,4 +324,38 @@ If it lands, choose how. "squash" lands it as one commit worded from the request
 	return b.String(), `
 Reply with only this JSON object:
 {"land": true or false, "how": "squash" or "fast-forward" when it lands, "reason": "one short line the owner reads on the task"}`
+}
+
+// parseLandingAsset accepts a structured creation obstacle before a hold is
+// recorded. Ordinary holds and teams without a designer keep their contract.
+func parseLandingAsset(p core.Project, t core.Task, reply string) (*core.Unreachable, error) {
+	if !hasProductionDesigner(t) {
+		return nil, nil
+	}
+	var in struct {
+		Land          bool            `json:"land"`
+		Blocked       *ownerStepEntry `json:"blocked_asset"`
+		AssetCreation *bool           `json:"asset_creation"`
+		Requirement   string          `json:"requirement"`
+		Reason        string          `json:"reason"`
+	}
+	if err := decodeReply(reply, &in); err != nil {
+		return nil, err
+	}
+	if in.Blocked == nil && in.AssetCreation != nil && *in.AssetCreation {
+		in.Blocked = &ownerStepEntry{Requirement: in.Requirement, Why: in.Reason, AssetCreation: in.AssetCreation}
+	}
+	if in.Blocked == nil {
+		return nil, nil
+	}
+	e := in.Blocked
+	if e.AssetCreation == nil || strings.TrimSpace(e.Requirement) == "" || strings.TrimSpace(e.Why) == "" {
+		return nil, errors.New("blocked_asset needs requirement, why and asset_creation")
+	}
+	if !*e.AssetCreation {
+		return nil, nil
+	}
+	u := reviewReport(p, t, finding{Role: "PM landing", Criterion: e.Requirement, Note: e.Why}, e.AssetCreation)
+	u.Source = "landing"
+	return &u, nil
 }

@@ -263,7 +263,7 @@ func (s *Service) applyEdit(v *Snapshot, t *Task, e TaskEdit, out *Task) error {
 			continue
 		}
 		if !slices.ContainsFunc(t.Unreachable, func(current Unreachable) bool {
-			return current.Criterion == u.Criterion && current.Revision == u.Revision
+			return ReportKey(current) == ReportKey(u) && current.Revision == u.Revision
 		}) {
 			t.Unreachable = append(t.Unreachable, u)
 		}
@@ -288,6 +288,7 @@ func (s *Service) applyEdit(v *Snapshot, t *Task, e TaskEdit, out *Task) error {
 		what = "undid a change to"
 	}
 	recordTask(v, now, t, "task.edited", fmt.Sprintf("%s %s %s", e.By, what, t.Objective))
+	reconcileAssetIntegration(t, p)
 	derive(v, t)
 	*out = *t
 	return nil

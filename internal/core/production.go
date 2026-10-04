@@ -277,45 +277,9 @@ func (s *Service) recordProduction(ctx context.Context, taskID, requestID string
 			escalate = &DecisionInput{Title: "Production assets need your call", Context: fmt.Sprintf("Delivered: %s\nRemaining: %s", strings.Join(delivered, ", "), strings.Join(remaining, ", ")), Recommendation: "Decide how to finish the remaining assets", Choices: []string{"Use your judgment", "Stop"}}
 		}
 		if escalate != nil || len(p.Remaining()) == 0 {
-			if p.Archive == "" {
-				var archive bytes.Buffer
-				if err := zip.NewWriter(&archive).Close(); err != nil {
-					return err
-				}
-				a := Attachment{ID: uid(), Name: "rejected-variants.zip", Type: "application/zip", Size: int64(archive.Len()), Design: r.ID, By: reply.Designer, Kind: RoleDesigner, At: now, Production: true}
-				path, err := s.keepFile(t.ID, a.ID, archive.Bytes())
-				if err != nil {
-					return err
-				}
-				written = append(written, path)
-				t.Attachments = append(t.Attachments, a)
-				p.Archive = a.ID
-			}
-			// keepFile avoids taking a nested store read inside this update.
-			p.Provenance = uid()
-			data, err := json.Marshal(p)
-			if err != nil {
+			if err := s.keepProductionHandoff(t, r, reply.Designer, now, &written); err != nil {
 				return err
 			}
-			a, err := checkFile(NewFile{Name: "provenance.json", Made: "daemon production record", Data: data})
-			if err != nil {
-				return err
-			}
-			a.ID = p.Provenance
-			path, err := s.keepFile(t.ID, a.ID, data)
-			if err != nil {
-				return err
-			}
-			written = append(written, path)
-			a.Design = r.ID
-			a.By = reply.Designer
-			a.Kind = RoleDesigner
-			a.At = now
-			a.Production = true
-			if err := withinLimits(t, []Attachment{a}); err != nil {
-				return err
-			}
-			t.Attachments = append(t.Attachments, a)
 		}
 		if escalate != nil {
 			if err := escalate.validTaskDecision(); err != nil {
@@ -504,4 +468,50 @@ func (s *Service) AddRejected(ctx context.Context, in DesignFiles, turn int) (At
 		removeAll([]string{oldPath})
 	}
 	return out, err
+}
+
+// keepProductionHandoff records readable provenance and the rejected archive
+// when complete groups return, including an interrupted production request.
+func (s *Service) keepProductionHandoff(t *Task, r *DesignRequest, designer string, now time.Time, written *[]string) error {
+	p := r.Production
+	if p.Archive == "" {
+		var archive bytes.Buffer
+		if err := zip.NewWriter(&archive).Close(); err != nil {
+			return err
+		}
+		a := Attachment{ID: uid(), Name: "rejected-variants.zip", Type: "application/zip", Size: int64(archive.Len()), Design: r.ID, By: designer, Kind: RoleDesigner, At: now, Production: true}
+		path, err := s.keepFile(t.ID, a.ID, archive.Bytes())
+		if err != nil {
+			return err
+		}
+		*written = append(*written, path)
+		t.Attachments = append(t.Attachments, a)
+		p.Archive = a.ID
+	}
+	// keepFile avoids taking a nested store read inside this update.
+	p.Provenance = uid()
+	data, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	a, err := checkFile(NewFile{Name: "provenance.json", Made: "daemon production record", Data: data})
+	if err != nil {
+		return err
+	}
+	a.ID = p.Provenance
+	path, err := s.keepFile(t.ID, a.ID, data)
+	if err != nil {
+		return err
+	}
+	*written = append(*written, path)
+	a.Design = r.ID
+	a.By = designer
+	a.Kind = RoleDesigner
+	a.At = now
+	a.Production = true
+	if err := withinLimits(t, []Attachment{a}); err != nil {
+		return err
+	}
+	t.Attachments = append(t.Attachments, a)
+	return nil
 }

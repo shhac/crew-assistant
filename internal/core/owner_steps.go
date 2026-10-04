@@ -19,9 +19,23 @@ import (
 // Unreachable is a requirement the implementer said it can't meet from its
 // sandbox, and why, on the draft it said so of.
 type Unreachable struct {
-	Criterion string `json:"criterion"`
-	Why       string `json:"why"`
-	Revision  int    `json:"revision"`
+	ID            string `json:"id,omitempty"`
+	BriefVersion  int    `json:"brief_version,omitempty"`
+	Source        string `json:"source,omitempty"`
+	Finding       string `json:"finding,omitempty"`
+	Bound         string `json:"bound,omitempty"`
+	TextVersion   int    `json:"text_version,omitempty"`
+	AssetCreation *bool  `json:"asset_creation,omitempty"`
+	Routed        string `json:"routed,omitempty"`
+	Criterion     string `json:"criterion"`
+	Why           string `json:"why"`
+	Revision      int    `json:"revision"`
+}
+
+// NeedsAssetReply includes confirmed assets left pending by a partial spec,
+// as well as an explicit route awaiting production or classification.
+func (u Unreachable) NeedsAssetReply() bool {
+	return u.Routed != "" || u.AssetCreation != nil && *u.AssetCreation
 }
 
 // OwnerStep is a requirement a decision proposes leaving to the owner: the
@@ -36,7 +50,7 @@ type OwnerStep struct {
 func (t Task) Pending(n int) []Unreachable {
 	var out []Unreachable
 	for _, u := range t.Unreachable {
-		if u.Revision == n {
+		if u.Revision == n && u.Source != "review" {
 			out = append(out, u)
 		}
 	}

@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,7 +43,28 @@ func (lp *Loop) escalate(ctx context.Context, p core.Project, t core.Task, curre
 	if busy != "" {
 		return lp.waitForSeat(ctx, t, busy)
 	}
+	if _, ok := t.Designer(); ok && judged == nil {
+		for _, f := range findings {
+			classified := slices.ContainsFunc(t.Unreachable, func(u core.Unreachable) bool {
+				if u.ID != "" {
+					return u.ID == reviewReport(p, t, f, nil).ID && u.AssetCreation != nil && !*u.AssetCreation
+				}
+				return u.Source == "review" && u.Revision == len(t.Revisions) && u.TextVersion == t.TextVersion && u.Finding == f.Note && u.Criterion == reviewRequirement(p, t, f) && u.AssetCreation != nil && !*u.AssetCreation
+			})
+			if !classified {
+				return lp.routeAsset(ctx, p, t, reviewReport(p, t, f, nil), "classification required")
+			}
+		}
+	}
 	if judged != nil {
+		if _, ok := t.Designer(); ok {
+			for _, j := range judged.Findings {
+				if j.AssetCreation != nil && *j.AssetCreation {
+					f := findings[j.Finding-1]
+					return lp.routeAsset(ctx, p, t, reviewReport(p, t, f, j.AssetCreation), seat)
+				}
+			}
+		}
 		choice, why := recommend(*judged, findings, passed, waiting)
 		in.Recommendation = fmt.Sprintf("%s: %s. %s", choice, why, judged.Reason)
 		if f := judged.FollowUp; f != nil {
@@ -159,11 +181,12 @@ type escalationJudgement struct {
 // findingJudgement is the PM's reading of one remaining finding, by its
 // number in the prompt.
 type findingJudgement struct {
-	Finding    int  `json:"finding"`
-	Narrow     bool `json:"narrow"`
-	Regression bool `json:"regression"`
-	Repeat     bool `json:"repeat"`
-	Core       bool `json:"core"`
+	AssetCreation *bool `json:"asset_creation"`
+	Finding       int   `json:"finding"`
+	Narrow        bool  `json:"narrow"`
+	Regression    bool  `json:"regression"`
+	Repeat        bool  `json:"repeat"`
+	Core          bool  `json:"core"`
 }
 
 func (j findingJudgement) words() string {
@@ -252,11 +275,43 @@ func (lp *Loop) judgeEscalation(ctx context.Context, p core.Project, t core.Task
 	spec.Observer = lp.watchTurn(t, core.RolePM, seat, dir, false)
 	lp.withTools(&spec, lp.answerTools(p.ID, seat))
 	var judged escalationJudgement
+	// Other invalid judgement fields must not erase an explicit asset finding
+	// if the correction fails. Only a complete judgement replaces it.
+	var assetFindings []findingJudgement
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
+		var reported struct {
+			Findings []json.RawMessage `json:"findings"`
+		}
+		if decodeReply(reply, &reported) == nil {
+			for _, raw := range reported.Findings {
+				var f struct {
+					Finding       int   `json:"finding"`
+					AssetCreation *bool `json:"asset_creation"`
+				}
+				if json.Unmarshal(raw, &f) != nil {
+					continue
+				}
+				if f.Finding > 0 && f.Finding <= findings && f.AssetCreation != nil && *f.AssetCreation {
+					assetFindings = append(assetFindings, findingJudgement{Finding: f.Finding, AssetCreation: f.AssetCreation})
+				}
+			}
+		}
 		judged, err = parseEscalation(reply, findings)
+		if err == nil {
+			if _, ok := t.Designer(); ok {
+				for _, j := range judged.Findings {
+					if j.AssetCreation == nil {
+						return errors.New("classify every finding with asset_creation true or false")
+					}
+				}
+			}
+		}
 		return err
 	})
 	if err != nil || parseErr != nil {
+		if hasProductionDesigner(t) && len(assetFindings) > 0 {
+			return seat.Name, &escalationJudgement{Findings: assetFindings}, ""
+		}
 		return "", nil, ""
 	}
 	return seat.Name, &judged, ""
@@ -345,15 +400,22 @@ Judge what remains at the round limit, for the owner, who decides whether it get
 
 Reply with only this JSON object:
 {"findings": [{"finding": 1, "narrow": true, "regression": false, "repeat": false, "core": false}], "wrong_way": false, "waiting_needs_fix": false, "reason": "one short line the owner reads", "follow_up": {"objective": "...", "criteria": ["..."]}}`)
-	return b.String()
+	reply := b.String()
+	if hasProductionDesigner(t) {
+		reply = strings.ReplaceAll(reply, `"owner_step": true or false`, `"asset_creation": true or false, "owner_step": true or false`)
+		reply = strings.ReplaceAll(reply, `"finding": 1, "narrow"`, `"finding": 1, "asset_creation": false, "narrow"`)
+	}
+	return reply + assetRule(t)
 }
 
 // Requirements the team can't meet from its sandbox.
 
 // ownerStepEntry is one requirement in the implementer's owner-step block.
 type ownerStepEntry struct {
-	Requirement string `json:"requirement"`
-	Why         string `json:"why"`
+	ReportID      string `json:"report_id,omitempty"`
+	AssetCreation *bool  `json:"asset_creation"`
+	Requirement   string `json:"requirement"`
+	Why           string `json:"why"`
 }
 
 // parseOwnerSteps reads the implementer's owner-step block: the
@@ -365,20 +427,16 @@ func parseOwnerSteps(block string, n int, criteria, owners, kept []string) ([]co
 	if block == "" {
 		return nil, nil
 	}
-	var entries []ownerStepEntry
-	if err := json.Unmarshal([]byte(block), &entries); err != nil {
-		var one ownerStepEntry
-		if json.Unmarshal([]byte(block), &one) != nil {
-			return nil, nil
-		}
-		entries = []ownerStepEntry{one}
+	entries, err := ownerStepEntries(block)
+	if err != nil {
+		return nil, nil
 	}
 	var out, retained []core.Unreachable
 	for _, e := range entries {
 		c := matchCriterion(criteria, e.Requirement)
 		if slices.Contains(kept, c) {
 			if !slices.ContainsFunc(retained, func(u core.Unreachable) bool { return u.Criterion == c }) {
-				retained = append(retained, core.Unreachable{Criterion: c, Why: text.Clip(strings.TrimSpace(e.Why), 600), Revision: n})
+				retained = append(retained, core.Unreachable{ID: e.ReportID, AssetCreation: e.AssetCreation, Criterion: c, Why: text.Clip(strings.TrimSpace(e.Why), 600), Revision: n})
 			}
 			continue
 		}
@@ -389,10 +447,10 @@ func parseOwnerSteps(block string, n int, criteria, owners, kept []string) ([]co
 		if slices.Contains(owners, matchCriterion(owners, e.Requirement)) && (slices.Contains(owners, c) || !slices.Contains(criteria, c)) {
 			continue
 		}
-		if c == "" || slices.ContainsFunc(out, func(u core.Unreachable) bool { return u.Criterion == c }) {
+		if c == "" || slices.ContainsFunc(out, func(u core.Unreachable) bool { return u.Criterion == c && u.ID == e.ReportID }) {
 			continue
 		}
-		out = append(out, core.Unreachable{Criterion: c, Why: text.Clip(strings.TrimSpace(e.Why), 600), Revision: n})
+		out = append(out, core.Unreachable{ID: e.ReportID, AssetCreation: e.AssetCreation, Criterion: c, Why: text.Clip(strings.TrimSpace(e.Why), 600), Revision: n})
 	}
 	return out, retained
 }
@@ -424,9 +482,10 @@ func matchCriterion(criteria []string, quoted string) string {
 // ownerStepJudgement is the PM's reading of a requirement the implementer
 // says it can't meet.
 type ownerStepJudgement struct {
-	OwnerStep *bool  `json:"owner_step"`
-	Step      string `json:"step"`
-	Reason    string `json:"reason"`
+	AssetCreation *bool  `json:"asset_creation"`
+	OwnerStep     *bool  `json:"owner_step"`
+	Step          string `json:"step"`
+	Reason        string `json:"reason"`
 }
 
 // proposeOwnerStep brings the owner a requirement the implementer says it
@@ -436,6 +495,10 @@ type ownerStepJudgement struct {
 // be met there and words the step; one it says the team can meet stays with
 // the team, and the task goes on as its checks say.
 func (lp *Loop) proposeOwnerStep(ctx context.Context, p core.Project, t core.Task, u core.Unreachable) error {
+	_, designer := t.Designer()
+	if designer && u.AssetCreation != nil && *u.AssetCreation {
+		return lp.routeAsset(ctx, p, t, u, "implementer")
+	}
 	step := core.OwnerStep{Criterion: u.Criterion, Step: u.Criterion}
 	rec := "Make it an owner step if the team truly can't meet it from its sandbox; otherwise keep it for the team"
 	var b strings.Builder
@@ -444,6 +507,16 @@ func (lp *Loop) proposeOwnerStep(ctx context.Context, p core.Project, t core.Tas
 		judged, busy := lp.judgeOwnerStep(ctx, p, t, seat, u)
 		if busy != "" {
 			return lp.waitForSeat(ctx, t, busy)
+		}
+		if designer && judged != nil && judged.AssetCreation != nil && *judged.AssetCreation {
+			u.AssetCreation = judged.AssetCreation
+			return lp.routeAsset(ctx, p, t, u, seat.Name)
+		}
+		if designer && u.AssetCreation == nil && (judged == nil || judged.AssetCreation == nil) {
+			return lp.routeAsset(ctx, p, t, u, "classification required")
+		}
+		if judged != nil && judged.AssetCreation != nil {
+			u.AssetCreation = judged.AssetCreation
 		}
 		if judged != nil && !*judged.OwnerStep {
 			// The implementer reads why in the task's notes.
@@ -460,6 +533,9 @@ func (lp *Loop) proposeOwnerStep(ctx context.Context, p core.Project, t core.Tas
 			rec = fmt.Sprintf("%s: %s", choiceOwnerStep, judged.Reason)
 			fmt.Fprintf(&b, "\n\n%s agrees the team can't meet it: %s", seat.Name, judged.Reason)
 		}
+	}
+	if designer && u.AssetCreation == nil {
+		return lp.routeAsset(ctx, p, t, u, "classification required")
 	}
 	fmt.Fprintf(&b, "\n\nAs an owner step, it leaves the team's requirements and the delivery carries:\nAfter it lands, check:\n- [ ] %s", step.Step)
 	b.WriteString("\n\nYou can split it: keep part with the team and check the rest after it lands.")
@@ -507,10 +583,22 @@ func (lp *Loop) judgeOwnerStep(ctx context.Context, p core.Project, t core.Task,
 	spec.Observer = lp.watchTurn(t, core.RolePM, seat, dir, false)
 	lp.withTools(&spec, lp.answerTools(p.ID, seat))
 	var judged ownerStepJudgement
+	// Retain the obstacle's classification independently of the owner-step
+	// recommendation, including across an unsuccessful correction turn.
+	var reportedAsset *bool
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) error {
+		var classification struct {
+			AssetCreation *bool `json:"asset_creation"`
+		}
+		if decodeReply(reply, &classification) == nil && classification.AssetCreation != nil && *classification.AssetCreation {
+			reportedAsset = classification.AssetCreation
+		}
 		judged = ownerStepJudgement{}
 		if err := decodeReply(reply, &judged); err != nil {
 			return errors.New("the reply was not valid JSON")
+		}
+		if _, ok := t.Designer(); ok && judged.AssetCreation == nil {
+			return errors.New("classify asset_creation as true or false")
 		}
 		judged.Reason = text.Clip(strings.TrimSpace(judged.Reason), 300)
 		if judged.OwnerStep == nil || judged.Reason == "" {
@@ -519,6 +607,9 @@ func (lp *Loop) judgeOwnerStep(ctx context.Context, p core.Project, t core.Task,
 		return nil
 	})
 	if err != nil || parseErr != nil {
+		if hasProductionDesigner(t) && reportedAsset != nil {
+			return &ownerStepJudgement{AssetCreation: reportedAsset}, ""
+		}
 		return nil, ""
 	}
 	return &judged, ""
@@ -539,5 +630,23 @@ Judge whether a requirement the implementer can't meet from its sandbox is truly
 
 Reply with only this JSON object:
 {"owner_step": true or false, "step": "what the owner checks after it lands, one line", "reason": "one short line the owner reads"}`)
-	return b.String()
+	reply := b.String()
+	if hasProductionDesigner(t) {
+		reply = strings.ReplaceAll(reply, `"owner_step": true or false`, `"asset_creation": true or false, "owner_step": true or false`)
+		reply = strings.ReplaceAll(reply, `"finding": 1, "narrow"`, `"finding": 1, "asset_creation": false, "narrow"`)
+	}
+	return reply + assetRule(t)
+}
+
+// Review reports use the same quoted criterion identity as implementer reports.
+func reviewRequirement(p core.Project, t core.Task, f finding) string {
+	if f.Criterion == "" {
+		f.Criterion = f.Note
+	}
+	return matchCriterion(append(slices.Clone(t.Criteria), p.Brief.Criteria...), f.Criterion)
+}
+
+func reviewReport(p core.Project, t core.Task, f finding, asset *bool) core.Unreachable {
+	key := fmt.Sprintf("%d/%d/%d/%s/%s/%s", len(t.Revisions), t.TextVersion, p.Brief.Version, f.Role, f.Criterion, f.Note)
+	return core.Unreachable{ID: fmt.Sprintf("review-%x", sha256.Sum256([]byte(key))), Source: "review", Finding: f.Note, Criterion: reviewRequirement(p, t, f), Why: f.Note, Revision: len(t.Revisions), TextVersion: t.TextVersion, BriefVersion: p.Brief.Version, AssetCreation: asset}
 }

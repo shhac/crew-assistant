@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/text"
@@ -14,8 +15,11 @@ import (
 // returns to that step with the input, which is kept here so everyone who
 // works on the task afterwards reads the same words.
 type DesignRequest struct {
-	ID         string      `json:"id"`
-	Production *Production `json:"production,omitempty"`
+	IntegrationPending bool          `json:"integration_pending,omitempty"`
+	ID                 string        `json:"id"`
+	Production         *Production   `json:"production,omitempty"`
+	Requirements       []string      `json:"requirements,omitempty"`
+	AssetReports       []Unreachable `json:"asset_reports,omitempty"`
 	// N numbers the designer's input on the task, from 1, as everyone
 	// names it: design 2. A request with no input has none.
 	N int `json:"n,omitempty"`
@@ -43,9 +47,9 @@ type DesignRequest struct {
 	AnsweredAt time.Time `json:"answered_at,omitzero"`
 }
 
-// DesignLimit is how many times one step, in one round, can hand the task to
-// the designer. Past it, the question goes to the owner, so a task can never
-// pass back and forth on its own.
+// DesignLimit bounds ordinary design input per step and round. Production
+// requests may iterate without this limit; their groups retain production's
+// validation and failure bounds.
 const DesignLimit = 2
 
 // Open reports a request still waiting for its answer.
@@ -83,10 +87,15 @@ func (t Task) nextDesignNumber() int {
 
 // DesignAsk is a hand-off the loop asks for.
 type DesignAsk struct {
-	Assets   []WantedAsset
-	From     string
-	For      string
-	Question string
+	BriefVersion int
+	// Requirements names only the reports covered by this production spec.
+	Requirements []string
+	Expected     *Task
+	Reports      []Unreachable
+	Assets       []WantedAsset
+	From         string
+	For          string
+	Question     string
 	// Owner is the decision the question becomes past DesignLimit.
 	Owner DecisionInput
 	// Also changes the task in the same change, such as keeping the
@@ -156,6 +165,12 @@ func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk, e
 		return Task{}, err
 	}
 	return s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
+		if !assetBriefCurrent(v, *t, ask.BriefVersion) {
+			return ErrConflict
+		}
+		if ask.Expected != nil && (!sameAssetRecord(*t, *ask.Expected) || t.Status != ask.Expected.Status) {
+			return ErrConflict
+		}
 		if t.Status != TaskResearching && t.Status != TaskWriting {
 			return fmt.Errorf("the task is no longer researching or being written: %w", ErrConflict)
 		}
@@ -171,10 +186,34 @@ func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk, e
 				designer = seat
 			}
 		}
+		t.Unreachable = MergeReports(t.Unreachable, ask.Reports)
 		now := s.now().UTC()
 		r := DesignRequest{ID: uid(), From: ask.From, For: ask.For, Step: t.Status, Round: t.Round, Question: text.Clip(ask.Question, 4000), At: now}
 		if ask.Assets != nil {
+			r.IntegrationPending = true
 			r.Production = &Production{Assets: append([]WantedAsset(nil), ask.Assets...)}
+			for _, c := range ask.Requirements {
+				u := reportFor(t.Unreachable, c)
+				if u == nil || obsoleteAssetReport(*t, project(v, t.ProjectID), *u) || u.AssetCreation == nil || !*u.AssetCreation {
+					return fmt.Errorf("production must link an explicitly classified asset report: %s", c)
+				}
+				if !slices.Contains(r.Requirements, u.Criterion) {
+					r.Requirements = append(r.Requirements, u.Criterion)
+				}
+				if !slices.ContainsFunc(r.AssetReports, func(old Unreachable) bool { return ReportKey(old) == ReportKey(*u) }) {
+					r.AssetReports = append(r.AssetReports, *u)
+				}
+			}
+			for _, report := range r.AssetReports {
+				recordTask(v, now, t, "task.asset_routed", ask.From+": "+report.Criterion+": asset creation belongs to the designer; "+report.Why)
+				t.Unreachable = slices.DeleteFunc(t.Unreachable, func(u Unreachable) bool { return ReportKey(u) == ReportKey(report) })
+			}
+			for i := range t.Unreachable {
+				u := &t.Unreachable[i]
+				if u.AssetCreation == nil && u.Routed == "" {
+					u.Routed = "Classify the outstanding report after the partial production hand-off"
+				}
+			}
 		}
 		if ask.Also != nil {
 			ask.Also(t)
@@ -189,7 +228,7 @@ func (s *Service) AskDesign(ctx context.Context, taskID string, ask DesignAsk, e
 			}
 		}
 		t.Failures, t.RetryAt = 0, time.Time{}
-		if t.DesignsAt(r.Step) >= DesignLimit {
+		if r.Production == nil && t.DesignInputsAt(r.Step) >= DesignLimit {
 			r.Decision = openTaskDecision(v, t, DecisionQuestion, ask.Owner, now).ID
 		} else {
 			t.Status, t.Detail = TaskDesigning, "With "+designer.Name+" for design input"
@@ -292,4 +331,26 @@ func markCurrent(v *Snapshot, t *Task, this *DesignRequest, designer string, cur
 	t.CurrentDesign = target.ID
 	recordTask(v, now, t, "task.design_current", fmt.Sprintf("%s marked design %d current on %s", designer, target.N, t.Objective))
 	return nil
+}
+
+// DesignInputsAt counts ordinary input only; finished asset iterations are unbounded.
+func (t Task) DesignInputsAt(step string) int {
+	n := 0
+	for _, r := range t.Design {
+		if r.Step == step && r.Round == t.Round && r.Production == nil {
+			n++
+		}
+	}
+	return n
+}
+
+// NeedsAssetIntegration holds delivered files for an implementer draft, never
+// treating a classification correction as integration of assets or provenance.
+func (t Task) NeedsAssetIntegration() bool {
+	for _, r := range t.Design {
+		if r.IntegrationPending && r.Production != nil && len(r.Production.Delivered) > 0 {
+			return true
+		}
+	}
+	return false
 }

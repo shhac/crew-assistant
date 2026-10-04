@@ -129,6 +129,9 @@ func (lp *Loop) supersedeStaleApprovals(ctx context.Context, projectID string) e
 }
 
 func (lp *Loop) askForDelivery(ctx context.Context, p core.Project, t core.Task, r core.Revision) error {
+	if t.NeedsAssetIntegration() {
+		return lp.setStatus(ctx, t.ID, core.TaskWriting, "Integrate delivered assets and provenance in a new draft")
+	}
 	m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
 	if err != nil {
 		return lp.roleFailed(ctx, t, "The workspace", err)

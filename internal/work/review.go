@@ -279,6 +279,8 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 	// owner taking it on, nor sent back for a round it can't win.
 	case len(now.Pending(r.N)) > 0:
 		return lp.proposeOwnerStep(ctx, p, now, now.Pending(r.N)[0])
+	case now.NeedsAssetIntegration():
+		return lp.setStatus(ctx, now.ID, core.TaskWriting, "Integrate delivered assets and provenance in a new draft")
 	// A draft written for an older brief that passes against the current one
 	// is still a pass.
 	case next == core.NextLand:
@@ -420,7 +422,7 @@ Weigh what each checker said and why. Do not build or approve anything yourself;
 
 Reply with only this JSON object:
 {"next": "one of the steps above", "reason": "one line on why"}`)
-	return b.String()
+	return b.String() + assetRule(t)
 }
 
 func orDash(s string) string {
