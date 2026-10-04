@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shhac/crew-assistant/internal/autopilot"
 	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -35,6 +36,12 @@ func TestConfigKeysCoverTheFile(t *testing.T) {
 		t.Fatalf("directive %v", directive)
 	}
 	c := config.Default()
+	// Mode rows are optional map entries, like the optional engine floors
+	// populated below. Include every compiled row in the file/key coverage.
+	c.Autopilot.Modes = map[string]autopilot.Mode{}
+	for _, function := range autopilot.Catalog() {
+		c.Autopilot.Modes[function.ID] = function.DefaultMode
+	}
 	floor, runs := 10, 2
 	for _, engine := range []*config.CLIEngine{&c.Engines.Codex, &c.Engines.Claude} {
 		*engine = config.CLIEngine{Bin: "x", Home: "/x", UsageFloor: config.UsageFloor{FiveHourPercent: &floor, WeekPercent: &floor}, OnUnknownUsage: "pause", RoleRuns: &runs}

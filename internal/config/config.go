@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"github.com/shhac/crew-assistant/internal/autopilot"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,8 +17,9 @@ const Namespace = "app.paulie.crew-assistant"
 const DefaultAssistantName = "Milo"
 
 type Config struct {
-	Chat      Chat      `json:"chat"`
-	Assistant Assistant `json:"assistant"`
+	Autopilot autopilot.Settings `json:"autopilot"`
+	Chat      Chat               `json:"chat"`
+	Assistant Assistant          `json:"assistant"`
 	// Assistants are the assistant profiles the owner keeps on their team;
 	// Assistant.Seat says which of them is the assistant.
 	Assistants []AssistantProfile `json:"assistants"`
@@ -159,6 +161,9 @@ func Paths() (FilePaths, error) {
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func (c Config) Validate() error {
+	if err := c.Autopilot.Validate(); err != nil {
+		return err
+	}
 	if err := c.Upgrade.validate(); err != nil {
 		return err
 	}

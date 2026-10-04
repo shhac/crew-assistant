@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 
 	"github.com/shhac/lib-agent-cli/creds"
@@ -58,6 +59,14 @@ func Save(path string, c Config) error {
 	return s.WithLock(func() error {
 		if _, err := upgradeLocked(path); err != nil {
 			return err
+		}
+		current, err := Load(path)
+		if err != nil {
+			return err
+		}
+		_, statErr := os.Stat(path)
+		if !errors.Is(statErr, os.ErrNotExist) && (!maps.Equal(current.Autopilot.Modes, c.Autopilot.Modes) || !maps.Equal(current.Autopilot.Revisions, c.Autopilot.Revisions)) {
+			return ErrAutopilotConflict
 		}
 		return s.Save(c)
 	})

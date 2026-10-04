@@ -129,6 +129,9 @@ func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (Project, 
 					title = p.Title
 				}
 				if p.Title != title || p.SourceDescription != in.SourceDescription {
+					if p.Title != title {
+						p.TitleRevision++
+					}
 					p.Title = title
 					p.SourceDescription = in.SourceDescription
 					p.UpdatedAt = now

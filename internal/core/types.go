@@ -40,7 +40,9 @@ type Project struct {
 	Title string `json:"title"`
 	// TitleRenamed says the owner has named the project, so a source
 	// refresh leaves its title alone.
-	TitleRenamed bool `json:"title_renamed,omitempty"`
+	TitleRenamed       bool               `json:"title_renamed,omitempty"`
+	TitleRevision      uint64             `json:"title_revision,omitempty"`
+	OperatorPermission OperatorPermission `json:"operator_permission"`
 	// Prefix starts the readable IDs of the project's tasks, as CA does
 	// CA-12; NextTask is the number the next task gets. A number is never
 	// given twice. See refs.go.

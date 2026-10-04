@@ -23,6 +23,7 @@ import (
 )
 
 type App struct {
+	Autopilot        *core.AutopilotCoordinator
 	version          string
 	checker          *upgrade.Checker
 	updateError      string // A state write failure cannot rely on that state being writable.
@@ -32,6 +33,12 @@ type App struct {
 	Core             *core.Service
 	mu               sync.RWMutex
 	cfg              config.Config
+	// applyConfiguration permits testing persistence/application divergence.
+	// Nil uses the service's ordinary checked configuration path.
+	applyConfiguration func(config.Config) error
+	// Disk connection settings at startup distinguish CLI overrides from edits
+	// that still require a daemon restart.
+	diskDashboard config.Dashboard
 	// slackConfig is the connection this boot uses. Edits are saved for restart.
 	slackConfig config.Slack
 	configPath  string
@@ -61,7 +68,8 @@ type App struct {
 	// set under mu, which orders a drawing's Add before that Wait.
 	drawingsClosed bool
 	// stop is the daemon's run: until one starts, a stop that never comes.
-	stop lifecycle.Stop
+	stop          lifecycle.Stop
+	autopilotStop atomic.Pointer[lifecycle.Stop]
 	// chatClosed is set once the chat queue takes no more turns, so a
 	// message queued after it hears so rather than waiting for an answer.
 	chatClosed       atomic.Bool
@@ -91,7 +99,28 @@ type Options struct {
 
 func New(s *core.Service, cfg config.Config, path string, opts Options) *App {
 	a := &App{Diagnostics: opts.Diagnostics, connectionClient: connections.New(), Core: s, cfg: cfg, slackConfig: cfg.Slack, configPath: path, Demo: opts.Demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), summarize: engine.Complete, stop: lifecycle.Now(context.Background()), statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
+	a.diskDashboard = cfg.Dashboard
+	if disk, err := config.Load(path); err == nil {
+		a.diskDashboard = disk.Dashboard
+	}
+	a.Autopilot = core.NewAutopilotCoordinator(s, func() error {
+		if a.dispatchDisabled.Load() || a.Demo {
+			return errors.New("autopilot dispatch is disabled")
+		}
+		if a.upgrading.Load() {
+			return errors.New("upgrade admission is closed")
+		}
+		if stop := a.autopilotStop.Load(); stop != nil && stop.Stopping() {
+			return errStoppingRefused
+		}
+		return nil
+	})
 	a.Work = work.New(s, a.Config, opts.Demo)
+	a.Autopilot.OnPerformed(func(action core.AutopilotAction) {
+		if action.Action.Kind == "resolve-choice" {
+			a.Work.Nudge()
+		}
+	})
 	a.prerequisiteComplete = engine.Complete
 	if !opts.Demo && s != nil {
 		s.SetPrerequisiteComparer(a.comparePrerequisites)
@@ -117,18 +146,26 @@ func (a *App) Avatars() avatars.Store { return avatars.NewStore(a.Core.StateDire
 
 func (a *App) Config() config.Config { a.mu.RLock(); defer a.mu.RUnlock(); return a.cfg }
 func (a *App) UpdateConfig(cfg config.Config) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.updateConfigLocked(cfg)
+	return a.Autopilot.SerializeSettings(func() error {
+		if err := a.validateSlackProject(context.Background(), cfg.Slack); err != nil {
+			return errors.Join(config.ErrAutopilotUnchanged, err)
+		}
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.updateConfigLocked(cfg)
+	})
 }
 
 // updateConfigLocked requires a.mu to preserve atomic read-modify-write updates.
 func (a *App) updateConfigLocked(cfg config.Config) error {
 	cfg.Assistant.Theme = config.NormalizeTheme(cfg.Assistant.Theme)
 	if err := a.checkConfigLocked(cfg); err != nil {
-		return err
+		return errors.Join(config.ErrAutopilotUnchanged, err)
 	}
 	if err := config.Save(a.configPath, cfg); err != nil {
+		if errors.Is(err, config.ErrAutopilotConflict) {
+			return errors.Join(config.ErrAutopilotUnchanged, err)
+		}
 		return err
 	}
 	return a.applyConfigLocked(cfg)
@@ -146,11 +183,15 @@ func (a *App) checkConfigLocked(cfg config.Config) error {
 	if !bytes.Equal(oldNetwork, newNetwork) {
 		return errors.New("dashboard connection changes require stopping the daemon and editing its config")
 	}
-	return a.validateSlackProject(context.Background(), cfg.Slack)
+	return nil
 }
 
 func (a *App) applyConfigLocked(cfg config.Config) error {
-	if err := a.Core.UpdateConfig(cfg); err != nil {
+	apply := a.applyConfiguration
+	if apply == nil {
+		apply = a.Core.UpdateConfig
+	}
+	if err := apply(cfg); err != nil {
 		return err
 	}
 	upgradeChanged := a.cfg.Upgrade != cfg.Upgrade
@@ -166,13 +207,32 @@ func (a *App) applyConfigLocked(cfg config.Config) error {
 // limit or model applies without a restart. It reports whether anything
 // changed.
 func (a *App) ReloadConfig() (bool, error) {
+	var changed bool
+	err := a.Autopilot.SerializeSettings(func() error {
+		var err error
+		changed, err = a.reloadConfig()
+		return err
+	})
+	return changed, err
+}
+func (a *App) reloadConfig() (bool, error) {
 	cfg, err := config.Load(a.configPath)
 	if err != nil {
 		return false, err
 	}
 	cfg.Assistant.Theme = config.NormalizeTheme(cfg.Assistant.Theme)
+	if err := a.validateSlackProject(context.Background(), cfg.Slack); err != nil {
+		return false, err
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	// Unchanged disk connection settings retain CLI overrides. Actual disk
+	// connection edits still go through the restart-required check below.
+	baseline, _ := json.Marshal(a.diskDashboard)
+	diskNetwork, _ := json.Marshal(cfg.Dashboard)
+	if bytes.Equal(baseline, diskNetwork) {
+		cfg.Dashboard = a.cfg.Dashboard
+	}
 	was, _ := json.Marshal(a.cfg)
 	now, _ := json.Marshal(cfg)
 	if bytes.Equal(was, now) {

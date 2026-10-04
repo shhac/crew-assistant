@@ -29,6 +29,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 	mux.HandleFunc("POST /api/upgrade/clear-rollback", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, 202, map[string]bool{"draining": true}, a.ClearRollback())
 	})
+	registerAutopilot(mux, a)
 	registerFilesystem(mux, a)
 	registerEnginePauses(mux, a)
 	mux.HandleFunc("GET /api/engines/codex/browser-bridge", browserBridgeHandler(a))
@@ -222,7 +223,7 @@ func problem(w http.ResponseWriter, err error) {
 	if errors.Is(err, core.ErrNotFound) {
 		status = 404
 	}
-	if errors.Is(err, core.ErrConflict) {
+	if errors.Is(err, core.ErrConflict) || errors.Is(err, config.ErrAutopilotConflict) {
 		status = 409
 	}
 	if errors.Is(err, upgrade.ErrInProgress) {

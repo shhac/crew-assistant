@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -258,24 +259,38 @@ const MaxProjectTitle = 200
 // IDs and their prefix stay as they are, and a source refresh no longer
 // overwrites the title.
 func (s *Service) SetProjectTitle(ctx context.Context, id, title string) (Project, error) {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return Project{}, errors.New("a project needs a name")
-	}
-	if utf8.RuneCountInString(title) > MaxProjectTitle {
-		return Project{}, fmt.Errorf("a project name can be at most %d characters", MaxProjectTitle)
+	var err error
+	title, err = cleanProjectTitle(title)
+	if err != nil {
+		return Project{}, err
 	}
 	return s.editProject(ctx, id, func(p *Project, v *Snapshot) error {
-		if p.Title == title {
-			return nil
-		}
-		old := p.Title
-		p.Title = title
-		p.TitleRenamed = true
-		p.UpdatedAt = s.now().UTC()
-		record(v, p.UpdatedAt, p.ID, "project.renamed", fmt.Sprintf("Renamed from “%s” to “%s”", old, title))
+		renameProject(v, p, title, s.now().UTC())
 		return nil
 	})
+}
+
+func cleanProjectTitle(title string) (string, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return "", errors.New("a project needs a name")
+	}
+	if utf8.RuneCountInString(title) > MaxProjectTitle {
+		return "", fmt.Errorf("a project name can be at most %d characters", MaxProjectTitle)
+	}
+	return title, nil
+}
+
+func renameProject(v *Snapshot, p *Project, title string, now time.Time) {
+	if p.Title == title {
+		return
+	}
+	old := p.Title
+	p.Title = title
+	p.TitleRenamed = true
+	p.TitleRevision++
+	p.UpdatedAt = now
+	record(v, p.UpdatedAt, p.ID, "project.renamed", fmt.Sprintf("Renamed from “%s” to “%s”", old, title))
 }
 
 // SetProjectPrefix renames a project's task ID prefix. Only the prefix is

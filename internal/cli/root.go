@@ -104,6 +104,7 @@ func NewRoot(version string) *cobra.Command {
 	}
 	root.AddCommand(decisionsCommand(o))
 	root.AddCommand(configCommand(o))
+	root.AddCommand(autopilotCommand(o))
 	operations := &cobra.Command{Use: "operations", Short: "Inspect interrupted operations without replaying them"}
 	operations.AddCommand(&cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		v, err := o.request("GET", "/api/state", nil)

@@ -53,6 +53,9 @@ func (s *Service) OnReleaseRecorded(fn func(repo, version string)) {
 	s.releaseRecorded = fn
 }
 func (s *Service) UpdateConfig(cfg config.Config) error {
+	// Configuration application may hold App.mu. Store admission calls back
+	// into App.Config, so taking Store.mu here would invert that lock order.
+	// Autopilot settings admission is serialized by the coordinator instead.
 	if err := cfg.Validate(); err != nil {
 		return err
 	}

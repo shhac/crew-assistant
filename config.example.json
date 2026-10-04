@@ -1,4 +1,19 @@
 {
+  "autopilot": {
+    "modes": {
+      "authorised-research": "suggest",
+      "proposed-split": "suggest",
+      "owner-step": "suggest",
+      "narrow-edge-cases": "suggest",
+      "settled-prerequisite": "suggest",
+      "cross-project-patterns": "suggest",
+      "ci-failures": "suggest",
+      "flaky-tests": "suggest",
+      "engine-usage": "suggest",
+      "repeated-friction": "suggest",
+      "landing-release-operator": "off"
+    }
+  },
   "//": "crew-assistant's settings. Copy to ~/.config/app.paulie.crew-assistant/config.json, or run crew-assistant init and change it with crew-assistant config set. Keys may be left out; they take the defaults shown here.",
   "assistant": {
     "//": "seat is the id of the assistant you work with, from assistants; choose it in Settings. theme is the dashboard's appearance: system, light or dark.",

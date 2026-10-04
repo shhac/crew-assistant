@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"fmt"
 	"strconv"
+	"strings"
 
 	libcli "github.com/shhac/lib-agent-cli/cli"
 	output "github.com/shhac/lib-agent-output"
@@ -20,6 +22,27 @@ func configCommand(o *options) *cobra.Command {
 	cmd := build()
 	for _, verb := range cmd.Commands() {
 		verb.RunE = func(c *cobra.Command, args []string) error {
+			if (verb.Name() == "set" || verb.Name() == "unset") && len(args) > 0 && (args[0] == "autopilot" || strings.HasPrefix(args[0], "autopilot.")) {
+				key := args[0]
+				if verb.Name() == "unset" && key == "autopilot.modes" {
+					for _, setting := range autopilotConfigKeys(o) {
+						if err := setting.Unset(); err != nil {
+							return err
+						}
+					}
+					return libcli.EmitItem(c.OutOrStdout(), o.globals.Format, map[string]bool{"reset": true})
+				}
+				known := false
+				for _, setting := range autopilotConfigKeys(o) {
+					if setting.Name == key {
+						known = true
+						break
+					}
+				}
+				if !known {
+					return fmt.Errorf("%s is protected; change individual autopilot modes instead", key)
+				}
+			}
 			built, _, err := build().Find([]string{verb.Name()})
 			if err != nil {
 				return err
@@ -134,7 +157,7 @@ func configKeys(o *options) []libcli.ConfigKey {
 			libcli.OneOfKey(b, prefix+"on_unknown_usage", "Whether team roles carry on or wait while usage can't be read", func(c *config.Config) *string { return &engine(c).OnUnknownUsage }, []string{config.OnUnknownUsageAllow, config.OnUnknownUsagePause}),
 		)
 	}
-	return keys
+	return append(keys, autopilotConfigKeys(o)...)
 }
 
 func boolKey(b libcli.ConfigBinding[config.Config], name, description string, field func(*config.Config) *bool) libcli.ConfigKey {

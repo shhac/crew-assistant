@@ -45,11 +45,17 @@ func (s *Service) DismissDecision(ctx context.Context, id, reason string) (Decis
 	return s.finishDecision(ctx, id, "", DispositionDismissed, reason, "")
 }
 func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, reason string, by string, splits ...*OwnerSplit) (Decision, error) {
+	return s.finishDecisionUsing(ctx, id, answer, disposition, reason, by, s.store.update, splits...)
+}
+
+// finishDecisionUsing shares checked resolution with transaction-local adapters.
+// Callers must reject decisions that require an outward post-commit hook.
+func (s *Service) finishDecisionUsing(ctx context.Context, id, answer, disposition, reason, by string, update func(context.Context, func(*Snapshot) error) error, splits ...*OwnerSplit) (Decision, error) {
 	var out Decision
 	var beforeUpgrade Decision
 	var afterCommit func() error
 	var upgradeTarget string
-	err := s.store.update(ctx, func(v *Snapshot) error {
+	err := update(ctx, func(v *Snapshot) error {
 		d := decision(v, id)
 		if d == nil {
 			return ErrNotFound

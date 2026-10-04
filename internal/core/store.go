@@ -108,7 +108,9 @@ func Open(path string) (*Store, error) {
 		CREATE INDEX IF NOT EXISTS team_turns_task ON team_turns(task_id, admitted_at, id);
 		CREATE INDEX IF NOT EXISTS team_turns_member ON team_turns(member_id, admitted_at, id);
 		CREATE INDEX IF NOT EXISTS team_turns_claim ON team_turns(claim_token);
-		CREATE INDEX IF NOT EXISTS turn_steps_task ON turn_steps(task_id, seat, id);`)
+		CREATE TABLE IF NOT EXISTS autopilot_actions (id TEXT PRIMARY KEY, source TEXT NOT NULL UNIQUE, project_id TEXT NOT NULL, task_id TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS autopilot_audit (seq INTEGER PRIMARY KEY AUTOINCREMENT, action_id TEXT NOT NULL, project_id TEXT NOT NULL, task_id TEXT NOT NULL, payload TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS turn_steps_task ON turn_steps(task_id, seat, id);`)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -195,6 +197,11 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 	return readState(ctx, conn)
 }
 func (s *Store) update(ctx context.Context, fn func(*Snapshot) error) error {
+	return s.updateTransaction(ctx, func(v *Snapshot, _ *sql.Conn) error { return fn(v) })
+}
+
+// updateTransaction keeps local effects and their durable receipts in one commit.
+func (s *Store) updateTransaction(ctx context.Context, fn func(*Snapshot, *sql.Conn) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	conn, err := s.db.Conn(ctx)
@@ -218,7 +225,7 @@ func (s *Store) update(ctx context.Context, fn func(*Snapshot) error) error {
 	for _, d := range state.Decisions {
 		resolved[d.ID] = d.Status == DecisionResolved
 	}
-	if err = fn(&state); err != nil {
+	if err = fn(&state, conn); err != nil {
 		return err
 	}
 	for _, d := range state.Decisions {

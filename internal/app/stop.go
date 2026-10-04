@@ -22,6 +22,7 @@ func (a *App) setStop(stop lifecycle.Stop) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stop = stop
+	a.autopilotStop.Store(&stop)
 }
 
 // Stopping says whether the daemon has been asked to stop, so it takes no
