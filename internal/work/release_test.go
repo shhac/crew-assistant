@@ -4,6 +4,7 @@ package work
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,16 +13,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shhac/lib-agent-harness/sandbox"
+
+	"github.com/shhac/crew-assistant/internal/checktest"
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/roles"
+	"github.com/shhac/crew-assistant/internal/testutil"
 )
 
 type releaseRunner struct {
 	scriptedRunner
-	checks  int
-	specs   []roles.Spec
-	before  func(roles.Spec)
-	verdict string
+	checks int
+	specs  []roles.Spec
+	before func(sandbox.Options)
+	opts   sandbox.Options
 }
 
 func (r *releaseRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
@@ -29,42 +35,39 @@ func (r *releaseRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result,
 	if strings.HasPrefix(spec.Prompt, "You keep the to-do list") {
 		return roles.Result{Text: `{"release":{"version":"v1.1.0","notes":"Adds a user-visible feature."},"note":"Feature landed"}`}, nil
 	}
-	if !strings.HasPrefix(spec.Prompt, "Check release") {
-		return roles.Result{}, fmt.Errorf("unexpected turn: %s", spec.Prompt)
+	if strings.HasPrefix(spec.Prompt, "Check release") {
+		return roles.Result{Text: `{"outcome":"pass","exit_status":0}`}, nil
 	}
-	r.checks++
-	if r.before != nil {
-		r.before(spec)
-	}
-	_, command, _ := strings.Cut(spec.Prompt, "once:\n")
-	command, _, _ = strings.Cut(command, "\n")
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	cmd.Dir = spec.Read[len(spec.Read)-1]
-	if _, root, ok := strings.Cut(spec.Prompt, "The repository root to run the check from is "); ok {
-		cmd.Dir, _, _ = strings.Cut(root, ": a writable copy")
-	}
-	cmd.Env = append(os.Environ(), spec.Env...)
-	output, err := cmd.CombinedOutput()
-	if r.verdict != "" {
-		return roles.Result{Text: r.verdict}, nil
-	}
-	status := 0
-	outcome := "pass"
-	if err != nil {
-		status = 1
-		if e, ok := err.(*exec.ExitError); ok {
-			status = e.ExitCode()
-		}
-		outcome = "fail"
-	}
-	return roles.Result{Text: fmt.Sprintf(`{"outcome":%q,"exit_status":%d,"output":%q}`, outcome, status, string(output))}, nil
+	return roles.Result{}, fmt.Errorf("unexpected turn: %s", spec.Prompt)
 }
+
 func releaseFixture(t *testing.T, approve string, pr bool, remoteNamed bool, status int) (*Loop, core.Project, *releaseRunner, string, string, string) {
 	t.Helper()
 	ctx := context.Background()
 	runner := &releaseRunner{}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
 	a.runner = runner
+	a.commands = func(_ context.Context, opts sandbox.Options) (commandSandbox, error) {
+		runner.opts = opts
+		return &fakeCommands{run: func(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
+			runner.checks++
+			if runner.before != nil {
+				runner.before(opts)
+			}
+			cmd := exec.CommandContext(ctx, "sh", "-c", req.Command)
+			cmd.Dir, cmd.Env = opts.WorkDir, append(os.Environ(), opts.Env...)
+			output, err := cmd.CombinedOutput()
+			status := 0
+			if err != nil {
+				status = 1
+				if e, ok := err.(*exec.ExitError); ok {
+					status = e.ExitCode()
+				}
+			}
+			return sandbox.CommandResult{ExitCode: status, Stdout: string(output)}, nil
+		}}, nil
+	}
+
 	source := ownerRepo(t)
 	ownerGit(t, source, "tag", "v1.0.0")
 	remote := filepath.Join(t.TempDir(), "github.git")
@@ -181,9 +184,8 @@ func TestReleaseOwnerApprovalChecksAndPublishes(t *testing.T) {
 	if ownerGit(t, remote, "rev-parse", "main") != tip || r.checks != 1 {
 		t.Fatal("branch/check", r.checks)
 	}
-	spec := r.specs[len(r.specs)-1]
-	if !spec.Write || spec.Web || !strings.Contains(spec.Prompt, "sh check.sh v1.1.0") || !strings.Contains(spec.Prompt, tip) || spec.WorkDir == spec.Read[len(spec.Read)-1] {
-		t.Fatal(spec)
+	if len(r.specs) != 1 || r.opts.WorkDir == source {
+		t.Fatal(r.specs, r.opts)
 	}
 	info, err := os.Stat(source)
 	if err != nil || info == nil {
@@ -203,7 +205,7 @@ func TestReleaseOwnerApprovalChecksAndPublishes(t *testing.T) {
 func TestReleaseCheckRetainsShellRepositoryRoot(t *testing.T) {
 	for _, inCopy := range []bool{false, true} {
 		t.Run(fmt.Sprint(inCopy), func(t *testing.T) {
-			a, p, runner, _, _, _ := releaseFixture(t, "", false, false, 0)
+			a, p, runner, _, _, tip := releaseFixture(t, "", false, false, 0)
 			book := *p.Playbook
 			book.CheckInCopy = inCopy
 			var err error
@@ -212,17 +214,20 @@ func TestReleaseCheckRetainsShellRepositoryRoot(t *testing.T) {
 				t.Fatal(err)
 			}
 			checked := false
-			runner.before = func(spec roles.Spec) {
+			runner.before = func(opts sandbox.Options) {
 				checked = true
-				root := spec.Read[len(spec.Read)-1]
-				if inCopy {
-					root = filepath.Join(spec.WorkDir, "tree")
+				unusedTree := filepath.Join(filepath.Dir(releaseCheckoutForTest(t, opts.WorkDir)), "scratch", "tree")
+				if _, err := os.Stat(unusedTree); !os.IsNotExist(err) {
+					t.Fatal("unused writable checkout created", err)
 				}
-				if !strings.Contains(spec.Prompt, "repository root to run the check from") || !strings.Contains(spec.Prompt, root) || strings.Contains(spec.Prompt, "run_check") || strings.Contains(spec.Prompt, "app may build") || hasTool(spec, "run_check") {
-					t.Fatalf("release shell root lost: %s", spec.Prompt)
+				if ownerGit(t, opts.WorkDir, "rev-parse", "HEAD") != tip {
+					t.Fatal("wrong release commit")
 				}
-				if inCopy && !strings.Contains(spec.Prompt, "repository root to run the check from is "+root) {
-					t.Fatal(spec.Prompt)
+				if opts.WorkDir == releaseCheckoutForTest(t, opts.WorkDir) {
+					t.Fatal("not a writable copy")
+				}
+				if _, err := os.Stat(filepath.Join(opts.WorkDir, "check.sh")); err != nil {
+					t.Fatal(err)
 				}
 			}
 			proposeFromPM(t, a, p)
@@ -339,11 +344,11 @@ func TestReleasePauseAndMovingTarget(t *testing.T) {
 		t.Fatal("checked while paused")
 	}
 	a.Core.SetLandingPaused(ctx, p.ID, false, "")
-	r.before = func(spec roles.Spec) {
+	r.before = func(opts sandbox.Options) {
 		// A later landing cannot change the checked or published commit.
 		ownerGit(t, source, "commit", "--allow-empty", "-qm", "Later landing")
 		a.Core.SetLandingPaused(ctx, p.ID, true, "freeze during check")
-		info, err := os.Stat(spec.Read[len(spec.Read)-1])
+		info, err := os.Stat(releaseCheckoutForTest(t, opts.WorkDir))
 		if err != nil || info.Mode().Perm()&0222 != 0 {
 			t.Fatal("checkout writable", err)
 		}
@@ -517,8 +522,8 @@ func TestReleaseCheckChangesAndMissingQARequireOwner(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				r.before = func(spec roles.Spec) {
-					dir := spec.Read[len(spec.Read)-1]
+				r.before = func(opts sandbox.Options) {
+					dir := releaseCheckoutForTest(t, opts.WorkDir)
 					if err := os.Chmod(dir, 0700); err != nil {
 						t.Fatal(err)
 					}
@@ -574,7 +579,7 @@ func TestReleaseSettingsRemainOwnerOnlyAndStartedCheckFinishes(t *testing.T) {
 		t.Fatal("team choice removed release settings")
 	}
 	proposeFromPM(t, a, p)
-	r.before = func(roles.Spec) {
+	r.before = func(sandbox.Options) {
 		if _, err := a.SetRelease(context.Background(), p.ID, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -638,24 +643,13 @@ func TestReleaseWithNoCheckPublishesWithoutQA(t *testing.T) {
 	}
 }
 
-func TestReleaseFailedVerdictPreservesCommandExitStatus(t *testing.T) {
-	t.Parallel()
-	a, p, r, source, _, _ := releaseFixture(t, core.ApprovePM, false, false, 0)
-	r.verdict = `{"outcome":"fail","exit_status":0,"output":"verification failed"}`
+func TestReleaseHostedExitStatus(t *testing.T) {
+	a, p, r, _, _, _ := releaseFixture(t, core.ApprovePM, false, false, 3)
 	proposeFromPM(t, a, p)
 	releasePass(t, a)
-	failed, snap := releaseState(t, a, p.ID)
-	if failed.Release == nil || failed.Release.DecisionID == "" || tagPresent(t, source, "v1.1.0") {
-		t.Fatal(failed)
-	}
-	found := false
-	for _, d := range snap.Decisions {
-		if d.ID == failed.Release.DecisionID && strings.Contains(d.Context, "exit 0") && strings.Contains(d.Context, "QA reported fail") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("exit status lost", snap.Decisions)
+	_, snap := releaseState(t, a, p.ID)
+	if len(r.specs) != 1 || !strings.Contains(snap.Decisions[len(snap.Decisions)-1].Context, "exit 3") || !strings.Contains(snap.Decisions[len(snap.Decisions)-1].Context, "tail-evidence") {
+		t.Fatal(snap.Decisions, r.specs)
 	}
 }
 
@@ -709,13 +703,13 @@ func TestReleasePromptUsesClockAndLatestDeclineOnly(t *testing.T) {
 	}
 }
 
-func TestReleaseQAAndPMHaveDurableProjectOnlyAttribution(t *testing.T) {
+func TestReleasePMHasDurableProjectOnlyAttribution(t *testing.T) {
 	a, p, runner, _, _, _ := releaseFixture(t, "", false, false, 0)
 	proposeFromPM(t, a, p)
 	chooseRelease(t, a, p.ID, "Release v1.1.0")
 	releasePass(t, a)
 	turns, err := a.Core.TeamTurns(context.Background(), core.TeamTurnFilter{ProjectID: p.ID})
-	if err != nil || len(turns) != len(runner.specs) || len(turns) != 2 {
+	if err != nil || len(turns) != len(runner.specs) || len(turns) != 1 {
 		t.Fatalf("%+v %v", turns, err)
 	}
 	for i, got := range turns {
@@ -724,7 +718,7 @@ func TestReleaseQAAndPMHaveDurableProjectOnlyAttribution(t *testing.T) {
 			t.Fatalf("project-only attribution: %+v", got)
 		}
 	}
-	if turns[0].Role != core.RolePM || turns[1].Role != core.RoleQA {
+	if turns[0].Role != core.RolePM {
 		t.Fatal(turns)
 	}
 }
@@ -732,16 +726,7 @@ func TestReleaseActiveCheckDoesNotReportWaitingOnItself(t *testing.T) {
 	t.Parallel()
 	a, p, r, _, _, _ := releaseFixture(t, "pm", false, false, 0)
 	proposeFromPM(t, a, p)
-	r.before = func(spec roles.Spec) {
-		if spec.Observer == nil {
-			t.Fatal("QA has no live observer")
-		}
-		spec.Observer.Started()
-		defer spec.Observer.Ended()
-		turns := a.Turns()
-		if len(turns) != 1 || turns[0].ProjectID != p.ID || turns[0].Role != core.RoleQA {
-			t.Fatal(turns)
-		}
+	r.before = func(opts sandbox.Options) {
 		snap, _ := a.Core.Snapshot(context.Background())
 		jobs, err := a.manageReleases(context.Background(), snap, true)
 		if err != nil || len(jobs) != 0 {
@@ -826,5 +811,267 @@ func TestReleasePMSeesRemoteOffTargetVersionOnPushProject(t *testing.T) {
 	saved, _ := releaseState(t, a, p.ID)
 	if saved.Release != nil {
 		t.Fatal("occupied version proposed", saved.Release)
+	}
+}
+
+// releaseCheckoutForTest finds the retained read-only checkout beside the hosted copy.
+func releaseCheckoutForTest(t *testing.T, copy string) string {
+	t.Helper()
+	entries, err := filepath.Glob(filepath.Join(filepath.Dir(filepath.Dir(copy)), "check-*", "checkout"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) == 1 {
+		return entries[0]
+	}
+	t.Fatal("no retained checkout", copy)
+	return ""
+}
+
+func saveReleaseProgress(t *testing.T, opts sandbox.Options, skips []checktest.Skip) {
+	t.Helper()
+	path, invocation := "", ""
+	for _, e := range opts.Env {
+		if v, ok := strings.CutPrefix(e, checktest.ProgressEnv+"="); ok {
+			path = v
+		}
+		if v, ok := strings.CutPrefix(e, checktest.InvocationEnv+"="); ok {
+			invocation = v
+		}
+	}
+	if err := checktest.SaveProgress(path, checktest.Progress{Invocation: invocation, Stage: "complete", Done: true, Report: checktest.Report{Complete: true, Skips: skips}}); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestReleaseHostedLoopbackForCodex(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		t.Run(fmt.Sprint(on), func(t *testing.T) {
+			if on {
+				listener := testutil.ListenLoopback(t)
+				listener.Close()
+			}
+			a, p, r, source, _, _ := releaseFixture(t, core.ApprovePM, false, false, 0)
+			book := *p.Playbook
+			book.CheckLoopback = on
+			for i := range book.Roles {
+				if book.Roles[i].Holds(core.RoleQA) {
+					book.Roles[i].Engine = "codex"
+				}
+			}
+			if config.Supports("codex", config.UseLoopback) {
+				t.Fatal("regression requires an engine without loopback")
+			}
+			var err error
+			p, err = a.Core.SetPlaybook(context.Background(), p.ID, book)
+			if err != nil {
+				t.Fatal(err)
+			}
+			called := false
+			a.commands = func(_ context.Context, opts sandbox.Options) (commandSandbox, error) {
+				called = true
+				if opts.Loopback != on || !strings.Contains(strings.Join(opts.Env, " "), "CREW_HOSTED_CHECK=1") || opts.WorkDir == source || opts.WorkDir == releaseCheckoutForTest(t, opts.WorkDir) {
+					t.Fatal(opts)
+				}
+				return &fakeCommands{run: func(_ context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
+					if req.Command != "sh check.sh v1.1.0" {
+						t.Fatal(req)
+					}
+					skips := []checktest.Skip{}
+					if opts.Loopback {
+						listener := testutil.ListenLoopback(t)
+						listener.Close()
+					} else {
+						skips = append(skips, checktest.Skip{Package: "p", Test: "TestBindsLoopback", Reason: "listen tcp 127.0.0.1: operation not permitted"})
+					}
+					saveReleaseProgress(t, opts, skips)
+					return sandbox.CommandResult{}, nil // Required skips must override exit zero.
+				}}, nil
+			}
+			proposeFromPM(t, a, p)
+			releasePass(t, a)
+			checked, snap := releaseState(t, a, p.ID)
+			if !called || len(r.specs) != 1 {
+				t.Fatal("hosted check not used", r.specs)
+			}
+			if on {
+				if checked.Release.State != "approved" {
+					t.Fatal(checked.Release)
+				}
+				releasePass(t, a)
+				if !tagPresent(t, source, "v1.1.0") {
+					t.Fatal("not published")
+				}
+			} else {
+				found := false
+				for _, item := range snap.Activity {
+					if item.Kind == "release.checked" && strings.Contains(item.Summary, "TestBindsLoopback") && strings.Contains(item.Summary, "Required-skip failures: 1") {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatal("required-skip activity missing")
+				}
+				text := snap.Decisions[len(snap.Decisions)-1].Context
+				if !strings.Contains(text, "Required-skip failures: 1") || !strings.Contains(text, "TestBindsLoopback") || tagPresent(t, source, "v1.1.0") {
+					t.Fatal(text)
+				}
+			}
+		})
+	}
+}
+func TestReleaseHostedRefusal(t *testing.T) {
+	a, p, _, source, _, _ := releaseFixture(t, core.ApprovePM, false, false, 0)
+	a.commands = func(context.Context, sandbox.Options) (commandSandbox, error) {
+		return nil, errors.New("sandbox refused loopback proof")
+	}
+	proposeFromPM(t, a, p)
+	releasePass(t, a)
+	_, snap := releaseState(t, a, p.ID)
+	text := snap.Decisions[len(snap.Decisions)-1].Context
+	if !strings.Contains(text, "exit -1") || !strings.Contains(text, "could not be run") || tagPresent(t, source, "v1.1.0") {
+		t.Fatal(text)
+	}
+}
+
+func TestReleaseHostedManyRequiredSkips(t *testing.T) {
+	a, p, _, _, _, _ := releaseFixture(t, core.ApprovePM, false, false, 0)
+	skips := []checktest.Skip{}
+	for i := range 120 {
+		skips = append(skips, checktest.Skip{Package: "p", Test: fmt.Sprintf("TestRequired%03d", i), Reason: "required capability denied"})
+	}
+	a.commands = func(_ context.Context, opts sandbox.Options) (commandSandbox, error) {
+		return &fakeCommands{run: func(context.Context, sandbox.CommandRequest) (sandbox.CommandResult, error) {
+			saveReleaseProgress(t, opts, skips)
+			return sandbox.CommandResult{Stdout: strings.Repeat("noise\n", 1000)}, nil
+		}}, nil
+	}
+	proposeFromPM(t, a, p)
+	releasePass(t, a)
+	_, snap := releaseState(t, a, p.ID)
+	text := snap.Decisions[len(snap.Decisions)-1].Context
+	if !strings.Contains(text, "Required-skip failures: 120") || !strings.Contains(text, "TestRequired000") || !strings.Contains(text, "and 105 more") {
+		t.Fatal(text)
+	}
+	var evidence strings.Builder
+	for _, item := range snap.Activity {
+		if item.Kind == "release.check_coverage" {
+			evidence.WriteString(item.Summary)
+		}
+	}
+	for _, skip := range skips {
+		if !strings.Contains(evidence.String(), skip.Test) {
+			t.Fatal("lost skip", skip.Test)
+		}
+	}
+}
+func TestReleaseHostedCancellationReruns(t *testing.T) {
+	a, p, runner, _, _, tip := releaseFixture(t, core.ApprovePM, false, false, 0)
+	proposeFromPM(t, a, p)
+	claim, seat, ok, err := a.Core.ClaimRelease(context.Background(), p.ID, tip, func(core.Role) string { return "" })
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	p, _ = releaseState(t, a, p.ID)
+	m, err := a.gitMediumFor(context.Background(), p, p.Playbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	var copy string
+	box := &fakeCommands{}
+	original := a.commands
+	a.commands = func(_ context.Context, opts sandbox.Options) (commandSandbox, error) {
+		copy = opts.WorkDir
+		box.run = func(ctx context.Context, _ sandbox.CommandRequest) (sandbox.CommandResult, error) {
+			saveReleaseProgress(t, opts, []checktest.Skip{{Package: "p", Test: "TestInterrupted", Reason: "denied"}})
+			cancel()
+			<-ctx.Done()
+			return sandbox.CommandResult{}, ctx.Err()
+		}
+		return box, nil
+	}
+	if err := a.checkRelease(ctx, p, m, seat); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	if !box.closed {
+		t.Fatal("box not closed")
+	}
+	if _, err := os.Stat(copy); !os.IsNotExist(err) {
+		t.Fatal("copy retained", err)
+	}
+	p, snap := releaseState(t, a, p.ID)
+	if p.Release.State != "checking" {
+		t.Fatal(p.Release)
+	}
+	interrupted := false
+	for _, item := range snap.Activity {
+		if item.Kind == "release.checked" {
+			t.Fatal("cancelled check recorded a result")
+		}
+		if item.Kind == "release.check_coverage" && strings.Contains(item.Summary, "interrupted; coverage incomplete") {
+			interrupted = true
+		}
+	}
+	if !interrupted {
+		t.Fatal("lost interrupted evidence")
+	}
+	if err := a.Core.ReleaseProjectClaim(context.Background(), p.ID, claim.Token); err != nil {
+		t.Fatal(err)
+	}
+	a.commands = original
+	releasePass(t, a)
+	p, _ = releaseState(t, a, p.ID)
+	if p.Release.State != "approved" || runner.checks != 1 {
+		t.Fatal("did not rerun", p.Release)
+	}
+}
+
+// Both failure reasons must survive releaseTail after noisy hosted output.
+func TestReleaseHostedFailureReasonsSurviveOutputTail(t *testing.T) {
+	for _, mode := range []string{"verification", "run error"} {
+		t.Run(mode, func(t *testing.T) {
+			a, p, _, source, _, _ := releaseFixture(t, core.ApprovePM, false, false, 0)
+			a.commands = func(_ context.Context, opts sandbox.Options) (commandSandbox, error) {
+				return &fakeCommands{run: func(context.Context, sandbox.CommandRequest) (sandbox.CommandResult, error) {
+					if mode == "verification" {
+						dir := releaseCheckoutForTest(t, opts.WorkDir)
+						if err := os.Chmod(dir, 0700); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.WriteFile(filepath.Join(dir, "unexpected.txt"), []byte("changed"), 0600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					result := sandbox.CommandResult{Stdout: strings.Repeat("earlier noisy output "+strings.Repeat("x", 100)+"\n", 100), Stderr: "terminal-output-evidence"}
+					if mode == "run error" {
+						return result, errors.New("sandbox command failed before progress")
+					}
+					return result, nil
+				}}, nil
+			}
+			proposeFromPM(t, a, p)
+			releasePass(t, a)
+			failed, snap := releaseState(t, a, p.ID)
+			if failed.Release.DecisionID == "" || tagPresent(t, source, "v1.1.0") {
+				t.Fatal(failed.Release)
+			}
+			reason, status := "changed the revision", "exit 0"
+			if mode == "run error" {
+				reason, status = "the release check could not be run: sandbox command failed before progress", "exit -1"
+			}
+			text := snap.Decisions[len(snap.Decisions)-1].Context
+			if !strings.Contains(text, reason) || !strings.Contains(text, status) || !strings.Contains(text, "terminal-output-evidence") {
+				t.Fatal(text)
+			}
+			found := false
+			for _, item := range snap.Activity {
+				if item.Kind == "release.checked" && strings.Contains(item.Summary, reason) {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("failure reason missing from activity")
+			}
+		})
 	}
 }

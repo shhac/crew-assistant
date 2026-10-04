@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shhac/crew-assistant/internal/checktest"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/integrations/github"
@@ -258,71 +259,57 @@ func releaseTail(s string) string {
 	return s
 }
 
-// checkRelease shares QA's checkout, sandbox spec, JSON retry and verification.
-// It gives QA no publishing tools or credentials.
-func (lp *Loop) checkRelease(ctx context.Context, p core.Project, m gitMedium, seat core.Role) error {
+// checkRelease runs in the daemon-hosted sandbox; QA gets no publishing tools or credentials.
+func (lp *Loop) checkRelease(ctx context.Context, p core.Project, m gitMedium, _ core.Role) error {
 	r := p.Release
-	c, err := m.check(ctx, core.Task{}, core.Revision{Ref: r.Commit}, true, false)
+	// hostedCheck creates the writable copy; retain only the read-only revision here.
+	c, err := m.check(ctx, core.Task{}, core.Revision{Ref: r.Commit}, false, false)
 	if err != nil {
 		return lp.Core.ReleaseFailed(ctx, p.ID, err.Error(), false)
 	}
 	defer c.remove()
-	command := strings.ReplaceAll(r.Policy.Check, "{version}", r.Version)
-	prompt := fmt.Sprintf("Check release %s on landed commit %s. This command verifies only; publish nothing. Run exactly this from the repository root, once:\n%s\n%s\nReply only JSON: {\"outcome\":\"pass or fail\",\"exit_status\":0,\"output\":\"last 40 lines or 4 KB of output\"}. A nonzero exit must fail.\n", r.Version, r.Commit, command, c.note)
-	spec := lp.baseSpec(seat, c.workDir, prompt)
-	spec.ProjectID, spec.Role = p.ID, core.RoleQA
-	spec.Observer = lp.watchTurn(core.Task{ProjectID: p.ID}, core.RoleQA, seat, c.workDir, false)
-	// A release has no task; the globally unique project ID scopes its temporary
-	// learnings folder, shared only by this project turn and member.
-	learned, err := lp.prepareLearnings(core.Task{ID: p.ID}, seat)
-	if err != nil {
-		return lp.Core.ReleaseFailed(ctx, p.ID, err.Error(), false)
-	}
-	defer learned.cleanup()
-	if learned.index != "" {
-		spec.Read = append(spec.Read, learned.dir)
-		spec.Instructions += "\n\n" + learned.index
-	}
-	spec.Write = true
-	spec.Env = c.env
-	spec.Read = append(append(spec.Read, m.readable()...), c.read...)
-	spec.Loopback = checkLoopback(&m.playbook, seat)
-	type checkResult struct {
-		Outcome string `json:"outcome"`
-		Status  *int   `json:"exit_status"`
-		Output  string `json:"output"`
-	}
-	var result checkResult
-	reply, _, parseErr, runErr := lp.askForJSON(ctx, spec, func(reply string) error {
-		result = checkResult{}
-		if err := decodeReply(reply, &result); err != nil {
-			return err
-		}
-		if result.Status == nil || (result.Outcome != "pass" && result.Outcome != "fail") {
-			return errors.New("give outcome, exit_status and output")
-		}
-		return nil
+	attempt := fmt.Sprint(time.Now().UnixNano())
+	result, progress, runErr := lp.hostedCheck(ctx, m, c.checkDir, checkCache(c.env), strings.ReplaceAll(r.Policy.Check, "{version}", r.Version), lp.commandCleanup, func(progress *checktest.Progress, status string) {
+		noteCoverage(progress, status, func(text string) {
+			text = fmt.Sprintf("Release %s commit %s attempt %s: %s", r.Version, r.Commit, attempt, text)
+			if err := lp.Core.RecordActivity(context.WithoutCancel(ctx), p.ID, "release.check_coverage", text); err != nil {
+				lp.releaseSchedulingError(p.ID, err)
+			}
+		})
 	})
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	status, tail := -1, result.Output
-	if result.Status != nil {
-		status = *result.Status
-	}
-	passed := result.Outcome == "pass" && status == 0
-	if result.Outcome == "fail" {
-		tail = "QA reported fail\n" + tail
-	}
+	passed := runErr == nil && result.ExitCode == 0 && !result.TimedOut && (progress == nil || progress.Done && progress.Stage == "complete" && !progress.Report.Failed)
+	status, tail := result.ExitCode, result.Stdout+"\n"+result.Stderr
 	if runErr != nil {
+		status = -1
+		tail += "\nthe release check could not be run: " + runErr.Error()
+	}
+	if err := c.verify(ctx); err != nil {
 		passed = false
-		status, tail = -1, runErr.Error()
-	} else if parseErr != nil {
-		passed = false
-		status, tail = -1, parseErr.Error()+"\n"+reply
-	} else if err = c.verify(ctx); err != nil {
-		passed = false
-		tail = err.Error() + "\n" + tail
+		tail += "\n" + err.Error()
+	}
+	if progress != nil {
+		required := []string{}
+		for _, skip := range progress.Report.Skips {
+			if skip.Exception == "" {
+				required = append(required, skip.Package+" "+skip.Test)
+			}
+		}
+		var evidence strings.Builder
+		shown := 0
+		for _, identity := range required {
+			if shown == 15 || evidence.Len()+len(identity) > 2500 {
+				break
+			}
+			evidence.WriteString(identity + "\n")
+			shown++
+		}
+		tail += fmt.Sprintf("\nRequired-skip failures: %d of %d skips\n", len(required), len(progress.Report.Skips)) + evidence.String()
+		if shown < len(required) {
+			tail += fmt.Sprintf("and %d more; full evidence in release.check_coverage activity", len(required)-shown)
+		}
 	}
 	return lp.Core.ReleaseChecked(ctx, p.ID, passed, status, releaseTail(tail))
 }

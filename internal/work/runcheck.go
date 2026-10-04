@@ -47,12 +47,19 @@ type checkRun struct {
 func newCheckRuns(lp *Loop, m gitMedium, from string, env []string) *checkRuns {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &checkRuns{lp: lp, medium: m, from: from, ctx: ctx, cancel: cancel, wait: 45 * time.Second}
+	r.cache = checkCache(env)
+	return r
+}
+
+// checkCache retains the shared cache parent used by disposable check copies.
+func checkCache(env []string) string {
+	cache := ""
 	for _, e := range env {
 		if path, ok := strings.CutPrefix(e, "GOCACHE="); ok {
-			r.cache = filepath.Dir(path)
+			cache = filepath.Dir(path)
 		}
 	}
-	return r
+	return cache
 }
 func (r *checkRuns) call(ctx context.Context) (string, error) {
 	r.mu.Lock()
@@ -89,83 +96,92 @@ func (r *checkRuns) call(ctx context.Context) (string, error) {
 }
 func (r *checkRuns) run(run *checkRun) {
 	defer close(run.done)
+	run.result, run.progress, run.err = r.lp.hostedCheck(r.ctx, r.medium, r.from, r.cache, r.medium.playbook.Check, r.cleanupError, func(p *checktest.Progress, status string) {
+		if r.coverageNote != nil {
+			noteCoverage(p, status, r.coverageNote)
+			r.mu.Lock()
+			run.noted = true
+			r.mu.Unlock()
+		}
+	})
+}
+func (lp *Loop) hostedCheck(ctx context.Context, m gitMedium, from, cache, command string, cleanupError func(error), note func(*checktest.Progress, string)) (result sandbox.CommandResult, progress *checktest.Progress, runErr error) {
 	var copy gitrepo.Checkout
-	copy, run.err = r.medium.repo.CopyForCheck(r.from, r.cache)
-	if run.err != nil {
+	copy, runErr = m.repo.CopyForCheck(from, cache)
+	if runErr != nil {
 		return
 	}
 	defer copy.Remove()
 	progressFile, err := os.CreateTemp(copy.Dir, ".crew-check-progress-")
 	if err != nil {
-		run.err = err
+		runErr = err
 		return
 	}
 	progressPath := progressFile.Name()
 	if err = progressFile.Close(); err != nil {
-		run.err = err
+		runErr = err
 		return
 	}
 	invocation := filepath.Base(progressPath)
 	var box commandSandbox
-	box, run.err = r.lp.openCommands(r.ctx, sandbox.Options{WorkDir: copy.Dir, Env: append(copy.Env, "CREW_HOSTED_CHECK=1", checktest.ProgressEnv+"="+progressPath, checktest.InvocationEnv+"="+invocation), Read: r.medium.readable(), Loopback: r.medium.playbook.CheckLoopback})
-	if run.err != nil {
+	box, runErr = lp.openCommands(ctx, sandbox.Options{WorkDir: copy.Dir, Env: append(copy.Env, "CREW_HOSTED_CHECK=1", checktest.ProgressEnv+"="+progressPath, checktest.InvocationEnv+"="+invocation), Read: m.readable(), Loopback: m.playbook.CheckLoopback})
+	if runErr != nil {
 		return
 	}
 	defer func() {
 		if err := box.Close(); err != nil {
-			if r.cleanupError != nil {
-				r.cleanupError(err)
+			if cleanupError != nil {
+				cleanupError(err)
 			} else {
-				r.lp.commandCleanup(err)
+				lp.commandCleanup(err)
 			}
 		}
 	}()
-	run.result, run.err = box.Run(r.ctx, sandbox.CommandRequest{Command: r.medium.playbook.Check})
-	run.progress, err = checktest.LoadProgress(copy.Dir, invocation, invocation)
+	result, runErr = box.Run(ctx, sandbox.CommandRequest{Command: command})
+	progress, err = checktest.LoadProgress(copy.Dir, invocation, invocation)
 	if err != nil {
-		run.result.ExitCode = 1
-		run.result.Stderr += "\nCheck coverage recovery failed; coverage incomplete: " + err.Error() + "\n"
+		result.ExitCode = 1
+		result.Stderr += "\nCheck coverage recovery failed; coverage incomplete: " + err.Error() + "\n"
 	}
-	if run.progress == nil && (r.ctx.Err() != nil || run.result.TimedOut) {
-		run.progress = &checktest.Progress{Invocation: invocation, Stage: "check startup (no coverage checkpoint)", Report: checktest.Report{Failed: true}}
-		run.result.Stderr += "\nNo coverage checkpoint was received; zero observed skips does not establish executed coverage.\n"
+	if progress == nil && (ctx.Err() != nil || result.TimedOut) {
+		progress = &checktest.Progress{Invocation: invocation, Stage: "check startup (no coverage checkpoint)", Report: checktest.Report{Failed: true}}
+		result.Stderr += "\nNo coverage checkpoint was received; zero observed skips does not establish executed coverage.\n"
 	}
-	if run.progress != nil {
-		if run.progress.Report.Failed && run.result.ExitCode == 0 {
-			run.result.ExitCode = 1
+	if progress != nil {
+		if progress.Report.Failed && result.ExitCode == 0 {
+			result.ExitCode = 1
 		}
-		if !run.progress.Done || run.result.TimedOut || r.ctx.Err() != nil || run.err != nil {
-			run.progress.Done = false
-			run.progress.Report.Complete = false
-			run.progress.Report.Failed = true
-			if run.result.ExitCode == 0 {
-				run.result.ExitCode = 1
+		if !progress.Done || result.TimedOut || ctx.Err() != nil || runErr != nil {
+			progress.Done = false
+			progress.Report.Complete = false
+			progress.Report.Failed = true
+			if result.ExitCode == 0 {
+				result.ExitCode = 1
 			}
-			if run.err != nil {
-				run.result.Stderr += "\nHosted check interrupted: " + run.err.Error() + "\n"
-				run.err = nil
+			if runErr != nil {
+				result.Stderr += "\nHosted check interrupted: " + runErr.Error() + "\n"
+				runErr = nil
 			}
 		}
 		// Append recovered evidence before the copy is removed. The structured
 		// pages below retain every skip even when stdout itself must be bounded.
-		if !run.progress.Done || run.result.Truncated {
+		if !progress.Done || result.Truncated {
 			var recovered bytes.Buffer
-			run.progress.Report.Write(&recovered)
-			run.result.Stdout += "\nRecovered hosted coverage:\n" + recovered.String()
-			run.result.Stdout += "Project check terminal stage: " + run.progress.Stage + "; coverage incomplete: " + fmt.Sprint(!run.progress.Done) + "\n"
+			progress.Report.Write(&recovered)
+			result.Stdout += "\nRecovered hosted coverage:\n" + recovered.String()
+			result.Stdout += "Project check terminal stage: " + progress.Stage + "; coverage incomplete: " + fmt.Sprint(!progress.Done) + "\n"
 		}
-		if r.coverageNote != nil {
+		if note != nil {
 			status := "Hosted check finished."
-			if r.ctx.Err() != nil || !run.progress.Done {
+			if ctx.Err() != nil || !progress.Done {
 				status = "Hosted check interrupted; coverage incomplete."
 			}
-			r.noteCoverage(run.progress, status)
-			r.mu.Lock()
-			run.noted = true
-			r.mu.Unlock()
+			note(progress, status)
 		}
 	}
+	return
 }
+
 func (r *checkRuns) close() {
 	r.mu.Lock()
 	if r.closed {
@@ -191,8 +207,8 @@ func (r *checkRuns) close() {
 	}
 }
 
-func (r *checkRuns) noteCoverage(p *checktest.Progress, status string) {
-	if r.coverageNote == nil {
+func noteCoverage(p *checktest.Progress, status string, sink func(string)) {
+	if sink == nil {
 		return
 	}
 	required := 0
@@ -201,14 +217,14 @@ func (r *checkRuns) noteCoverage(p *checktest.Progress, status string) {
 			required++
 		}
 	}
-	r.coverageNote(fmt.Sprintf("%s Project check stage: %s; observed skip count: %d; required-skip failures: %d", status, p.Stage, len(p.Report.Skips), required))
+	sink(fmt.Sprintf("%s Project check stage: %s; observed skip count: %d; required-skip failures: %d", status, p.Stage, len(p.Report.Skips), required))
 	if p.Report.EvidenceLimited {
-		r.coverageNote("Skip evidence retention budget reached; collection stopped with all observed skips retained; coverage incomplete.")
+		sink("Skip evidence retention budget reached; collection stopped with all observed skips retained; coverage incomplete.")
 	}
 	var note bytes.Buffer
 	flush := func() {
 		if note.Len() > 0 {
-			r.coverageNote(note.String())
+			sink(note.String())
 			note.Reset()
 		}
 	}
@@ -223,7 +239,7 @@ func (r *checkRuns) noteCoverage(p *checktest.Progress, status string) {
 		note.Write(entry.Bytes())
 	}
 	flush()
-	r.coverageNote(fmt.Sprintf("Go check observed skip count: %d; required-skip failures: %d; complete: %t", len(p.Report.Skips), required, p.Done && p.Report.Complete))
+	sink(fmt.Sprintf("Go check observed skip count: %d; required-skip failures: %d; complete: %t", len(p.Report.Skips), required, p.Done && p.Report.Complete))
 }
 
 func boundedCommandResult(result sandbox.CommandResult) sandbox.CommandResult {
