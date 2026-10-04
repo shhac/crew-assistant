@@ -126,6 +126,16 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		v, err := a.Work.SetSeatBrowser(r.Context(), r.PathValue("id"), in)
 		reply(w, 200, v, err)
 	})
+	mux.HandleFunc("PUT /api/projects/{id}/team/check", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Check string `json:"check"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.SetCheck(r.Context(), r.PathValue("id"), in.Check)
+		reply(w, 200, v, err)
+	})
 	mux.HandleFunc("PUT /api/projects/{id}/team/check/loopback", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			On bool `json:"on"`

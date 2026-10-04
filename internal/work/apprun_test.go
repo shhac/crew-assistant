@@ -490,6 +490,13 @@ func TestTheRecipeAndQAsBrowserAreProjectSettings(t *testing.T) {
 	if p, err = a.SetCheckLoopback(ctx, p.ID, false); err != nil || p.Playbook.CheckLoopback || len(p.Playbook.Roles) != seats {
 		t.Fatalf("turning check loopback off: %+v %v", p.Playbook, err)
 	}
+	// So does the check command, and a team with QA keeps one.
+	if p, err = a.SetCheck(ctx, p.ID, "  make check lint  "); err != nil || p.Playbook.Check != "make check lint" || len(p.Playbook.Roles) != seats {
+		t.Fatalf("setting the check: %+v %v", p.Playbook, err)
+	}
+	if _, err = a.SetCheck(ctx, p.ID, " "); err == nil {
+		t.Fatal("a team with QA accepted an empty check")
+	}
 }
 
 func seatHolding(p core.Project, kind string) (core.Role, bool) {

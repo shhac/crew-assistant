@@ -85,6 +85,16 @@ func (lp *Loop) SetSeatBrowser(ctx context.Context, projectID string, browser co
 	})
 }
 
+// SetCheck sets the command QA and releases run as the project's check, and
+// changes nothing else: the team's seats stay as they are. Tasks already under
+// way keep the check they started with.
+func (lp *Loop) SetCheck(ctx context.Context, projectID, check string) (core.Project, error) {
+	return lp.editPlaybook(ctx, projectID, "a check is for code teams; choose a code team first", func(_ *core.Snapshot, _ *core.Project, playbook *core.Playbook) error {
+		playbook.Check = strings.TrimSpace(check)
+		return nil
+	})
+}
+
 // SetCheckLoopback sets whether the project's check may bind and reach this
 // machine's own addresses, for tests that start a local server, and changes
 // nothing else: the team's seats stay as they are. Tasks already under way
