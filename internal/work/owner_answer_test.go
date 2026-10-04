@@ -11,6 +11,175 @@ import (
 	"testing"
 )
 
+func TestOwnerAnswerToolsTransferLongStoredCriterion(t *testing.T) {
+	for _, kind := range []string{core.RolePM, core.RoleResearcher} {
+		for _, inherited := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/inherited=%v", kind, inherited), func(t *testing.T) {
+				ctx := context.Background()
+				var reopen func(*Loop) *Loop
+				a, p, task := loopApp(t, &scriptedRunner{}, "", &reopen)
+				clause := strings.Repeat("界", 501) + "\n--dry-run; literal * punctuation"
+				unrelated := strings.Repeat("別", 600)
+				_, err := a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, p *core.Project) (string, error) {
+					t.Criteria = []string{unrelated, "Team"}
+					if inherited {
+						p.Brief.Criteria = []string{clause}
+					} else {
+						t.Criteria = append(t.Criteria, clause)
+					}
+					return "", nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				initial, _ := a.Core.Snapshot(ctx)
+				tools := a.toolsFor(task, kind, core.Role{Name: "Planner"})
+				if kind == core.RolePM {
+					tools = a.managerTools(p.ID, core.Role{Name: "PM"})
+				}
+				raw, _ := json.Marshal([]string{clause, clause})
+				args := map[string]string{"task_id": task.ID, "owner_checks": string(raw)}
+				for i := 0; i < 2; i++ {
+					if result := callTool(t, tools, "edit_task", args); result.IsError {
+						t.Fatal(result.Content)
+					}
+				}
+				snap, _ := a.Core.Snapshot(ctx)
+				if !reflect.DeepEqual(initial.Projects, snap.Projects) {
+					t.Fatal("transfer changed project brief")
+				}
+				got, _ := findTask(snap, p.ID, task.ID)
+				if !slices.Equal(got.OwnerChecks, []string{clause}) || !slices.Equal(got.Criteria, []string{unrelated, "Team"}) || len(got.Edits) != 1 || got.TextVersion != 1 {
+					t.Fatalf("%+v", got)
+				}
+				if !strings.Contains(got.OwnerChecklist(), clause) || strings.Count(got.OwnerChecklist(), clause) != 1 {
+					t.Fatal(got.OwnerChecklist())
+				}
+				before := snap
+				bad, _ := json.Marshal([]string{clause, clause + "!"})
+				if result := callTool(t, tools, "edit_task", map[string]string{"task_id": task.ID, "owner_checks": string(bad), "add_requirement": "Uncommitted"}); !result.IsError {
+					t.Fatal("accepted near-match")
+				}
+				snap, _ = a.Core.Snapshot(ctx)
+				if !reflect.DeepEqual(before, snap) {
+					t.Fatal("partial write")
+				}
+				a = reopen(a)
+				tools = a.toolsFor(got, kind, core.Role{})
+				if kind == core.RolePM {
+					tools = a.managerTools(p.ID, core.Role{})
+				}
+				if result := callTool(t, tools, "edit_task", args); result.IsError {
+					t.Fatal(result.Content)
+				}
+				snap, _ = a.Core.Snapshot(ctx)
+				replay, _ := findTask(snap, p.ID, task.ID)
+				if !reflect.DeepEqual(got, replay) {
+					t.Fatal("restart replay changed task")
+				}
+				args["add_requirement"] = "Regression"
+				if result := callTool(t, tools, "edit_task", args); result.IsError {
+					t.Fatal(result.Content)
+				}
+				snap, _ = a.Core.Snapshot(ctx)
+				mixed, _ := findTask(snap, p.ID, task.ID)
+				if !slices.Equal(mixed.OwnerChecks, got.OwnerChecks) || !slices.Equal(mixed.Criteria, []string{unrelated, "Team", "Regression"}) || mixed.TextVersion != 2 {
+					t.Fatal("mixed replay lost work")
+				}
+			})
+		}
+	}
+}
+
+func TestOwnerAnswerUndoDoesNotReviveSettledWork(t *testing.T) {
+	for _, inherited := range []bool{false, true} {
+		for _, ownerStep := range []bool{false, true} {
+			t.Run(fmt.Sprintf("inherited=%v/owner-step=%v", inherited, ownerStep), func(t *testing.T) {
+				ctx := context.Background()
+				var reopen func(*Loop) *Loop
+				a, p, task := loopApp(t, &scriptedRunner{}, "", &reopen)
+				_, err := a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, p *core.Project) (string, error) {
+					t.Criteria = []string{"A", "B"}
+					if inherited {
+						t.Criteria = []string{"Team"}
+						p.Brief.Criteria = []string{"A", "B"}
+					}
+					t.Revisions = []core.Revision{{N: 1}}
+					t.Unreachable = []core.Unreachable{{Criterion: "A", Revision: 1, Why: "Cannot A"}, {Criterion: "B", Revision: 1, Why: "Cannot B"}}
+					return "", nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				transfer := func(c string) core.Task {
+					t.Helper()
+					got, err := a.Core.EditTask(ctx, core.EditInput{Project: p.ID, Task: task.ID, Kind: core.RolePM, OwnerChecks: []string{c}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					return got
+				}
+				first := transfer("A")
+				a = reopen(a)
+				transfer("B")
+				undone, err := a.Core.UndoTaskEdit(ctx, p.ID, task.ID, first.Edits[0].ID)
+				if err != nil || len(undone.OwnerChecks) != 0 || len(undone.Unreachable) != 2 {
+					t.Fatalf("older undo: %+v %v", undone, err)
+				}
+				a = reopen(a)
+				// Resolve A using a reworded owner proposal or the real keep-for-team answer.
+				choice := choiceKeepForTeam
+				if ownerStep {
+					choice = choiceOwnerStep
+				}
+				d, err := a.Core.OpenTaskDecision(ctx, task.ID, core.DecisionEscalation, core.DecisionInput{Title: "A", Context: "Cannot A", Recommendation: choice, Choices: []string{choice, choiceStop}, OwnerStep: &core.OwnerStep{Criterion: "A", Step: "Verify A"}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := a.ResolveDecision(ctx, d.ID, choice, "", core.FromOwner); err != nil {
+					t.Fatal(err)
+				}
+				snap, _ := a.Core.Snapshot(ctx)
+				if _, err := a.settleAnswers(ctx, snap); err != nil {
+					t.Fatal(err)
+				}
+				a = reopen(a)
+				second := transfer("B")
+				final, err := a.Core.UndoTaskEdit(ctx, p.ID, task.ID, second.Edits[len(second.Edits)-1].ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(final.Unreachable) != 1 || final.Unreachable[0].Criterion != "B" {
+					t.Fatalf("revived resolved refusal: %+v", final.Unreachable)
+				}
+				if ownerStep && (!slices.Contains(final.OwnerSteps, "Verify A") || !slices.Contains(final.OwnerTook, "A")) {
+					t.Fatal("lost owner assignment")
+				}
+				a = reopen(a)
+				final, err = a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
+					t.Status = core.TaskDeciding
+					t.Roles = nil
+					t.DecisionID = ""
+					return "", nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				snap, _ = a.Core.Snapshot(ctx)
+				p = snap.Projects[0]
+				if err := a.decide(ctx, p, final); err != nil {
+					t.Fatal(err)
+				}
+				snap, _ = a.Core.Snapshot(ctx)
+				final, _ = findTask(snap, p.ID, task.ID)
+				if next := openDecision(t, a, final); next.OwnerStep == nil || next.OwnerStep.Criterion != "B" {
+					t.Fatalf("wrong escalation: %+v", next)
+				}
+			})
+		}
+	}
+}
+
 func TestOwnerAnswerMultilineReplacementRoundTrip(t *testing.T) {
 	for _, kind := range []string{core.RolePM, core.RoleResearcher} {
 		t.Run(kind, func(t *testing.T) {

@@ -104,6 +104,7 @@ func (s *Service) EditTask(ctx context.Context, in EditInput) (Task, error) {
 			return fmt.Errorf("owner-answer replacement requires text_version: %w", ErrConflict)
 		}
 		after := t.text()
+		p := project(v, t.ProjectID)
 		if objective := strings.TrimSpace(in.Objective); objective != "" {
 			after.Objective = text.Clip(objective, maxObjective)
 		}
@@ -125,7 +126,10 @@ func (s *Service) EditTask(ctx context.Context, in EditInput) (Task, error) {
 			if slices.Contains(after.OwnerChecks, c) || slices.Contains(t.OwnerSteps, c) {
 				continue
 			}
-			if len([]rune(c)) > maxCriterion {
+			// Transfer only exact pre-edit stored criteria. New input in this
+			// request cannot manufacture an exemption from the input limit.
+			stored := slices.Contains(t.Criteria, c) || (p != nil && slices.Contains(p.Brief.Criteria, c))
+			if len([]rune(c)) > maxCriterion && !stored {
 				return fmt.Errorf("owner check exceeds %d characters", maxCriterion)
 			}
 			after.OwnerChecks = append(after.OwnerChecks, c)
@@ -195,6 +199,7 @@ func (s *Service) UndoTaskEdit(ctx context.Context, projectID, taskID, editID st
 			checks = slices.Clone(before.OwnerChecks)
 		}
 		restore := []Unreachable{}
+		p := project(v, t.ProjectID)
 		// Undo restores a whole text snapshot, potentially reactivating work
 		// transferred by later edits. Late handoffs may also have retained
 		// evidence on a redo rather than the original transfer. Recover the
@@ -202,16 +207,25 @@ func (s *Service) UndoTaskEdit(ctx context.Context, projectID, taskID, editID st
 		// still fences by draft and preserves evidence already on the task.
 		for j := len(t.Edits) - 1; j >= 0; j-- {
 			for _, u := range t.Edits[j].Settled {
-				if slices.Contains(before.Criteria, u.Criterion) &&
-					(!slices.Contains(t.Criteria, u.Criterion) || slices.Contains(t.OwnerChecks, u.Criterion)) {
+				if teamRequirement(p, before.Criteria, checks, t.OwnerSteps, t.OwnerTook, u.Criterion) &&
+					!teamRequirement(p, t.Criteria, t.OwnerChecks, t.OwnerSteps, t.OwnerTook, u.Criterion) {
 					restore = append(restore, u)
 				}
 			}
 		}
-		restore = append(restore, t.Edits[i].Settled...)
 		return s.applyEdit(v, t, TaskEdit{By: FromOwner, Kind: FromOwner, After: TaskText{Objective: before.Objective, Criteria: slices.Clone(before.Criteria), OwnerChecks: checks}, Undoes: editID, Restored: restore, Settled: slices.Clone(t.Edits[i].Restored)}, &out)
 	})
 	return out, err
+}
+
+// Explicit task criteria can put previously owner-assigned work back on the
+// team. Inherited criteria remain assigned to the owner under their original
+// wording even when the checklist step has been reworded.
+func teamRequirement(p *Project, criteria, checks, steps, took []string, c string) bool {
+	if slices.Contains(checks, c) || slices.Contains(steps, c) {
+		return false
+	}
+	return slices.Contains(criteria, c) || (p != nil && slices.Contains(p.Brief.Criteria, c) && !slices.Contains(took, c))
 }
 
 // applyEdit keeps e on t and puts its text in place, within a change.
@@ -245,7 +259,7 @@ func (s *Service) applyEdit(v *Snapshot, t *Task, e TaskEdit, out *Task) error {
 		if len(t.Revisions) == 0 || u.Revision != t.Revisions[len(t.Revisions)-1].N {
 			continue
 		}
-		if (!slices.Contains(t.Criteria, u.Criterion) && (p == nil || !slices.Contains(p.Brief.Criteria, u.Criterion))) || slices.Contains(t.OwnerChecks, u.Criterion) || slices.Contains(t.OwnerSteps, u.Criterion) {
+		if !teamRequirement(p, t.Criteria, t.OwnerChecks, t.OwnerSteps, t.OwnerTook, u.Criterion) {
 			continue
 		}
 		if !slices.ContainsFunc(t.Unreachable, func(current Unreachable) bool {

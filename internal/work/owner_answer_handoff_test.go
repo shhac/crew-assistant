@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -217,16 +218,29 @@ func TestOwnerAnswerNewLiteralReplacement(t *testing.T) {
 }
 
 func TestOwnerAnswerUndoOlderTransferEvidence(t *testing.T) {
-	for _, scenario := range []string{"existing", "running", "restart", "redo-running", "redo-restart"} {
+	ownerAnswerUndoOlderTransferEvidence(t, false)
+}
+
+func TestOwnerAnswerUndoOlderInheritedTransferEvidence(t *testing.T) {
+	ownerAnswerUndoOlderTransferEvidence(t, true)
+}
+
+func ownerAnswerUndoOlderTransferEvidence(t *testing.T, inherited bool) {
+	t.Helper()
+	for _, scenario := range []string{"existing", "existing-no-restart", "running", "restart", "redo-running", "redo-restart"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			a, p, task, m, h := handoffAt(t)
 			criteria := []string{"After landing, I will check A", "After landing, I will check B"}
 			pending := []core.Unreachable{{Criterion: criteria[0], Revision: h.Revision.N, Why: "Cannot check A"}, {Criterion: criteria[1], Revision: h.Revision.N, Why: "Cannot check B"}}
-			_, err := a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
+			_, err := a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, project *core.Project) (string, error) {
 				t.Criteria = slices.Clone(criteria)
+				if inherited {
+					project.Brief.Criteria = slices.Clone(criteria)
+					t.Criteria = []string{"Unrelated team work"}
+				}
 				t.Handoff = nil
-				if scenario == "existing" {
+				if strings.HasPrefix(scenario, "existing") {
 					t.Revisions = []core.Revision{h.Revision}
 					t.Unreachable = slices.Clone(pending)
 				}
@@ -239,7 +253,13 @@ func TestOwnerAnswerUndoOlderTransferEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if inherited {
+				p.Brief.Criteria = slices.Clone(criteria)
+			}
 			originalID := folded.Edits[len(folded.Edits)-1].ID
+			if scenario == "existing" {
+				a = restart(t, a)
+			}
 			if strings.HasPrefix(scenario, "redo-") {
 				undone, err := a.Core.UndoTaskEdit(ctx, p.ID, task.ID, originalID)
 				if err != nil {
@@ -252,7 +272,7 @@ func TestOwnerAnswerUndoOlderTransferEvidence(t *testing.T) {
 			if _, err := a.Core.EditTask(ctx, core.EditInput{Project: p.ID, Task: task.ID, Kind: core.RoleResearcher, OwnerChecks: criteria[1:]}); err != nil {
 				t.Fatal(err)
 			}
-			if scenario != "existing" {
+			if !strings.HasPrefix(scenario, "existing") {
 				h.Unreachable = slices.Clone(pending)
 				if strings.HasSuffix(scenario, "restart") {
 					if _, err := a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) { t.Handoff = &h; return "", nil }); err != nil {
@@ -264,18 +284,35 @@ func TestOwnerAnswerUndoOlderTransferEvidence(t *testing.T) {
 				}
 			}
 			// Retained handoff evidence must remain available across a further restart.
-			a = restart(t, a)
+			if scenario != "existing-no-restart" {
+				a = restart(t, a)
+			}
 			undone, err := a.Core.UndoTaskEdit(ctx, p.ID, task.ID, originalID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !slices.Equal(undone.Criteria, criteria) || len(undone.OwnerChecks) != 0 {
+			expected := criteria
+			if inherited {
+				expected = []string{"Unrelated team work"}
+			}
+			if !slices.Equal(undone.Criteria, expected) || len(undone.OwnerChecks) != 0 {
 				t.Fatal("undo did not restore both requirements")
 			}
 			for _, u := range pending {
 				if !slices.Contains(undone.Unreachable, u) {
 					t.Fatalf("lost refusal: %+v", undone.Unreachable)
 				}
+			}
+			if scenario != "existing-no-restart" {
+				a = restart(t, a)
+				snap, _ := a.Core.Snapshot(ctx)
+				durable, _ := findTask(snap, p.ID, task.ID)
+				if !reflect.DeepEqual(undone, durable) {
+					t.Fatal("restart lost undo")
+				}
+			}
+			if inherited && (!strings.Contains(briefText(p, undone), criteria[0]) || !strings.Contains(briefText(p, undone), criteria[1])) {
+				t.Fatal("team criteria lost inherited requirements")
 			}
 			// Exercise A first too: the redo's late evidence must protect the
 			// original transfer, not just the independently transferred B.
@@ -327,7 +364,7 @@ func TestOwnerAnswerHandoffKeepsCurrentAndUnrelatedEvidence(t *testing.T) {
 		OwnerTook: []string{"Original split", "Team part"},
 		Edits:     []core.TaskEdit{{Before: core.TaskText{Criteria: []string{"Removed criterion", "Restored criterion", "Brief criterion"}}}},
 	}
-	p := core.Project{Brief: core.Brief{Criteria: []string{"Brief criterion"}}}
+	p := core.Project{Brief: core.Brief{Criteria: []string{"Brief criterion", "Original split"}}}
 	var pending []core.Unreachable
 	for _, c := range []string{"Owner check", "Owner step", "Original split", "Removed criterion", "Restored criterion", "Brief criterion", "Team part", "Unmatched report clause"} {
 		pending = append(pending, core.Unreachable{Criterion: c, Revision: 1, Why: c})

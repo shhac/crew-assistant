@@ -103,6 +103,105 @@ func TestOwnerAnswerUndoSettlementMergesCurrentEvidence(t *testing.T) {
 	}
 }
 
+func TestOwnerAnswerInheritedUndoEvidenceFences(t *testing.T) {
+	for _, scenario := range []string{"current", "pending", "retained", "obsolete", "removed", "owned"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, _ := fixture(t)
+			p := newProject(t, s)
+			criteria := []string{"A", "B"}
+			task, err := s.QueueTask(testContext, p.ID, TaskInput{Objective: "Build", Criteria: []string{"Team"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			original := []Unreachable{{Criterion: "A", Revision: 1, Why: "A refused"}, {Criterion: "B", Revision: 1, Why: "B refused"}}
+			_, err = s.UpdateTask(testContext, task.ID, func(t *Task, p *Project) (string, error) {
+				p.Brief.Criteria = slices.Clone(criteria)
+				t.Revisions = []Revision{{N: 1}}
+				t.Unreachable = slices.Clone(original)
+				return "", nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := s.EditTask(testContext, EditInput{Project: p.ID, Task: task.ID, Kind: RolePM, By: "PM", OwnerChecks: criteria[:1]})
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := s.EditTask(testContext, EditInput{Project: p.ID, Task: task.ID, Kind: RoleResearcher, By: "Planner", OwnerChecks: criteria[1:]})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if first.Edits[0].By != "PM" || second.Edits[1].By != "Planner" || !slices.Equal(first.Edits[0].Settled, original[:1]) || !slices.Equal(second.Edits[1].Settled, original[1:]) || second.TextVersion != 2 {
+				t.Fatal("transfer audit")
+			}
+			newer := Unreachable{Criterion: "B", Revision: 1, Why: "Newer B"}
+			_, err = s.UpdateTask(testContext, task.ID, func(t *Task, p *Project) (string, error) {
+				switch scenario {
+				case "pending":
+					t.Unreachable = append(t.Unreachable, newer)
+				case "retained":
+					t.Edits = append(t.Edits, TaskEdit{Settled: []Unreachable{newer}})
+				case "obsolete":
+					t.Revisions = append(t.Revisions, Revision{N: 2})
+				case "removed":
+					p.Brief.Criteria = criteria[:1]
+				case "owned":
+					t.OwnerSteps = []string{"B"}
+				}
+				return "", nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := mustSnapshot(t, s)
+			if _, err := s.store.db.Exec("CREATE TRIGGER refuse_inherited_undo BEFORE UPDATE ON state BEGIN SELECT RAISE(ABORT, 'test failure'); END;"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.UndoTaskEdit(testContext, p.ID, task.ID, first.Edits[0].ID); err == nil {
+				t.Fatal("write succeeded")
+			}
+			if !reflect.DeepEqual(before, mustSnapshot(t, s)) {
+				t.Fatal("partial undo")
+			}
+			if _, err := s.store.db.Exec("DROP TRIGGER refuse_inherited_undo"); err != nil {
+				t.Fatal(err)
+			}
+			got, err := s.UndoTaskEdit(testContext, p.ID, task.ID, first.Edits[0].ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.OwnerChecks) != 0 || !slices.Equal(got.Criteria, []string{"Team"}) {
+				t.Fatal("text not restored")
+			}
+			audit := got.Edits[len(got.Edits)-1]
+			if got.TextVersion != 3 || audit.Undoes != first.Edits[0].ID || audit.By != FromOwner || audit.Kind != FromOwner || !slices.Equal(audit.Restored, got.Unreachable[len(before.Tasks[0].Unreachable):]) {
+				t.Fatal("undo audit lost restored evidence")
+			}
+			if scenario != "obsolete" && !slices.Contains(got.Unreachable, original[0]) {
+				t.Fatal("lost A")
+			}
+			switch scenario {
+			case "current":
+				if !slices.Contains(got.Unreachable, original[1]) {
+					t.Fatal("lost B")
+				}
+			case "pending", "retained":
+				if !slices.Contains(got.Unreachable, newer) || slices.Contains(got.Unreachable, original[1]) {
+					t.Fatal("lost newer B")
+				}
+			case "obsolete":
+				if len(got.Unreachable) != 0 {
+					t.Fatal("obsolete evidence")
+				}
+			case "removed", "owned":
+				if slices.Contains(got.Unreachable, original[1]) {
+					t.Fatal("inactive evidence")
+				}
+			}
+		})
+	}
+}
+
 func TestOwnerAnswerReplaysExistingLongChecks(t *testing.T) {
 	for _, source := range []string{"creation", "plan", "step"} {
 		t.Run(source, func(t *testing.T) {
@@ -142,6 +241,108 @@ func TestOwnerAnswerReplaysExistingLongChecks(t *testing.T) {
 				t.Fatalf("mixed replay: %v", err)
 			}
 		})
+	}
+}
+
+func TestOwnerAnswerLongTransferAtomicAndConcurrent(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	long := strings.Repeat("界", 501) + "\nLiteral punctuation *"
+	task, err := s.QueueTask(testContext, p.ID, TaskInput{Objective: "Build", Criteria: []string{long, "Team"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := EditInput{Project: p.ID, Task: task.ID, Kind: RolePM, OwnerChecks: []string{long}}
+	before := mustSnapshot(t, s)
+	if _, err := s.store.db.Exec("CREATE TRIGGER refuse_long BEFORE UPDATE ON state BEGIN SELECT RAISE(ABORT, 'test failure'); END;"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EditTask(testContext, in); err == nil {
+		t.Fatal("write succeeded")
+	}
+	if !reflect.DeepEqual(before, mustSnapshot(t, s)) {
+		t.Fatal("partial transfer")
+	}
+	if _, err := s.store.db.Exec("DROP TRIGGER refuse_long"); err != nil {
+		t.Fatal(err)
+	}
+	// A long criterion supplied by this request cannot create its own exemption.
+	invalid := in
+	invalid.OwnerChecks = []string{long, long + "new"}
+	invalid.Add = []string{long + "new"}
+	if _, err := s.EditTask(testContext, invalid); err == nil {
+		t.Fatal("accepted new long input")
+	}
+	if !reflect.DeepEqual(before, mustSnapshot(t, s)) {
+		t.Fatal("partial mixed transfer")
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			edit := in
+			if i%2 == 0 {
+				edit.Add = []string{"Regression"}
+			}
+			if _, err := s.EditTask(testContext, edit); err != nil {
+				t.Error(err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	got := taskByID(t, s, task.ID)
+	if !slices.Equal(got.OwnerChecks, []string{long}) || slices.Contains(got.Criteria, long) || !slices.Contains(got.Criteria, "Team") || !slices.Contains(got.Criteria, "Regression") || len(got.Edits) > 2 {
+		t.Fatal("concurrent transfer lost work")
+	}
+}
+
+func TestOwnerAnswerConcurrentInheritedUndoAndTransfer(t *testing.T) {
+	s, _ := fixture(t)
+	p := newProject(t, s)
+	task, err := s.QueueTask(testContext, p.ID, TaskInput{Objective: "Build", Criteria: []string{"Team"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := Unreachable{Criterion: "B", Revision: 1, Why: "Refused B"}
+	_, err = s.UpdateTask(testContext, task.ID, func(t *Task, p *Project) (string, error) {
+		p.Brief.Criteria = []string{"A", "B"}
+		t.Revisions = []Revision{{N: 1}}
+		t.Unreachable = []Unreachable{{Criterion: "A", Revision: 1, Why: "Refused A"}, evidence}
+		return "", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.EditTask(testContext, EditInput{Project: p.ID, Task: task.ID, Kind: RolePM, OwnerChecks: []string{"A"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if _, err := s.UndoTaskEdit(testContext, p.ID, task.ID, first.Edits[0].ID); err != nil {
+			t.Error(err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if _, err := s.EditTask(testContext, EditInput{Project: p.ID, Task: task.ID, Kind: RoleResearcher, OwnerChecks: []string{"B"}}); err != nil {
+			t.Error(err)
+		}
+	}()
+	wg.Wait()
+	got := taskByID(t, s, task.ID)
+	if slices.Contains(got.OwnerChecks, "A") || !slices.Equal(got.Criteria, []string{"Team"}) || got.TextVersion != 3 {
+		t.Fatal("partial serialized edit")
+	}
+	// Either transfer precedes undo (B is pending) or follows it (B is owned).
+	if slices.Contains(got.OwnerChecks, "B") == slices.Contains(got.Unreachable, evidence) {
+		t.Fatal("B neither or both pending and owned")
+	}
+	if !slices.Contains(got.Unreachable, Unreachable{Criterion: "A", Revision: 1, Why: "Refused A"}) {
+		t.Fatal("lost A refusal")
 	}
 }
 

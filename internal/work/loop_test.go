@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -193,7 +194,7 @@ const (
 )
 
 // testLoop is a loop over a fresh, private store.
-func testLoop(t *testing.T) *Loop {
+func testLoop(t *testing.T, reopen ...*func(*Loop) *Loop) *Loop {
 	t.Helper()
 	cfg := config.Default()
 	// A code team's reviewer and QA are both on Codex, and the scripted
@@ -202,17 +203,41 @@ func testLoop(t *testing.T) *Loop {
 	// runs them side by side sets a cap of its own.
 	one := 1
 	cfg.Engines.Codex.RoleRuns = &one
-	s, err := core.Open(filepath.Join(t.TempDir(), "state.db"))
+	path := filepath.Join(t.TempDir(), "state.db")
+	s, err := core.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
+	if len(reopen) > 0 {
+		*reopen[0] = func(old *Loop) *Loop {
+			t.Helper()
+			before, err := old.Core.Snapshot(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			s, err = core.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fresh := New(core.NewService(s, old.Config()), old.Config, false)
+			fresh.runner, fresh.meter = old.runner, old.meter
+			after, err := fresh.Core.Snapshot(context.Background())
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("SQLite reopen changed record: %v", err)
+			}
+			return restart(t, fresh)
+		}
+	}
 	return New(core.NewService(s, cfg), func() config.Config { return cfg }, false)
 }
 
-func loopApp(t *testing.T, runner *scriptedRunner, deliverTo string) (*Loop, core.Project, core.Task) {
+func loopApp(t *testing.T, runner *scriptedRunner, deliverTo string, reopen ...*func(*Loop) *Loop) (*Loop, core.Project, core.Task) {
 	t.Helper()
-	a := testLoop(t)
+	a := testLoop(t, reopen...)
 	a.runner = runner
 	// No real account is ever read from a test; an empty reading is unknown.
 	a.meter = &quota.Meter{Inspect: func(context.Context, harness.Provider) (harness.AccountReport, error) {

@@ -130,6 +130,10 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 			t.KeepSettledEvidence(u)
 			return true
 		}
+		if slices.Contains(t.OwnerTook, u.Criterion) && !slices.Contains(t.Criteria, u.Criterion) {
+			t.KeepSettledEvidence(u)
+			return true
+		}
 		if slices.Contains(t.Criteria, u.Criterion) || slices.Contains(p.Brief.Criteria, u.Criterion) {
 			return false
 		}
