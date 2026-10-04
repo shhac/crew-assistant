@@ -109,18 +109,22 @@ func pinTeam(v *Snapshot, p *Project, t *Task) {
 	t.Roles = withLearnings(v, p.Playbook.Roles)
 }
 
-// UseProjectTeam moves a task that waits for the owner onto the team its
-// project has now. A task keeps the team it started with, so a change to the
-// team, such as a QA that can run the check, reaches it only this way. No
-// one may be working on it, and the kind of work stays the same. Checks the
-// new seats haven't made are made afresh.
+// UseProjectTeam moves a task that waits for the owner, or waits in the queue
+// after it started, onto the team its project has now. A task keeps the team
+// it started with, so a change to the team, such as a QA that can run the
+// check or seats moved off a paused engine, reaches it only this way. No one
+// may be working on it, and the kind of work stays the same. Checks the new
+// seats haven't made are made afresh.
 func (s *Service) UseProjectTeam(ctx context.Context, projectID, taskID string) (Task, error) {
 	return s.updateTask(ctx, taskID, func(v *Snapshot, t *Task, p *Project) (string, error) {
 		switch {
 		case t.ProjectID != projectID:
 			return "", ErrNotFound
-		case t.Status != TaskWaiting || len(t.Claims) > 0:
-			return "", fmt.Errorf("a request takes on the project's team only while it waits for you and no one is working on it: %w", ErrConflict)
+		case (t.Status != TaskWaiting && t.Status != TaskQueued) || len(t.Claims) > 0:
+			return "", fmt.Errorf("a request takes on the project's team only while it waits, for you or in the queue, and no one is working on it: %w", ErrConflict)
+		case t.Status == TaskQueued && t.Playbook == nil:
+			// Not started yet: it takes on the project's team when it starts.
+			return "", nil
 		case p.Playbook == nil || t.Playbook == nil || p.Playbook.Medium != t.Playbook.Medium:
 			return "", fmt.Errorf("the project's team does a different kind of work: %w", ErrConflict)
 		}

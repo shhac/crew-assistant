@@ -736,14 +736,29 @@ func TestHostedCheckDoesNotGiveQASessionLoopback(t *testing.T) {
 }
 
 // A task keeps the team it started with, so the owner moves one waiting on
-// them onto the project's team as it is now, such as a QA whose engine can
-// run the check; never one queued or being worked on.
+// them, or waiting in the queue, onto the project's team as it is now, such as
+// a QA whose engine can run the check; never one being worked on.
 func TestATaskWaitingForTheOwnerCanTakeOnTheProjectsTeam(t *testing.T) {
 	t.Parallel()
 	a, _, p, task := codeTask(t, pass, ask)
 	ctx := context.Background()
+	if _, err := a.Core.UpdateTask(ctx, task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+		task.Claims = append(task.Claims, core.Claim{Seat: "someone"})
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := a.UseProjectTeam(ctx, p.ID, task.ID); !errors.Is(err, core.ErrConflict) {
-		t.Fatalf("a queued task took on the team: %v", err)
+		t.Fatalf("a task being worked on took on the team: %v", err)
+	}
+	if _, err := a.Core.UpdateTask(ctx, task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+		task.Claims = nil
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if queued, err := a.UseProjectTeam(ctx, p.ID, task.ID); err != nil || queued.Status != core.TaskQueued {
+		t.Fatalf("a queued task didn't take on the team: %v, %s", err, queued.Status)
 	}
 	task = settleCode(t, a, task.ID)
 	if task.Status != core.TaskWaiting {
@@ -766,6 +781,21 @@ func TestATaskWaitingForTheOwnerCanTakeOnTheProjectsTeam(t *testing.T) {
 	qa := slices.IndexFunc(moved.Playbook.Roles, func(r core.Role) bool { return r.Holds(core.RoleQA) })
 	if !moved.Playbook.CheckLoopback || qa < 0 || moved.Playbook.Roles[qa].Member != quinn.ID || moved.Roles[qa].Member != quinn.ID {
 		t.Fatalf("the task's team: %+v", moved.Playbook)
+	}
+	// Back in the queue after it started, such as behind a dependency, it
+	// keeps its pinned team until moved.
+	if _, err := a.Core.UpdateTask(ctx, task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+		task.Status = core.TaskQueued
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", CheckLoopback: "no"}); err != nil {
+		t.Fatal(err)
+	}
+	requeued, err := a.UseProjectTeam(ctx, p.ID, task.ID)
+	if err != nil || requeued.Playbook.CheckLoopback {
+		t.Fatalf("a started task back in the queue kept its old team: %v, %+v", err, requeued.Playbook)
 	}
 }
 
