@@ -11,19 +11,22 @@ import (
 // ChatTurn is a durable owner message. Queued content is kept out of the model
 // conversation until its turn starts; the client ID makes acceptance retryable.
 type ChatTurn struct {
-	BrowserNote        string     `json:"browser_note,omitempty"`
-	ModelStatus        string     `json:"model_status,omitempty"`
-	RetryAt            time.Time  `json:"retry_at,omitempty"`
-	ID                 string     `json:"id"`
-	Message            string     `json:"message"`
-	Status             string     `json:"status"`
-	CreatedAt          time.Time  `json:"created_at"`
-	StartedAt          *time.Time `json:"started_at,omitempty"`
-	FinishedAt         *time.Time `json:"finished_at,omitempty"`
-	UserMessageID      string     `json:"user_message_id,omitempty"`
-	AssistantMessageID string     `json:"assistant_message_id,omitempty"`
-	Error              string     `json:"error,omitempty"`
-	LoadingPhrase      string     `json:"loading_phrase,omitempty"`
+	// PrerequisiteInstruction pins an explicit owner instruction at acceptance.
+	// It is never refreshed when the assistant retries or the daemon restarts.
+	PrerequisiteInstruction *PrerequisiteInstruction `json:"prerequisite_instruction,omitempty"`
+	BrowserNote             string                   `json:"browser_note,omitempty"`
+	ModelStatus             string                   `json:"model_status,omitempty"`
+	RetryAt                 time.Time                `json:"retry_at,omitempty"`
+	ID                      string                   `json:"id"`
+	Message                 string                   `json:"message"`
+	Status                  string                   `json:"status"`
+	CreatedAt               time.Time                `json:"created_at"`
+	StartedAt               *time.Time               `json:"started_at,omitempty"`
+	FinishedAt              *time.Time               `json:"finished_at,omitempty"`
+	UserMessageID           string                   `json:"user_message_id,omitempty"`
+	AssistantMessageID      string                   `json:"assistant_message_id,omitempty"`
+	Error                   string                   `json:"error,omitempty"`
+	LoadingPhrase           string                   `json:"loading_phrase,omitempty"`
 	// Origin is empty for the owner's messages, or OriginWake for a turn the
 	// daemon queued to deliver the wakes named in WakeIDs.
 	Origin  string   `json:"origin,omitempty"`
@@ -97,6 +100,7 @@ func (s *Service) EnqueueChat(ctx context.Context, id, message string) (ChatTurn
 		if pending >= 20 {
 			return ErrChatQueueFull
 		}
+		out.PrerequisiteInstruction = prerequisiteInstruction(v, message)
 		v.ChatTurns = append(v.ChatTurns, out)
 		v.ChatQueueRevision++
 		return nil

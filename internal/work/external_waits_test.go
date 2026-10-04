@@ -94,6 +94,10 @@ func TestResearchWaitSummaryIsSentBackOnce(t *testing.T) {
 				if got.Status != core.TaskQueued || len(got.Blockers) != 1 || len(snap.Decisions) != 1 || snap.Decisions[0].Kind != core.DecisionPrerequisite {
 					t.Fatalf("held %+v decisions %+v", got, snap.Decisions)
 				}
+			} else if strings.HasPrefix(outcome, "malformed") {
+				if got.Status != core.TaskResearching || got.Failures != 1 || got.RetryAt.IsZero() || got.Plan != nil || len(snap.Decisions) != 0 {
+					t.Fatalf("unreadable plan must retry research without a partial plan: %+v", got)
+				}
 			} else {
 				if got.Status != core.TaskWaiting || got.Plan == nil || !slices.Contains(got.Plan.Questions, "The plan says implementation waits for something but names nothing to wait for. Should it start?") {
 					t.Fatalf("owner question %+v", got)
@@ -393,6 +397,15 @@ func TestBegunTaskWaitSummaryReturnsToItsChecker(t *testing.T) {
 				t.Fatal("no open checker request")
 			}
 			got := taskNow(t, a, queued.ID)
+			if malformed {
+				if got.Status != core.TaskResearching || got.Failures != 1 || len(got.Revisions) != 1 || runner.edits != 1 || got.Branch != before.Branch || got.Base != before.Base || got.OpenResearch() == nil {
+					t.Fatalf("unreadable replan lost its draft or checker request: %+v", got)
+				}
+				if len(turns(&runner.scriptedRunner, "Plan this task before anything is written")) != 3 {
+					t.Fatal("missing correction attempt")
+				}
+				return
+			}
 			if got.Plan == nil || len(got.Plan.Questions) != 0 || len(got.Revisions) != 1 || runner.edits != 1 || got.Branch != before.Branch || got.Base != before.Base {
 				t.Fatalf("did not preserve the checked draft: %+v edits %d", got, runner.edits)
 			}
@@ -446,6 +459,15 @@ func TestAnsweredWaitQuestionIsNotAskedAgain(t *testing.T) {
 					t.Fatal(err)
 				}
 				got := taskNow(t, a, queued.ID)
+				if malformed {
+					if got.Status != core.TaskResearching || got.Failures != 1 || len(got.Revisions) != 0 || runner.edits != 0 || got.Plan == nil || !got.Plan.Answered {
+						t.Fatalf("invalid replan must preserve the answer and retry: %+v", got)
+					}
+					if len(turns(&runner.scriptedRunner, "Plan this task before anything is written")) != 4 {
+						t.Fatal("missing correction attempt")
+					}
+					return
+				}
 				if got.Plan == nil || len(got.Plan.Questions) != 0 || len(got.Revisions) != 1 || runner.edits != 1 {
 					t.Fatalf("did not start after the answer: %+v edits %d", got, runner.edits)
 				}

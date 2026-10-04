@@ -100,7 +100,7 @@ func TestNoDeprecatedSessionCommandNames(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() == ".git" || d.Name() == "node_modules" {
+			if d.Name() == ".git" || d.Name() == ".crew" || d.Name() == "node_modules" {
 				return filepath.SkipDir
 			}
 			return nil

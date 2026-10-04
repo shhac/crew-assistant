@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/text"
@@ -682,7 +683,7 @@ func planText(t core.Task) string {
 		if outcome == "" {
 			outcome = "waiting"
 		}
-		prerequisites = append(prerequisites, pre.What+" ("+outcome+")")
+		prerequisites = append(prerequisites, prerequisiteContext(pre.Blocker, pre.What, outcome, pre.Settlements))
 	}
 	section("Prerequisites", prerequisites)
 	section("What already exists", t.Plan.Exists)
@@ -799,7 +800,10 @@ If it needs more than about 10 changes or would touch more than about 30 files, 
 			if outcome == "" {
 				outcome = "waiting for the owner"
 			}
-			fmt.Fprintf(&b, "Existing prerequisite: %s (%s). Do not ask again for a confirmed or dropped condition.\n", blocker.Description, outcome)
+			fmt.Fprintf(&b, "Existing prerequisite: %s.\n", prerequisiteContext(blocker.ID, blocker.Description, outcome, blocker.Settlements))
+			if blocker.Outcome != "" {
+				b.WriteString("The owner settled this condition. Do not declare it as a prerequisite or ask about it again, including paraphrases, confirmation questions and identity references. Only an explicit owner instruction can reopen it.\n")
+			}
 		}
 	}
 	researcher, _ := t.Researcher()
@@ -838,4 +842,15 @@ func byHandNote(r core.Revision) string {
 		return ""
 	}
 	return fmt.Sprintf("The owner made this draft by hand (%s). Review it as you would any other: the owner wants to know what's wrong with it too.\n", r.Summary)
+}
+
+func prerequisiteContext(id, what, outcome string, settlements []core.PrerequisiteSettlement) string {
+	out := fmt.Sprintf("%s (%s)", what, outcome)
+	if id != "" {
+		out += " [" + id + "]"
+	}
+	for _, settled := range settlements {
+		out += fmt.Sprintf("; %s by %s at %s, source %s, owner answer: %q", settled.Outcome, settled.By, settled.At.Format(time.RFC3339), settled.Source, settled.Answer)
+	}
+	return out
 }

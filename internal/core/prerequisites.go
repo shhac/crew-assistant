@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/shhac/crew-assistant/internal/text"
 )
 
 const (
@@ -43,7 +41,7 @@ func taskPrerequisites(t Task) []Prerequisite {
 	var out []Prerequisite
 	for _, b := range t.Blockers {
 		if b.Kind == BlockerPrerequisite {
-			out = append(out, Prerequisite{b.Description, b.ID, b.Outcome})
+			out = append(out, Prerequisite{What: b.Description, Blocker: b.ID, Outcome: b.Outcome, Settlements: b.Settlements})
 		}
 	}
 	return out
@@ -52,13 +50,13 @@ func taskPrerequisites(t Task) []Prerequisite {
 // The blocker and its decision are created in RecordPlan's single write.
 func (s *Service) planPrerequisites(v *Snapshot, t *Task, conditions []string, now time.Time) {
 	for _, what := range conditions {
-		what = text.Clip(strings.TrimSpace(what), 300)
+		what = strings.TrimSpace(what)
 		if what == "" {
 			continue
 		}
 		exists := false
 		for _, b := range t.Blockers {
-			if b.Kind == BlockerPrerequisite && sameTitle(b.Description) == sameTitle(what) {
+			if b.Kind == BlockerPrerequisite && deterministicPrerequisite(what, false, b) {
 				exists = true
 				break
 			}
@@ -68,10 +66,7 @@ func (s *Service) planPrerequisites(v *Snapshot, t *Task, conditions []string, n
 		}
 		b := Blocker{ID: uid(), Kind: BlockerPrerequisite, Description: what, By: researcherLinker(*t), At: now}
 		t.Blockers = append(t.Blockers, b)
-		d := Decision{ID: uid(), Kind: DecisionPrerequisite, ProjectID: t.ProjectID, TaskID: t.ID, BlockerID: b.ID, Title: fmt.Sprintf("Is %s ready?", what), Context: fmt.Sprintf("“%s” waits for this prerequisite. Choose %q to start once it is ready, or %q to start without waiting for it. Other dependencies still apply.", t.Objective, ChoiceReadyPrerequisite, ChoiceDropPrerequisite), Choices: []string{ChoiceReadyPrerequisite, ChoiceDropPrerequisite}, Status: DecisionOpen, CreatedAt: now}
-		v.Decisions = append(v.Decisions, d)
-		recordTask(v, now, t, "task.blocked", what)
-		recordOn(v, now, t.ProjectID, t.ID, "decision.opened", d.Title)
+		openPrerequisite(v, t, b, now)
 	}
 }
 
@@ -82,4 +77,12 @@ func dismissPrerequisites(v *Snapshot, taskID string, now time.Time, reason stri
 			dismiss(v, d, now, reason)
 		}
 	}
+}
+
+func openPrerequisite(v *Snapshot, t *Task, b Blocker, now time.Time) {
+	what := b.Description
+	d := Decision{ID: uid(), Kind: DecisionPrerequisite, ProjectID: t.ProjectID, TaskID: t.ID, BlockerID: b.ID, Title: fmt.Sprintf("Is %s ready?", what), Context: fmt.Sprintf("“%s” waits for this prerequisite. Choose %q to start once it is ready, or %q to start without waiting for it. Other dependencies still apply.", t.Objective, ChoiceReadyPrerequisite, ChoiceDropPrerequisite), Choices: []string{ChoiceReadyPrerequisite, ChoiceDropPrerequisite}, Status: DecisionOpen, CreatedAt: now}
+	v.Decisions = append(v.Decisions, d)
+	recordTask(v, now, t, "task.blocked", what)
+	recordOn(v, now, t.ProjectID, t.ID, "decision.opened", d.Title)
 }

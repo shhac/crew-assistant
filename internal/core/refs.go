@@ -158,6 +158,7 @@ func withoutRefs(tasks []Task) []Task {
 		out[i].Blockers = slices.Clone(out[i].Blockers)
 		for j := range out[i].Blockers {
 			out[i].Blockers[j].AnswerPending = false
+			out[i].Blockers[j].CurrentSettlement = ""
 		}
 	}
 	return out

@@ -36,6 +36,14 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	if err != nil {
 		return err
 	}
+	t.Blockers = append([]core.Blocker(nil), t.Blockers...)
+	for i := range t.Blockers {
+		for _, pre := range core.TaskPrerequisites(snap, t) {
+			if pre.Blocker == t.Blockers[i].ID {
+				t.Blockers[i].Settlements = pre.Settlements
+			}
+		}
+	}
 	base := researcherPrompt(p, t, otherWork(snap, t), snap.Projects) + learnedGuide(researcher, true) + handOnGuide(t, core.RoleResearcher, "")
 	spec, cleanup, err := lp.roleSpec(t, researcher, m.workspace(t), false, m, base, nil)
 	if err != nil {
@@ -47,15 +55,13 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	var dependsOn []string
 	var design, designer string
 	attempts := 0
-	inconsistent := false
 	_, hasDesigner := t.Designer()
-	reply, learned, _, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
+	_, learned, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
 		attempts++
 		clean, block := splitHandOn(reply)
 		plan, dependsOn, design, designer, err = parsePlan(clean, designsFor(t, researcher), !hasDesigner, t.RolesOf(core.RoleDesigner))
 		end.HandOnWhy, end.Problems = parseHandOn(block)
 		if err == nil && design == "" && core.UndeclaredPlanWait(plan, core.PlanDependencies(snap, t, dependsOn), t) {
-			inconsistent = true
 			if attempts == 1 {
 				return errors.New("the summary says implementation waits, but declares no depends_on or prerequisites; name the task or external condition it waits for, or reword the summary if implementation does not actually wait")
 			}
@@ -66,18 +72,12 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	if err != nil {
 		return lp.roleFailed(ctx, t, researcher.Name, err)
 	}
+	if parseErr != nil {
+		return lp.roleFailed(ctx, t, researcher.Name, parseErr)
+	}
 	lp.recordLearned(ctx, p, t, researcher, m, learned)
 	if design != "" {
 		return lp.askDesignFor(ctx, t, researcher.Name, design, designer, nil, end)
-	}
-	// A plan that still cannot be read is kept as written rather than stopping
-	// the work: the implementer reads it either way.
-	if plan.Summary == "" {
-		clean, _ := splitHandOn(reply)
-		plan, dependsOn = core.Plan{Summary: text.Clip(strings.TrimSpace(clean), 3000)}, nil
-		if inconsistent || core.UndeclaredPlanWait(plan, core.PlanDependencies(snap, t, dependsOn), t) {
-			plan.Questions = append(plan.Questions, core.UndeclaredWaitQuestion)
-		}
 	}
 	var checks []string
 	for _, quoted := range plan.OwnerChecks {
@@ -94,6 +94,9 @@ func (lp *Loop) researchTask(ctx context.Context, p core.Project, t core.Task, m
 	planned, err := lp.Core.RecordPlan(ctx, t.ID, plan, dependsOn, prerequisites, end)
 	if errors.Is(err, core.ErrConflict) {
 		return nil
+	}
+	if errors.Is(err, core.ErrPrerequisiteComparison) {
+		return lp.roleFailed(ctx, t, researcher.Name, err)
 	}
 	if err != nil || planned.Status != core.TaskResearching {
 		return err
@@ -114,19 +117,13 @@ func planned(t core.Task) bool {
 // askPlanQuestions brings the researcher's questions to the owner, and
 // their answer comes back to the researcher.
 func (lp *Loop) askPlanQuestions(ctx context.Context, t core.Task) error {
-	if t.Plan == nil || len(t.Plan.Questions) == 0 {
-		return lp.setStatus(ctx, t.ID, core.TaskWriting, "")
+	_, err := lp.Core.AskPlanQuestions(ctx, t.ID)
+	if errors.Is(err, core.ErrConflict) {
+		return nil
 	}
-	title := fmt.Sprintf("%s has questions about “%s” before starting", t.Plan.Role, t.Objective)
-	if len(t.Revisions) > 0 {
-		title = fmt.Sprintf("%s has questions about “%s”", t.Plan.Role, t.Objective)
+	if errors.Is(err, core.ErrPrerequisiteComparison) {
+		return lp.roleFailed(ctx, t, t.Plan.Role, err)
 	}
-	_, err := lp.Core.AskQuestion(ctx, t.ID, core.Asker{From: t.Plan.Role, Step: core.TaskResearching}, core.DecisionInput{
-		Title:          title,
-		Context:        strings.TrimSpace(numbered(t.Plan.Questions)),
-		Recommendation: "Answer what you can, or let the team use its judgment",
-		Choices:        []string{"Use your judgment", choiceStop},
-	})
 	return err
 }
 
@@ -225,14 +222,26 @@ func parsePlan(reply string, designs, noDesigner bool, seats []core.Role) (core.
 	plan.Tests = keep(in.Tests)
 	plan.Exists = keep(in.Exists)
 	plan.OutOfScope = keep(in.OutOfScope)
-	plan.Questions = asked(in.Questions, maxPlanItems)
+	if err := core.ValidatePrerequisiteConditions(in.Questions); err != nil {
+		return core.Plan{}, nil, "", "", err
+	}
+	for _, question := range in.Questions {
+		if question = strings.TrimSpace(question); question != "" {
+			plan.Questions = append(plan.Questions, question)
+		}
+	}
 	for _, part := range in.SplitOff {
 		if title := strings.TrimSpace(part.Title); title != "" && len(plan.SplitOff) < core.MaxSplitOff {
 			plan.SplitOff = append(plan.SplitOff, core.SplitPart{Objective: text.Clip(title, 500), Criteria: listed(part.Requirements, maxPlanItems)})
 		}
 	}
-	for _, what := range listed(in.Prerequisites, maxPlanItems) {
-		plan.Prerequisites = append(plan.Prerequisites, core.Prerequisite{What: text.Clip(what, 300)})
+	if err := core.ValidatePrerequisiteConditions(in.Prerequisites); err != nil {
+		return core.Plan{}, nil, "", "", err
+	}
+	for _, what := range in.Prerequisites {
+		if what = strings.TrimSpace(what); what != "" {
+			plan.Prerequisites = append(plan.Prerequisites, core.Prerequisite{What: what})
+		}
 	}
 	return plan, listed(in.DependsOn, maxPlanItems), design, designer, nil
 }

@@ -131,6 +131,7 @@ func (s *Service) EditChatMessage(ctx context.Context, id, message string, revis
 			return fmt.Errorf("this message changed since you opened it: %w", ErrConflict)
 		}
 		turn.Message = strings.TrimSpace(message)
+		turn.PrerequisiteInstruction = prerequisiteInstruction(v, turn.Message)
 		turn.Command = command
 		turn.Revision++
 		out = *turn

@@ -93,6 +93,10 @@ func deriveWith(v *Snapshot, t *Task, index map[string][]string) {
 	for i := range t.Blockers {
 		b := &t.Blockers[i]
 		b.AnswerPending = false
+		b.CurrentSettlement = ""
+		if b.Kind == BlockerPrerequisite {
+			b.CurrentSettlement = PrerequisiteSettlementID(*b)
+		}
 		if b.Kind == BlockerPrerequisite && b.ClearedAt == nil {
 			for _, d := range v.Decisions {
 				if d.TaskID == t.ID && d.BlockerID == b.ID && d.Kind == DecisionPrerequisite && d.Status == DecisionOpen {

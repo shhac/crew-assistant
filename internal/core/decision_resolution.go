@@ -125,6 +125,9 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 			choosePRFlow(v, d.TaskID, answer == ChoiceKeepPR, "You", now)
 		}
 		if d.Kind == DecisionPrerequisite && disposition == DispositionChoice {
+			if by != FromOwner && by != FromAssistant {
+				return ErrConflict
+			}
 			if t := task(v, d.TaskID); t != nil && !t.Finished() {
 				for i := range t.Blockers {
 					b := &t.Blockers[i]
@@ -134,6 +137,8 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 							b.Outcome = "dropped"
 						}
 						s.clearBlocker(v, t, b, LinkedByOwner, answer)
+						b.Settlements[len(b.Settlements)-1].Source = d.ID
+						b.Settlements[len(b.Settlements)-1].By = by
 					}
 				}
 			}
@@ -164,6 +169,11 @@ func (s *Service) finishDecision(ctx context.Context, id, answer, disposition, r
 			}
 		}
 		out = *d
+		if disposition == DispositionCustom {
+			if err := s.reopenPrerequisiteAnswer(ctx, v, out, answer, by); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err == nil && afterCommit != nil {

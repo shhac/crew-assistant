@@ -127,13 +127,13 @@ func TestWhatAPlanSplitsOffIsQueuedToWaitForTheTask(t *testing.T) {
 	}
 }
 
-func TestAPlanThatCannotBeReadIsKeptAsWritten(t *testing.T) {
+func TestAPlanThatCannotBeReadRetriesWithoutStartingImplementation(t *testing.T) {
 	t.Parallel()
-	a, _, p := plannedCode(t, 6, "no json here", "still no json")
+	a, runner, p := plannedCode(t, 6, "no json here", "still no json")
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add A"})
 	task = taskNow(t, a, task.ID)
-	if task.Plan == nil || task.Plan.Summary != "still no json" || len(task.Revisions) == 0 {
-		t.Fatalf("plan %+v", task.Plan)
+	if task.Plan != nil || len(task.Revisions) != 0 || runner.edits != 0 || task.Status != core.TaskResearching || task.Failures != 1 || task.RetryAt.IsZero() {
+		t.Fatalf("unreadable plan must not start implementation: %+v", task)
 	}
 }
 

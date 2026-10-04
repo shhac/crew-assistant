@@ -36,6 +36,9 @@ type Claim struct {
 	// Held says why a turn a stopped daemon left behind could not be
 	// confirmed ended: its task waits rather than run the step again.
 	Held string `json:"held,omitempty"`
+	// Revoked keeps a superseded turn's scheduling hold and launch identity
+	// until it ends, but denies it authority to change the task.
+	Revoked bool `json:"revoked,omitempty"`
 }
 
 const (
@@ -100,8 +103,10 @@ func checkFence(ctx context.Context, v *Snapshot) error {
 		if p := project(v, f.project); p != nil && slices.ContainsFunc(p.Claims, func(c Claim) bool { return c.Token == f.token }) {
 			return nil
 		}
-	} else if t := task(v, f.task); t != nil && t.claim(f.token) != nil {
-		return nil
+	} else if t := task(v, f.task); t != nil {
+		if c := t.claim(f.token); c != nil && !c.Revoked {
+			return nil
+		}
 	}
 	return fmt.Errorf("%s: %w", f.token, ErrStale)
 }
@@ -140,7 +145,7 @@ func newClaim(t *Task, c Claim, now time.Time) Claim {
 
 // alone reports whether the task has a claim that holds it alone.
 func (t Task) alone() bool {
-	return slices.ContainsFunc(t.Claims, func(c Claim) bool { return !c.Shared })
+	return slices.ContainsFunc(t.Claims, func(c Claim) bool { return !c.Shared || c.Revoked })
 }
 
 // Scheduled is a step the loop has claimed, with the task as it was claimed
@@ -238,6 +243,11 @@ func (s *Service) Schedule(ctx context.Context, admit Admit) ([]Scheduled, error
 			return 0
 		})
 		for _, t := range active {
+			// Owner answers retain their continuation, including retry and
+			// design answers. They cannot bypass a reopened start condition.
+			if t.Status == TaskWriting && len(t.Revisions) == 0 && holdsStart(*t) {
+				continue
+			}
 			if t.RetryAt.After(now) || t.Handoff != nil || t.alone() {
 				continue
 			}
@@ -561,7 +571,7 @@ func startQueued(v *Snapshot, p *Project, busy map[string]busyWork, admit Admit,
 	var out []Scheduled
 	for i := range v.Tasks {
 		t := &v.Tasks[i]
-		if t.ProjectID != p.ID || t.Status != TaskQueued || heldBack(v, *t) {
+		if t.ProjectID != p.ID || t.Status != TaskQueued || len(t.Claims) > 0 || heldBack(v, *t) {
 			continue
 		}
 		if limit := p.Playbook.ActiveCap(); limit > 0 && active >= limit {
@@ -735,7 +745,7 @@ func (s *Service) HoldSeat(ctx context.Context, taskID, token, seat string) (boo
 			return ErrNotFound
 		}
 		c := t.claim(token)
-		if c == nil {
+		if c == nil || c.Revoked {
 			return fmt.Errorf("%s: %w", token, ErrStale)
 		}
 		if strings.EqualFold(c.Seat, seat) {

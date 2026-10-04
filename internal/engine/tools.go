@@ -155,6 +155,15 @@ type SetBlockerArgs struct {
 	OtherTaskID string `json:"other_task_id"`
 	Holds       string `json:"holds"`
 }
+type ReopenPrerequisiteArgs struct {
+	Settlement string `json:"settlement"`
+	ProjectID  string `json:"project_id"`
+	TaskID     string `json:"task_id"`
+	BlockerID  string `json:"blocker_id"`
+	Condition  string `json:"condition"`
+	Answer     string `json:"answer"`
+}
+
 type ClearBlockerArgs struct {
 	ProjectID string `json:"project_id"`
 	TaskID    string `json:"task_id"`
@@ -272,6 +281,7 @@ var tools = []labelled{
 	{Tool: tool("link_task_linear", "Link a task to a Linear issue (identifier or URL) or project (UUID). Reads and validates only; never writes to Linear. Empty connection_id and profile use the project's Linear connection. Task ids can be readable or canonical.", []string{"project_id", "task_id", "connection_id", "profile", "kind", "ref"}, nil), label: "Link a task to Linear"},
 	{Tool: tool("unlink_task_linear", "Remove an added Linear link from a task. ref is its stored UUID. Imported source links cannot be removed; removal never re-imports the issue.", []string{"project_id", "task_id", "kind", "ref"}, nil), label: "Remove a task's Linear link"},
 	{Tool: tool("set_blocker", "Hold a task on an external condition. kind is manual (description required) or daemon_includes (other_task_id names a landed or to-land task in the same code project; an empty description is generated). holds is start (also the default when empty, holding both start and landing) or landing (holding only landing). Task ids can be readable or canonical. Conditions you set, like the owner's, hold against the team, including on work already begun. Use it when the owner asks or when the condition is plain from what they ask for.", []string{"project_id", "task_id", "kind", "description", "other_task_id", "holds"}, nil), label: "Hold a task on a condition"},
+	{Tool: tool("reopen_prerequisite", "Reopen an identified owner-settled prerequisite only when the owner explicitly says in this conversation that its condition no longer holds or explicitly asks to reopen it. Never infer reopening from a replan, omission, team response or ambiguous answer. condition is the original condition from read_task; settlement is current_settlement from that blocker. The current recorded owner message must exactly say: Prerequisite <blocker id> no longer holds: <original condition>. answer quotes that entire message. Ambiguous or fabricated messages are refused. Keeps past answers and opens one decision.", []string{"project_id", "task_id", "blocker_id", "condition", "answer", "settlement"}, nil), label: "Reopen an owner-settled prerequisite"},
 	{Tool: tool("clear_blocker", "Clear any open external condition on a task, whoever set it. blocker_id is the condition's id shown by read_state or read_task. Clearing can let work start or land. Use it when the owner asks or when clearing is plain from what they ask for.", []string{"project_id", "task_id", "blocker_id"}, nil), label: "Clear a task's condition"},
 	{Tool: tool("order_tasks", "Set the order a project's queued tasks start in: task_ids lists every queued task of the project, by readable or canonical id, first to start first. Set an order when the owner asks for one. The PM keeps the order and may change it for a stated reason; it treats your order as the owner's priorities. Tasks already started are not included. If the list has changed since you read it, read the state again and retry.", []string{"project_id"}, []string{"task_ids"}), label: "Reorder the to-do list"},
 	{Tool: tool("draw_member", "Have Codex draw a team member's face, in the same cute chibi manga style as the rest of the team. look describes how they look (hair colour and style, eyes, one distinctive feature, a background colour), or is empty to keep their last look, or to let Codex design one for a member who has none. It takes a few minutes and runs in the background; the member's picture changes when it is done.", []string{"member_id", "look"}, nil), label: "Draw a team member"},

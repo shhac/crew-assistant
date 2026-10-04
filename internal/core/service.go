@@ -32,13 +32,14 @@ func Reason(err error) string {
 
 // Service deliberately exposes no execution, shell, production or purchase capability.
 type Service struct {
-	upgradeDraining  bool // Guarded by store.mu; committed upgrade admission closes new claims.
-	store            *Store
-	mu               sync.RWMutex
-	cfg              config.Config
-	releaseRecorded  func(repo, version string)
-	upgradeRequested func(version string) error
-	now              func() time.Time
+	upgradeDraining     bool // Guarded by store.mu; committed upgrade admission closes new claims.
+	store               *Store
+	mu                  sync.RWMutex
+	cfg                 config.Config
+	releaseRecorded     func(repo, version string)
+	upgradeRequested    func(version string) error
+	now                 func() time.Time
+	comparePrerequisite PrerequisiteComparer
 }
 
 func NewService(store *Store, cfg config.Config) *Service {

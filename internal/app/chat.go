@@ -265,6 +265,7 @@ func (a *App) runChatTurn(ctx context.Context, turn core.ChatTurn) (engine.Resul
 // runChatTurnOn runs a chat turn on the model ec reaches, with the owner's
 // browser where the assistant may use it and the turn runs on a session.
 func (a *App) runChatTurnOn(ctx context.Context, turn core.ChatTurn, ec engine.Config, browser config.Browser, bridgeHome string) (engine.Result, error) {
+	ctx = core.WithOwnerInstruction(ctx, turn.ID)
 	// On a model session the CLI keeps the conversation and compacts it
 	// itself; the turn-by-turn way below sends everything each time.
 	result, sessionErr := a.runSessionTurn(ctx, turn, ec, browser, bridgeHome)

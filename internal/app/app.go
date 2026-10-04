@@ -43,9 +43,10 @@ type App struct {
 	chatWaiters sync.Map
 	chatInvoker func(context.Context, engine.Config, engine.Request, engine.ToolExecutor) (engine.Result, error)
 	// sessions holds the model session the assistant's conversation runs on.
-	sessions  chatSessions
-	summarize smallCompletion // Writes the conversation's summaries.
-	statuses  map[string]core.Integration
+	sessions             chatSessions
+	prerequisiteComplete smallCompletion
+	summarize            smallCompletion // Writes the conversation's summaries.
+	statuses             map[string]core.Integration
 	// drawing is each picture being drawn or that failed, by member id or
 	// drawingAssistant. It is not stored: a restart forgets a drawing it
 	// could not finish.
@@ -91,6 +92,10 @@ type Options struct {
 func New(s *core.Service, cfg config.Config, path string, opts Options) *App {
 	a := &App{Diagnostics: opts.Diagnostics, connectionClient: connections.New(), Core: s, cfg: cfg, slackConfig: cfg.Slack, configPath: path, Demo: opts.Demo, chat: make(chan struct{}, 1), chatWake: make(chan struct{}, 1), summarize: engine.Complete, stop: lifecycle.Now(context.Background()), statuses: map[string]core.Integration{}, drawing: map[string]drawing{}, small: newSmallModels(func() string { return s.StateDirectory() })}
 	a.Work = work.New(s, a.Config, opts.Demo)
+	a.prerequisiteComplete = engine.Complete
+	if !opts.Demo && s != nil {
+		s.SetPrerequisiteComparer(a.comparePrerequisites)
+	}
 	a.version, a.checker = opts.Version, opts.Checker
 	a.upgradeEngine, a.requestUpgrade, a.upgradeClock = opts.UpgradeEngine, opts.RequestUpgrade, opts.UpgradeClock
 	if opts.RequestUpgrade != nil && !opts.Demo {

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -55,7 +56,7 @@ func prerequisiteTask(t *testing.T) (*Service, Project, Task, Decision) {
 	if started.ID != queued.ID {
 		t.Fatal(started)
 	}
-	held, err := s.RecordPlan(testContext, started.ID, Plan{Summary: "Use release"}, nil, []string{"lib v0.20.0 tagged", " LIB  v0.20.0 TAGGED "})
+	held, err := s.RecordPlan(testContext, started.ID, Plan{Summary: "Use release"}, nil, []string{"lib v0.20.0 tagged", " lib v0.20.0 tagged "})
 	snap, _ := s.Snapshot(testContext)
 	if err != nil || held.Status != TaskQueued || held.Plan != nil || len(held.Blockers) != 1 || len(snap.Decisions) != 1 {
 		t.Fatalf("held %+v decisions %+v %v", held, snap.Decisions, err)
@@ -75,6 +76,14 @@ func prerequisiteTask(t *testing.T) (*Service, Project, Task, Decision) {
 	if got := taskByID(t, s, held.ID); got.Status != TaskQueued {
 		t.Fatal("started before answer")
 	}
+	// Case changes are semantic: this fixture's script establishes that only
+	// prose casing changed, while the library and version remain the same.
+	s.SetPrerequisiteComparer(func(_ context.Context, incoming string, _ bool, records []Prerequisite) (PrerequisiteComparison, error) {
+		if strings.Join(strings.Fields(strings.ToLower(incoming)), " ") == "lib v0.20.0 tagged" && len(records) == 1 {
+			return PrerequisiteComparison{Result: "equivalent", Blocker: records[0].Blocker, Details: "same library, exact v0.20.0 and tag requirement; prose casing only"}, nil
+		}
+		return PrerequisiteComparison{Result: "uncertain"}, nil
+	})
 	return s, p, held, d
 }
 

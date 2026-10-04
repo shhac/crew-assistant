@@ -393,6 +393,7 @@ func (a *App) sessionTool(ctx context.Context, name string, args json.RawMessage
 			return session.ToolResult{Content: "The day's allowance of model requests is spent. Finish this reply without further actions.", IsError: true}
 		}
 	}
+	ctx = core.WithOwnerInstruction(ctx, turn.id)
 	output, action, err := engine.RunTool(ctx, a, turn.cfg.OnTool, chatID(), name, args)
 	a.sessions.mu.Lock()
 	current := a.sessions.live.currentTurn() == turn

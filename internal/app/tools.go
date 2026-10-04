@@ -75,6 +75,15 @@ var toolActions = map[string]toolAction{
 			return nil, err
 		}
 		if t, ok := s.FindTask(in.TaskID); ok && t.ProjectID == in.ProjectID {
+			t.Blockers = append([]core.Blocker(nil), t.Blockers...)
+			for _, pre := range core.TaskPrerequisites(s, t) {
+				for i := range t.Blockers {
+					if t.Blockers[i].ID == pre.Blocker {
+						t.Blockers[i].Settlements = pre.Settlements
+						t.Blockers[i].CurrentSettlement = core.PrerequisiteSettlementID(t.Blockers[i])
+					}
+				}
+			}
 			return taskDetail(t), nil
 		}
 		return nil, core.ErrNotFound
@@ -145,6 +154,13 @@ var toolActions = map[string]toolAction{
 			return nil, errors.New("holds must be start or landing, or empty for start")
 		}
 		return a.Work.SetBlocker(ctx, core.BlockerInput{Project: in.ProjectID, Task: in.TaskID, Kind: in.Kind, Description: in.Description, Other: in.OtherTaskID, LandingOnly: in.Holds == "landing", By: core.LinkedByAssistant})
+	}),
+	"reopen_prerequisite": with(func(a *App, ctx context.Context, in engine.ReopenPrerequisiteArgs) (any, error) {
+		t, err := a.Core.ReopenPrerequisite(ctx, in.ProjectID, in.TaskID, in.BlockerID, in.Condition, in.Answer, core.LinkedByAssistant, core.PrerequisiteReopen{Source: core.OwnerInstructionSource(ctx), Settlement: in.Settlement})
+		if err == nil {
+			a.Work.Nudge()
+		}
+		return t, err
 	}),
 	"clear_blocker": with(func(a *App, ctx context.Context, in engine.ClearBlockerArgs) (any, error) {
 		return a.Work.ClearBlocker(ctx, in.ProjectID, in.TaskID, in.BlockerID, core.LinkedByAssistant, "cleared by the assistant")

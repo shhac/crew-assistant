@@ -13,9 +13,10 @@ import (
 
 // Prerequisite records an external condition and the owner's outcome.
 type Prerequisite struct {
-	What    string `json:"what"`
-	Blocker string `json:"blocker"`
-	Outcome string `json:"outcome,omitempty"`
+	What        string                   `json:"what"`
+	Blocker     string                   `json:"blocker"`
+	Outcome     string                   `json:"outcome,omitempty"`
+	Settlements []PrerequisiteSettlement `json:"settlements,omitempty"`
 }
 
 // Plan is what a researcher worked out about a task before anything was
@@ -193,12 +194,32 @@ func reaches(v *Snapshot, from, to string, seen map[string]bool) bool {
 // on the task queues the parts it splits off, in the same change.
 // ends records optional reply metadata with the plan under the same fence.
 func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, dependsOn, prerequisites []string, ends ...TurnEnd) (Task, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		reconciled, err := s.reconcilePrerequisites(ctx, taskID, prerequisites, plan.Questions)
+		if err != nil {
+			return Task{}, err
+		}
+		out, err := s.recordReconciledPlan(ctx, taskID, plan, dependsOn, reconciled, ends...)
+		if errors.Is(err, errPrerequisiteStale) {
+			continue
+		}
+		return out, err
+	}
+	return Task{}, fmt.Errorf("prerequisites changed during planning: %w", ErrConflict)
+}
+
+func (s *Service) recordReconciledPlan(ctx context.Context, taskID string, plan Plan, dependsOn []string, reconciled prerequisiteReconciliation, ends ...TurnEnd) (Task, error) {
 	var out Task
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		t := task(v, taskID)
 		if t == nil {
 			return ErrNotFound
 		}
+		if prerequisiteState(*t) != reconciled.state || (len(t.Revisions) > 0) != reconciled.begun {
+			return errPrerequisiteStale
+		}
+		recoverPrerequisiteAnswers(v, t)
+		plan.Questions = reconciled.questions
 		// A task stopped while the researcher worked stays stopped.
 		if t.Status != TaskResearching {
 			return fmt.Errorf("the task is no longer being researched: %w", ErrConflict)
@@ -219,8 +240,9 @@ func (s *Service) RecordPlan(ctx context.Context, taskID string, plan Plan, depe
 			}
 		}
 		if !begun {
-			s.planPrerequisites(v, t, prerequisites, now)
+			s.planPrerequisites(v, t, reconciled.conditions, now)
 		}
+		recordPrerequisiteMatches(v, t, reconciled.matches, now)
 		plan.Prerequisites = taskPrerequisites(*t)
 		waiting := append(waitsFor(v, *t), BlockerReasons(*t)...)
 		// Validate against the dependencies that survived this write, not the

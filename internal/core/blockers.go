@@ -19,19 +19,22 @@ const (
 
 // Blocker keeps an external condition and its clearing history on the task.
 type Blocker struct {
-	ID          string     `json:"id"`
-	Kind        string     `json:"kind"`
-	Description string     `json:"description"`
-	Task        string     `json:"task,omitempty"`
-	LandingOnly bool       `json:"landing_only,omitempty"`
-	By          string     `json:"by"`
-	At          time.Time  `json:"at"`
-	ClearedAt   *time.Time `json:"cleared_at,omitempty"`
-	ClearedBy   string     `json:"cleared_by,omitempty"`
-	Check       string     `json:"check,omitempty"`
-	Outcome     string     `json:"outcome,omitempty"`
+	ID          string                   `json:"id"`
+	Kind        string                   `json:"kind"`
+	Description string                   `json:"description"`
+	Task        string                   `json:"task,omitempty"`
+	LandingOnly bool                     `json:"landing_only,omitempty"`
+	By          string                   `json:"by"`
+	At          time.Time                `json:"at"`
+	ClearedAt   *time.Time               `json:"cleared_at,omitempty"`
+	ClearedBy   string                   `json:"cleared_by,omitempty"`
+	Check       string                   `json:"check,omitempty"`
+	Outcome     string                   `json:"outcome,omitempty"`
+	Settlements []PrerequisiteSettlement `json:"settlements,omitempty"`
+	Aliases     []string                 `json:"aliases,omitempty"`
 	// AnswerPending is derived from the prerequisite decision.
-	AnswerPending bool `json:"answer_pending,omitempty"`
+	AnswerPending     bool   `json:"answer_pending,omitempty"`
+	CurrentSettlement string `json:"current_settlement,omitempty"`
 }
 
 type BlockerInput struct {
@@ -212,7 +215,13 @@ func (s *Service) ClearBlocker(ctx context.Context, projectID, taskID, id, by, w
 func (s *Service) clearBlocker(v *Snapshot, t *Task, b *Blocker, by, why string) {
 	now := s.now().UTC()
 	b.ClearedAt, b.ClearedBy, b.Check = &now, by, ""
+	if b.Kind == BlockerPrerequisite {
+		b.Settlements = append(b.Settlements, PrerequisiteSettlement{Outcome: b.Outcome, Answer: why, By: by, At: now, Source: "clear:" + uid()})
+	}
 	t.UpdatedAt = now
+	if b.Kind == BlockerPrerequisite && t.Plan != nil {
+		t.Plan.Prerequisites = taskPrerequisites(*t)
+	}
 	// A ready pull request the condition held waits on its wakes; with the
 	// last condition gone it is looked at again.
 	if t.Status == TaskAwaiting && t.UsesPRs() && len(BlockerReasons(*t)) == 0 {

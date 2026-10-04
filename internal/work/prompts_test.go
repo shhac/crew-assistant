@@ -178,7 +178,7 @@ func TestAPlanKeepsItsStepsWholeWithinABound(t *testing.T) {
 		"changes":       []string{long, strings.Repeat("b", maxPlanItem+500)},
 		"failure_paths": []string{"Stopped after the first write: the record says the task is still writing."},
 		"tests":         []string{"A crash between the two writes leaves one record"},
-		"questions":     []string{strings.Repeat("q", 900), strings.Repeat("r", maxPlanItem+500)},
+		"questions":     []string{strings.Repeat("q", 900), strings.Repeat("r", core.MaxPrerequisiteBytes)},
 	})
 	plan, _, _, _, err := parsePlan(string(reply), false, true, nil)
 	if err != nil {
@@ -191,7 +191,7 @@ func TestAPlanKeepsItsStepsWholeWithinABound(t *testing.T) {
 		t.Fatalf("plan %+v", plan)
 	}
 	// The owner answers the questions, so a long one reaches them whole.
-	if len(plan.Questions) != 2 || plan.Questions[0] != strings.Repeat("q", 900) || len(plan.Questions[1]) > maxPlanItem+len("…") {
+	if len(plan.Questions) != 2 || plan.Questions[0] != strings.Repeat("q", 900) || plan.Questions[1] != strings.Repeat("r", core.MaxPrerequisiteBytes) {
 		t.Fatalf("questions %d", len(plan.Questions))
 	}
 	shown := planText(core.Task{Plan: &plan})

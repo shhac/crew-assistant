@@ -176,6 +176,9 @@ func taskBrief(snap core.Snapshot, projectID string, t core.Task, designFiles st
 			}
 		}
 	}
+	for _, pre := range core.TaskPrerequisites(snap, t) {
+		fmt.Fprintf(&b, "Prerequisite: %s\n", prerequisiteContext(pre.Blocker, pre.What, pre.Outcome, pre.Settlements))
+	}
 	if t.Plan != nil {
 		fmt.Fprintf(&b, "Plan: %s\n", text.Clip(t.Plan.Summary, 800))
 		if t.Plan.NeedsDesigner != "" {
