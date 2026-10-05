@@ -248,7 +248,8 @@ func TestEnclosingCheckSettlesHostedFixtureGroup(t *testing.T) {
 			t.Fatalf("enclosing runner exited before fixture startup: %v\n%s", err, &output)
 		default:
 		}
-		if _, err := os.Stat(heartbeat); err == nil {
+		// The fixture's os.WriteFile creates the file before writing it.
+		if info, err := os.Stat(heartbeat); err == nil && info.Size() > 0 {
 			break
 		}
 		if time.Now().After(deadline) {
