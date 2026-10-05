@@ -9,6 +9,7 @@ import { SlackBotSettings } from "./SlackBotSettings";
 import { Panel } from "./SettingsPanel";
 import { UpdatesSettings } from "./UpdatesSettings";
 import { ToolsSettings } from "./ToolsSettings";
+import { RepositoriesSettings, TeamsSettings } from "./StaffingSettings";
 import { appearanceOf, applyAppearance, type Appearance } from "./appearance";
 import { href } from "./router";
 import { assistantSummary } from "./members";
@@ -26,6 +27,8 @@ import {
 
 const sections = [
   { id: "assistant", label: "Assistant" },
+  { id: "repositories", label: "Repositories" },
+  { id: "teams", label: "Teams" },
   { id: "appearance", label: "Appearance" },
   { id: "updates", label: "Updates" },
   { id: "models", label: "Models" },
@@ -259,6 +262,12 @@ export function Settings({
                 </>
               )}
               {current === "tools" && <ToolsSettings />}
+              {current === "repositories" && (
+                <RepositoriesSettings state={state} refresh={refresh} />
+              )}
+              {current === "teams" && (
+                <TeamsSettings state={state} refresh={refresh} />
+              )}
               {current === "limits" && (
                 <LimitsSettings
                   config={draft}

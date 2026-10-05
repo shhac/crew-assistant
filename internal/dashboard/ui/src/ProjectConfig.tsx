@@ -5,6 +5,7 @@ import { ReleaseSettings } from "./ReleaseSettings";
 import { LandingSettings } from "./ProjectLanding";
 import { TeamSettings } from "./TeamSettings";
 import { ProjectLinear } from "./ProjectLinear";
+import { ProjectSetupCard, SharedNote } from "./ProjectSetup";
 import { boardColumns, boardRows } from "./boardLanes";
 import { isCode, stageLimit } from "./stages";
 import { ErrorNotice, useAction } from "./ui";
@@ -17,6 +18,7 @@ import {
   type Member,
   type Playbook,
   type Project,
+  type State,
 } from "./api";
 
 const signing: Record<string, string> = {
@@ -29,10 +31,13 @@ const signing: Record<string, string> = {
 export function ConfigTab({
   project,
   members,
+  state,
   refresh,
 }: {
   project: Project;
   members: Member[];
+  /** The repositories, teams and projects that may share them. */
+  state?: State;
   refresh: () => Promise<void>;
 }) {
   const playbook = project.playbook;
@@ -47,6 +52,9 @@ export function ConfigTab({
             playbook={playbook}
             refresh={refresh}
           />
+        )}
+        {state && (
+          <ProjectSetupCard project={project} state={state} refresh={refresh} />
         )}
         <TeamSettings project={project} members={members} refresh={refresh} />
         <ProjectLinear project={project} refresh={refresh} />
@@ -70,6 +78,9 @@ export function ConfigTab({
       )}
       <section className="config-group">
         <h2>Where work happens</h2>
+        {code && (
+          <SharedNote state={state} project={project} what="repository" />
+        )}
         <Folders project={project} refresh={refresh} />
         {code && (
           <>

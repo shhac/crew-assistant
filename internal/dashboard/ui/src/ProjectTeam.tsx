@@ -1,4 +1,5 @@
 import { NoPM } from "./PMChat";
+import { SharedNote } from "./ProjectSetup";
 import { pmSeat } from "./members";
 import { ProviderIcon } from "./ProviderIcon";
 import { useState } from "react";
@@ -56,6 +57,7 @@ export function TeamTab({
       {!pmSeat(project) && <NoPM project={project} />}
       <section className="tab-panel card" aria-label="Team">
         <h2>Team</h2>
+        <SharedNote state={state} project={project} what="team" />
         {playbook ? (
           <>
             <Roles

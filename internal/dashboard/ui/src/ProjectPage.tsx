@@ -154,6 +154,7 @@ export function ProjectPage({
         <ConfigTab
           project={project}
           members={state.members}
+          state={state}
           refresh={refresh}
         />
       )}

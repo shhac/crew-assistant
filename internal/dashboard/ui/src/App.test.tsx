@@ -986,6 +986,8 @@ describe("settings", () => {
         .map((a) => a.textContent),
     ).toEqual([
       "Assistant",
+      "Repositories",
+      "Teams",
       "Appearance",
       "Updates",
       "Models",

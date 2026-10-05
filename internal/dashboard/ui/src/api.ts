@@ -313,7 +313,18 @@ export interface Project {
   prefix?: string;
   status: string;
   brief: Brief;
+  /**
+   * How the project's work gets done, as everything reads it: its own
+   * settings with its repository's code settings, its team's seats and its
+   * seat overrides applied.
+   */
   playbook?: Playbook;
+  /** The team that staffs it, by id; absent for seats of its own. */
+  team?: string;
+  /** Adjustments to its team's seats, for this project only. */
+  seat_overrides?: SeatOverride[];
+  /** The repositories, and code areas in them, it expects to touch. */
+  scope?: { repositories?: ScopeRepository[] };
   directories?: string[];
   scratch_directory?: string;
   source_id?: string;
@@ -328,6 +339,54 @@ export interface Project {
   /** What the owner told the PM, for its next look. */
   pm_direction?: string;
   updated_at?: string;
+}
+/** A codebase projects work in, registered once and shared. */
+export interface Repository {
+  id: string;
+  name: string;
+  path: string;
+  default_branch?: string;
+  check?: string;
+  prepare?: string[];
+  check_in_copy?: boolean;
+  check_loopback?: boolean;
+  run?: RunRecipe;
+  areas?: CodeArea[];
+}
+/** A named set of paths in a repository. */
+export interface CodeArea {
+  name: string;
+  paths: string[];
+}
+export type RepositoryInput = Omit<Repository, "id">;
+/** Default seats by kind of role, a PM among them, and rounds. */
+export interface Team {
+  id: string;
+  name: string;
+  template: string;
+  roles: Role[];
+  max_rounds: number;
+}
+export interface ScopeRepository {
+  id: string;
+  areas?: string[];
+}
+export type OverrideAction = "add" | "replace" | "exclude";
+export interface SeatOverride {
+  action: OverrideAction;
+  kind: MemberKind;
+  seat?: Role;
+}
+/** A seat override as the owner chooses it: no member is the template's seat. */
+export interface SeatOverrideChoice {
+  action: OverrideAction;
+  kind: MemberKind;
+  member?: string;
+}
+export interface ProjectSetup {
+  team: string;
+  repository: string;
+  areas: string[];
 }
 export interface ProjectInput {
   title: string;
@@ -1028,6 +1087,8 @@ export interface State {
   };
   assistants: AssistantProfile[];
   projects: Project[];
+  repositories?: Repository[];
+  teams?: Team[];
   members: Member[];
   tasks: Task[];
   decisions: Decision[];
@@ -1834,5 +1895,94 @@ export function setRelease(projectID: string, release: ReleasePolicy | null) {
   return api<Project>(`/api/projects/${projectID}/release`, {
     method: "PUT",
     body: JSON.stringify(release),
+  });
+}
+
+/** Registers a repository. */
+export function createRepository(input: RepositoryInput) {
+  return api<Repository>("/api/repositories", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+/** Changes a repository for every project working in it. */
+export function updateRepository(id: string, input: RepositoryInput) {
+  return api<Repository>(`/api/repositories/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+export function deleteRepository(id: string) {
+  return api<{ deleted: boolean }>(
+    `/api/repositories/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+}
+/** Makes a team from a template, or from a project's seats. */
+export function createTeam(input: {
+  name: string;
+  template?: string;
+  from_project?: string;
+}) {
+  return api<Team>("/api/teams", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+/** Renames a team and sets its rounds, for every project it staffs. */
+export function updateTeam(
+  id: string,
+  input: { name: string; max_rounds: number },
+) {
+  return api<Team>(`/api/teams/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+export function deleteTeam(id: string) {
+  return api<{ deleted: boolean }>(`/api/teams/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+/** Fills one of a team's roles with a member, or "" for the template's seat. */
+export function setTeamSeat(id: string, kind: MemberKind, member: string) {
+  return api<Team>(
+    `/api/teams/${encodeURIComponent(id)}/seats/${encodeURIComponent(kind)}`,
+    { method: "PUT", body: JSON.stringify({ member }) },
+  );
+}
+/** Adds a seat to a team: like the named seat, or a member in a role. */
+export function addTeamSeat(
+  id: string,
+  input: { seat: string } | { kind: MemberKind; member: string },
+) {
+  return api<Team>(`/api/teams/${encodeURIComponent(id)}/seats`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+/** Takes a seat off a team, or with a kind only that role from it. */
+export function removeTeamSeat(id: string, seat: string, kind?: MemberKind) {
+  const query = kind ? `?kind=${encodeURIComponent(kind)}` : "";
+  return api<Team>(
+    `/api/teams/${encodeURIComponent(id)}/seats/${encodeURIComponent(seat)}${query}`,
+    { method: "DELETE" },
+  );
+}
+/** Chooses the team that staffs a project and the repository it works in. */
+export function setProjectSetup(projectID: string, setup: ProjectSetup) {
+  return api<Project>(`${projectPath(projectID)}/setup`, {
+    method: "PUT",
+    body: JSON.stringify(setup),
+  });
+}
+/** Replaces a project's seat overrides. */
+export function setSeatOverrides(
+  projectID: string,
+  overrides: SeatOverrideChoice[],
+) {
+  return api<Project>(`${projectPath(projectID)}/seat-overrides`, {
+    method: "PUT",
+    body: JSON.stringify({ overrides }),
   });
 }
