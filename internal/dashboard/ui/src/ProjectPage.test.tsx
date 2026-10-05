@@ -3017,6 +3017,7 @@ describe("the project's tabs", () => {
           approve: "before",
           draft: false,
           trusted_bots: [],
+          stack: false,
         },
       },
     ]);
@@ -3044,6 +3045,9 @@ describe("the project's tabs", () => {
     fireEvent.click(
       screen.getByRole("checkbox", { name: "Open them as drafts" }),
     );
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Stack pull requests" }),
+    );
     fireEvent.change(
       screen.getByLabelText(/^Automated reviewers the team trusts/),
       { target: { value: "@review-bot[bot], lint-bot[bot] review-bot[bot]" } },
@@ -3062,6 +3066,7 @@ describe("the project's tabs", () => {
       approve: "pm",
       draft: true,
       trusted_bots: ["review-bot[bot]", "lint-bot[bot]"],
+      stack: true,
     });
   });
   it("pauses landing for a code freeze, with why, and resumes it", async () => {

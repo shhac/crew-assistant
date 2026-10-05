@@ -12,6 +12,7 @@ import {
   openGate,
   openHint,
   pmCanDecide,
+  stackHint,
 } from "./landing";
 import { ErrorNotice, useAction } from "./ui";
 import { setLanding, type Project } from "./api";
@@ -36,6 +37,7 @@ export function LandingEditor({
   const [chosenApprove, setApprove] = useState(land?.approve || "before");
   const [draft, setDraft] = useState(!!land?.draft);
   const [bots, setBots] = useState((land?.trusted_bots ?? []).join(", "));
+  const [stack, setStack] = useState(!!land?.stack);
   const way = pullRequests ? "pull-request" : via;
   const approve = effectiveApprove(chosenApprove, way);
   const hasPM = !!project.playbook?.roles.some((r) => r.kinds.includes("pm"));
@@ -59,6 +61,7 @@ export function LandingEditor({
           approve: chosenApprove,
           draft,
           bots,
+          stack,
         }),
       );
       await refresh();
@@ -89,6 +92,18 @@ export function LandingEditor({
           </label>
           <p className="hint" id="land-draft-hint">
             {draftHint}
+          </p>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={stack}
+              onChange={(e) => setStack(e.target.checked)}
+              aria-describedby="land-stack-hint"
+            />
+            <span>Stack pull requests</span>
+          </label>
+          <p className="hint" id="land-stack-hint">
+            {stackHint}
           </p>
         </>
       )}

@@ -226,6 +226,7 @@ describe("the landing editor", () => {
     approve: "pm",
     draft: true,
     bots: "review-bot[bot]",
+    stack: true,
   };
   it("saves only what the way needs", () => {
     expect(landingInput(form)).toEqual({
@@ -240,6 +241,7 @@ describe("the landing editor", () => {
       approve: "pm",
       draft: false,
       trusted_bots: [],
+      stack: false,
     });
     // With pull requests, who approves merging is what is saved.
     expect(landingInput({ ...form, pullRequests: true })).toMatchObject({
@@ -250,6 +252,7 @@ describe("the landing editor", () => {
       approve: "none",
       draft: true,
       trusted_bots: ["review-bot[bot]"],
+      stack: true,
     });
     // A branch has no target, and never leaves landing to the PM.
     expect(landingInput({ ...form, via: "branch" })).toMatchObject({

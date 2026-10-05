@@ -54,6 +54,7 @@ export const landingWays: Record<string, LandingWay> = {
           ]
         : []),
       `Once it's approved where review is asked for, green and every thread is resolved, ${mergeWords[mergeGate(land)] ?? mergeWords.pm}, by ${mergeMethod(land)}.`,
+      ...(land.stack ? [stackHint] : []),
     ],
   },
 };
@@ -252,6 +253,7 @@ export interface LandingForm {
   draft: boolean;
   /** The trusted automated reviewers, as written. */
   bots: string;
+  stack: boolean;
 }
 
 /**
@@ -275,12 +277,17 @@ export function landingInput(form: LandingForm): LandingInput {
       : effectiveApprove(form.approve, way),
     draft: form.pullRequests && form.draft,
     trusted_bots: form.pullRequests ? loginsIn(form.bots) : [],
+    stack: form.pullRequests && form.stack,
   };
 }
 
 /** The hint under opening pull requests as drafts. */
 export const draftHint =
   "The team still answers its reviews and checks. Once nothing is left for it, you're asked whether to mark it ready for review; only you do.";
+
+/** The hint under stacking pull requests. */
+export const stackHint =
+  "A request can build on another's open pull request instead of waiting for it to merge, as during a code freeze; it merges after it, and g2g keeps the stack.";
 
 /** The hint under the automated reviewers the team trusts. */
 export const botsHint =

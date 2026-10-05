@@ -17,13 +17,21 @@ const relations: { relation: Relation; label: string }[] = [
   { relation: "depends_on", label: "Depends on" },
   { relation: "blocks", label: "Blocks" },
   { relation: "relates_to", label: "Relates to" },
+  { relation: "stacks_on", label: "Stacked on" },
 ];
 
 const linkedIds: Record<Relation, (task: Task) => string[] | undefined> = {
   depends_on: (task) => task.depends_on,
   blocks: (task) => task.blocks,
   relates_to: (task) => task.relates_to,
+  stacks_on: (task) => (task.stacks_on ? [task.stacks_on] : undefined),
 };
+
+/** The relations the owner can add: stacking only where it is on. */
+const addable = (project: Project) =>
+  relations.filter(
+    (r) => r.relation !== "stacks_on" || !!project.playbook?.land?.stack,
+  );
 
 const linked = (task: Task, relation: Relation) =>
   linkedIds[relation](task) ?? [];
@@ -158,7 +166,12 @@ export function RequestRelations({
         </div>
       ))}
       {candidates.length > 0 && (
-        <AddRelation candidates={candidates} busy={busy} onAdd={link} />
+        <AddRelation
+          candidates={candidates}
+          relations={addable(project)}
+          busy={busy}
+          onAdd={link}
+        />
       )}
       <RequestBlockers
         project={project}
@@ -174,10 +187,12 @@ export function RequestRelations({
 
 function AddRelation({
   candidates,
+  relations,
   busy,
   onAdd,
 }: {
   candidates: Task[];
+  relations: { relation: Relation; label: string }[];
   busy: boolean;
   onAdd: (relation: Relation, other: string) => Promise<void>;
 }) {

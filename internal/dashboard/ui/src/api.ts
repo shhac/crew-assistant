@@ -247,6 +247,8 @@ export interface LandPolicy {
   draft?: boolean;
   /** GitHub logins of automated reviewers the team weighs as advice. */
   trusted_bots?: string[];
+  /** Lets a task build on another's open pull request; g2g keeps the stack. */
+  stack?: boolean;
 }
 /** The PM's decision to land or hold a task's change, and why. */
 export interface LandDecision {
@@ -270,6 +272,7 @@ export interface LandingInput {
   approve: string;
   draft: boolean;
   trusted_bots: string[];
+  stack: boolean;
 }
 export interface LinearLink {
   connection_id: string;
@@ -558,7 +561,7 @@ export interface DesignRequest {
   at?: string;
   answered_at?: string;
 }
-export type Relation = "depends_on" | "blocks" | "relates_to";
+export type Relation = "depends_on" | "blocks" | "relates_to" | "stacks_on";
 export interface LinkMark {
   /** "owner", "assistant", "pm", "member:<id>" or "role:<kind>". */
   by: string;
@@ -724,6 +727,8 @@ export interface Task {
   /** Ids of the tasks that depend on this one. */
   blocks?: string[];
   relates_to?: string[];
+  /** The task whose open pull request this one builds on. */
+  stacks_on?: string;
   /**
    * Who set each link, keyed "depends_on:<id>" or "relates_to:<id>". A link
    * with no entry was set by the team before links were marked.
