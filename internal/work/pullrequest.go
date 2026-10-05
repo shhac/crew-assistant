@@ -96,9 +96,10 @@ func (lp *Loop) wokenRound(ctx context.Context, t core.Task) (bool, error) {
 }
 
 // catchUpIfBehind sends the task to catch up when it lacks what it must
-// include before landing.
-func (lp *Loop) catchUpIfBehind(ctx context.Context, t core.Task, m gitMedium, r core.Revision) (bool, error) {
-	l, err := m.behind(ctx, t)
+// include before landing; required when GitHub says the pull request is
+// behind its base or conflicts with it.
+func (lp *Loop) catchUpIfBehind(ctx context.Context, t core.Task, m gitMedium, r core.Revision, required bool) (bool, error) {
+	l, err := m.behindFor(ctx, t, required)
 	if err != nil {
 		return true, lp.landingFailed(ctx, t, r, err)
 	}
@@ -112,11 +113,11 @@ func (lp *Loop) catchUpIfBehind(ctx context.Context, t core.Task, m gitMedium, r
 // catching up and, for an update to an open pull request, after the owner has
 // seen anything in it that runs or instructs on their side.
 func (lp *Loop) publish(ctx context.Context, p core.Project, t core.Task, m gitMedium, r core.Revision, prop *core.Proposal) (bool, error) {
-	if done, err := lp.catchUpIfBehind(ctx, t, m, r); done || err != nil {
+	if done, err := lp.catchUpIfBehind(ctx, t, m, r, false); done || err != nil {
 		return true, err
 	}
 	if prop.Number > 0 && !approvalStands(t) {
-		notes, err := m.repo.Attention(ctx, prop.Pushed, r.Ref)
+		notes, err := m.repo.OwnAttention(ctx, prop.Pushed, r.Ref, t.Base)
 		if err != nil {
 			return true, lp.landingFailed(ctx, t, r, err)
 		}
@@ -140,7 +141,7 @@ func (lp *Loop) publish(ctx context.Context, p core.Project, t core.Task, m gitM
 			return true, lp.landingFailed(ctx, t, r, fetchErr)
 		}
 		if in, _ := m.repo.Contains(ctx, r.Ref, head); !in {
-			return lp.catchUpIfBehind(ctx, t, m, r)
+			return lp.catchUpIfBehind(ctx, t, m, r, false)
 		}
 		err = m.pushGitHub(ctx, r.Ref, prop.Branch, head)
 	}
@@ -243,7 +244,7 @@ func (lp *Loop) reactTo(ctx context.Context, p core.Project, t core.Task, m gitM
 		}
 	}
 	if pr.HeadRefOid != prop.Pushed || pr.Behind() {
-		if done, err := lp.catchUpIfBehind(ctx, t, m, r); done || err != nil {
+		if done, err := lp.catchUpIfBehind(ctx, t, m, r, pr.Behind()); done || err != nil {
 			return err
 		}
 	}

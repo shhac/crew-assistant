@@ -587,3 +587,46 @@ func TestARewrittenDescriptionUpdatesTheOpenPullRequest(t *testing.T) {
 		t.Fatalf("posts %v", s.gh.posts)
 	}
 }
+
+// A busy main doesn't make a pull request catch up: commits that merge
+// cleanly are left to GitHub's own merge, and taken in only when GitHub
+// says the branch must be up to date.
+func TestAPullRequestTakesInMainOnlyWhenItMust(t *testing.T) {
+	t.Parallel()
+	s := newPRScenario(t, 6)
+	opened := s.open(t)
+	other := t.TempDir()
+	ownerGit(t, other, "clone", "-q", "--branch", "main", s.remote, ".")
+	os.WriteFile(filepath.Join(other, "elsewhere.go"), []byte("package main\n"), 0600)
+	ownerGit(t, other, "add", "-A")
+	ownerGit(t, other, "commit", "-q", "-m", "someone else's change on main")
+	ownerGit(t, other, "push", "-q", "origin", "main")
+	moved := ownerGit(t, other, "rev-parse", "HEAD")
+
+	s.review(t, "Rename the handler.", time.Now())
+	task := s.current(t)
+	latest := task.Revisions[len(task.Revisions)-1]
+	if latest.N == opened.Revisions[len(opened.Revisions)-1].N || s.remoteHead(t) != latest.Ref {
+		t.Fatalf("the review's fix wasn't pushed: %+v", task)
+	}
+	if task.Base != opened.Base || isAncestor(t, s.remote, moved, latest.Ref) {
+		t.Fatal("the pull request caught up with a main it merges into cleanly")
+	}
+
+	s.gh.set(func() { s.gh.mergeState = "BEHIND" })
+	if err := s.a.checkWakes(s.ctx, time.Now().Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	task = s.current(t)
+	latest = task.Revisions[len(task.Revisions)-1]
+	if task.Base != moved || !isAncestor(t, s.remote, moved, s.remoteHead(t)) {
+		t.Fatalf("GitHub said the branch was behind, but main wasn't taken in: base %s, head %s", task.Base, s.remoteHead(t))
+	}
+}
+
+func isAncestor(t *testing.T, repo, ancestor, of string) bool {
+	t.Helper()
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", ancestor, of)
+	cmd.Dir = repo
+	return cmd.Run() == nil
+}

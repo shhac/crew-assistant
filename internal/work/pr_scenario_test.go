@@ -45,6 +45,9 @@ type fakeGitHub struct {
 	// often gh was asked to mark it so.
 	draft   bool
 	readied int
+	// mergeState, when set, is the merge state GitHub reports, such as
+	// BEHIND for a repository that wants branches up to date.
+	mergeState string
 }
 
 func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
@@ -122,6 +125,9 @@ func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
 			}
 		default:
 			pr["statusCheckRollup"] = []map[string]string{{"name": "build", "status": "IN_PROGRESS"}}
+		}
+		if f.mergeState != "" {
+			pr["mergeStateStatus"] = f.mergeState
 		}
 		if f.draft {
 			pr["mergeStateStatus"] = "DRAFT"
