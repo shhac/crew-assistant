@@ -178,6 +178,8 @@ Each role runs as an ordinary headless Claude Code or Codex session through [`li
 
 What this does not contain, stated plainly: a role can **read** what your account can read, and its model provider connection is an outward channel for what it reads. Claude Code's file tools are confined by permission rules; its OS sandbox covers its shell. The standing rules — no deployment, no production data, no purchases — are enforced by the sandbox where it can and by instruction elsewhere. See the [trust decision](design-docs/decisions/2026-09-role-sandbox-trust.md) and the [sandbox evidence](design-docs/reference/2026-09-23-cli-sandboxes.md).
 
+API team roles use lib-agent-harness v0.24.0: read_file, search_files and edit_file are unavailable, with the library’s reason recorded in turn details. Roles read, search and edit through proved sandboxed commands; writing turns also have write_file. Commands filter PATH against the read policy. Git workspaces grant the module cache, resolved Go root and dedicated Node install root to command sandboxes and CLI role sandboxes alike; shared home prefixes and roots containing Crew default or XDG config/state paths are refused; the harness system set covers macOS Xcode, CommandLineTools and Homebrew. See [the capability and release note](design-docs/2026-10-04-api-roles-without-file-tools.md).
+
 The assistant itself never writes project files or runs commands; it works through its own tools with native tools disabled.
 
 ## Dashboard

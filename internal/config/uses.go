@@ -70,14 +70,11 @@ var roleSupport = harness.Support
 
 // RoleSupport says whether team roles can run on engine and, when they
 // can't, why in the owner's words. A role works in its own sandbox and
-// reaches the daemon's tools. API roles also need the workspace read and
-// write tools the workbench supplies.
+// reaches the daemon's tools. API roles use proved commands for workspace
+// reads, searches and edits while workbench content tools are unavailable.
 func RoleSupport(engine string) (ok bool, reason string) {
 	e := harness.Engine(engine)
 	features := []harness.Feature{harness.Sandbox, harness.Tools}
-	if e.Transport() == harness.APITransport {
-		features = append(features, harness.WorkspaceRead, harness.WorkspaceWrite)
-	}
 	for _, feature := range features {
 		c := roleSupport(e, harness.Session, feature)
 		if c.Usable() {
@@ -89,6 +86,27 @@ func RoleSupport(engine string) (ok bool, reason string) {
 		return false, fmt.Sprintf("%s can't run team roles: %s.", EngineLabel(engine), strings.TrimRight(strings.TrimSpace(c.Reason), "."))
 	}
 	return true, ""
+}
+
+// RoleFileToolClaim identifies an unavailable combined workbench claim.
+type RoleFileToolClaim struct {
+	Feature harness.Feature
+	harness.Capability
+}
+
+// RoleFileTools reports unavailable combined workbench claims for diagnostics.
+func RoleFileTools(engine string) []RoleFileToolClaim {
+	if harness.Engine(engine).Transport() != harness.APITransport {
+		return nil
+	}
+	var absent []RoleFileToolClaim
+	for _, feature := range []harness.Feature{harness.WorkspaceRead, harness.WorkspaceWrite} {
+		c := roleSupport(harness.Engine(engine), harness.Session, feature)
+		if !c.Usable() {
+			absent = append(absent, RoleFileToolClaim{Feature: feature, Capability: c})
+		}
+	}
+	return absent
 }
 
 // CheckRoleModel requires an explicit model where a team role has no default.

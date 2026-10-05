@@ -33,3 +33,5 @@ use remained unavailable for API roles on every platform.
 
 The owner's live provider implementation-to-landing check remained an owner
 check after landing.
+
+Successor: [API roles without workbench content tools](2026-10-04-api-roles-without-file-tools.md), as of lib-agent-harness v0.24.0.

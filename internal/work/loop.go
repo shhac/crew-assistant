@@ -424,7 +424,7 @@ func (lp *Loop) baseSpec(r core.Role, workDir, prompt string) roles.Spec {
 		h := lp.Config().HarnessOn(r.Engine, r.Provider, r.Model, r.Effort)
 		spec.Provider = h.Provider()
 		spec.AccountIdentity = h.APIProvider + ":" + h.APIKeyEnv
-		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\nRead files outside the workspace only through run_command. You have no web search.")
+		spec.Instructions = strings.TrimSpace(spec.Instructions + "\n\nRead and search files through run_command (for example sed -n, grep -rn and ls). read_file, search_files and edit_file are unavailable. On writing turns, write whole files with write_file and edit with write_file or run_command. You have no web search.")
 	}
 	if b := lp.memberBrowser(r); b.On {
 		spec.Browser = true

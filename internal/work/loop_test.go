@@ -511,6 +511,14 @@ func TestAPIMemberSeatAndBaseSpecKeepProvider(t *testing.T) {
 	if seat.Provider != "fixture-api" || spec.Provider.API.BaseURL != cfg.Engines.Providers[0].BaseURL || spec.RuntimeHome != lp.runtimeHome(seat.Engine) || spec.Browser || strings.Contains(spec.Instructions, "GOCACHE") || strings.Contains(spec.Instructions, "PORT=") || !strings.Contains(spec.Instructions, "no web search") {
 		t.Fatalf("seat %+v spec %+v", seat, spec)
 	}
+	for _, text := range []string{"Read and search files through run_command", "read_file, search_files and edit_file are unavailable", "write whole files with write_file"} {
+		if !strings.Contains(spec.Instructions, text) {
+			t.Fatalf("missing API guidance %q: %s", text, spec.Instructions)
+		}
+	}
+	if strings.Contains(spec.Instructions, "Read files outside the workspace only") {
+		t.Fatal("old API guidance retained")
+	}
 	cli := lp.baseSpec(core.Role{Engine: "codex", Instructions: "Keep it small"}, "/work", "Write")
 	if cli.Instructions != "Keep it small" || cli.RuntimeHome != lp.runtimeHome("codex") || cli.Provider.Engine != "" {
 		t.Fatalf("CLI changed: %+v", cli)

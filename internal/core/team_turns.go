@@ -53,11 +53,17 @@ const (
 	FreshHarnessUnavailable  = "harness_unavailable"
 )
 
+type TeamTurnTool struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
 type TeamTurnOpening struct {
-	At          time.Time `json:"at"`
-	Resumed     bool      `json:"resumed"`
-	FreshReason string    `json:"fresh_reason,omitempty"`
-	SessionID   string    `json:"session_id,omitempty"`
+	At               time.Time      `json:"at"`
+	Resumed          bool           `json:"resumed"`
+	FreshReason      string         `json:"fresh_reason,omitempty"`
+	SessionID        string         `json:"session_id,omitempty"`
+	UnavailableTools []TeamTurnTool `json:"unavailable_tools,omitempty"`
 }
 
 // TeamTurnTerminal separates the runner outcome from the provider status.

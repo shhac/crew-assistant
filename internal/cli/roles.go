@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/config"
@@ -28,6 +29,9 @@ func roleSandboxChecks(ctx context.Context, cfg config.Config, statePath string)
 			ok, reason := config.RoleSupport(engine)
 			if ok {
 				reason = "Offered; its sandbox is checked when each turn starts"
+				if absent := config.RoleFileTools(engine); len(absent) > 0 {
+					reason = "Offered; reads, searches and edits run as sandboxed commands (" + absentRoleFileTools(absent) + "); its sandbox is checked when each turn starts"
+				}
 			}
 			checks = append(checks, map[string]any{"name": "team roles on " + engine, "ok": ok, "hint": reason})
 			continue
@@ -52,4 +56,21 @@ func roleSandboxChecks(ctx context.Context, cfg config.Config, statePath string)
 		checks = append(checks, map[string]any{"name": name, "ok": verifyErr == nil, "hint": hint})
 	}
 	return checks
+}
+
+func absentRoleFileTools(claims []config.RoleFileToolClaim) string {
+	var parts []string
+	for _, claim := range claims {
+		var names, status string
+		switch claim.Feature {
+		case harness.WorkspaceRead:
+			names, status = "read_file, search_files", " are off: "
+		case harness.WorkspaceWrite:
+			names, status = "edit_file", " is off: "
+		default:
+			continue
+		}
+		parts = append(parts, names+status+claim.Reason)
+	}
+	return strings.Join(parts, "; ")
 }

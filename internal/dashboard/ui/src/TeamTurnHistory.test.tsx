@@ -481,3 +481,40 @@ it("mounts history on member and task pages without filtering recorded assignmen
   ).toBe(true);
 });
 // @vitest-environment jsdom
+
+it("shows the session's unavailable tools and their reasons", async () => {
+  fetcher().mockResolvedValue(
+    reply(
+      page([
+        turn("api", {
+          opening: {
+            at: "2026-10-04T10:00:00Z",
+            resumed: false,
+            unavailable_tools: ["read_file", "search_files", "edit_file"].map(
+              (name) => ({ name, reason: "file tools are off" }),
+            ),
+          },
+        }),
+      ]),
+    ),
+  );
+  render(<TeamTurnHistory scope={scope} state={state} />);
+  expect(
+    await screen.findByText(
+      "Unavailable tools: read_file: file tools are off; search_files: file tools are off; edit_file: file tools are off",
+    ),
+  ).toBeTruthy();
+});
+
+it("omits unavailable tools for older opening records", async () => {
+  fetcher().mockResolvedValue(
+    reply(
+      page([
+        turn("old", { opening: { at: "2026-10-04T10:00:00Z", resumed: true } }),
+      ]),
+    ),
+  );
+  render(<TeamTurnHistory scope={scope} state={state} />);
+  await screen.findAllByText(/Recorded old/);
+  expect(screen.queryByText(/Unavailable tools:/)).toBeNull();
+});

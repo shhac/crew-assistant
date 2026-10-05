@@ -522,6 +522,23 @@ func TestStartupReclaimsStaleCommandsWithoutRunningWorkspaceContent(t *testing.T
 	}
 }
 
+func TestCommandStartErrorRetainsSettledDiagnosticsAndNoHandle(t *testing.T) {
+	failure := errors.New("post-launch failure")
+	h := newFakeStarted()
+	h.result = sandbox.CommandResult{Stderr: "[harness PATH: dropped outside read policy]"}
+	h.Stop()
+	commands := nativeCommands{start: func(context.Context, sandbox.CommandRequest) (startedCommand, error) { return h, failure }}
+	got, err := commands.Start(context.Background(), sandbox.CommandRequest{Command: "fixture"})
+	if got != nil || !errors.Is(err, failure) || !strings.Contains(err.Error(), "[harness PATH:") {
+		t.Fatalf("%v %v", got, err)
+	}
+	commands.start = func(context.Context, sandbox.CommandRequest) (startedCommand, error) { return nil, failure }
+	got, err = commands.Start(context.Background(), sandbox.CommandRequest{})
+	if got != nil || !errors.Is(err, failure) || strings.Contains(err.Error(), "PATH") {
+		t.Fatalf("%v %v", got, err)
+	}
+}
+
 func TestCommandRecoveryExcludesLiveSandbox(t *testing.T) {
 	lp := testLoop(t)
 	base := filepath.Join(lp.Core.StateDirectory(), "commands", "commands")

@@ -151,6 +151,14 @@ export function TeamTurnHistory({
                       </>
                     )}
                   </p>
+                  {!!turn.opening?.unavailable_tools?.length && (
+                    <p>
+                      Unavailable tools:{" "}
+                      {turn.opening.unavailable_tools
+                        .map((tool) => `${tool.name}: ${tool.reason}`)
+                        .join("; ")}
+                    </p>
+                  )}
                   <Usage usage={turn.terminal?.usage} label="Terminal tokens" />
                   {turn.terminal?.observed.status !== "unknown" &&
                     turn.terminal && (

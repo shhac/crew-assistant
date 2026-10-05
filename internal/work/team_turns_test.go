@@ -756,3 +756,29 @@ func assertTaskPMAccounting(t *testing.T, lp *Loop, task core.Task) {
 		t.Fatal("task-related PM turn has no durable task accounting")
 	}
 }
+
+func TestTeamOpeningPersistsUnavailableToolsWithFreshReason(t *testing.T) {
+	lp, p, task := loopApp(t, &scriptedRunner{}, "")
+	want := []core.TeamTurnTool{{Name: "read_file", Reason: "file tools off"}, {Name: "search_files", Reason: "file tools off"}, {Name: "edit_file", Reason: "file tools off"}}
+	lp.runner = accountingRunner(func(ctx context.Context, spec roles.Spec) (roles.Result, error) {
+		var tools []session.WorkbenchTool
+		for _, tool := range want {
+			tools = append(tools, session.WorkbenchTool{Name: tool.Name, Capability: harness.Capability{Availability: harness.Unsupported, Reason: tool.Reason}})
+		}
+		spec.ToolReport(tools)
+		for i := 0; i < 2; i++ {
+			if err := spec.Opening(session.Opened{Fresh: session.FreshIncompatible}, session.Ref{ID: "fresh-api"}); err != nil {
+				return roles.Result{}, err
+			}
+		}
+		return roles.Result{CleanupConfirmed: true}, nil
+	})
+	result, err := lp.runAttempt(context.Background(), roles.Spec{ProjectID: p.ID, TaskID: task.ID, Role: core.RoleReviewer, Seat: "reviewer", Engine: "openai-compatible"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turns, err := lp.Core.TeamTurns(context.Background(), core.TeamTurnFilter{TaskID: task.ID})
+	if err != nil || len(turns) != 1 || turns[0].ID != result.AttemptID || turns[0].Opening.FreshReason != core.FreshHarnessIncompatible || !reflect.DeepEqual(turns[0].Opening.UnavailableTools, want) {
+		t.Fatalf("%+v %v", turns, err)
+	}
+}

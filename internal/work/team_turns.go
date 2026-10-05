@@ -50,6 +50,17 @@ func (lp *Loop) runAttempt(ctx context.Context, spec roles.Spec) (roles.Result, 
 		observer.Attempt(id)
 	}
 	opening, accepted := spec.Opening, spec.Accepted
+	var unavailable []core.TeamTurnTool
+	report := spec.ToolReport
+	spec.ToolReport = func(tools []session.WorkbenchTool) {
+		unavailable = nil
+		for _, tool := range tools {
+			unavailable = append(unavailable, core.TeamTurnTool{Name: tool.Name, Reason: tool.Capability.Reason})
+		}
+		if report != nil {
+			report(tools)
+		}
+	}
 	var actualOpening *core.TeamTurnOpening
 	var actualAccepted *time.Time
 	spec.Opening = func(o session.Opened, ref session.Ref) error {
@@ -70,7 +81,7 @@ func (lp *Loop) runAttempt(ctx context.Context, spec roles.Spec) (roles.Result, 
 		if actualOpening != nil {
 			at = actualOpening.At
 		}
-		observed := core.TeamTurnOpening{At: at, Resumed: o.Resumed, FreshReason: reason, SessionID: ref.ID}
+		observed := core.TeamTurnOpening{At: at, Resumed: o.Resumed, FreshReason: reason, SessionID: ref.ID, UnavailableTools: unavailable}
 		if actualOpening == nil {
 			actualOpening = &observed
 		}

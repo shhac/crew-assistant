@@ -132,8 +132,22 @@ func TestAnEndpointsChatSessionIsTheLibrarysLoopOverTheAssistantsTools(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	openedOptions := o
+	openedOptions.Provider.API.Credentials = nil
+	openedOptions.Provider.API.Unauthenticated = true
+	openedOptions.Provider.API.BaseURL = "http://127.0.0.1:1/v1"
+	opened, openErr := session.Start(context.Background(), openedOptions)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	if tools := opened.Capabilities().WorkbenchTools; len(tools) != 0 {
+		t.Fatal("restricted chat gained workbench tools", tools)
+	}
+	if _, err := opened.Release(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	host := o.Restriction.Tools
-	if o.WorkDir != "" || o.Env != nil || !reflect.DeepEqual(o.Policy, session.Policy{}) || o.Sandbox != nil || host.Dir != "" || host.Bridge.Path != "" || o.Restriction.Probe != 0 {
+	if o.Workbench != nil || o.WorkDir != "" || o.Env != nil || !reflect.DeepEqual(o.Policy, session.Policy{}) || o.Sandbox != nil || host.Dir != "" || host.Bridge.Path != "" || o.Restriction.Probe != 0 {
 		t.Fatalf("an endpoint's session has no process to configure: %+v", o)
 	}
 	if info, err := os.Stat(o.RuntimeHome); err != nil || info.Mode().Perm() != 0o700 || o.RuntimeHome != filepath.Join(state, "chat", "runtime", "openai-compatible") {

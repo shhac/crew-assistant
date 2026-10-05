@@ -23,6 +23,7 @@ type Spec struct {
 	Engine, Model, Effort                               string
 	ProjectID, TaskID, Role, Seat, MemberID, MemberName string
 	PreviousID, RetryCause, FreshReason                 string
+	ToolReport                                          func([]session.WorkbenchTool)
 	Opening                                             func(session.Opened, session.Ref) error
 	Accepted                                            func() error
 	Provider                                            harness.Provider
@@ -120,6 +121,7 @@ type Result struct {
 	Text             string
 	AttemptID        string
 	Opening          *session.Opened
+	UnavailableTools []session.WorkbenchTool
 	Provider         session.Result
 	Compaction       session.Result
 	FailureStage     string
@@ -143,6 +145,7 @@ type Native struct {
 
 // conversation is what a role's turn needs of its session.
 type conversation interface {
+	Capabilities() session.Capabilities
 	Compact(ctx context.Context) (turn, error)
 	StartTurn(ctx context.Context, in session.Input) (turn, error)
 	Ref() session.Ref
@@ -189,6 +192,9 @@ func (n Native) Run(ctx context.Context, spec Spec) (out Result, err error) {
 	o := options(spec)
 	confirmed := false
 	out.FailureStage = "launch"
+	if o.Workbench != nil && o.Workbench.Commands == nil {
+		return out, fmt.Errorf("API roles require a proved command sandbox while file tools are off: %w", &session.CapabilityError{Engine: o.Provider.Engine, Phase: session.BeforeLaunch, Code: session.CapabilityUnsupportedPlatform, Tools: []string{"run_command"}})
+	}
 	if o.Workbench != nil {
 		if err = os.MkdirAll(o.RuntimeHome, 0o700); err != nil {
 			return
@@ -220,6 +226,14 @@ func (n Native) Run(ctx context.Context, spec Spec) (out Result, err error) {
 			out.FailureStage = "launch"
 		}
 		return out, err
+	}
+	for _, tool := range s.Capabilities().WorkbenchTools {
+		if !tool.Capability.Usable() {
+			out.UnavailableTools = append(out.UnavailableTools, tool)
+		}
+	}
+	if spec.ToolReport != nil {
+		spec.ToolReport(append([]session.WorkbenchTool(nil), out.UnavailableTools...))
 	}
 	out.Opening = &opening
 	out.Session, _ = json.Marshal(s.Ref())
@@ -331,6 +345,8 @@ func (n Native) Run(ctx context.Context, spec Spec) (out Result, err error) {
 	return
 }
 
+var commandSupport = harness.Support
+
 // options preserves CLI settings and uses the API workbench for API roles.
 // Codex needs a private login home; the API needs a private transcript home.
 func options(spec Spec) session.Options {
@@ -351,7 +367,7 @@ func options(spec Spec) session.Options {
 		o.AccountIdentity = spec.AccountIdentity
 		o.Sandbox, o.Env, o.Browser = nil, nil, false
 		o.Workbench = &session.Workbench{Write: spec.Write}
-		if harness.Support(o.Provider.Engine, harness.Session, harness.Sandbox).Usable() {
+		if commandSupport(o.Provider.Engine, harness.Session, harness.Sandbox).Usable() {
 			o.Workbench.Commands = &session.Commands{Read: spec.Read, Loopback: spec.Loopback, Env: CommandEnv(spec.Env, spec.Read)}
 		}
 		o.Restriction = &session.Restriction{Tools: session.ToolHost{Server: "crew", Tools: spec.Tools, Handler: spec.Handler, MaxResultBytes: 128 << 10}}

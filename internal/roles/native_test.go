@@ -31,6 +31,8 @@ type fakeSession struct {
 	confirmed bool
 }
 
+func (s *fakeSession) Capabilities() session.Capabilities { return session.Capabilities{} }
+
 type fakeTurn struct {
 	s      *fakeSession
 	name   string

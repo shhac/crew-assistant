@@ -1845,7 +1845,12 @@ export interface TeamTurn {
   model: string;
   provider_default: boolean;
   admitted_at: string;
-  opening: { at: string; resumed: boolean; fresh_reason?: string } | null;
+  opening: {
+    at: string;
+    resumed: boolean;
+    fresh_reason?: string;
+    unavailable_tools?: { name: string; reason: string }[];
+  } | null;
   lifecycle: string;
   held: boolean;
   terminal: {

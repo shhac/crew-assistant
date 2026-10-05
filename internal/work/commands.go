@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,7 +81,9 @@ type startedCommand interface {
 	Result() (sandbox.CommandResult, error)
 }
 type nativeCommands struct {
-	inner    *sandbox.Sandbox
+	inner *sandbox.Sandbox
+	// start is a test seam for a post-launch error with a settled handle.
+	start    func(context.Context, sandbox.CommandRequest) (startedCommand, error)
 	once     sync.Once
 	closeErr error
 }
@@ -91,11 +94,25 @@ func (s *nativeCommands) Run(ctx context.Context, req sandbox.CommandRequest) (s
 }
 
 func (s *nativeCommands) Start(ctx context.Context, req sandbox.CommandRequest) (startedCommand, error) {
-	h, err := s.inner.Start(ctx, req)
+	start := s.start
+	if start == nil {
+		start = func(ctx context.Context, req sandbox.CommandRequest) (startedCommand, error) {
+			h, err := s.inner.Start(ctx, req)
+			if h == nil {
+				return nil, err
+			}
+			return &nativeStartedCommand{inner: h}, err
+		}
+	}
+	h, err := start(ctx, req)
 	if err != nil {
+		if h != nil {
+			result, _ := h.Result()
+			return nil, settledStartError(commandError(err), result)
+		}
 		return nil, commandError(err)
 	}
-	return &nativeStartedCommand{inner: h}, nil
+	return h, nil
 }
 
 func (s *nativeCommands) Close() error {
@@ -260,4 +277,13 @@ func (lp *Loop) sweepCommands(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// Start may return an already-settled handle after launch. Keep its bounded
+// diagnostics (including PATH filtering), and never retain that handle.
+func settledStartError(err error, result sandbox.CommandResult) error {
+	if stderr := strings.TrimSpace(result.Stderr); stderr != "" {
+		return fmt.Errorf("%w: %s", err, stderr)
+	}
+	return err
 }

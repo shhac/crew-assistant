@@ -53,7 +53,7 @@ func TestRolesOnAnAPIProviderFollowTheHarness(t *testing.T) {
 				return real(e, op, f)
 			}
 			ok, reason := RoleSupport("openai-compatible")
-			if missing == "" {
+			if missing == "" || missing == harness.WorkspaceRead || missing == harness.WorkspaceWrite {
 				if !ok || reason != "" || CheckRoleEngine("openai-compatible") != nil {
 					t.Fatalf("offered: %v %q", ok, reason)
 				}
@@ -108,6 +108,43 @@ func TestRoleModelRequiresAnIDOnlyOnAnAPI(t *testing.T) {
 			if (err != nil) != wantError {
 				t.Fatalf("%s %q: %v", engine, model, err)
 			}
+		}
+	}
+}
+
+func TestRoleFileToolsReportHarnessAbsence(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		return
+	}
+	claims := RoleFileTools("openai-compatible")
+	if len(claims) != 2 {
+		t.Fatal(claims)
+	}
+	if claims[0].Feature != harness.WorkspaceRead || claims[1].Feature != harness.WorkspaceWrite {
+		t.Fatal(claims)
+	}
+	for _, c := range claims {
+		if c.Usable() || c.Reason != "workbench file tools are off until their workspace check is verified" {
+			t.Fatal(c)
+		}
+	}
+	if got := RoleFileTools("codex"); len(got) != 0 {
+		t.Fatal(got)
+	}
+}
+
+func TestMissingCommandsOrCallerToolsRefusesEvenWithFileToolsOff(t *testing.T) {
+	real := roleSupport
+	t.Cleanup(func() { roleSupport = real })
+	for _, missing := range []harness.Feature{harness.Sandbox, harness.Tools} {
+		roleSupport = func(e harness.Engine, op harness.Operation, f harness.Feature) harness.Capability {
+			if f == missing || f == harness.WorkspaceRead || f == harness.WorkspaceWrite {
+				return harness.Capability{Availability: harness.Unsupported, Reason: "required capability absent"}
+			}
+			return harness.Capability{Availability: harness.Composed}
+		}
+		if ok, reason := RoleSupport("openai-compatible"); ok || !strings.Contains(reason, "required capability absent") {
+			t.Fatalf("%v %s", ok, reason)
 		}
 	}
 }
