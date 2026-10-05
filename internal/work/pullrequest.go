@@ -50,12 +50,14 @@ func (lp *Loop) landPR(ctx context.Context, p core.Project, t core.Task, m gitMe
 			return lp.landingFailed(ctx, t, r, err)
 		}
 	}
-	if text := prText(t); prop.Described != described(text) && t.Delivering == nil && !t.PRMergePending() {
-		// The implementer rewrote the pull request's text with a later draft.
-		if err := lp.github.Edit(ctx, m.playbook.Land.GitHub, prop.Number, text.Title, description(text)); err != nil {
+	text := prText(t)
+	if body := description(t, text); prop.Described != described(text.Title, body) && t.Delivering == nil && !t.PRMergePending() {
+		// The implementer rewrote the pull request's text with a later draft,
+		// or the task gained a Linear issue or an author since.
+		if err := lp.github.Edit(ctx, m.playbook.Land.GitHub, prop.Number, text.Title, body); err != nil {
 			return lp.landingFailed(ctx, t, r, err)
 		}
-		prop.Described = described(text)
+		prop.Described = described(text.Title, body)
 	}
 	pr, err := lp.github.View(ctx, m.playbook.Land.GitHub, prop.Number)
 	if err != nil {
@@ -164,10 +166,11 @@ func (lp *Loop) openPR(ctx context.Context, t core.Task, m gitMedium, r core.Rev
 	}
 	pr := prText(t)
 	if !found {
-		if n, url, err = lp.github.Open(ctx, land.GitHub, land.Target, prop.Branch, pr.Title, description(pr), land.Draft); err != nil {
+		body := description(t, pr)
+		if n, url, err = lp.github.Open(ctx, land.GitHub, land.Target, prop.Branch, pr.Title, body, land.Draft); err != nil {
 			return true, lp.landingFailed(ctx, t, r, err)
 		}
-		prop.Described = described(pr)
+		prop.Described = described(pr.Title, body)
 	}
 	prop.Number, prop.URL = n, url
 	return false, lp.editProposal(ctx, t.ID, "Opened pull request #"+fmt.Sprint(n), func(p *core.Proposal) {

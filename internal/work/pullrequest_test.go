@@ -538,6 +538,9 @@ func TestThePMDecidesWhetherAPullRequestOpensWithTheImplementersText(t *testing.
 	if argAfter(created, "--title") != "Add Feature" || !strings.Contains(argAfter(created, "--body"), "Adds Feature so callers can use it.") || !strings.Contains(argAfter(created, "--body"), prFooter) {
 		t.Fatalf("opened with %v", created)
 	}
+	if !strings.HasSuffix(argAfter(created, "--body"), " -->") || !strings.Contains(argAfter(created, "--body"), "\n<!-- agent-provenance v=1 harness=") {
+		t.Fatalf("opened without its provenance: %v", created)
+	}
 	if !activityHas(t, s.a, "The PM approved opening a pull request") {
 		t.Fatal("the PM's decision is not in the activity")
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -36,15 +37,90 @@ func prText(t core.Task) core.PRText {
 	return out
 }
 
-// described fingerprints the text GitHub was given, so a rewrite is noticed.
-func described(pr core.PRText) string {
-	sum := sha256.Sum256([]byte(pr.Title + "\x00" + pr.Body))
+// described fingerprints the title and description GitHub was given, so a
+// rewrite, a newly linked issue or a new author is noticed.
+func described(title, description string) string {
+	sum := sha256.Sum256([]byte(title + "\x00" + description))
 	return hex.EncodeToString(sum[:8])
 }
 
-// description is what GitHub is given as the pull request's description.
-func description(pr core.PRText) string {
-	return strings.TrimSpace(pr.Body) + "\n\n" + prFooter
+// description is what GitHub is given as the pull request's description:
+// the text, a reference to each Linear issue it doesn't already name, the
+// footer, and a provenance line for each way its drafts were written.
+func description(t core.Task, pr core.PRText) string {
+	body := strings.TrimSpace(pr.Body)
+	if refs := linearReferences(t, body); len(refs) > 0 {
+		body += "\n\n" + strings.Join(refs, "\n")
+	}
+	body += "\n\n" + prFooter
+	var lines []string
+	for _, line := range provenance(t) {
+		if !strings.Contains(body, line) {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) > 0 {
+		body += "\n\n" + strings.Join(lines, "\n")
+	}
+	return body
+}
+
+// linearReferences link the pull request to the task's Linear issues, which
+// Linear does only from a magic word with the issue's identifier. Text that
+// already names an issue, such as "Part of EX-123", is left as it is.
+func linearReferences(t core.Task, body string) []string {
+	var out []string
+	for _, issue := range t.LinearIssues() {
+		if !core.LinearTicket(issue.Identifier) || namesIssue(body, issue.Identifier) {
+			continue
+		}
+		out = append(out, "Fixes "+issue.Identifier)
+	}
+	return out
+}
+
+// namesIssue is whether text names identifier as a whole word, so EX-12 is
+// not taken for EX-123.
+func namesIssue(text, identifier string) bool {
+	return regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_])` + regexp.QuoteMeta(identifier) + `($|[^0-9])`).MatchString(text)
+}
+
+// provenance is a line for each distinct way the task's drafts were written,
+// in the form repositories ask agents to append: the harness, the exact model
+// and the effort its seat was set to. What wasn't set is unknown, never
+// guessed. Drafts the owner made, and catch-up merges the daemon made, have
+// no seat and add none.
+func provenance(t core.Task) []string {
+	var out []string
+	for _, r := range t.Revisions {
+		if r.Seat == "" || r.CleanMergeOf != 0 {
+			continue
+		}
+		seat, _ := t.Role(r.Seat)
+		line := fmt.Sprintf("<!-- agent-provenance v=1 harness=%s model=%s effort=%s -->", harnessName(seat.Engine), provenanceValue(seat.Model), provenanceValue(seat.Effort))
+		if !slices.Contains(out, line) {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// harnessName is the agent harness an engine's sessions run in.
+func harnessName(engine string) string {
+	if engine == "claude" {
+		return "claude-code"
+	}
+	return provenanceValue(engine)
+}
+
+// provenanceValue is a setting as a provenance line gives it: lowercase, and
+// unknown when unset or when it can't be written as one word in a comment.
+func provenanceValue(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" || strings.ContainsAny(v, " \t\r\n=<>") || strings.Contains(v, "--") {
+		return "unknown"
+	}
+	return v
 }
 
 // maxPostFailures is how often GitHub may refuse a post before the team
