@@ -156,7 +156,9 @@ func TestAPICommandProof(t *testing.T) {
 	spec.Env = []string{"GOCACHE=/cache/go", "GOMODCACHE=/modules", "GOPROXY=off", "GOTOOLCHAIN=local", "GOFLAGS=-mod=readonly", "npm_config_cache=/cache/npm", "XDG_CACHE_HOME=/cache/xdg", "npm_config_update_notifier=false", "CI=1", "PORT=41234", "TMPDIR=/private", "HOME=/private"}
 	spec.Tools = []session.ToolDefinition{{Name: "read_task", Schema: map[string]any{"type": "object"}}}
 	spec.Handler = session.ToolHandlerFunc(func(context.Context, session.ToolCall) (session.ToolResult, error) { return session.ToolResult{}, nil })
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// The sandbox's capability probe alone can take over 30 seconds on a
+	// loaded machine; this test is about what starts, not how fast.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if err := os.Chmod(spec.RuntimeHome, 0700); err != nil {
 		t.Fatal(err)
