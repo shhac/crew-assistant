@@ -446,3 +446,28 @@ func TestDeferredPRSwitchCancellationWithoutPendingWork(t *testing.T) {
 		}
 	}
 }
+
+func TestPRMergeWorkspaceFailureKeepsRetryAndIntent(t *testing.T) {
+	s := newPRScenario(t, 8)
+	task := queuePR(t, s)
+	if _, err := s.a.Core.UpdateTask(s.ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		t.Status = core.TaskLanding
+		t.Delivering = &core.Delivering{Revision: task.Revisions[0].N}
+		return "", nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(task.Playbook.Repo, task.Playbook.Repo+"-away"); err != nil {
+		t.Fatal(err)
+	}
+	restartPR(t, s)
+	// Exercise the claimed workspace failure directly. The scheduling pass now
+	// reconciles a queued merge without opening its unavailable workspace.
+	if err := s.a.step(s.ctx, core.Scheduled{Task: task, Claim: core.Claim{Step: core.TaskLanding}}); err != nil {
+		t.Fatal(err)
+	}
+	got := taskByID(t, s.a, task.ID)
+	if got.Status != core.TaskLanding || got.Delivering == nil || !got.PRMergePending() || got.RetryAt.IsZero() || got.DecisionID != "" {
+		t.Fatal("PR workspace failure changed retry or released intent", got)
+	}
+}

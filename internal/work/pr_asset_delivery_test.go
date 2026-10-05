@@ -141,7 +141,7 @@ func TestUnreadyPRReleasesAbsentMergeBeforeAssetIntegration(t *testing.T) {
 			if err := s.a.setStatus(s.ctx, task.ID, core.TaskLanding, "Ready"); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.a.beginDelivering(s.ctx, task.ID, task.Revisions[0]); err != nil {
+			if _, err := s.a.beginDelivering(s.ctx, task.ID, task.Revisions[0], ""); err != nil {
 				t.Fatal(err)
 			}
 			if acknowledged {

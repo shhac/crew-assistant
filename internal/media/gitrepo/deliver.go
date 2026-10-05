@@ -11,72 +11,163 @@ import (
 // only a recorded revision lands.
 var errNotRecorded = errors.New("the approved revision is not in the project's clone")
 
-// Deliver puts commit on a new branch in the owner's repository without
-// checking anything out there. A branch already at commit counts as
-// delivered, so a retried delivery settles; one pointing elsewhere is left
-// alone and a numbered name is used instead.
-func (r Repo) Deliver(ctx context.Context, commit, name string) (string, error) {
+// ErrDeliveryChanged means the recorded branch no longer proves the outcome.
+var ErrDeliveryChanged = errors.New("the recorded delivery branch has changed")
+
+// ErrBranchTaken confirms that delivery did not create the chosen branch.
+var ErrBranchTaken = errors.New("the delivery branch was taken")
+
+// ErrNotDelivered confirms failure before the destination could be changed.
+var ErrNotDelivered = errors.New("the revision was not delivered")
+
+// runDelivery pins only local branch operations to the source's git directory.
+// Workspace commands, signing and checks retain ordinary repository discovery.
+func (r Repo) runDelivery(ctx context.Context, args ...string) (string, error) {
+	return run(ctx, r.source, append([]string{"--git-dir=" + r.sourceGitDir}, args...)...)
+}
+
+// readBranch distinguishes a confirmed missing ref from an unreadable or
+// corrupt one. A ref whose object cannot be read is not delivery evidence.
+func (r Repo) readBranch(ctx context.Context, branch string) (string, bool, error) {
+	ref := "refs/heads/" + branch
+	out, err := r.runDelivery(ctx, "rev-parse", "--verify", "--quiet", ref)
+	if err != nil {
+		var failure *gitError
+		if errors.As(err, &failure) && failure.code == 1 && failure.detail == "" {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("could not read delivery branch %s: %w", branch, err)
+	}
+	commit := strings.TrimSpace(out)
+	if _, err := r.runDelivery(ctx, "cat-file", "-e", commit+"^{commit}"); err != nil {
+		return "", false, fmt.Errorf("could not read delivery branch %s: %w", branch, err)
+	}
+	return commit, true, nil
+}
+
+func numberedBranch(name string, attempt int) string {
+	if attempt == 1 {
+		return name
+	}
+	return fmt.Sprintf("%s-%d", name, attempt)
+}
+
+// Destination chooses the exact branch before recording an outward intent.
+func (r Repo) Destination(ctx context.Context, commit, name string) (string, error) {
 	if !r.Holds(ctx, commit) {
 		return "", errNotRecorded
 	}
-	current, _ := run(ctx, r.source, "symbolic-ref", "--quiet", "--short", "HEAD")
-	for attempt := 1; attempt <= 100; attempt++ {
-		candidate := name
-		if attempt > 1 {
-			candidate = fmt.Sprintf("%s-%d", name, attempt)
+	current, err := r.runDelivery(ctx, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		var failure *gitError
+		if !errors.As(err, &failure) || failure.code != 1 || failure.detail != "" {
+			return "", err
 		}
+		// Quiet symbolic-ref also reports malformed HEAD as non-symbolic.
+		// Only a readable detached commit permits branch selection.
+		if _, err := r.runDelivery(ctx, "rev-parse", "--verify", "HEAD^{commit}"); err != nil {
+			return "", err
+		}
+	}
+	for attempt := 1; attempt <= 100; attempt++ {
+		candidate := numberedBranch(name, attempt)
 		if err := validBranch(ctx, r.source, candidate); err != nil {
 			return "", err
 		}
-		existing, err := run(ctx, r.source, "rev-parse", "--verify", "--quiet", "refs/heads/"+candidate)
-		if err == nil {
-			if strings.TrimSpace(existing) == commit {
+		existing, exists, err := r.readBranch(ctx, candidate)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			if existing == commit {
 				return candidate, nil
 			}
 			continue
 		}
-		// A checked-out branch with no commits yet is the owner's to start;
-		// one already at commit, checked out after delivery, settled above.
-		if candidate == strings.TrimSpace(current) {
-			continue
+		if candidate != strings.TrimSpace(current) {
+			return candidate, nil
 		}
-		// Bring the objects over without naming any branch, then create the
-		// branch only if it still does not exist: a branch that appeared in
-		// between is never moved.
-		if _, err = run(ctx, r.source, append(fetchQuietly, "--no-write-fetch-head", r.Workspace(), "+"+commit+":refs/crew-assistant/incoming")...); err != nil {
-			return "", fmt.Errorf("the revision could not be fetched: %w", err)
-		}
-		_, err = run(ctx, r.source, "update-ref", "-m", "crew-assistant delivery", "refs/heads/"+candidate, commit, strings.Repeat("0", len(commit)))
-		_, _ = run(ctx, r.source, "update-ref", "-d", "refs/crew-assistant/incoming")
-		if err != nil {
-			continue
-		}
-		return candidate, nil
 	}
 	return "", errors.New("no free branch name")
 }
 
-// Delivered finds the branch Deliver put commit on under name, or a
-// numbered name after it, without delivering anything: for settling a
-// delivery whose outcome was never recorded. It reports false when no such
-// branch is at commit.
+// DeliverTo creates only the recorded destination, never moving an existing
+// branch. A failed read-back leaves the outcome unknown to the caller.
+func (r Repo) DeliverTo(ctx context.Context, commit, branch string) (string, error) {
+	if !r.Holds(ctx, commit) {
+		return "", fmt.Errorf("%w: %w", ErrNotDelivered, errNotRecorded)
+	}
+	if err := validBranch(ctx, r.source, branch); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrNotDelivered, err)
+	}
+	if _, err := r.runDelivery(ctx, append(fetchQuietly, "--no-write-fetch-head", r.Workspace(), "+"+commit+":refs/crew-assistant/incoming")...); err != nil {
+		return "", fmt.Errorf("%w: the revision could not be fetched: %w", ErrNotDelivered, err)
+	}
+	_, err := r.runDelivery(ctx, "update-ref", "-m", "crew-assistant delivery", "refs/heads/"+branch, commit, strings.Repeat("0", len(commit)))
+	_, _ = r.runDelivery(ctx, "update-ref", "-d", "refs/crew-assistant/incoming")
+	if err == nil {
+		return branch, nil
+	}
+	existing, exists, readErr := r.readBranch(ctx, branch)
+	if readErr != nil {
+		return "", readErr
+	}
+	if existing == commit {
+		return branch, nil
+	}
+	if !exists {
+		return "", fmt.Errorf("%w: creating %s: %w", ErrNotDelivered, branch, err)
+	}
+	return "", fmt.Errorf("%w: %s: %w", ErrBranchTaken, branch, err)
+}
+
+// Deliver composes selection and creation for callers without a durable intent.
+func (r Repo) Deliver(ctx context.Context, commit, name string) (string, error) {
+	branch, err := r.Destination(ctx, commit, name)
+	if err != nil {
+		return "", err
+	}
+	return r.DeliverTo(ctx, commit, branch)
+}
+
+// DeliveredTo reconciles the recorded destination. An unexpected tip cannot
+// prove that delivery never happened, so it retains the outward intent.
+func (r Repo) DeliveredTo(ctx context.Context, commit, branch string) (string, bool, error) {
+	existing, exists, err := r.readBranch(ctx, branch)
+	if err != nil || !exists {
+		return "", false, err
+	}
+	if existing != commit {
+		return "", false, fmt.Errorf("%w: delivery branch %s is at %s, expected %s", ErrDeliveryChanged, branch, existing, commit)
+	}
+	return branch, true, nil
+}
+
+// Delivered reconciles older intents without a destination. Search every
+// supported name: the owner may have removed an earlier numbered branch.
 func (r Repo) Delivered(ctx context.Context, commit, name string) (string, bool, error) {
+	return r.delivered(ctx, commit, name, true)
+}
+
+// DeliveredBeforeIntent keeps the original first-unused-name lookup for work
+// that has no outward intent. Only interrupted legacy intents need to look
+// beyond gaps left by deleted branches.
+func (r Repo) DeliveredBeforeIntent(ctx context.Context, commit, name string) (string, bool, error) {
+	return r.delivered(ctx, commit, name, false)
+}
+
+func (r Repo) delivered(ctx context.Context, commit, name string, interrupted bool) (string, bool, error) {
 	for attempt := 1; attempt <= 100; attempt++ {
-		candidate := name
-		if attempt > 1 {
-			candidate = fmt.Sprintf("%s-%d", name, attempt)
-		}
-		existing, err := run(ctx, r.source, "rev-parse", "--verify", "--quiet", "refs/heads/"+candidate)
+		candidate := numberedBranch(name, attempt)
+		existing, exists, err := r.readBranch(ctx, candidate)
 		if err != nil {
-			// Deliver skips only names that exist, or the one checked out;
-			// past the first free name, it never went further.
-			if current, _ := run(ctx, r.source, "symbolic-ref", "--quiet", "--short", "HEAD"); strings.TrimSpace(current) == candidate {
-				continue
-			}
-			return "", false, nil
+			return "", false, err
 		}
-		if strings.TrimSpace(existing) == commit {
+		if exists && existing == commit {
 			return candidate, true, nil
+		}
+		if !exists && !interrupted {
+			return "", false, nil
 		}
 	}
 	return "", false, nil

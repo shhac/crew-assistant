@@ -292,8 +292,12 @@ func (lp *Loop) step(ctx context.Context, s core.Scheduled) error {
 	if t.Status != s.Claim.Step && !(s.Claim.Step == core.StepValidateMerge && t.Status == core.TaskReviewing) {
 		return nil
 	}
-	m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
+	playbook := taskPlaybook(p, t)
+	m, err := lp.mediumFor(ctx, p, playbook)
 	if err != nil {
+		if t.Status == core.TaskLanding && t.Delivering != nil && playbook != nil && playbook.Medium == core.MediumGit && playbook.Land.Way() == core.LandBranch {
+			return lp.landingFailed(ctx, t, mergeRevision(t, core.Revision{}), err)
+		}
 		return lp.roleFailed(ctx, t, "The workspace", err)
 	}
 	// A check runs beside the task's other checks and never moves the task;

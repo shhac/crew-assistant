@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 	"github.com/shhac/crew-assistant/internal/text"
 )
@@ -71,14 +72,27 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 	if l != nil {
 		return lp.catchUpRound(ctx, t, c, *l)
 	}
-	if held, err := lp.beginDelivering(ctx, t.ID, r); err != nil || len(held) > 0 {
+	branch := ""
+	if g, ok := m.(gitMedium); ok && playbook.Land.Way() == core.LandBranch {
+		unlock := g.locked()
+		branch, err = g.repo.Destination(ctx, r.Ref, g.branchName(t))
+		unlock()
+		if err != nil {
+			return lp.landingFailed(ctx, t, r, err)
+		}
+	}
+	if held, err := lp.beginDelivering(ctx, t.ID, r, branch); err != nil || len(held) > 0 {
 		return err
 	}
+	t.Delivering = &core.Delivering{Revision: r.N, Branch: branch}
 	target, err := m.deliver(context.WithoutCancel(ctx), t, r)
-	if err != nil {
+	if err != nil && (branch == "" || errors.Is(err, gitrepo.ErrBranchTaken) || errors.Is(err, gitrepo.ErrNotDelivered)) {
 		if cleared := lp.notDelivering(ctx, t.ID); cleared != nil {
 			return cleared
 		}
+	}
+	if errors.Is(err, gitrepo.ErrBranchTaken) {
+		return nil // A confirmed race needs a new destination, not an owner decision.
 	}
 	if errors.Is(err, gitrepo.ErrTargetMoved) {
 		if c, l, lagErr := lag(ctx, m, t); lagErr == nil && l != nil {
@@ -97,14 +111,14 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 // delivery, once begun, goes to its end: a task stopped or a daemon
 // restarted meanwhile is settled from where the change went, never left half
 // done or landed unrecorded.
-func (lp *Loop) beginDelivering(ctx context.Context, taskID string, r core.Revision) ([]string, error) {
+func (lp *Loop) beginDelivering(ctx context.Context, taskID string, r core.Revision, branch string) ([]string, error) {
 	var held []string
 	_, err := lp.updateOpen(ctx, taskID, func(t *core.Task, p *core.Project) (string, error) {
 		if t.PRMergePending() {
 			return "", core.ErrConflict
 		}
 		if t.Delivering != nil {
-			if t.Delivering.Revision != r.N {
+			if t.Delivering.Revision != r.N || t.Delivering.Branch != branch {
 				return "", core.ErrConflict
 			}
 			return "", nil
@@ -121,7 +135,7 @@ func (lp *Loop) beginDelivering(ctx context.Context, taskID string, r core.Revis
 			held = []string{t.Detail}
 			return "", nil
 		}
-		t.Delivering = &core.Delivering{Revision: r.N, At: time.Now().UTC()}
+		t.Delivering = &core.Delivering{Revision: r.N, Branch: branch, At: time.Now().UTC()}
 		return "", nil
 	})
 	if errors.Is(err, errDeliveryBlocked) {
@@ -198,6 +212,18 @@ func (lp *Loop) notDelivering(ctx context.Context, taskID string) error {
 // stands. Outstanding intents are reconciled before requirement edits can
 // invalidate approval or start fresh checks.
 func (lp *Loop) settleDeliveries(ctx context.Context, snap core.Snapshot) error {
+	eligible := make(map[string]bool)
+	for _, t := range snap.Tasks {
+		if t.Delivering != nil || t.PRMergePending() {
+			eligible[t.ID] = true
+		}
+	}
+	lp.deliveryRecovery.Range(func(key, _ any) bool {
+		if !eligible[key.(string)] {
+			lp.deliveryRecovery.Delete(key)
+		}
+		return true
+	})
 	for _, t := range snap.Tasks {
 		if snap.ProjectPaused(t.ProjectID) {
 			continue
@@ -210,10 +236,18 @@ func (lp *Loop) settleDeliveries(ctx context.Context, snap core.Snapshot) error 
 			continue
 		}
 		if err := lp.settleDelivery(ctx, p, t); err != nil {
-			message := "Delivery observation could not be confirmed: " + text.Clip(err.Error(), 900)
+			message := err.Error()
+			previous, seen := lp.deliveryRecovery.LoadOrStore(t.ID, message)
+			if !seen || previous != message {
+				lp.deliveryRecovery.Store(t.ID, message)
+				lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "delivery_recovery", ProjectID: p.ID}, err)
+			}
+			message = "Delivery observation could not be confirmed: " + text.Clip(deliveryObservationReason(err), 900)
 			if noteErr := lp.reportDeliveryObservation(ctx, t, message); noteErr != nil && !errors.Is(noteErr, core.ErrStale) {
 				return noteErr
 			}
+		} else {
+			lp.deliveryRecovery.Delete(t.ID)
 		}
 	}
 	return nil
@@ -321,7 +355,7 @@ func delivered(ctx context.Context, m medium, t core.Task, r *core.Revision) (st
 	}
 	if g.playbook.Land.Way() == core.LandBranch {
 		defer g.locked()()
-		return g.repo.Delivered(ctx, r.Ref, g.branchName(t))
+		return branchDelivered(ctx, g, t, *r)
 	}
 	if g.playbook.Land.Way() == core.LandPullRequest {
 		commit, there, err := mergedPR(ctx, g, t, *r)
@@ -337,7 +371,7 @@ func delivered(ctx context.Context, m medium, t core.Task, r *core.Revision) (st
 // landingFailed brings the owner a decision rather than retrying on a timer: a
 // refused push needs something only they can change.
 func (lp *Loop) landingFailed(ctx context.Context, t core.Task, r core.Revision, cause error) error {
-	reason := cause.Error()
+	reason := deliveryObservationReason(cause)
 	target := "the target branch"
 	if t.Playbook != nil && t.Playbook.Land.Target != "" {
 		target = t.Playbook.Land.Target
@@ -439,4 +473,14 @@ func (lp *Loop) LandTask(ctx context.Context, projectID, taskID string) (core.Ta
 
 func (lp *Loop) reportDeliveryObservation(ctx context.Context, t core.Task, message string) error {
 	return lp.Core.ObserveDeliveryFailure(context.WithoutCancel(ctx), t.ID, t, core.DecisionInput{Title: fmt.Sprintf("“%s” needs its delivery checked", t.Objective), Context: message, Recommendation: choiceTryAgain + " once the observation is available", Choices: []string{choiceTryAgain, choiceStop}})
+}
+
+// deliveryObservationReason keeps the same recovery guidance for observations
+// during scheduling and failures during a claimed landing step.
+func deliveryObservationReason(cause error) string {
+	reason := cause.Error()
+	if errors.Is(cause, gitrepo.ErrDeliveryChanged) {
+		reason += ". Check the recorded branch and restore its expected commit, or remove it if delivery should be retried, then choose Try again."
+	}
+	return reason
 }

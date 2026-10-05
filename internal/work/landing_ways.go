@@ -62,11 +62,14 @@ func (branchWay) line(_ context.Context, m gitMedium, t core.Task) (*line, error
 }
 
 func (branchWay) deliver(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (string, error) {
-	return m.repo.Deliver(ctx, r.Ref, m.branchName(t))
+	if t.Delivering == nil || t.Delivering.Branch == "" {
+		return "", errors.New("branch delivery has no recorded destination")
+	}
+	return m.repo.DeliverTo(ctx, r.Ref, t.Delivering.Branch)
 }
 
 func (branchWay) alreadyLanded(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (bool, error) {
-	_, there, err := m.repo.Delivered(ctx, r.Ref, m.branchName(t))
+	_, there, err := branchDelivered(ctx, m, t, r)
 	return there, err
 }
 
@@ -292,4 +295,15 @@ func (prWay) note(m gitMedium, t core.Task) string {
 	}
 	pr := prText(t)
 	return note + "\n\nIt opens as “" + pr.Title + "”:\n" + text.Clip(pr.Body, 1500)
+}
+
+// branchDelivered uses the exact outward destination when recorded.
+func branchDelivered(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (string, bool, error) {
+	if t.Delivering != nil && t.Delivering.Branch != "" {
+		return m.repo.DeliveredTo(ctx, r.Ref, t.Delivering.Branch)
+	}
+	if t.Delivering == nil {
+		return m.repo.DeliveredBeforeIntent(ctx, r.Ref, m.branchName(t))
+	}
+	return m.repo.Delivered(ctx, r.Ref, m.branchName(t))
 }

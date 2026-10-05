@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -174,27 +175,69 @@ func (s *Service) Waiting(ctx context.Context) ([]Wake, error) {
 	return out, nil
 }
 
-// FireWake records the change the watcher saw. An assistant's wake joins the
-// queued wake-up turn, or starts one; a task's waits for its next round.
-func (s *Service) FireWake(ctx context.Context, id, observed, event string, timedOut bool) (Wake, error) {
+// FireWake records the watcher observation. Assistant wakes queue a turn;
+// loop wakes resume eligible tasks and consume fired loop wakes atomically.
+// Task-owned wakes remain available to the implementer's next round.
+// Valid CI receipts share that transaction, but capture failures are reported
+// and must never prevent firing or task resumption.
+func (s *Service) FireWake(ctx context.Context, id, observed, event string, timedOut bool, ci ...CIEvent) (Wake, error) {
+	now := s.now().UTC()
+	var receipts []AutopilotEvent
+	var failures []string
+	for _, input := range ci {
+		receipt, err := ciEvent(input, now)
+		if err != nil {
+			failures = append(failures, err.Error())
+			continue
+		}
+		receipts = append(receipts, receipt)
+	}
 	var out Wake
-	err := s.store.update(ctx, func(v *Snapshot) error {
-		w := wakeByID(v, id)
-		if w == nil {
-			return ErrNotFound
+	var captureErr error
+	fire := func(capture bool) error {
+		return s.store.updateTransaction(ctx, func(v *Snapshot, conn *sql.Conn) error {
+			w := wakeByID(v, id)
+			if w == nil {
+				return ErrNotFound
+			}
+			if w.Status != WakeWaiting {
+				return fmt.Errorf("%s is %s: %w", id, w.Status, ErrConflict)
+			}
+			w.Status, w.Observed, w.Event, w.TimedOut, w.FiredAt = WakeFired, observed, event, timedOut, &now
+			if w.Owner == WakeAssistant {
+				queueWakeTurn(v, w.ID, now)
+			} else {
+				resumeWoken(v, w.TaskID, event, now)
+			}
+			if capture {
+				for _, receipt := range receipts {
+					if err := insertAutopilotEvent(ctx, conn, receipt); err != nil {
+						captureErr = err
+						return err
+					}
+				}
+			}
+			for _, failure := range failures {
+				record(v, now, w.ProjectID, "autopilot.ci.capture_failed", failure)
+			}
+			out = *w
+			pruneWakes(v)
+			return nil
+		})
+	}
+	err := fire(true)
+	if captureErr != nil {
+		// The failed transaction committed neither wake nor resumption. Retry both
+		// together without CI, even for persistent receipt-storage failures.
+		failures = append(failures, captureErr.Error())
+		err = fire(false)
+	}
+	if err == nil && captureErr == nil && len(receipts) > 0 {
+		select {
+		case s.store.autopilotNudge <- struct{}{}:
+		default:
 		}
-		if w.Status != WakeWaiting {
-			return fmt.Errorf("%s is %s: %w", id, w.Status, ErrConflict)
-		}
-		now := s.now().UTC()
-		w.Status, w.Observed, w.Event, w.TimedOut, w.FiredAt = WakeFired, observed, event, timedOut, &now
-		if w.Owner == WakeAssistant {
-			queueWakeTurn(v, w.ID, now)
-		}
-		pruneWakes(v)
-		out = *w
-		return nil
-	})
+	}
 	return out, err
 }
 
@@ -326,4 +369,50 @@ func wakeByID(v *Snapshot, id string) *Wake {
 		}
 	}
 	return nil
+}
+
+func firedLoopWake(w Wake, taskID string) bool {
+	return w.TaskID == taskID && w.Owner == WakeLoop && w.Status == WakeFired && w.On != WakeOnTask
+}
+
+// WakeTask resumes a task after a local change, such as its stack parent
+// advancing, without a watched wake to fire.
+func (s *Service) WakeTask(ctx context.Context, taskID, event string) error {
+	_, err := s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
+		resumeWoken(v, t.ID, event, s.now().UTC())
+		return nil
+	})
+	return err
+}
+
+// resumeWoken resumes a sleeping task and consumes its fired loop wakes in
+// the same state write. Task-owned wakes remain for the implementer's prompt.
+// A wake fired during an active step stays Fired until the task sleeps again;
+// Schedule replays it once. Landing reads fresh PR state, so stale event text
+// can cause one extra reconciliation pass without repeating a merge.
+func resumeWoken(v *Snapshot, taskID, event string, now time.Time) bool {
+	t := task(v, taskID)
+	if t == nil {
+		return false
+	}
+	d := decision(v, t.DecisionID)
+	switch {
+	case t.Status == TaskWaiting && t.PROpen() && reconsiderablePRDecision(d):
+		event += "; it is looked at again before anyone decides"
+		dismiss(v, d, now, event)
+		t.DecisionID = ""
+	case t.Status == TaskAwaiting:
+	default:
+		return false
+	}
+	t.Status, t.Detail, t.UpdatedAt = TaskLanding, event, now
+	for i := range v.Wakes {
+		w := &v.Wakes[i]
+		if firedLoopWake(*w, t.ID) {
+			w.Status, w.DeliveredAt = WakeDelivered, &now
+		}
+	}
+	recordTask(v, now, t, "task.woken", event)
+	derive(v, t)
+	return true
 }

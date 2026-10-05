@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -281,5 +282,123 @@ func TestAWakeUpTurnIsRetriedTwiceThenGivenUpAndCanBeCancelled(t *testing.T) {
 	turns, _ = s.ChatTurns(testContext)
 	if last := turns[len(turns)-1]; last.Status != "cancelled" || last.FinishedAt == nil {
 		t.Fatalf("an empty wake-up turn stayed queued: %+v", last)
+	}
+}
+
+func TestFireWakeResumesMergeAtomically(t *testing.T) {
+	for _, failure := range []string{"", "state", "ci", "invalid-ci"} {
+		t.Run("atomic-"+failure, func(t *testing.T) {
+			reject := failure == "state"
+			s, _ := fixture(t)
+			task := prTask(t, s, newProject(t, s), TaskAwaiting)
+			if _, err := s.UpdateTask(testContext, task.ID, func(t *Task, _ *Project) (string, error) {
+				t.Proposal.MergeRequested = "abc"
+				return "", nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			w, err := s.RegisterWake(testContext, WakeInput{Owner: WakeLoop, TaskID: task.ID, On: WakeOnChecks, Target: "o/r#7"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.store.update(testContext, func(v *Snapshot) error {
+				v.Wakes = append(v.Wakes, Wake{ID: "future-task-wake", Owner: WakeLoop, TaskID: task.ID, On: WakeOnTask, Status: WakeFired})
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := s.Snapshot(testContext)
+			if failure == "state" {
+				if _, err := s.store.db.Exec("CREATE TRIGGER fail_state BEFORE UPDATE ON state BEGIN SELECT RAISE(ABORT, 'injected'); END"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if failure == "ci" {
+				if _, err := s.store.db.Exec("CREATE TRIGGER fail_ci BEFORE INSERT ON autopilot_events BEGIN SELECT RAISE(ABORT, 'injected'); END"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ci := CIEvent{Provider: "github", Repo: "o/r", Ref: "o/r#7", Commit: "abc", Check: "pr_checks", State: "SUCCESS"}
+			if failure == "invalid-ci" {
+				ci.Commit = ""
+			}
+			fired, err := s.FireWake(testContext, w.ID, "cancelled", "Merge changed", false, ci)
+			wantEvents := 1
+			if failure != "" {
+				wantEvents = 0
+			}
+			if got := eventCount(t, s, "kind='ci.result'"); got != wantEvents {
+				t.Fatalf("CI event count %d, want %d", got, wantEvents)
+			}
+			if (err != nil) != reject {
+				t.Fatal(fired, err)
+			}
+			after, _ := s.Snapshot(testContext)
+			got, _ := after.FindTask(task.ID)
+			for _, pending := range after.Wakes {
+				if pending.On == WakeOnTask && (pending.Status != WakeFired || pending.DeliveredAt != nil) {
+					t.Fatal("fire consumed an unobserved task wake", pending)
+				}
+			}
+			if reject {
+				if !reflect.DeepEqual(before.Tasks, after.Tasks) || !reflect.DeepEqual(before.Wakes, after.Wakes) || !reflect.DeepEqual(before.Activity, after.Activity) {
+					t.Fatal("partial wake write", after)
+				}
+			} else if got.Status != TaskLanding || !got.PRMergePending() || fired.Status != WakeDelivered || fired.DeliveredAt == nil {
+				t.Fatal("wake not resumed with delivery evidence", got, fired)
+			}
+		})
+	}
+}
+
+func TestScheduleReplaysInterruptedLoopWakesOnce(t *testing.T) {
+	s, _ := fixture(t)
+	subject := prTask(t, s, newProject(t, s), TaskAwaiting)
+	if err := s.store.update(testContext, func(v *Snapshot) error {
+		task(v, subject.ID).Proposal.MergeRequested = "abc"
+		for _, on := range []string{WakeOnChecks, WakeOnReview} {
+			v.Wakes = append(v.Wakes, Wake{ID: on, Owner: WakeLoop, TaskID: subject.ID, On: on, Status: WakeFired, Event: "Merge cancelled"})
+		}
+		v.Wakes = append(v.Wakes, Wake{ID: "future-task-wake", Owner: WakeLoop, TaskID: subject.ID, On: WakeOnTask, Status: WakeFired})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		claims, err := s.Schedule(testContext, func(Role) string { return "" })
+		if err != nil {
+			t.Fatal(err)
+		}
+		after, _ := s.Snapshot(testContext)
+		got, _ := after.FindTask(subject.ID)
+		want := TaskLanding
+		if attempt == 1 {
+			want = TaskAwaiting
+		}
+		if got.Status != want || !got.PRMergePending() || attempt == 0 && got.Detail != "Merge cancelled" {
+			t.Fatal("wrong replay outcome", attempt, got)
+		}
+		for _, w := range after.Wakes {
+			if w.On == WakeOnTask {
+				if w.Status != WakeFired || w.DeliveredAt != nil {
+					t.Fatal("unobserved task wake consumed", w)
+				}
+				continue
+			}
+			if w.Status != WakeDelivered || w.DeliveredAt == nil {
+				t.Fatal("wake not consumed", w)
+			}
+		}
+		for _, claim := range claims {
+			if err := s.ReleaseClaim(testContext, subject.ID, claim.Claim.Token); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := s.UpdateTask(testContext, subject.ID, func(t *Task, _ *Project) (string, error) {
+			t.Status = TaskAwaiting
+			return "", nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

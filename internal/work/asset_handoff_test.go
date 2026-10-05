@@ -49,7 +49,7 @@ func TestAssetIntegrationReactivationFencesApprovalAndDelivery(t *testing.T) {
 	if got.Approved != 0 || got.Status != core.TaskWriting {
 		t.Fatal("approval bypassed integration", got)
 	}
-	held, err := a.beginDelivering(ctx, task.ID, task.Revisions[0])
+	held, err := a.beginDelivering(ctx, task.ID, task.Revisions[0], "")
 	if err != nil || len(held) == 0 {
 		t.Fatal("delivery bypassed integration", held, err)
 	}

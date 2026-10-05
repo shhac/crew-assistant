@@ -24,7 +24,7 @@ func TestDeliveryObservationFailureDoesNotBlockTheLoop(t *testing.T) {
 			if err := s.a.setStatus(s.ctx, task.ID, core.TaskLanding, "Landing"); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.a.beginDelivering(s.ctx, task.ID, r); err != nil {
+			if _, err := s.a.beginDelivering(s.ctx, task.ID, r, ""); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := s.a.Core.UpdateTask(s.ctx, task.ID, func(task *core.Task, _ *core.Project) (string, error) {

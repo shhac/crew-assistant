@@ -75,6 +75,20 @@ func TestTheOwnersCheckoutIsNeverTouched(t *testing.T) {
 	if git(t, source, "status", "--porcelain") != before || git(t, source, "branch", "--list", "crew/*") != "" {
 		t.Fatal("working in the clone changed the owner's checkout")
 	}
+	plain := t.TempDir()
+	// An older clone records a root source in origin. This keeps the plain
+	// folder isolated from repositories enclosing sandbox temp paths while
+	// exercising Open's real source validation.
+	project := t.TempDir()
+	legacy, err := Open(ctx, project, source, nil, SignAsOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git(t, legacy.Workspace(), "config", "--unset", "crew-assistant.deliveryRepository")
+	git(t, legacy.Workspace(), "remote", "set-url", "origin", plain)
+	if _, err := Open(ctx, project, plain, nil, SignAsOwner); err == nil {
+		t.Fatal("a plain non-repository folder was accepted")
+	}
 	invalid := t.TempDir()
 	// TMPDIR may be inside a checkout. Stop Git discovering that parent;
 	// this fixture must remain invalid regardless of the test environment.

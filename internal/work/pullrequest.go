@@ -346,7 +346,7 @@ func (lp *Loop) mergeReady(ctx context.Context, p core.Project, t core.Task, lan
 		}
 		return lp.setStatus(ctx, t.ID, core.TaskDeciding, fmt.Sprintf("Pull request #%d is ready to merge", prop.Number))
 	}
-	held, err := lp.beginDelivering(ctx, t.ID, r)
+	held, err := lp.beginDelivering(ctx, t.ID, r, "")
 	if err != nil {
 		return err
 	}

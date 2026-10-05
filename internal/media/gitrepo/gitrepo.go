@@ -10,6 +10,7 @@ package gitrepo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/shhac/crew-assistant/internal/media"
 	"github.com/shhac/crew-assistant/internal/procgroup"
@@ -34,13 +36,49 @@ const (
 // fetches from the owner, keeps every recorded revision and lands them, or a
 // task's clone, made from the project's, which its implementer works in.
 type Repo struct {
-	root    string
-	source  string
-	prepare []string
-	sign    Signing
+	root   string
+	source string
+	// sourceGitDir pins delivery reads to the repository opened.
+	sourceGitDir string
+	prepare      []string
+	sign         Signing
 	// records is the project's clone a task's clone fetches from; empty for
 	// the project's clone itself.
 	records string
+}
+
+// Serialize each clone's opens without retaining locks for finished calls or
+// blocking opens of unrelated projects.
+var openLocks = struct {
+	sync.Mutex
+	paths map[string]*openLock
+}{paths: make(map[string]*openLock)}
+
+type openLock struct {
+	sync.Mutex
+	users int
+}
+
+func lockOpen(projectDir string) func() {
+	key := filepath.Clean(projectDir)
+	openLocks.Lock()
+	lock := openLocks.paths[key]
+	if lock == nil {
+		lock = &openLock{}
+		openLocks.paths[key] = lock
+	}
+	lock.users++
+	openLocks.Unlock()
+	lock.Lock()
+	return func() {
+		lock.Unlock()
+		openLocks.Lock()
+		lock.users--
+		if lock.users == 0 {
+			delete(openLocks.paths, key)
+		}
+		openLocks.Unlock()
+	}
 }
 
 // Open prepares the clone under the project's private directory. The owner's
@@ -49,15 +87,75 @@ func Open(ctx context.Context, projectDir, source string, prepare []string, sign
 	if !filepath.IsAbs(projectDir) || !filepath.IsAbs(source) {
 		return Repo{}, errors.New("project and repository paths must be absolute")
 	}
+	unlock := lockOpen(projectDir)
+	defer unlock()
 	r := Repo{root: projectDir, source: source, prepare: prepare, sign: sign}
-	if _, err := run(ctx, source, "rev-parse", "--git-dir"); err != nil {
-		return Repo{}, fmt.Errorf("%s is not a git repository", source)
+	const sourceKey = "crew-assistant.deliveryRepository"
+	recorded := false
+	identity := struct {
+		Source string `json:"source"`
+		GitDir string `json:"git_dir"`
+	}{Source: source}
+	if Cloned(projectDir) {
+		out, err := run(ctx, r.Workspace(), "config", "--get", sourceKey)
+		if err != nil {
+			var failure *gitError
+			if !errors.As(err, &failure) || failure.code != 1 || failure.detail != "" {
+				return Repo{}, fmt.Errorf("could not read delivery repository identity: %w", err)
+			}
+		}
+		if err == nil {
+			if err := json.Unmarshal([]byte(out), &identity); err != nil {
+				return Repo{}, fmt.Errorf("could not read delivery repository identity: %w", err)
+			}
+			if identity.Source == source && identity.GitDir != "" {
+				r.sourceGitDir = identity.GitDir
+				recorded = true
+			}
+		}
+	}
+	if r.sourceGitDir == "" {
+		env := gitEnvironment()
+		if Cloned(projectDir) {
+			origin, err := run(ctx, r.Workspace(), "config", "--get", "remote.origin.url")
+			if err != nil {
+				return Repo{}, fmt.Errorf("could not read delivery clone origin: %w", err)
+			}
+			if strings.TrimSpace(origin) == source {
+				// Older clones record their source root in origin. If its metadata
+				// vanished, discovering an enclosing repository is not recovery.
+				env = append(env, "GIT_CEILING_DIRECTORIES="+filepath.Dir(source))
+			}
+		}
+		out, err := runIn(ctx, source, env, "rev-parse", "--absolute-git-dir")
+		if err != nil {
+			return Repo{}, fmt.Errorf("%s is not a git repository", source)
+		}
+		r.sourceGitDir = strings.TrimSpace(out)
+	}
+	identity.Source, identity.GitDir = source, r.sourceGitDir
+	encoded, err := json.Marshal(identity)
+	if err != nil {
+		return Repo{}, err
+	}
+	if _, err := r.runDelivery(ctx, "rev-parse", "--git-dir"); err != nil {
+		return Repo{}, fmt.Errorf("could not read delivery repository: %w; if you relocated the source Git directory, verify the repository and reset %s in the project clone with git -C %q config --unset %s, then try again", err, sourceKey, r.Workspace(), sourceKey)
 	}
 	if _, err := os.Stat(filepath.Join(r.Workspace(), ".git")); errors.Is(err, os.ErrNotExist) {
-		if err = r.cloneFrom(ctx, source); err != nil {
+		from := source
+		if _, statErr := os.Stat(filepath.Join(source, ".git")); errors.Is(statErr, os.ErrNotExist) {
+			from = r.sourceGitDir // A source subdirectory is not itself cloneable.
+		}
+		if err = r.cloneFrom(ctx, from); err != nil {
 			return Repo{}, err
 		}
-		return r, nil
+		_, err = run(ctx, r.Workspace(), "config", sourceKey, string(encoded))
+		return r, err
+	}
+	if !recorded {
+		if _, err := run(ctx, r.Workspace(), "config", sourceKey, string(encoded)); err != nil {
+			return Repo{}, err
+		}
 	}
 	// Task clones and checks fetch revisions from here by commit.
 	return r, r.serveCommits(ctx)
@@ -124,7 +222,7 @@ func (r Repo) Workspace() string { return filepath.Join(r.root, "clone") }
 // Task is the clone task taskID's implementer works in, made from this one,
 // the project's, on first use. Nothing is on disk until Ready.
 func (r Repo) Task(taskID string) Repo {
-	return Repo{root: r.taskDir(taskID), source: r.source, prepare: r.prepare, sign: r.sign, records: r.Workspace()}
+	return Repo{root: r.taskDir(taskID), source: r.source, sourceGitDir: r.sourceGitDir, prepare: r.prepare, sign: r.sign, records: r.Workspace()}
 }
 
 func (r Repo) taskDir(taskID string) string {

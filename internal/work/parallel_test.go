@@ -1361,10 +1361,15 @@ func TestAStopWhileLandingRecordsWhereTheChangeWent(t *testing.T) {
 		t.Fatalf("task %+v", task)
 	}
 	r := task.Revisions[len(task.Revisions)-1]
+	m, _ := a.testMedium(t, p.ID, task.ID)
+	destination, err := m.repo.Destination(ctx, r.Ref, m.branchName(task))
+	if err != nil {
+		t.Fatal(err)
+	}
 	// The landing has recorded its intent, as it does before delivering.
 	if _, err := a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Status, t.DecisionID, t.Approved = core.TaskLanding, "", r.N
-		t.Delivering = &core.Delivering{Revision: r.N}
+		t.Delivering = &core.Delivering{Revision: r.N} // Legacy intent, before destinations were recorded.
 		return "", nil
 	}); err != nil {
 		t.Fatal(err)
@@ -1373,8 +1378,8 @@ func TestAStopWhileLandingRecordsWhereTheChangeWent(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The delivery, already under way, goes to its end.
-	m, stopped := a.testMedium(t, p.ID, task.ID)
-	branch, err := m.deliver(ctx, stopped, r)
+	m, _ = a.testMedium(t, p.ID, task.ID)
+	branch, err := m.repo.DeliverTo(ctx, r.Ref, destination)
 	if err != nil {
 		t.Fatal(err)
 	}

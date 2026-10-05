@@ -20,6 +20,14 @@ import (
 // expiries. A task's status is watched as it changes, not polled.
 const wakeCheckEvery = 15 * time.Second
 
+func (lp *Loop) wakeTask(ctx context.Context, taskID, event string) error {
+	if err := lp.Core.WakeTask(ctx, taskID, event); err != nil && !errors.Is(err, core.ErrNotFound) {
+		return err
+	}
+	lp.Nudge()
+	return nil
+}
+
 // WakeMeWhen registers one of the assistant's wakes. The baseline is read now,
 // so a change is measured from what the assistant could see when it asked.
 func (lp *Loop) WakeMeWhen(ctx context.Context, in WakeRequest) (core.Wake, error) {
@@ -156,18 +164,18 @@ func (lp *Loop) checkWakes(ctx context.Context, now time.Time) error {
 		if !ok {
 			continue
 		}
+		var ci []core.CIEvent
 		if f.ci != nil {
-			if err := lp.Core.RecordCIEvent(ctx, *f.ci); err != nil {
-				_ = lp.Core.RecordActivity(ctx, w.ProjectID, "autopilot.ci.capture_failed", err.Error())
-			}
+			ci = append(ci, *f.ci)
 		}
-		if _, err := lp.Core.FireWake(ctx, w.ID, f.observed, f.event, f.timedOut); err != nil && !errors.Is(err, core.ErrConflict) {
+		if _, err := lp.Core.FireWake(ctx, w.ID, f.observed, f.event, f.timedOut, ci...); err != nil {
+			if errors.Is(err, core.ErrConflict) {
+				continue
+			}
 			return err
 		}
 		if w.Owner != core.WakeAssistant {
-			if err := lp.wakeTask(ctx, w.TaskID, f.event); err != nil {
-				return err
-			}
+			lp.Nudge()
 		}
 	}
 	return nil
@@ -221,27 +229,6 @@ func (lp *Loop) observe(ctx context.Context, snap core.Snapshot, w core.Wake, no
 		return firing{observed: tip, event: fmt.Sprintf("%s moved from %s to %s", w.Target, text.Short(w.Baseline), text.Short(tip))}, w.FiresOn(tip)
 	}
 	return firing{}, false
-}
-
-// wakeTask sends a task asleep on something outside the team back to
-// landing, to look again.
-func (lp *Loop) wakeTask(ctx context.Context, taskID, event string) error {
-	// A pull request that changed while someone decides whether it merges
-	// is decided again, as it is now.
-	if err := lp.Core.ReconsiderMerge(ctx, taskID, event+"; it is looked at again before anyone decides"); err != nil && !errors.Is(err, core.ErrNotFound) {
-		return err
-	}
-	_, err := lp.Core.UpdateTask(ctx, taskID, func(t *core.Task, _ *core.Project) (string, error) {
-		if t.Status == core.TaskAwaiting {
-			t.Status, t.Detail = core.TaskLanding, event
-		}
-		return "", nil
-	})
-	if err != nil && !errors.Is(err, core.ErrNotFound) {
-		return err
-	}
-	lp.Nudge()
-	return nil
 }
 
 // wakeBlock is what an implementer may end its reply with.

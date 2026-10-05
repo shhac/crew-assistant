@@ -134,6 +134,10 @@ func (s *Service) DirectFromPM(ctx context.Context, taskID, from, note string) e
 	return err
 }
 
+func reconsiderablePRDecision(d *Decision) bool {
+	return d != nil && d.Status == DecisionOpen && slices.Contains([]string{DecisionDelivery, DecisionReadyForReview, DecisionOutsideThreads}, d.Kind)
+}
+
 // ReconsiderMerge withdraws the open decision the state of a task's pull
 // request raised (whether it merges, whether a draft is marked ready for
 // review, who answers outsiders' threads) once the pull request changed
@@ -142,7 +146,7 @@ func (s *Service) DirectFromPM(ctx context.Context, taskID, from, note string) e
 func (s *Service) ReconsiderMerge(ctx context.Context, taskID, why string) error {
 	_, err := s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		d := decision(v, t.DecisionID)
-		if t.Status != TaskWaiting || !t.PROpen() || d == nil || d.Status != DecisionOpen || !slices.Contains([]string{DecisionDelivery, DecisionReadyForReview, DecisionOutsideThreads}, d.Kind) {
+		if t.Status != TaskWaiting || !t.PROpen() || !reconsiderablePRDecision(d) {
 			return nil
 		}
 		now := s.now().UTC()

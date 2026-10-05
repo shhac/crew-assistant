@@ -399,6 +399,7 @@ func (t Task) UsesPRs() bool { return t.Playbook != nil && t.Playbook.Land.PullR
 
 // Delivering is a landing under way: the revision going out, and when.
 type Delivering struct {
+	Branch    string    `json:"branch,omitempty"`
 	Requested bool      `json:"requested,omitempty"` // An outward merge request may have been submitted.
 	Refused   bool      `json:"refused,omitempty"`
 	Failure   string    `json:"failure,omitempty"`

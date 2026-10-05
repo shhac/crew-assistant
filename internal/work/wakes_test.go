@@ -214,3 +214,91 @@ func TestCICaptureFailureDoesNotChangeWakeFiring(t *testing.T) {
 		})
 	}
 }
+
+func TestLoopCICaptureFailureStillResumesEveryMergeTask(t *testing.T) {
+	for _, cause := range []string{"url", "long-head", "storage", "storage-rollback"} {
+		t.Run(cause, func(t *testing.T) {
+			a := testLoop(t)
+			p, err := a.Core.CreateProject(t.Context(), core.ProjectInput{Title: "PR watches", Brief: core.BriefInput{Goal: "Wake pending merges"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.SetTeam(t.Context(), p.ID, TeamChoice{Template: "draft"}); err != nil {
+				t.Fatal(err)
+			}
+			if strings.HasPrefix(cause, "storage") {
+				db, err := sql.Open("sqlite", filepath.Join(a.Core.StateDirectory(), "state.db"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				action := "ABORT"
+				if cause == "storage-rollback" {
+					action = "ROLLBACK"
+				}
+				if _, err := db.Exec("CREATE TRIGGER fail_ci BEFORE INSERT ON autopilot_events WHEN NEW.kind='ci.result' BEGIN SELECT RAISE(" + action + ",'synthetic capture failure'); END"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var tasks []string
+			for _, target := range []string{"example/repo#7", "example/repo#8"} {
+				task, err := a.Core.QueueTask(t.Context(), p.ID, core.TaskInput{Objective: target})
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = a.Core.UpdateTask(t.Context(), task.ID, func(task *core.Task, _ *core.Project) (string, error) {
+					task.Status = core.TaskAwaiting
+					task.Playbook = &core.Playbook{Land: core.LandPolicy{PullRequests: true, GitHub: "example/repo", Target: "main"}}
+					task.Proposal = &core.Proposal{Number: 7, MergeRequested: "abc"}
+					return "", nil
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := a.Core.RegisterWake(t.Context(), core.WakeInput{Owner: core.WakeLoop, TaskID: task.ID, ProjectID: p.ID, On: core.WakeOnChecks, Target: target, Baseline: "PENDING", Match: "SUCCESS"}); err != nil {
+					t.Fatal(err)
+				}
+				tasks = append(tasks, task.ID)
+			}
+			a.github = github.Client{Run: func(_ context.Context, args ...string) ([]byte, error) {
+				url := ""
+				if cause == "url" {
+					url = strings.Repeat("x", 2049)
+				}
+				out, err := syntheticWakePR("SUCCESS", url, args...)
+				head := "0123456789abcdef"
+				if cause == "long-head" {
+					out = []byte(strings.ReplaceAll(string(out), head, strings.Repeat("a", 513)))
+				}
+				return out, err
+			}}
+			if err := a.checkWakes(t.Context(), time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			snap, err := a.Core.Snapshot(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range tasks {
+				got, _ := snap.FindTask(id)
+				if got.Status != core.TaskLanding || !got.PRMergePending() {
+					t.Fatal("CI failure left merge asleep", got)
+				}
+			}
+			for _, wake := range snap.Wakes {
+				if wake.Owner == core.WakeLoop && wake.Status != core.WakeDelivered {
+					t.Fatal("later wake starved", wake)
+				}
+			}
+			failures := 0
+			for _, activity := range snap.Activity {
+				if activity.Kind == "autopilot.ci.capture_failed" {
+					failures++
+				}
+			}
+			if failures != len(tasks) {
+				t.Fatal("capture failures not reported", failures)
+			}
+		})
+	}
+}

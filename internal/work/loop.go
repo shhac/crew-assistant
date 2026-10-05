@@ -75,6 +75,8 @@ type Loop struct {
 	// stacker finds and runs g2g for a project's stacks; replaced in tests.
 	stacker g2gTool
 	prSeen  sync.Map
+	// Suppress unchanged stopped-delivery failures until recovery.
+	deliveryRecovery sync.Map
 	// posting is held while the team's replies go up on a pull request, by
 	// the landing step or by a teammate answering beside it.
 	posting sync.Mutex

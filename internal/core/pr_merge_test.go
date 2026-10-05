@@ -24,19 +24,26 @@ func prTask(t *testing.T, s *Service, p Project, status string) Task {
 // Only a decision about merging is withdrawn when the pull request changes:
 // a question the owner was asked stays.
 func TestAChangedPullRequestWithdrawsOnlyAMergeDecision(t *testing.T) {
-	for kind, withdrawn := range map[string]bool{DecisionDelivery: true, DecisionQuestion: false, DecisionUpdate: false} {
+	for kind, withdrawn := range map[string]bool{DecisionDelivery: true, DecisionReadyForReview: true, DecisionOutsideThreads: true, DecisionQuestion: false, DecisionUpdate: false} {
 		s, _ := fixture(t)
 		task := prTask(t, s, newProject(t, s), TaskAwaiting)
 		d, err := s.OpenTaskDecision(testContext, task.ID, kind, DecisionInput{Title: "t", Context: "c", Recommendation: "r", Choices: []string{"Approve", "Stop"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.ReconsiderMerge(testContext, task.ID, "it changed"); err != nil {
+		w, err := s.RegisterWake(testContext, WakeInput{Owner: WakeLoop, TaskID: task.ID, On: WakeOnChecks, Target: "o/r#7"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.FireWake(testContext, w.ID, "changed", "it changed", false); err != nil {
 			t.Fatal(err)
 		}
 		snap, _ := s.Snapshot(testContext)
 		got, _ := snap.FindTask(task.ID)
 		dec := *decision(&snap, d.ID)
+		if withdrawn && got.Detail != "it changed; it is looked at again before anyone decides" {
+			t.Fatal("withdrawn decision lost its explanation", got.Detail)
+		}
 		if (dec.Status == DecisionDismissed) != withdrawn || (got.Status == TaskLanding) != withdrawn {
 			t.Errorf("%s: decision %s, task %s", kind, dec.Status, got.Status)
 		}

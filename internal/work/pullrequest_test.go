@@ -37,7 +37,7 @@ func TestPRMergeIntentSurvivesAssetReactivationAndRestart(t *testing.T) {
 			if err != nil || task.NeedsAssetIntegration() {
 				t.Fatal("production did not suspend", task, err)
 			}
-			held, err := s.a.beginDelivering(s.ctx, task.ID, task.Revisions[0])
+			held, err := s.a.beginDelivering(s.ctx, task.ID, task.Revisions[0], "")
 			if err != nil || len(held) > 0 {
 				t.Fatal(held, err)
 			}

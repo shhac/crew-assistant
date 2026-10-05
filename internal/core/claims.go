@@ -261,7 +261,16 @@ func (s *Service) Schedule(ctx context.Context, admit Admit, deferred ...string)
 		// Never interrupt a live turn or an outward action awaiting reconciliation.
 		for i := range v.Tasks {
 			t := &v.Tasks[i]
-			if !t.Finished() && !v.ProjectPaused(t.ProjectID) && len(t.Claims) == 0 && (t.PRMergePending() || t.Delivering != nil) && t.Status != TaskAwaiting && t.Status != TaskWaiting && t.Status != TaskLanding {
+			resumed := false
+			if !v.ProjectPaused(t.ProjectID) && len(t.Claims) == 0 {
+				for _, w := range v.Wakes {
+					if firedLoopWake(w, t.ID) {
+						resumed = resumeWoken(v, t.ID, w.Event, now)
+						break
+					}
+				}
+			}
+			if !resumed && !t.Finished() && !v.ProjectPaused(t.ProjectID) && len(t.Claims) == 0 && (t.PRMergePending() || t.Delivering != nil) && t.Status != TaskAwaiting && t.Status != TaskWaiting && t.Status != TaskLanding {
 				t.Status, t.Detail = TaskLanding, "Reconcile the recorded delivery before continuing"
 			}
 			if t.Finished() || len(t.Claims) > 0 || t.Handoff != nil || t.Delivering != nil || t.PRMergePending() || v.ProjectPaused(t.ProjectID) {

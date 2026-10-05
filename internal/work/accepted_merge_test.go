@@ -438,7 +438,7 @@ func TestAcceptedCatchUpRestartRetainsEachValidationStep(t *testing.T) {
 			}
 			if strings.HasPrefix(phase, "delivery") {
 				r := task.Revisions[1]
-				if held, err := a.beginDelivering(context.Background(), task.ID, r); err != nil || len(held) > 0 {
+				if held, err := a.beginDelivering(context.Background(), task.ID, r, ""); err != nil || len(held) > 0 {
 					t.Fatal(held, err)
 				}
 				if _, err := m.deliver(context.Background(), task, r); err != nil {
@@ -528,7 +528,7 @@ func TestAcceptedMergeDeliveryGuardRequiresCurrentValidation(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			held, err := a.beginDelivering(context.Background(), task.ID, task.Revisions[1])
+			held, err := a.beginDelivering(context.Background(), task.ID, task.Revisions[1], "")
 			if err != nil {
 				t.Fatal(err)
 			}

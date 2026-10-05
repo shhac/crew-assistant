@@ -49,7 +49,7 @@ func TestInterruptedPushReconcilesBeforeTargetCatchUp(t *testing.T) {
 				}); err != nil {
 					t.Fatal(err)
 				}
-				if held, err := a.beginDelivering(ctx, task.ID, task.Revisions[0]); err != nil || len(held) != 0 {
+				if held, err := a.beginDelivering(ctx, task.ID, task.Revisions[0], ""); err != nil || len(held) != 0 {
 					t.Fatal(held, err)
 				}
 				if assets {

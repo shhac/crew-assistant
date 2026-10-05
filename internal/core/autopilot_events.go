@@ -121,24 +121,32 @@ type CIEvent struct {
 
 // RecordCIEvent is an ingestion seam; it does not monitor CI.
 func (s *Service) RecordCIEvent(ctx context.Context, e CIEvent) error {
+	event, err := ciEvent(e, s.now().UTC())
+	if err != nil {
+		return err
+	}
+	return s.store.updateAutopilotEvents(ctx, func(conn *sql.Conn) error {
+		return insertAutopilotEvent(ctx, conn, event)
+	})
+}
+
+func ciEvent(e CIEvent, now time.Time) (AutopilotEvent, error) {
 	for _, value := range []string{e.Provider, e.Repo, e.Ref, e.Commit, e.Check, e.State} {
 		if strings.TrimSpace(value) == "" || len(value) > 512 {
-			return errors.New("CI identity fields are required and bounded")
+			return AutopilotEvent{}, errors.New("CI identity fields are required and bounded")
 		}
 	}
 	if len(e.URL) > 2048 || len(e.ProjectID) > 128 {
-		return errors.New("CI metadata exceeds bounds")
+		return AutopilotEvent{}, errors.New("CI metadata exceeds bounds")
 	}
 	data, err := json.Marshal(e)
 	if err != nil {
-		return err
+		return AutopilotEvent{}, err
 	}
 	// Check participates in identity so independent checks cannot mask one another.
 	identity, _ := json.Marshal([]string{e.Provider, e.Repo, e.Ref, e.Commit, e.Check, e.State})
 	id := fmt.Sprintf("ci:%x", sha256.Sum256(identity))
-	return s.store.updateAutopilotEvents(ctx, func(conn *sql.Conn) error {
-		return insertAutopilotEvent(ctx, conn, AutopilotEvent{ID: id, Kind: "ci.result", ProjectID: e.ProjectID, OccurredAt: s.now().UTC(), Payload: data})
-	})
+	return AutopilotEvent{ID: id, Kind: "ci.result", ProjectID: e.ProjectID, OccurredAt: now, Payload: data}, nil
 }
 
 func (s *Service) RecordAutopilotHeartbeat(ctx context.Context, now time.Time) error {
