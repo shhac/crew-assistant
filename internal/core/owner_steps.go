@@ -96,7 +96,9 @@ func (t Task) OwnerChecklist() string {
 // on as any approval does and says what happened. The follow-up is the
 // owner's: it joins the to-do list directly, not triage, depends on the
 // accepted task by a link only the owner or the assistant can take away, and
-// starts right after it. A task that has finished is left alone.
+// starts right after it. Criteria retain the decision's full text, with only
+// leading and trailing whitespace trimmed and empty entries dropped.
+// A finished task is left alone.
 func (s *Service) AcceptWithFollowUp(ctx context.Context, taskID, decisionID string, accept func(*Task) string) (Task, Task, error) {
 	return s.AcceptDraft(ctx, taskID, decisionID, true, accept)
 }
@@ -170,9 +172,7 @@ func (s *Service) AcceptDraft(ctx context.Context, taskID, decisionID string, fo
 			return nil
 		}
 		follow = Task{ID: uid(), ProjectID: t.ProjectID, Objective: text.Clip(strings.TrimSpace(d.FollowUp.Objective), maxObjective), Status: TaskQueued, Stage: StageTodo, DependsOn: []string{t.ID}, Revisions: []Revision{}, Verdicts: []Verdict{}, CreatedAt: now, UpdatedAt: now}
-		for _, c := range cleanList(d.FollowUp.Criteria) {
-			follow.Criteria = append(follow.Criteria, text.Clip(c, maxCriterion))
-		}
+		follow.Criteria = cleanList(d.FollowUp.Criteria)
 		d.FollowUpID = follow.ID
 		mark(&follow, RelationDependsOn, t.ID, LinkedByOwner, now)
 		numberTask(p, &follow)

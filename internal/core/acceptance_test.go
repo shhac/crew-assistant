@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -42,6 +43,93 @@ func acceptForTest(t *Task) string {
 	t.Approved = t.Revisions[len(t.Revisions)-1].N
 	t.Status, t.DecisionID = TaskLanding, ""
 	return "Accepted"
+}
+
+func TestAcceptanceKeepsFullFollowUpCriteria(t *testing.T) {
+	s, _, source, d := acceptanceFixture(t)
+	criteria := []string{strings.Repeat("a", 499) + "界" + strings.Repeat("é", 700), "Short criterion"}
+	if err := s.store.update(testContext, func(v *Snapshot) error {
+		decision(v, d.ID).FollowUp.Criteria = slices.Clone(criteria)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, follow, err := s.AcceptWithFollowUp(testContext, source.ID, d.ID, acceptForTest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(follow.Criteria, criteria) {
+		t.Fatal("returned follow-up changed criteria")
+	}
+	snap, err := s.Snapshot(testContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(task(&snap, follow.ID).Criteria, criteria) || !slices.Equal(decision(&snap, d.ID).FollowUp.Criteria, criteria) {
+		t.Fatal("persisted follow-up changed criteria")
+	}
+	_, replay, err := s.AcceptWithFollowUp(testContext, source.ID, d.ID, func(*Task) string { panic("replay applied acceptance") })
+	if err != nil || replay.ID != follow.ID || !slices.Equal(replay.Criteria, criteria) {
+		t.Fatalf("replay changed follow-up: %v", err)
+	}
+}
+
+func TestAcceptanceCleansFollowUpCriteriaWithoutRemovingDuplicates(t *testing.T) {
+	s, _, source, d := acceptanceFixture(t)
+	criterion := strings.Repeat("Full criterion café. ", 40) + "End."
+	proposed := []string{" \n" + criterion + "\t ", "", " \n\t", criterion}
+	want := []string{criterion, criterion}
+	if err := s.store.update(testContext, func(v *Snapshot) error {
+		decision(v, d.ID).FollowUp.Criteria = slices.Clone(proposed)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, follow, err := s.AcceptWithFollowUp(testContext, source.ID, d.ID, acceptForTest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(follow.Criteria, want) {
+		t.Fatal("follow-up should only trim whitespace and drop empty criteria")
+	}
+	snap, err := s.Snapshot(testContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(task(&snap, follow.ID).Criteria, want) || !slices.Equal(decision(&snap, d.ID).FollowUp.Criteria, proposed) {
+		t.Fatal("cleanup changed the decision or persisted criteria")
+	}
+}
+
+func TestFollowUpStoredCriteriaRemainEditable(t *testing.T) {
+	for _, criterion := range []string{strings.Repeat("é", 700), strings.Repeat("a", 500) + "…"} {
+		s, p, source, d := acceptanceFixture(t)
+		_, follow, err := s.AcceptWithFollowUp(testContext, source.ID, d.ID, acceptForTest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		follow, err = s.UpdateTask(testContext, follow.ID, func(t *Task, _ *Project) (string, error) {
+			t.Criteria = []string{criterion, "Short criterion"}
+			return "", nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		requirements := slices.Clone(follow.Criteria)
+		slices.Reverse(requirements)
+		replay, err := s.EditTask(testContext, EditInput{Project: p.ID, Task: follow.ID, Kind: RolePM, Criteria: requirements})
+		if err != nil || !slices.Equal(replay.Criteria, requirements) {
+			t.Fatalf("requirements replay changed stored criteria: %v", err)
+		}
+		added, err := s.EditTask(testContext, EditInput{Project: p.ID, Task: follow.ID, Kind: RoleReviewer, Add: []string{"New requirement"}})
+		if err != nil || !slices.Equal(added.Criteria, []string{"Short criterion", criterion, "New requirement"}) {
+			t.Fatalf("adding changed stored criteria: %v", err)
+		}
+		moved, err := s.EditTask(testContext, EditInput{Project: p.ID, Task: follow.ID, Kind: RolePM, OwnerChecks: []string{criterion}})
+		if err != nil || !slices.Equal(moved.OwnerChecks, []string{criterion}) || !slices.Equal(moved.Criteria, []string{"Short criterion", "New requirement"}) {
+			t.Fatalf("owner transfer changed stored criteria: %v", err)
+		}
+	}
 }
 
 func TestAcceptanceIsAtomicAndReplaySafe(t *testing.T) {

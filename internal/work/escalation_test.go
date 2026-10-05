@@ -203,7 +203,9 @@ func TestWithoutThePMsJudgementTheFollowUpIsMadeFromTheFindings(t *testing.T) {
 // after it, as the owner's own task.
 func TestAcceptAndFollowUpQueuesTheFollowUpRightAfterTheTask(t *testing.T) {
 	t.Parallel()
-	runner := &scriptedRunner{reviews: []string{revise}, escalate: []string{judgement(true, false, false, false, false)}}
+	criterion := strings.Repeat("The note opens warmly with café details. ", 40) + "End."
+	reply := strings.Replace(judgement(true, false, false, false, false), "The note opens warmly rather than formally", criterion, 1)
+	runner := &scriptedRunner{reviews: []string{revise}, escalate: []string{reply}}
 	a, p, task := roundLimited(t, runner, true)
 	ctx := context.Background()
 	later, err := a.Core.QueueTaskAs(ctx, p.ID, core.TaskInput{Objective: "Send the note round", DependsOn: []string{task.ID}}, core.LinkedByPM)
@@ -212,6 +214,9 @@ func TestAcceptAndFollowUpQueuesTheFollowUpRightAfterTheTask(t *testing.T) {
 	}
 	task = stepUntil(t, a, task.ID, waiting)
 	d := openDecision(t, a, task)
+	if d.FollowUp == nil || !slices.Equal(d.FollowUp.Criteria, []string{criterion}) || !strings.Contains(d.Context, criterion) {
+		t.Fatal("decision did not preserve and show full criterion")
+	}
 	if _, err = a.Core.ChooseDecision(ctx, d.ID, choiceAcceptFollowUp, core.FromOwner); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +235,7 @@ func TestAcceptAndFollowUpQueuesTheFollowUpRightAfterTheTask(t *testing.T) {
 		t.Fatalf("the follow-up should sit right after the accepted task, before the rest: %v", ids)
 	}
 	follow, _ := findTask(snap, p.ID, ids[1])
-	if follow.Objective != "Soften the opening of the thank-you note" || !slices.Equal(follow.Criteria, []string{"The note opens warmly rather than formally"}) {
+	if follow.Objective != "Soften the opening of the thank-you note" || !slices.Equal(follow.Criteria, d.FollowUp.Criteria) {
 		t.Fatalf("follow-up %q %v", follow.Objective, follow.Criteria)
 	}
 	if follow.Status != core.TaskQueued || !slices.Equal(follow.DependsOn, []string{task.ID}) || !follow.HeldByOwner(core.RelationDependsOn, task.ID) {
