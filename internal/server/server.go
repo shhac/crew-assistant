@@ -39,6 +39,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 	registerChatQueue(mux, a)
 	registerPMChat(mux, a)
 	registerProjectWork(mux, a)
+	registerStaffing(mux, a)
 	registerProjectTasks(mux, a)
 	registerTeamTurns(mux, a)
 	registerMembers(mux, a, models)
