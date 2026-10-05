@@ -130,6 +130,7 @@ func NewRoot(version string) *cobra.Command {
 	registerDashboard(root, o)
 	registerModel(root, o)
 	registerTask(root, o)
+	registerStaffing(root, o)
 	registerEngine(root, o)
 	registerUpgrade(root, o)
 	registerCompletions(root, o)
