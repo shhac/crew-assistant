@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/shhac/crew-assistant/internal/media"
 	"github.com/shhac/crew-assistant/internal/procgroup"
 )
 
@@ -145,9 +146,10 @@ func (r Repo) Ready(ctx context.Context) error {
 }
 
 // RemoveTask deletes task taskID's clone, once the task has finished. Its
-// revisions stay in the project's clone.
+// revisions stay in the project's clone. Tests a role ran there may have left
+// folders read-only, so those are given write permission back first.
 func (r Repo) RemoveTask(taskID string) error {
-	return os.RemoveAll(r.taskDir(taskID))
+	return media.RemoveReadOnly(r.taskDir(taskID))
 }
 
 // TaskClones names the tasks that have a clone of their own.

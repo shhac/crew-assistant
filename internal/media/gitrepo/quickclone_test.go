@@ -144,3 +144,28 @@ func TestTheProjectsCloneIsQuickAndNeverHalfMade(t *testing.T) {
 		t.Fatalf("the task's clone is at %s, want %s", head, want)
 	}
 }
+
+// A finished task's clone goes even when a test run in it left a folder
+// read-only.
+func TestAFinishedTasksCloneGoesWithReadOnlyFolders(t *testing.T) {
+	owner := packedOwnerRepo(t)
+	repo, err := Open(ctx, filepath.Join(t.TempDir(), "project"), owner, nil, SignAsOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := repo.Task("t1")
+	if err := task.Ready(ctx); err != nil {
+		t.Fatal(err)
+	}
+	locked := filepath.Join(task.Workspace(), ".crew", "tmp", "TestSomething", "checkout")
+	write(t, filepath.Join(locked, "file"), "x")
+	if err := os.Chmod(locked, 0500); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.RemoveTask("t1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(task.Workspace()); err == nil {
+		t.Fatal("the task's clone is still there")
+	}
+}
