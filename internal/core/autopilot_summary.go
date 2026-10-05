@@ -136,11 +136,11 @@ func (c *AutopilotCoordinator) Summary(ctx context.Context, q SummaryQuery) (Aut
 
 	for _, a := range latest {
 		group := a.Status
-		if group == "uncertain" {
+		if group == "uncertain" || group == "conflict" {
 			group = "failed"
 		}
 		out.Groups[group] = append(out.Groups[group], a)
-		if a.Status == "proposed" {
+		if a.Status == "proposed" || a.Status == "conflict" {
 			out.Groups["needs_owner"] = append(out.Groups["needs_owner"], a)
 		}
 	}

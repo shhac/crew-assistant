@@ -106,8 +106,9 @@ Approval names the exact proposal revision; arguments cannot be substituted.
 Override executes through ordinary owner action authority, cancels the original
 only on success, and records a separate owner-attributed replacement. Failed
 replacement attempts retain the pending suggestion and record their failure.
-Only explicitly owner-allowed local adapters support replacement; external
-operations do not. Cancellation does not answer the underlying decision.
+Local adapters require explicit owner replacement authority. External adapters
+may implement the replacement contract below. Cancellation does not answer
+the underlying decision.
 Undo requires a supported inverse and unchanged target revision. Duplicate
 approval/undo reads the recorded outcome without another effect or audit entry.
 Inspect the returned status rather than interpreting HTTP success as performance.
@@ -127,7 +128,7 @@ target/digest/commit, why, assistant identity at proposal time, approval/executo
 outcome and supported inverse survive restart and assistant renaming.
 
 Outcomes are `proposed`, `performed`, `failed`, `cancelled`, `refused`, `undone`
-and `uncertain`.
+`uncertain` and `conflict`.
 
 ## Durable events and summaries (CA-103)
 
@@ -175,7 +176,7 @@ no new event; force cancellation interrupts in-flight work. Pending suggestions
 remain in the existing action table across deferral, replay and restart.
 
 `Summary(SummaryQuery)` reduces immutable audit transitions at a fixed boundary,
-groups proposed, performed, failed (including uncertain), refused, undone and
+groups proposed, performed, failed (including uncertain and conflict), refused, undone and
 cancelled outcomes, and includes pending proposals and open owner decisions.
 It decodes at most 1000 audit copies, with a bounded outstanding-proposal scan;
 current summaries query indexed proposed actions rather than regrouping the full
@@ -243,5 +244,69 @@ when a daemon owns the state lock, mode edits use its narrow owner route.
 Offline catalog availability is always false because no daemon registration is
 known. `permission <project> <true|false> <revision>`, `action <id>`, `pending`,
 `history`, and `approve|cancel|undo|reconcile <id> <revision>` require the daemon.
-`override <id> <revision> <replacement-json>` sends an exact local replacement.
+`override <id> <revision> <replacement-json>` sends an exact adapter-validated replacement.
 History offers `--project`, `--task`, `--cursor`, `--limit`, `--forward`, `--after`.
+
+## External dispatch and replacement (CA-101 and CA-104)
+
+Before calling Execute, the intent transaction durably grants a dispatch lease:
+coordinator instance, monotonically increasing fencing token, purpose, actor kind
+and expiry. The coordinator renews that lease while executing or inspecting,
+retrying storage errors until ownership is observed lost. Lease maintenance does
+not wake event consumers or add audit entries.
+A separately opened store observes the same fence. Reconciliation refuses a live
+lease with ErrConflict ("dispatch in progress"), without inspecting or writing.
+After expiry, an inspector claims its own fenced lease; owner reconciliation and
+autonomous reconciliation retain distinct audit attribution. No reconciliation
+repeats Execute.
+
+Receipts are written independently of request cancellation. A late receipt is
+retained as an accepted outcome or confirmation; disagreement with a definite
+recorded outcome becomes `conflict`, retaining both bounded evidence strings.
+An unconfirmed late receipt preserves a definite inspected outcome. Owner
+reconciliation alone can settle a conflict; autonomous inspection refuses it.
+An inconclusive owner inspection preserves the conflict and its evidence.
+Conflicts count as failed and need the
+owner in summaries and the notifications built from those summaries.
+An expired inspector's receipt cannot clear a newer live dispatch lease or
+settle its action; its evidence is retained in the audit. An unconfirmed late
+executor receipt likewise preserves live inspection ownership. Only a definite
+executor receipt can supersede that inspection.
+A failed receipt write leaves the durable intent and lease for inspection after
+expiry; replay never repeats the effect.
+
+Service tracks every admitted Execute or Reconcile callback from intent admission
+through receipt persistence, including HTTP approvals. Shutdown closes admission
+and waits for callbacks and their receipts; graceful drain does not cancel them.
+App callbacks use the daemon's Force context. Upgrades count callbacks both before
+a live observer appears and in the waiting list. Forced upgrade admission closes
+new admission too. Refused external approval during drain leaves its suggestion
+pending. Receipt-write failure releases the callback so draining can finish.
+An ordinary Act submission refused by callback admission retains a pending
+proposal. A new App.Run reopens admission after the previous runtime drained;
+upgrade draining still prevents admission.
+
+The coordinator mutex covers registration, checked admission and transitions.
+Neither Execute nor Reconcile runs under that mutex or a store transaction.
+Catalog/history reads, mode saves and unrelated owner actions remain available
+while an external callback blocks. SQLite BEGIN IMMEDIATE serializes approval,
+cancellation and replacement of the same proposal across independent stores.
+
+An adapter opts into override with
+`ExternalAction.Replace func(snapshot Snapshot, original, replacement ConcreteAction) error`.
+This pure validation contract must validate replacement arguments against the
+original and current snapshot; it must never perform an effect. Nil refuses
+override with a clear unsupported error. Kind, project and task must remain the
+same. Check and function policy also validate the replacement. Operator
+replacement requires the project's separate owner permission and current
+PermissionRevision; global mode alone grants no authority.
+
+A successful replacement is a new immutable owner-attributed action, revision
+original+1, with `replaces` pointing to the cancelled original and
+`replaced_by` pointing back. Failed validation is recorded as an owner-attributed
+failed attempt without replacement links while retaining the original proposal.
+Override replay reads the
+same replacement. Approval or cancellation of a replaced original conflicts.
+External approval also checks the proposal's mode and mode revision, current
+target and operator authority again before dispatch. Stale approval cannot
+authorize a replacement or a changed mode, target or permission.

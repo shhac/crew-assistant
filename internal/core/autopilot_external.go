@@ -4,17 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 )
 
-// ExternalAction explicitly opts into the persist-intent/reconcile contract.
-// Only the operator function may bind it. CA-101 supplies actual host/publishing
-// implementations; this framework has no command executor or publishing tool.
-// Execute runs once after checked intent commits. Reconcile must only inspect
-// evidence, never repeat the effect. An unavailable implementation cannot run.
+// ExternalAction opts into durable intent, fenced dispatch and inspection.
+// Replace validates owner replacement arguments; nil explicitly refuses override.
 type ExternalAction struct {
 	Check     func(Snapshot, ConcreteAction) error
 	Execute   func(context.Context, AutopilotAction) (ExternalResult, error)
 	Reconcile func(context.Context, AutopilotAction) (ExternalResult, error)
+	Replace   func(Snapshot, ConcreteAction, ConcreteAction) error
 }
 
 type ExternalResult struct {
@@ -35,67 +34,108 @@ func (c *AutopilotCoordinator) RegisterExternal(kind string, adapter ExternalAct
 	return nil
 }
 
-// executeExternal is called only by the caller that committed a new intent.
-// A replay sees the durable uncertain record and never calls Execute again.
-// It runs under c.mu, ordering mode saves and shutdown against this admission.
+// executeExternal belongs only to the caller that committed the new intent.
+// Callback admission precedes that commit; replay never dispatches again.
 func (c *AutopilotCoordinator) executeExternal(ctx context.Context, a AutopilotAction) (AutopilotAction, error) {
+	defer c.service.releaseExternal(a)
+	c.mu.Lock()
 	adapter := c.actions[a.Action.Kind].external
-	if adapter == nil {
-		return a, errors.New("external action unavailable")
+	if c.callbackContext != nil {
+		ctx = c.callbackContext
 	}
-	// Recheck target, gate and runtime after intent persistence, before dispatch.
 	allowed := false
-	err := c.service.store.updateTransaction(ctx, func(v *Snapshot, conn *sql.Conn) error {
-		current, err := readAutopilotAction(ctx, conn, "id", a.ID)
+	err := c.service.store.updateTransaction(context.WithoutCancel(ctx), func(v *Snapshot, conn *sql.Conn) error {
+		current, err := readAutopilotAction(context.WithoutCancel(ctx), conn, "id", a.ID)
 		if err != nil {
 			return err
 		}
-		if current.Status != "uncertain" {
+		if current.Status != "uncertain" || !c.ownsDispatch(a, current) || !current.Dispatch.ExpiresAt.After(c.service.now()) {
 			return ErrConflict
 		}
-		if err := c.check(*v, a); err != nil {
-			a.Status, a.Detail = "refused", err.Error()
-			return writeAutopilotAction(ctx, conn, a, a.Executor, a.ExecutorKind, c.service.now().UTC())
+		// Drain cannot revoke an already admitted callback. Recheck mutable policy,
+		// target and authority, while ignoring runtime gates already passed.
+		checkErr := c.checkPolicy(*v, a)
+		if c.blocked {
+			checkErr = errors.New("autopilot settings require reconciliation")
+		}
+		if checkErr != nil {
+			a.Status, a.Detail, a.Dispatch = "refused", checkErr.Error(), nil
+			return writeAutopilotAction(context.WithoutCancel(ctx), conn, a, a.Executor, a.ExecutorKind, c.service.now().UTC())
 		}
 		allowed = true
 		return nil
 	})
-	if err != nil {
+	c.mu.Unlock()
+	if err != nil || !allowed {
 		return a, err
 	}
-	if !allowed {
-		return a, nil
-	}
-	result, err := adapter.Execute(ctx, a)
-	if err != nil {
-		// Arbitrary adapter error text can contain host secrets. Keep only the
-		// conservative outcome; reconciliation supplies safe, attributable evidence.
+	stopRenew := c.renewDispatch(a)
+	defer stopRenew()
+	result, callbackErr := adapter.Execute(ctx, a)
+	if callbackErr != nil {
 		result = ExternalResult{Outcome: "uncertain", Evidence: "Completion could not be confirmed; check what happened"}
 	}
 	return c.externalResult(context.WithoutCancel(ctx), a, result, a.Executor, a.ExecutorKind)
 }
 
 func (c *AutopilotCoordinator) externalResult(ctx context.Context, a AutopilotAction, result ExternalResult, actor string, kind AutopilotActorKind) (AutopilotAction, error) {
-	if result.Evidence == "" || len(result.Evidence) > 8192 {
-		return a, errors.New("bounded reconciliation evidence is required")
-	}
-	if result.Outcome != "performed" && result.Outcome != "failed" && result.Outcome != "uncertain" {
-		return a, errors.New("invalid external outcome")
+	// Even a malformed adapter receipt must leave an attributable durable outcome.
+	if result.Evidence == "" || len(result.Evidence) > 8192 ||
+		(result.Outcome != "performed" && result.Outcome != "failed" && result.Outcome != "uncertain") {
+		result = ExternalResult{Outcome: "uncertain", Evidence: "Adapter returned an invalid receipt; inspect completion"}
 	}
 	err := c.service.store.updateTransaction(ctx, func(_ *Snapshot, conn *sql.Conn) error {
 		current, err := readAutopilotAction(ctx, conn, "id", a.ID)
 		if err != nil {
 			return err
 		}
-		if current.Status != "uncertain" || current.Revision != a.Revision {
-			return ErrConflict
+		owned := c.ownsDispatch(a, current)
+		// An expired inspector cannot settle another inspector's live claim.
+		// Only a definite executor receipt can supersede live inspection; an
+		// unconfirmed receipt supplies evidence without revoking ownership.
+		preserveDispatch := !owned && current.Dispatch != nil && current.Dispatch.ExpiresAt.After(c.service.now()) &&
+			(a.Dispatch == nil || a.Dispatch.Purpose != "execute" || result.Outcome == "uncertain")
+		switch {
+		case preserveDispatch:
+			if current.Status == "conflict" {
+				current.Detail = conflictEvidence(current.Detail, "Late "+result.Outcome+" receipt: "+result.Evidence)
+			} else {
+				current.Detail = boundedEvidence(current.Detail, "Late "+result.Outcome+" receipt: "+result.Evidence)
+			}
+		case owned && current.Status == "conflict" && result.Outcome == "uncertain":
+			current.Detail = conflictEvidence(current.Detail, "Unconfirmed inspection: "+result.Evidence)
+		case owned:
+			current.Status, current.Detail = result.Outcome, result.Evidence
+		case current.Status == "uncertain":
+			// A definite executor receipt supersedes an in-flight inspection.
+			current.Status, current.Detail = result.Outcome, result.Evidence
+		case result.Outcome == "uncertain":
+			if current.Status == "conflict" {
+				current.Detail = conflictEvidence(current.Detail, "Unconfirmed late receipt: "+result.Evidence)
+			} else {
+				current.Detail = boundedEvidence(current.Detail, "Unconfirmed late receipt: "+result.Evidence)
+			}
+		case current.Status == result.Outcome:
+			current.Detail = boundedEvidence(current.Detail, "Confirmed: "+result.Evidence)
+		case current.Status == "conflict":
+			current.Detail = conflictEvidence(current.Detail, result.Outcome+": "+result.Evidence)
+		default:
+			current.Detail = boundedEvidence(current.Status+": "+current.Detail, result.Outcome+": "+result.Evidence)
+			current.Status = "conflict"
 		}
-		a.Status, a.Detail = result.Outcome, result.Evidence
+		if !preserveDispatch {
+			current.Dispatch = nil
+			if !owned {
+				current.DispatchToken++
+			}
+		}
+		if a.Dispatch != nil && a.Dispatch.Purpose == "execute" {
+			current.Executor, current.ExecutorKind = a.Executor, a.ExecutorKind
+		}
+		a = current
 		return writeAutopilotAction(ctx, conn, a, actor, kind, c.service.now().UTC())
 	})
 	if err != nil {
-		// Never return a successful receipt when its persistence failed. Rereading
-		// resolves a lost commit acknowledgement without re-executing the effect.
 		current, readErr := c.Action(context.WithoutCancel(ctx), a.ID)
 		if readErr == nil {
 			return current, err
@@ -105,43 +145,98 @@ func (c *AutopilotCoordinator) externalResult(ctx context.Context, a AutopilotAc
 	return a, nil
 }
 
-// Reconcile records inspected evidence, even after modes/gates are revoked.
-// Revocation prevents execution, not recording what already happened.
+func boundedEvidence(first, second string) string {
+	if len(first) > 4096 {
+		first = first[:4096]
+	}
+	if len(second) > 4096 {
+		second = second[:4096]
+	}
+	return first + "; " + second
+}
+
+// Keep both original bounded conflict receipts (4096 + separator + 4096).
+// Later inconclusive evidence may replace earlier annotations, never receipts.
+func conflictEvidence(conflict, annotation string) string {
+	if len(conflict) > 8194 {
+		conflict = conflict[:8194]
+	}
+	if len(annotation) > 4096 {
+		annotation = annotation[:4096]
+	}
+	return conflict + "; " + annotation
+}
+
+// Reconciliation only inspects; modes and authority cannot suppress facts.
 func (c *AutopilotCoordinator) Reconcile(ctx context.Context, id string, revision uint64) (AutopilotAction, error) {
 	return c.reconcile(ctx, id, revision, AutopilotOwner)
 }
-
-// ReconcileAutomatic attributes inspected recovery evidence to the assistant,
-// without implying owner approval or granting execution authority.
 func (c *AutopilotCoordinator) ReconcileAutomatic(ctx context.Context, id string, revision uint64) (AutopilotAction, error) {
 	return c.reconcile(ctx, id, revision, AutopilotAssistant)
 }
 
 func (c *AutopilotCoordinator) reconcile(ctx context.Context, id string, revision uint64, kind AutopilotActorKind) (AutopilotAction, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	a, err := c.Action(ctx, id)
-	if err != nil {
+	var a AutopilotAction
+	var adapter *ExternalAction
+	actor := "owner"
+	admitted := false
+	err := c.service.store.updateTransaction(ctx, func(_ *Snapshot, conn *sql.Conn) error {
+		var err error
+		a, err = readAutopilotAction(ctx, conn, "id", id)
+		if err != nil {
+			return err
+		}
+		if a.Revision != revision {
+			return ErrConflict
+		}
+		if a.Status != "uncertain" && a.Status != "conflict" {
+			return nil
+		}
+		if a.Status == "conflict" && kind != AutopilotOwner {
+			return fmt.Errorf("%w: conflict requires owner reconciliation", ErrConflict)
+		}
+		if a.Dispatch != nil && a.Dispatch.ExpiresAt.After(c.service.now()) {
+			return fmt.Errorf("%w: dispatch in progress", ErrConflict)
+		}
+		f := c.functions[a.Function]
+		adapter = c.actions[a.Action.Kind].external
+		if f == nil || f.version != a.RuleVersion || !f.allowed[a.Action.Kind] || adapter == nil {
+			return errors.New("reconciliation implementation unavailable")
+		}
+		if kind == AutopilotAssistant {
+			actor = a.AssistantID
+		}
+		if c.closed || c.blocked {
+			return autopilotDeferred{ErrConflict}
+		}
+		if c.admission != nil {
+			if err := c.admission(); err != nil {
+				return autopilotDeferred{err}
+			}
+		}
+		c.grantDispatch(&a, "reconcile", kind)
+		if err := c.service.admitExternal(a); err != nil {
+			return err
+		}
+		admitted = true
+		return writeAutopilotAction(ctx, conn, a, actor, kind, c.service.now().UTC())
+	})
+	if c.callbackContext != nil {
+		ctx = c.callbackContext
+	}
+	c.mu.Unlock()
+	if admitted {
+		defer c.service.releaseExternal(a)
+	}
+	if err != nil || !admitted {
 		return a, err
 	}
-	if a.Revision != revision {
-		return a, ErrConflict
+	stopRenew := c.renewDispatch(a)
+	defer stopRenew()
+	result, inspectErr := adapter.Reconcile(ctx, a)
+	if inspectErr != nil {
+		result = ExternalResult{Outcome: "uncertain", Evidence: "Completion could not be reconciled; inspect completion"}
 	}
-	if a.Status != "uncertain" {
-		return a, nil
-	}
-	f := c.functions[a.Function]
-	adapter := c.actions[a.Action.Kind].external
-	if f == nil || f.version != a.RuleVersion || !f.allowed[a.Action.Kind] || adapter == nil {
-		return a, errors.New("reconciliation implementation unavailable")
-	}
-	result, err := adapter.Reconcile(ctx, a)
-	if err != nil {
-		return a, errors.New("completion could not be reconciled")
-	}
-	actor := "owner"
-	if kind == AutopilotAssistant {
-		actor = a.AssistantID
-	}
-	return c.externalResult(ctx, a, result, actor, kind)
+	return c.externalResult(context.WithoutCancel(ctx), a, result, actor, kind)
 }

@@ -207,7 +207,7 @@ func TestAutopilotApprovalCancellationAndOverride(t *testing.T) {
 		t.Fatal("replay revived replacement's original")
 	}
 	approved, err := c.OwnerAction(testContext, a.ID, 1, "approve", nil)
-	if err != nil || approved.Status != "cancelled" {
+	if !errors.Is(err, ErrConflict) || approved.ID != "" {
 		t.Fatal("old approval replaced owner action")
 	}
 	snap, _ := s.Snapshot(testContext)

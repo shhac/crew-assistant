@@ -262,6 +262,7 @@ type PendingOperation struct {
 }
 
 type Snapshot struct {
+	ExternalCallbacks []ExternalCallback `json:"-"`
 	// Retirement survives member deletion; historical seats remain intact.
 	RetiredSpriteMembers []string               `json:"retired_sprite_members,omitempty"`
 	EnginePauses         map[string]EnginePause `json:"engine_pauses,omitempty"`

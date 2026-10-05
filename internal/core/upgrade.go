@@ -48,6 +48,9 @@ func (s *Service) AdmitUpgrade(ctx context.Context, request func(Snapshot, confi
 	if err != nil {
 		return false, err
 	}
+	for _, callback := range s.external {
+		v.ExternalCallbacks = append(v.ExternalCallbacks, callback)
+	}
 	admitted, err := request(v, s.cfg)
 	if admitted && err == nil {
 		s.upgradeDraining = true
@@ -58,6 +61,9 @@ func (s *Service) AdmitUpgrade(ctx context.Context, request func(Snapshot, confi
 // Claimed work counts as busy even before its model observer starts. This
 // closes the gap between durable admission and a live turn appearing.
 func UpgradeWorkClaimed(v Snapshot) bool {
+	if len(v.ExternalCallbacks) > 0 {
+		return true
+	}
 	for _, t := range v.Tasks {
 		if len(t.Claims) > 0 {
 			return true

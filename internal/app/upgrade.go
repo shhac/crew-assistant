@@ -86,6 +86,9 @@ func upgradeWaiting(snapshot core.Snapshot, turns []core.Turn) []upgrade.Waiting
 		labels[project.ID] = project.Title
 	}
 	waiting := []upgrade.WaitingOn{}
+	for _, callback := range snapshot.ExternalCallbacks {
+		waiting = append(waiting, upgrade.WaitingOn{Kind: "autopilot", Ref: callback.ID, Label: callback.Kind + " for " + labels[callback.ProjectID], StartedAt: callback.StartedAt})
+	}
 	pmReplies := map[string]core.PMChatMessage{}
 	for _, reply := range snapshot.PMChats {
 		if reply.Status == "working" {
@@ -124,7 +127,12 @@ func upgradeWaiting(snapshot core.Snapshot, turns []core.Turn) []upgrade.Waiting
 			waiting = append(waiting, upgrade.WaitingOn{Kind: "pm-chat", Ref: reply.ID, Label: labels[reply.ProjectID] + " (PM reply)", StartedAt: *reply.StartedAt})
 		}
 	}
-	slices.SortFunc(waiting, func(a, b upgrade.WaitingOn) int { return strings.Compare(a.Kind+a.Ref, b.Kind+b.Ref) })
+	slices.SortFunc(waiting, func(a, b upgrade.WaitingOn) int {
+		if order := strings.Compare(a.Kind+a.Ref, b.Kind+b.Ref); order != 0 {
+			return order
+		}
+		return a.StartedAt.Compare(b.StartedAt)
+	})
 	return waiting
 }
 

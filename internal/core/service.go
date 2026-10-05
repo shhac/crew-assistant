@@ -32,6 +32,9 @@ func Reason(err error) string {
 
 // Service deliberately exposes no execution, shell, production or purchase capability.
 type Service struct {
+	external            map[string]ExternalCallback
+	externalClosed      bool
+	externalChanged     chan struct{}
 	upgradeDraining     bool // Guarded by store.mu; committed upgrade admission closes new claims.
 	store               *Store
 	mu                  sync.RWMutex
@@ -67,6 +70,7 @@ func (s *Service) UpdateConfig(cfg config.Config) error {
 func (s *Service) configuration() config.Config { s.mu.RLock(); defer s.mu.RUnlock(); return s.cfg }
 func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	v, err := s.store.Snapshot(ctx)
+	v.ExternalCallbacks = s.ExternalCallbacks()
 	cfg := s.configuration()
 	// A loaded configuration is valid, so every avatar in it draws.
 	v.Assistants = make([]AssistantProfile, len(cfg.Assistants))

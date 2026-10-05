@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/shhac/crew-assistant/internal/autopilot"
 )
@@ -108,6 +109,8 @@ func TestAutopilotExternalOutcomeFailureNeverRepeatsEffect(t *testing.T) {
 	if err != nil || replay.Status != "uncertain" || calls != 1 {
 		t.Fatal("lost-response retry repeated publication")
 	}
+	at := s.now().Add(2 * time.Minute)
+	s.now = func() time.Time { return at }
 	reconciled, err := c.Reconcile(testContext, a.ID, 1)
 	if err != nil || reconciled.Status != "performed" || calls != 1 {
 		t.Fatal("reconciliation failed")

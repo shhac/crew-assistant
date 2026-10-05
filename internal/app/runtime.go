@@ -26,13 +26,16 @@ func (a *App) Run(stop lifecycle.Stop, noDispatch bool) (runErr error) {
 	// everything it started, as a forced stop would.
 	stop, cancel := stop.WithCancel()
 	var listeners sync.WaitGroup
+	a.Core.OpenExternalAdmission()
 	a.setStop(stop)
 	a.dispatchDisabled.Store(noDispatch)
 	defer func() {
 		if runErr != nil {
 			cancel()
 		}
+		a.Core.CloseExternalAdmission()
 		listeners.Wait()
+		a.Core.DrainExternal()
 		a.closeDrawings()
 		cancel()
 	}()

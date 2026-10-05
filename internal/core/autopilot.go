@@ -70,6 +70,12 @@ const (
 )
 
 type AutopilotAction struct {
+	Mode          autopilot.Mode     `json:"mode,omitempty"`
+	ModeRevision  uint64             `json:"mode_revision,omitempty"`
+	Dispatch      *AutopilotDispatch `json:"dispatch,omitempty"`
+	DispatchToken uint64             `json:"dispatch_token,omitempty"`
+	Replaces      string             `json:"replaces,omitempty"`
+	ReplacedBy    string             `json:"replaced_by,omitempty"`
 	ExecutorKind  AutopilotActorKind `json:"executor_kind,omitempty"`
 	ID            string             `json:"id"`
 	Source        string             `json:"source"`
@@ -109,6 +115,10 @@ type LocalAction struct {
 }
 
 type AutopilotCoordinator struct {
+	instance                     string
+	leaseFor                     time.Duration
+	renewEvery                   time.Duration
+	callbackContext              context.Context
 	eventMu                      sync.Mutex
 	eventAfterTime, eventAfterID string
 	service                      *Service
@@ -138,7 +148,7 @@ type AutopilotFunction struct {
 }
 
 func NewAutopilotCoordinator(s *Service, admission func() error) *AutopilotCoordinator {
-	c := &AutopilotCoordinator{service: s, functions: map[string]*AutopilotFunction{}, actions: map[string]LocalAction{}, admission: admission}
+	c := &AutopilotCoordinator{instance: uid(), leaseFor: time.Minute, renewEvery: 20 * time.Second, service: s, functions: map[string]*AutopilotFunction{}, actions: map[string]LocalAction{}, admission: admission}
 	c.actions["rename-project"] = projectRenameAction(s)
 	c.actions["resolve-choice"] = decisionChoiceAction(s)
 	return c
@@ -279,16 +289,27 @@ func (c *AutopilotCoordinator) check(v Snapshot, a AutopilotAction) error {
 	if c.service.upgradeDraining || v.Paused {
 		return autopilotDeferred{errors.New("coordination is paused or upgrading")}
 	}
+	return c.checkPolicy(v, a)
+}
+
+func (c *AutopilotCoordinator) checkPolicy(v Snapshot, a AutopilotAction) error {
+	if v.Paused {
+		return autopilotDeferred{errors.New("coordination is paused")}
+	}
 	f := c.functions[a.Function]
 	if f == nil || f.version != a.RuleVersion || !f.allowed[a.Action.Kind] {
 		return errors.New("function or action is unavailable or policy changed")
 	}
-	mode, err := c.service.configuration().Autopilot.EffectiveMode(a.Function)
+	settings := c.service.configuration().Autopilot
+	mode, err := settings.EffectiveMode(a.Function)
 	if err != nil {
 		return err
 	}
 	if mode == autopilot.Off {
 		return errors.New("function is Off")
+	}
+	if c.actions[a.Action.Kind].external != nil && (a.Mode != mode || a.ModeRevision != settings.Revisions[a.Function]) {
+		return errors.New("proposal mode is stale")
 	}
 	p := project(&v, a.Action.ProjectID)
 	if p == nil {
@@ -338,17 +359,21 @@ func (f *AutopilotFunction) SubmitEvent(ctx context.Context, source, reason stri
 func (f *AutopilotFunction) submit(ctx context.Context, source, reason string, action ConcreteAction, event bool) (AutopilotAction, error) {
 	c := f.coordinator
 	c.mu.Lock()
+	locked := true
 	var out AutopilotAction
 	notify := false
 	newEffect := false
 	defer func() {
-		fn := c.performed
-		c.mu.Unlock()
+		var fn func(AutopilotAction)
+		if locked {
+			fn = c.performed
+			c.mu.Unlock()
+		}
 		if notify && fn != nil {
 			fn(out)
 		}
 	}()
-	var runExternal bool
+	var runExternal, admittedExternal bool
 	if c.functions[f.id] != f {
 		return out, errors.New("unregistered authority")
 	}
@@ -388,18 +413,29 @@ func (f *AutopilotFunction) submit(ctx context.Context, source, reason string, a
 		if !ok {
 			return errors.New("no assistant is seated")
 		}
-		out = AutopilotAction{ID: uid(), Source: source, Function: f.id, RuleVersion: f.version, Revision: 1, Action: a, Reason: reason, AssistantID: seated.ID, AssistantName: seated.Name, ProposedAt: c.service.now().UTC(), Status: "proposed"}
+		out = AutopilotAction{Mode: mode, ModeRevision: cfg.Autopilot.Revisions[f.id], ID: uid(), Source: source, Function: f.id, RuleVersion: f.version, Revision: 1, Action: a, Reason: reason, AssistantID: seated.ID, AssistantName: seated.Name, ProposedAt: c.service.now().UTC(), Status: "proposed"}
+		deferred := false
 		if err := c.check(*v, out); err != nil {
 			if event && errors.Is(err, ErrAutopilotDeferred) {
 				return err
 			}
-			out.Status, out.Detail = "refused", err.Error()
+			deferred = errors.Is(err, ErrAutopilotDeferred) && c.actions[a.Kind].external != nil
+			out.Detail = err.Error()
+			if !deferred {
+				out.Status = "refused"
+			}
 		}
 		if err := writeAutopilotAction(ctx, conn, out, out.AssistantID, AutopilotAssistant, c.service.now().UTC()); err != nil {
 			return err
 		}
-		if mode == autopilot.Act && out.Status == "proposed" {
-			if err := c.perform(ctx, conn, v, &out, out.AssistantID, AutopilotAssistant, event); err != nil {
+		if mode == autopilot.Act && out.Status == "proposed" && !deferred {
+			performErr := c.perform(ctx, conn, v, &out, out.AssistantID, AutopilotAssistant, event)
+			admittedExternal = out.Dispatch != nil
+			if err := performErr; err != nil {
+				if !event && errors.Is(err, ErrAutopilotDeferred) {
+					out.Status, out.Detail = "proposed", err.Error()
+					return writeAutopilotAction(ctx, conn, out, out.AssistantID, AutopilotAssistant, c.service.now().UTC())
+				}
 				return err
 			}
 			runExternal = out.Status == "uncertain"
@@ -408,12 +444,17 @@ func (f *AutopilotFunction) submit(ctx context.Context, source, reason string, a
 		return nil
 	})
 	if err != nil {
+		if admittedExternal {
+			c.service.releaseExternal(out)
+		}
 		return AutopilotAction{}, err
 	}
 	// An existing source returns before perform, so only a new local receipt
 	// reaches this notification. External completion has its own lifecycle.
 	notify = newEffect
 	if runExternal {
+		c.mu.Unlock()
+		locked = false
 		return c.executeExternal(ctx, out)
 	}
 	return out, nil
@@ -421,11 +462,16 @@ func (f *AutopilotFunction) submit(ctx context.Context, source, reason string, a
 
 func (c *AutopilotCoordinator) perform(ctx context.Context, conn *sql.Conn, v *Snapshot, a *AutopilotAction, actor string, kind AutopilotActorKind, event bool) error {
 	if err := c.check(*v, *a); err != nil {
-		if event && errors.Is(err, ErrAutopilotDeferred) {
+		if errors.Is(err, ErrAutopilotDeferred) && (event || c.actions[a.Action.Kind].external != nil) {
 			return err
 		}
 		a.Status, a.Detail = "refused", err.Error()
 	} else if c.actions[a.Action.Kind].external != nil {
+		c.grantDispatch(a, "execute", kind)
+		if err := c.service.admitExternal(*a); err != nil {
+			a.Dispatch = nil
+			return err
+		}
 		a.ExecutorKind = kind
 		a.Status, a.Executor, a.Detail = "uncertain", actor, "Intent recorded; completion is not yet confirmed"
 	} else {
@@ -449,16 +495,20 @@ func (c *AutopilotCoordinator) perform(ctx context.Context, conn *sql.Conn, v *S
 // ordinary owner target checks and retain the original if replacement fails.
 func (c *AutopilotCoordinator) OwnerAction(ctx context.Context, id string, revision uint64, verb string, replacement *ConcreteAction) (AutopilotAction, error) {
 	c.mu.Lock()
+	locked := true
 	var out AutopilotAction
 	notify, newEffect := false, false
 	defer func() {
-		fn := c.performed
-		c.mu.Unlock()
+		var fn func(AutopilotAction)
+		if locked {
+			fn = c.performed
+			c.mu.Unlock()
+		}
 		if notify && fn != nil {
 			fn(out)
 		}
 	}()
-	var runExternal bool
+	var runExternal, admittedExternal bool
 	var ownerErr error
 	if verb != "override" && replacement != nil {
 		return out, errors.New("only override accepts replacement arguments")
@@ -474,7 +524,7 @@ func (c *AutopilotCoordinator) OwnerAction(ctx context.Context, id string, revis
 		out = a
 		switch verb {
 		case "cancel":
-			if a.Status == "cancelled" {
+			if a.Status == "cancelled" && a.ReplacedBy == "" {
 				return nil
 			}
 			if a.Status != "proposed" {
@@ -482,11 +532,16 @@ func (c *AutopilotCoordinator) OwnerAction(ctx context.Context, id string, revis
 			}
 			out.Status = "cancelled"
 		case "approve":
+			if a.ReplacedBy != "" {
+				return ErrConflict
+			}
 			if a.Status != "proposed" {
 				return nil
 			} // replay reads the durable result
 			out.Approver = "owner"
-			if err := c.perform(ctx, conn, v, &out, "owner", AutopilotOwner, false); err != nil {
+			performErr := c.perform(ctx, conn, v, &out, "owner", AutopilotOwner, false)
+			admittedExternal = out.Dispatch != nil
+			if err := performErr; err != nil {
 				return err
 			}
 			runExternal = out.Status == "uncertain"
@@ -526,41 +581,74 @@ func (c *AutopilotCoordinator) OwnerAction(ctx context.Context, id string, revis
 			if action.Kind != a.Action.Kind || action.ProjectID != a.Action.ProjectID || action.TaskID != a.Action.TaskID {
 				return ErrConflict
 			}
+
 			adapter, ok := c.actions[action.Kind]
-			if !ok || !adapter.OwnerAllowed || adapter.external != nil || a.Function == autopilot.Operator {
-				return errors.New("owner replacement requires an ordinary local action")
-			}
-			candidate, err := readState(ctx, conn)
-			if err != nil {
-				return err
-			}
 			replacementRecord := a
 			replacementRecord.ID, replacementRecord.Source = uid(), "owner-override-failed:"+uid()
 			replacementRecord.Action, replacementRecord.Status, replacementRecord.Approver = action, "failed", "owner"
+			replacementRecord.Revision++
+			replacementRecord.Mode, _ = c.service.configuration().Autopilot.EffectiveMode(a.Function)
+			replacementRecord.ModeRevision = c.service.configuration().Autopilot.Revisions[a.Function]
 			failed := func(err error) error {
 				ownerErr = err
 				replacementRecord.Detail = err.Error()
 				out = replacementRecord
 				return writeAutopilotAction(ctx, conn, out, "owner", AutopilotOwner, c.service.now().UTC())
 			}
-			if err := adapter.Check(candidate, action); err != nil {
+			if !ok {
+				return failed(errors.New("replacement adapter unavailable"))
+			}
+			if adapter.external != nil {
+				if adapter.external.Replace == nil {
+					return failed(errors.New(action.Kind + " does not support owner replacement"))
+				}
+				if err := adapter.external.Replace(*v, a.Action, action); err != nil {
+					return failed(err)
+				}
+			} else if !adapter.OwnerAllowed {
+				return failed(errors.New("action does not support owner replacement"))
+			}
+			if a.Function == autopilot.Operator {
+				if err := c.check(*v, replacementRecord); err != nil {
+					return failed(err)
+				}
+			} else if err := adapter.Check(*v, action); err != nil {
 				return failed(err)
 			}
-			inverse, version, err := adapter.Apply(&candidate, action, AutopilotOwner)
-			if err != nil {
-				return failed(err)
+			var inverse json.RawMessage
+			var version uint64
+			if adapter.external == nil && a.Function != autopilot.Operator {
+				candidate, err := readState(ctx, conn)
+				if err != nil {
+					return err
+				}
+				inverse, version, err = adapter.Apply(&candidate, action, AutopilotOwner)
+				if err != nil {
+					return failed(err)
+				}
+				*v = candidate
 			}
-			*v = candidate
-			// Keep the old immutable proposal and append a separate attributable action.
-			out.Status = "cancelled"
+			replacementRecord.Replaces = a.ID
+			replacementRecord.Source = "owner-override:" + a.ID
+			replacementRecord.Status = "proposed"
+			out.Status, out.ReplacedBy = "cancelled", replacementRecord.ID
 			if err := writeAutopilotAction(ctx, conn, out, "owner", AutopilotOwner, c.service.now().UTC()); err != nil {
 				return err
 			}
-			out = a
-			out.ID, out.Source, out.Revision = uid(), "owner-override:"+a.ID, a.Revision+1
-			out.ExecutorKind = AutopilotOwner
-			out.Action, out.Status, out.Approver, out.Executor, out.Undo, out.UndoVersion = action, "performed", "owner", "owner", inverse, version
+			out = replacementRecord
+			if adapter.external != nil || a.Function == autopilot.Operator {
+				performErr := c.perform(ctx, conn, v, &out, "owner", AutopilotOwner, false)
+				admittedExternal = out.Dispatch != nil
+				if err := performErr; err != nil {
+					return err
+				}
+				runExternal = out.Status == "uncertain"
+				newEffect = out.Status == "performed"
+				return nil
+			}
+			out.Status, out.Executor, out.ExecutorKind, out.Undo, out.UndoVersion = "performed", "owner", AutopilotOwner, inverse, version
 			newEffect = true
+
 		case "undo":
 			if a.Status == "undone" {
 				return nil
@@ -590,6 +678,9 @@ func (c *AutopilotCoordinator) OwnerAction(ctx context.Context, id string, revis
 		return writeAutopilotAction(ctx, conn, out, "owner", AutopilotOwner, c.service.now().UTC())
 	})
 	if err != nil {
+		if admittedExternal {
+			c.service.releaseExternal(out)
+		}
 		return AutopilotAction{}, err
 	}
 	if ownerErr != nil {
@@ -597,6 +688,8 @@ func (c *AutopilotCoordinator) OwnerAction(ctx context.Context, id string, revis
 	}
 	notify = newEffect
 	if runExternal {
+		c.mu.Unlock()
+		locked = false
 		return c.executeExternal(ctx, out)
 	}
 	return out, nil

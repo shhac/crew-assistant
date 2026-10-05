@@ -19,6 +19,9 @@ var (
 
 // setStop is the run the app belongs to.
 func (a *App) setStop(stop lifecycle.Stop) {
+	if a.Autopilot != nil {
+		a.Autopilot.SetCallbackContext(stop.Force)
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stop = stop

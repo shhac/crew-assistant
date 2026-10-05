@@ -453,11 +453,16 @@ func (c *AutopilotCoordinator) checkEventAdmission(snapshot Snapshot, projectID 
 // Event-only writes do not serialize or rewrite the project state. SQLite's
 // connection-local change counter is constant-time and detects duplicate no-ops.
 func (s *Store) updateAutopilotEvents(ctx context.Context, fn func(*sql.Conn) error) error {
+	return s.updateAutopilotRecords(ctx, true, fn)
+}
+
+// Lease maintenance changes no event work and must not wake the event loop.
+func (s *Store) updateAutopilotRecords(ctx context.Context, nudge bool, fn func(*sql.Conn) error) error {
 	s.mu.Lock()
 	committed := false
 	defer func() {
 		s.mu.Unlock()
-		if committed {
+		if committed && nudge {
 			select {
 			case s.autopilotNudge <- struct{}{}:
 			default:
