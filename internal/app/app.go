@@ -18,6 +18,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/engine"
 	"github.com/shhac/crew-assistant/internal/integrations/connections"
 	"github.com/shhac/crew-assistant/internal/lifecycle"
+	"github.com/shhac/crew-assistant/internal/toolkit"
 	"github.com/shhac/crew-assistant/internal/upgrade"
 	"github.com/shhac/crew-assistant/internal/work"
 )
@@ -61,7 +62,9 @@ type App struct {
 	// Work runs the teams' tasks and wakes agents.
 	Work *work.Loop
 	// Painter draws avatars; with none, as in demo mode, nothing is drawn.
-	Painter  avatars.Painter
+	Painter avatars.Painter
+	// Toolkit installs and updates the owner's CLIs from the dashboard.
+	Toolkit  *toolkit.Manager
 	paint    sync.Mutex // One drawing at a time.
 	drawings sync.WaitGroup
 	// drawingsClosed refuses new drawings once the run waits for them. It is
@@ -138,6 +141,7 @@ func New(s *core.Service, cfg config.Config, path string, opts Options) *App {
 	if opts.DrawWithCodex && !opts.Demo {
 		a.Painter = codexPainter{a}
 	}
+	a.Toolkit = toolkit.New(toolkit.Options{})
 	return a
 }
 

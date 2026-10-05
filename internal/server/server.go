@@ -31,6 +31,7 @@ func New(a *app.App, auth *Auth) http.Handler {
 	})
 	registerAutopilot(mux, a)
 	registerFilesystem(mux, a)
+	registerToolkit(mux, a)
 	registerEnginePauses(mux, a)
 	mux.HandleFunc("GET /api/engines/codex/browser-bridge", browserBridgeHandler(a))
 	models := newModelLookup(catalog.Discover)

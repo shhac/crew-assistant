@@ -161,7 +161,9 @@ func (c *Checker) check(ctx context.Context, cfg config.UpgradeSettings) (Result
 var explicitVersion = regexp.MustCompile(`(?m)^\s*version\s+["']([^"']+)["']`)
 var taggedURL = regexp.MustCompile(`(?m)^\s*url\s+["'][^"']*/(?:tags/|download/)(v?[^/"']+)(?:/|["'])`)
 
-func formulaVersion(body []byte) (string, error) {
+// FormulaVersion reads the release a Homebrew formula installs, from its
+// explicit version or its tagged download URL.
+func FormulaVersion(body []byte) (string, error) {
 	for _, re := range []*regexp.Regexp{explicitVersion, taggedURL} {
 		if m := re.FindSubmatch(body); len(m) > 1 {
 			v := strings.TrimSuffix(strings.TrimSuffix(string(m[1]), ".tar.gz"), ".zip")
@@ -178,7 +180,7 @@ func (c *Checker) fetch(ctx context.Context, cfg config.UpgradeSettings) (Result
 	if err != nil {
 		return Result{}, err
 	}
-	version, err := formulaVersion(body)
+	version, err := FormulaVersion(body)
 	if err != nil {
 		return Result{}, err
 	}
@@ -220,12 +222,17 @@ func (c *Checker) fetch(ctx context.Context, cfg config.UpgradeSettings) (Result
 	return Result{Available: version, Notes: bounded(release.Notes, NotesLimit), URL: release.URL}, nil
 }
 func (c *Checker) get(ctx context.Context, endpoint string) ([]byte, error) {
+	return Fetch(ctx, c.client, endpoint)
+}
+
+// Fetch reads a bounded update source, with errors safe to show the owner.
+func Fetch(ctx context.Context, client HTTPClient, endpoint string) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, errors.New("invalid update source URL")
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
-	response, err := c.client.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		return nil, errors.New("update source could not be reached")
 	}
