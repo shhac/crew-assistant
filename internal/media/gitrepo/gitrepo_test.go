@@ -75,7 +75,11 @@ func TestTheOwnersCheckoutIsNeverTouched(t *testing.T) {
 	if git(t, source, "status", "--porcelain") != before || git(t, source, "branch", "--list", "crew/*") != "" {
 		t.Fatal("working in the clone changed the owner's checkout")
 	}
-	if _, err = Open(ctx, t.TempDir(), t.TempDir(), nil, SignAsOwner); err == nil {
+	invalid := t.TempDir()
+	// TMPDIR may be inside a checkout. Stop Git discovering that parent;
+	// this fixture must remain invalid regardless of the test environment.
+	write(t, filepath.Join(invalid, ".git"), "not a git directory\n")
+	if _, err = Open(ctx, t.TempDir(), invalid, nil, SignAsOwner); err == nil {
 		t.Fatal("a folder that is not a repository was accepted")
 	}
 	if _, err = Open(ctx, t.TempDir(), source, []string{"../escape"}, SignAsOwner); err == nil {

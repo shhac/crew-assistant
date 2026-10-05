@@ -40,6 +40,7 @@ func pmAssetDraft(t *testing.T) (pmPush, core.Project, core.Task) {
 }
 
 func TestNullNestedLandingObstacleStillReadsTopLevel(t *testing.T) {
+	t.Parallel()
 	w, p, task := pmAssetDraft(t)
 	w.runner.pmLand = []string{`{"land":true,"reason":"generator unavailable","blocked_asset":null,"asset_creation":true,"requirement":"Frames"}`}
 	m, _ := w.a.mediumFor(context.Background(), p, task.Playbook)
@@ -54,8 +55,10 @@ func TestNullNestedLandingObstacleStillReadsTopLevel(t *testing.T) {
 }
 
 func TestMalformedNestedObstacleRetainsTopLevelAcrossCorrectionAndRestart(t *testing.T) {
+	t.Parallel()
 	for _, nested := range []string{`{}`, `"invalid"`, `{"requirement":45,"why":"unreadable","report_id":"unknown","asset_creation":false}`} {
 		t.Run(nested, func(t *testing.T) {
+			t.Parallel()
 			w, p, task := pmAssetDraft(t)
 			ctx := context.Background()
 			first := fmt.Sprintf(`{"land":true,"reason":"generator unavailable","blocked_asset":%s,"requirement":"Frames","why":"generator unavailable","asset_creation":true}`, nested)
@@ -98,6 +101,7 @@ func TestMalformedNestedObstacleRetainsTopLevelAcrossCorrectionAndRestart(t *tes
 }
 
 func TestUnclassifiedTopLevelPMObstacleSurvivesCorrectionAndRestart(t *testing.T) {
+	t.Parallel()
 	w, p, task := pmAssetDraft(t)
 	w.runner.pmLand = []string{
 		`{"land":true,"reason":"generator unavailable","blocked_asset":null,"requirement":"Frames","why":"generator unavailable"}`,
@@ -121,8 +125,10 @@ func TestUnclassifiedTopLevelPMObstacleSurvivesCorrectionAndRestart(t *testing.T
 }
 
 func TestMatchingPMFalseCorrectionResumesLandingAfterRestart(t *testing.T) {
+	t.Parallel()
 	for _, rejectDecision := range []bool{false, true} {
 		t.Run(fmt.Sprint(rejectDecision), func(t *testing.T) {
+			t.Parallel()
 			w, p, task := pmAssetDraft(t)
 			ctx := context.Background()
 			yes, no := true, false
@@ -163,6 +169,7 @@ func TestMatchingPMFalseCorrectionResumesLandingAfterRestart(t *testing.T) {
 }
 
 func TestPMLandingRetainsDistinctObstaclesThroughCorrections(t *testing.T) {
+	t.Parallel()
 	for name, second := range map[string]string{
 		"Icons mismatched ID":     `{"land":true,"reason":"ready","blocked_asset":{"report_id":"FRAMES_ID","requirement":"Icons","why":"generator unavailable","asset_creation":false}}`,
 		"unknown initial ID":      `{"land":true,"reason":"ready","blocked_asset":{"requirement":"Icons","why":"code only","asset_creation":false}}`,
@@ -179,6 +186,7 @@ func TestPMLandingRetainsDistinctObstaclesThroughCorrections(t *testing.T) {
 		"code-only then omission": `{"land":true,"reason":"ready"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			w := newPMPush(t, core.ApprovePM, "2", passes(4)...)
 			ctx := context.Background()
 			task, err := w.a.Core.QueueTask(ctx, w.p.ID, core.TaskInput{Objective: "Assets", Criteria: []string{"Frames", "Icons"}})
@@ -274,9 +282,11 @@ func TestPMLandingRetainsDistinctObstaclesThroughCorrections(t *testing.T) {
 }
 
 func TestPMLandingAcceptsEmptyCodeOnlyClassifications(t *testing.T) {
+	t.Parallel()
 	for _, extra := range []string{`"blocked_asset":null`, `"asset_creation":false`} {
 		for _, land := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/land=%v", extra, land), func(t *testing.T) {
+				t.Parallel()
 				w := newPMPush(t, core.ApprovePM, "2", passes(4)...)
 				ctx := context.Background()
 				task, err := w.a.Core.QueueTask(ctx, w.p.ID, core.TaskInput{Objective: "Code only"})

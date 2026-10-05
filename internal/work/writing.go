@@ -195,8 +195,7 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	// changed is set aside when the workspace is next reset, and its session
 	// resumes with the answer.
 	if in.question != "" {
-		reports, _ := parseOwnerSteps(in.unmet, len(t.Revisions), append(slices.Clone(t.Criteria), p.Brief.Criteria...), t.OwnersAlready(), t.TeamKept)
-		reports = bindWriterReports(p, t, reports)
+		reports := routedWriterReports(p, t, in.unmet, in)
 		return lp.askDesignAssets(ctx, t, writer, in.question, "", in.assets, reports, productionLinks(in, reports), p.Brief.Version, func(t *core.Task) {
 			t.WakeErrors = wakeErrors
 			if why != "" {
@@ -211,18 +210,24 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 		})
 	}
 	if in.unmet != "" && len(t.Revisions) > 0 && slices.ContainsFunc(t.Unreachable, func(u core.Unreachable) bool { return u.NeedsAssetReply() }) {
-		reports, _ := parseOwnerSteps(in.unmet, len(t.Revisions), append(slices.Clone(t.Criteria), p.Brief.Criteria...), t.OwnersAlready(), t.TeamKept)
-		reports = bindWriterReports(p, t, reports)
-		_, err := lp.Core.RecordAssetClassification(ctx, t, reports, writer, result.Session, p.Brief.Version)
-		if errors.Is(err, core.ErrConflict) {
-			return nil
+		if err := writerAssetClassificationError(p, t, in.unmet); err != nil {
+			return lp.assetClassificationFailed(ctx, t, writer, err)
 		}
-		return err
+		reports := routedWriterReports(p, t, in.unmet)
+		if len(reports) > 0 {
+			_, err := lp.Core.RecordAssetClassification(ctx, t, reports, writer, result.Session, p.Brief.Version)
+			if errors.Is(err, core.ErrConflict) {
+				return nil
+			}
+			return err
+		}
 	}
 	revision, err := m.snapshot(ctx, t, n)
 	if errors.Is(err, gitrepo.ErrNoChange) && in.unmet != "" && len(t.Revisions) > 0 {
-		reports, _ := parseOwnerSteps(in.unmet, len(t.Revisions), append(slices.Clone(t.Criteria), p.Brief.Criteria...), t.OwnersAlready(), t.TeamKept)
-		reports = bindWriterReports(p, t, reports)
+		if err := writerAssetClassificationError(p, t, in.unmet); err != nil {
+			return lp.assetClassificationFailed(ctx, t, writer, err)
+		}
+		reports := routedWriterReports(p, t, in.unmet)
 		if len(reports) > 0 {
 			_, err = lp.Core.RecordAssetClassification(ctx, t, reports, writer, result.Session, p.Brief.Version)
 			if errors.Is(err, core.ErrConflict) {
@@ -261,7 +266,11 @@ func (lp *Loop) recordDraft(ctx context.Context, p core.Project, t core.Task, m 
 	retained := slices.DeleteFunc(slices.Clone(t.Unreachable), func(u core.Unreachable) bool {
 		return !u.NeedsAssetReply() && u.Source != "review" && u.Source != "landing"
 	})
-	h.Unreachable = core.MergeReports(retained, bindWriterReports(p, t, h.Unreachable))
+	reports := core.MergeReports(retained, bindWriterReports(p, t, h.Unreachable))
+	if err := t.CheckLinkedAssetClassifications(reports); err != nil {
+		h.WakeErrors = append(h.WakeErrors, err.Error())
+	}
+	h.Unreachable = t.WithoutLinkedAssetReports(reports)
 	for i := range h.Unreachable {
 		if h.Unreachable[i].Source != "review" {
 			h.Unreachable[i].Revision = n

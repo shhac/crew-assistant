@@ -46,6 +46,9 @@ func (s *Service) RouteAsset(ctx context.Context, expected Task, u Unreachable, 
 		if i >= 0 && t.Unreachable[i].Why != u.Why && u.Source != "review" {
 			return ErrConflict
 		}
+		if i >= 0 && u.AssetCreation == nil {
+			u.AssetCreation = t.Unreachable[i].AssetCreation
+		}
 		u.Routed = reporter + ": asset creation belongs to the team's designer; implementer must supply a production spec (or correct classification)"
 		if u.AssetCreation == nil {
 			u.Routed = reporter + ": classify blocked work before owner escalation; asset creation belongs to the designer"
@@ -236,7 +239,10 @@ func (s *Service) RecordAssetClassification(ctx context.Context, expected Task, 
 				return fmt.Errorf("classification correction needs asset_creation")
 			}
 		}
-		t.Unreachable = MergeReports(t.Unreachable, reports)
+		if err := t.CheckLinkedAssetClassifications(reports); err != nil {
+			return err
+		}
+		t.Unreachable = t.WithoutLinkedAssetReports(MergeReports(t.Unreachable, reports))
 		for _, u := range reports {
 			if corrected := reportFor(t.Unreachable, ReportKey(u)); corrected != nil {
 				corrected.TextVersion = t.TextVersion
@@ -388,4 +394,88 @@ func reconcileAssetIntegration(t *Task, p *Project) {
 	if t.NeedsAssetIntegration() && (t.Status == TaskDeciding || t.Status == TaskLanding || t.Status == TaskAwaiting && t.PROpen()) && t.Delivering == nil && !t.PRMergePending() {
 		t.Status, t.Detail = TaskWriting, "Integrate delivered assets and provenance in a new draft"
 	}
+}
+
+// RouteReviewAssets persists the full classification set atomically.
+func (s *Service) RouteReviewAssets(ctx context.Context, expected Task, reports []Unreachable, reporter string, briefVersion int) (Task, error) {
+	return s.editTaskRecord(ctx, "", expected.ID, func(t *Task, v *Snapshot) error {
+		if t.Status != TaskDeciding || !sameAssetRecord(*t, expected) || !assetBriefCurrent(v, *t, briefVersion) {
+			return ErrConflict
+		}
+		if _, ok := t.Designer(); !ok {
+			return ErrConflict
+		}
+		p := project(v, t.ProjectID)
+		stored := false
+		for _, u := range reports {
+			if u.Source != "review" || u.ID == "" || u.AssetCreation == nil {
+				return ErrConflict
+			}
+			if old := reportFor(t.Unreachable, ReportKey(u)); old != nil {
+				u.Bound = old.Bound
+			}
+			if obsoleteAssetReport(*t, p, u) {
+				t.Unreachable = slices.DeleteFunc(t.Unreachable, func(old Unreachable) bool { return ReportKey(old) == ReportKey(u) })
+				t.KeepSettledEvidence(u)
+				recordTask(v, s.now().UTC(), t, "task.asset_obsolete", u.Criterion+": requirement removed before review routing")
+				continue
+			}
+			if slices.Contains(t.Criteria, u.Criterion) {
+				u.Bound = "task"
+			} else if p != nil && slices.Contains(p.Brief.Criteria, u.Criterion) {
+				u.Bound = "brief"
+			}
+			u.Routed = ""
+			if *u.AssetCreation {
+				u.Routed = reporter + ": supply a production spec or correct this classification"
+				t.Status, t.Detail = TaskWriting, u.Routed
+			}
+			if old := reportFor(t.Unreachable, ReportKey(u)); old != nil {
+				*old = u
+			} else {
+				t.Unreachable = append(t.Unreachable, u)
+			}
+			stored = true
+		}
+		t.UpdatedAt = s.now().UTC()
+		if stored {
+			recordTask(v, t.UpdatedAt, t, "task.review_assets", reporter+": recorded review classifications")
+		}
+		derive(v, t)
+		return nil
+	})
+}
+
+// WithoutLinkedAssetReports prevents a linked hand-off from being reopened.
+// ID-less writer reports match only their original revision and explanation;
+// another draft can report a new obstacle against the same requirement.
+func (t Task) WithoutLinkedAssetReports(reports []Unreachable) []Unreachable {
+	return slices.DeleteFunc(slices.Clone(reports), func(u Unreachable) bool { return t.LinkedAssetReport(u) != nil })
+}
+
+// LinkedAssetReport identifies an obstacle already covered by finished production.
+// ID-less reports must retain their original revision and explanation.
+func (t Task) LinkedAssetReport(u Unreachable) *Unreachable {
+	for _, d := range t.Design {
+		if d.Production == nil || d.Open() || len(d.Production.Remaining()) != 0 {
+			continue
+		}
+		for _, old := range d.AssetReports {
+			if u.ID != "" && old.ID == u.ID || u.ID == "" && old.ID == "" && old.Criterion == u.Criterion && old.Revision == u.Revision && old.Why == u.Why {
+				return &old
+			}
+		}
+	}
+	return nil
+}
+
+// CheckLinkedAssetClassifications refuses to silently discard a contradictory
+// correction of a fulfilled obstacle. New findings need their own identity.
+func (t Task) CheckLinkedAssetClassifications(reports []Unreachable) error {
+	for _, u := range reports {
+		if old := t.LinkedAssetReport(u); old != nil && old.AssetCreation != nil && u.AssetCreation != nil && *old.AssetCreation != *u.AssetCreation {
+			return fmt.Errorf("report %s is already covered by production; report a new obstacle separately instead of changing its classification", ReportKey(u))
+		}
+	}
+	return nil
 }

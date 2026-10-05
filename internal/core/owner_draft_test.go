@@ -33,3 +33,13 @@ func TestADraftByHandIsCheckedLikeAnyOther(t *testing.T) {
 		t.Fatalf("a landing task took a draft: %v", err)
 	}
 }
+
+func TestOrdinaryAdoptionIgnoresEmptyIntegrationFence(t *testing.T) {
+	s, current := routedDraftFixture(t)
+	stale := current
+	stale.TextVersion++
+	got, err := s.AdoptDraft(testContext, current.ID, Revision{Ref: "owner"}, false, OwnerIntegration{Expected: stale})
+	if err != nil || len(got.Revisions) != 2 {
+		t.Fatal(got, err)
+	}
+}

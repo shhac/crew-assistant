@@ -18,9 +18,11 @@ func (m failedAssetPublication) publish(context.Context, core.Task, string, stri
 }
 
 func TestAssetHandoffRecoveryRetainsAndSettlesRecordedCoverage(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []string{"before prepare", "prepared", "published", "committed", "failed publication"} {
 		for _, covered := range []bool{false, true} {
 			t.Run(stage+map[bool]string{false: "/suspended turn", true: "/integration turn"}[covered], func(t *testing.T) {
+				t.Parallel()
 				a, _, task, m, h := handoffAt(t)
 				ctx := context.Background()
 				var err error

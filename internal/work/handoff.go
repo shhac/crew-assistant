@@ -152,7 +152,10 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 	t.AnswerDirection(h.Seen, r.N, h.Reply, r.At)
 	// A prepared draft cannot erase PM evidence recorded or corrected after
 	// its turn began. Classification-only turns settle that evidence explicitly.
-	reports := slices.Clone(h.Unreachable)
+	if err := t.CheckLinkedAssetClassifications(h.Unreachable); err != nil {
+		h.WakeErrors = append(h.WakeErrors, err.Error())
+	}
+	reports := t.WithoutLinkedAssetReports(h.Unreachable)
 	for _, u := range t.Unreachable {
 		if u.Source == "landing" {
 			u.Revision = r.N

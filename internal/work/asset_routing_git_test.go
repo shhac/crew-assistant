@@ -18,8 +18,10 @@ import (
 )
 
 func TestIntegrationRestorationKeepsUnclassifiedLandingObstacle(t *testing.T) {
+	t.Parallel()
 	for _, source := range []string{"undo", "brief"} {
 		t.Run(source, func(t *testing.T) {
+			t.Parallel()
 			a, _, p, task := codeTask(t, pass, pass)
 			ctx := context.Background()
 			seatDesignerOn(t, a, p.ID, "codex")
@@ -105,6 +107,7 @@ func TestIntegrationRestorationKeepsUnclassifiedLandingObstacle(t *testing.T) {
 }
 
 func TestRoutedAssetHandBackIsCopiedIntoTheRecordedCommit(t *testing.T) {
+	t.Parallel()
 	a, runner, p, task := codeTask(t, pass, pass)
 	seatDesignerOn(t, a, p.ID, "codex")
 	runner.ending = func(n int) string {
@@ -170,8 +173,10 @@ func TestRoutedAssetHandBackIsCopiedIntoTheRecordedCommit(t *testing.T) {
 }
 
 func TestGitClassificationOnlyKeepsTheExistingDraftForDecision(t *testing.T) {
+	t.Parallel()
 	for _, pr := range []bool{false, true} {
 		t.Run(map[bool]string{false: "without PR", true: "open PR"}[pr], func(t *testing.T) {
+			t.Parallel()
 			a, _, p, task := codeTask(t, pass, pass)
 			seatDesigner(t, a, p.ID)
 			task = stepUntil(t, a, task.ID, func(t core.Task) bool { return len(t.Revisions) > 0 })
@@ -210,6 +215,7 @@ func TestGitClassificationOnlyKeepsTheExistingDraftForDecision(t *testing.T) {
 }
 
 func TestPartialProductionRequiresClassificationAndAssetCommit(t *testing.T) {
+	t.Parallel()
 	for _, restart := range []bool{false, true} {
 		for _, pr := range []bool{false, true} {
 			a, runner, p, task := codeTask(t, pass, pass)
@@ -313,6 +319,7 @@ func TestPartialProductionRequiresClassificationAndAssetCommit(t *testing.T) {
 }
 
 func TestPMAssetLandingHoldRoutesBeforeOwnerDecision(t *testing.T) {
+	t.Parallel()
 	for _, approve := range []bool{false, true} {
 		for _, openPR := range []bool{false, true} {
 			for _, asset := range []bool{false, true} {
@@ -320,6 +327,7 @@ func TestPMAssetLandingHoldRoutesBeforeOwnerDecision(t *testing.T) {
 					continue
 				}
 				t.Run(fmt.Sprintf("approve=%v/PR=%v/asset=%v", approve, openPR, asset), func(t *testing.T) {
+					t.Parallel()
 					reply := `{"land":false,"reason":"Wait for another change"}`
 					if asset {
 						reply = `{"land":false,"reason":"Cannot generate frames here","blocked_asset":{"requirement":"Frames","why":"generator is unavailable to implementer","asset_creation":true}}`
@@ -384,6 +392,7 @@ func TestPMAssetLandingHoldRoutesBeforeOwnerDecision(t *testing.T) {
 }
 
 func TestMalformedPMLandingAssetReportDoesNotBecomeOwnerHold(t *testing.T) {
+	t.Parallel()
 	for name, reply := range map[string]string{
 		"missing requirement":           `{"land":false,"reason":"Generate frames","asset_creation":true}`,
 		"nested string":                 `{"land":false,"reason":"Generate frames","blocked_asset":{"requirement":"Frames","why":"sandbox","asset_creation":"true"}}`,
@@ -392,6 +401,7 @@ func TestMalformedPMLandingAssetReportDoesNotBecomeOwnerHold(t *testing.T) {
 		"nested number":                 `{"land":true,"reason":"Ready","blocked_asset":{"requirement":"Frames","why":"sandbox","asset_creation":1}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			w := newPMPush(t, core.ApprovePM, "2", passes(4)...)
 			w.runner.pmLand = []string{reply, reply}
 			ctx := context.Background()
@@ -427,6 +437,7 @@ func TestMalformedPMLandingAssetReportDoesNotBecomeOwnerHold(t *testing.T) {
 }
 
 func TestMalformedSiblingWriterReportSurvivesProductionRestart(t *testing.T) {
+	t.Parallel()
 	original := "```owner-step\n" + `[{"requirement":"Frames","why":"sandbox","asset_creation":true},{"requirement":"Icons","why":"sandbox","asset_creation":"true"}]` + "\n```"
 	spec := productionBlock(1)
 	spec = strings.Replace(spec, "Match the existing art.", "Requirement: Frames", 1)
@@ -454,11 +465,13 @@ func TestMalformedSiblingWriterReportSurvivesProductionRestart(t *testing.T) {
 }
 
 func TestPMLandingCorrectionCannotOmitAssetObstacle(t *testing.T) {
+	t.Parallel()
 	for name, reply := range map[string]string{
 		"nested": `{"land":false,"blocked_asset":{"requirement":"Frames","why":"sandbox","asset_creation":true}}`,
 		"top":    `{"land":false,"requirement":"Frames","asset_creation":true}`,
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			w := newPMPush(t, core.ApprovePM, "2", passes(4)...)
 			w.runner.pmLand = []string{reply, `{"land":true,"reason":"Ready"}`}
 			ctx := context.Background()
@@ -494,6 +507,7 @@ func TestPMLandingCorrectionCannotOmitAssetObstacle(t *testing.T) {
 }
 
 func TestRetiredProductionAllowsUnchangedPR(t *testing.T) {
+	t.Parallel()
 	for _, reopen := range []bool{false, true} {
 		for _, pr := range []bool{true} {
 			a, runner, p, task := codeTask(t, pass, pass)
@@ -632,6 +646,7 @@ func TestRetiredProductionAllowsUnchangedPR(t *testing.T) {
 }
 
 func TestAmbiguousCoverageCorrectionRetainsUncoveredAssets(t *testing.T) {
+	t.Parallel()
 	for _, restart := range []bool{false, true} {
 		for _, pr := range []bool{false, true} {
 			a, runner, p, task := codeTask(t, pass, pass)
@@ -695,11 +710,13 @@ func TestAmbiguousCoverageCorrectionRetainsUncoveredAssets(t *testing.T) {
 }
 
 func TestPMLandingCorrectionCannotNullAssetObstacle(t *testing.T) {
+	t.Parallel()
 	for name, reply := range map[string]string{
 		"nested": `{"land":false,"blocked_asset":{"requirement":"Frames","why":"sandbox","asset_creation":true}}`,
 		"top":    `{"land":false,"requirement":"Frames","asset_creation":true}`,
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			w := newPMPush(t, core.ApprovePM, "2", passes(4)...)
 			w.runner.pmLand = []string{reply, `{"land":false,"reason":"Ready","blocked_asset":null}`}
 			ctx := context.Background()

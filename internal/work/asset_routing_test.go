@@ -11,6 +11,7 @@ import (
 )
 
 func TestMixedMalformedPMFindingsRetainConfirmedAssets(t *testing.T) {
+	t.Parallel()
 	reply := `{"findings":[{"finding":1,"asset_creation":true},{"finding":2,"asset_creation":"false"}]}`
 	runner := &scriptedRunner{escalate: []string{reply, reply}}
 	a, p, task := draftTeam(t, runner, true, "1")
@@ -42,6 +43,7 @@ func TestMixedMalformedPMFindingsRetainConfirmedAssets(t *testing.T) {
 }
 
 func TestProductionLinksNormalizedQuotes(t *testing.T) {
+	t.Parallel()
 	for _, quote := range []string{"Frames", strings.Repeat("x", 510)} {
 		criterion := "Generate Frames"
 		if len(quote) > 500 {
@@ -60,6 +62,7 @@ func TestProductionLinksNormalizedQuotes(t *testing.T) {
 }
 
 func TestFirstDraftRetainsRestoredAssetWithoutDesigner(t *testing.T) {
+	t.Parallel()
 	a, _, current := draftTeam(t, &scriptedRunner{reviews: []string{pass}}, false, "2")
 	current, err := a.Core.UpdateTask(context.Background(), current.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		yes := true
@@ -80,6 +83,7 @@ func TestFirstDraftRetainsRestoredAssetWithoutDesigner(t *testing.T) {
 }
 
 func TestProductionCorrectionRetainsUncoveredUnknownReport(t *testing.T) {
+	t.Parallel()
 	task := core.Task{Roles: []core.Role{{Name: "Designer", Kinds: []string{core.RoleDesigner}}}}
 	previous := `[{"requirement":"Frames","why":"sandbox","asset_creation":true},{"requirement":"Decode images","why":"decoder blocked"}]`
 	in := parseWriterReply("```production\nframe: PNG\n\nRequirement: Frames\n```", true)
@@ -116,6 +120,7 @@ func TestProductionCorrectionRetainsUncoveredUnknownReport(t *testing.T) {
 }
 
 func TestProductionWithMultipleDurableRoutesRequiresCoverage(t *testing.T) {
+	t.Parallel()
 	for _, classified := range []bool{false, true} {
 		runner := &scriptedRunner{}
 		a, p, task := draftTeam(t, runner, false, "2")
@@ -160,6 +165,7 @@ func TestProductionWithMultipleDurableRoutesRequiresCoverage(t *testing.T) {
 }
 
 func TestProductionCoverageMustResolvePendingReports(t *testing.T) {
+	t.Parallel()
 	yes := true
 	corrected := core.Task{Roles: []core.Role{{Name: "Designer", Kinds: []string{core.RoleDesigner}}}, Unreachable: []core.Unreachable{{Criterion: "Frames", AssetCreation: &yes}, {Criterion: "Decode", Routed: "classification required"}}}
 	entries := writerReply{assets: []core.WantedAsset{{Name: "frame", Want: "PNG"}}, requirements: []string{"Decode"}, unmet: `[{"requirement":"Decode","why":"code only","asset_creation":false}]`}
@@ -200,6 +206,7 @@ func TestProductionCoverageMustResolvePendingReports(t *testing.T) {
 }
 
 func TestFailedRoundLimitCorrectionPreservesExplicitAssetFinding(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{escalate: []string{`{"findings":[{"finding":1,"asset_creation":true}]}`, "invalid"}}
 	a, p, task := draftTeam(t, runner, true, "1")
 	seatDesigner(t, a, p.ID)
@@ -226,6 +233,7 @@ func TestFailedRoundLimitCorrectionPreservesExplicitAssetFinding(t *testing.T) {
 }
 
 func TestPreparedHandoffCannotRestoreRemovedLegacyBriefReport(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{}
 	a, p, task := draftTeam(t, runner, false, "2")
 	task = stepUntil(t, a, task.ID, func(t core.Task) bool { return len(t.Revisions) > 0 })
@@ -255,6 +263,7 @@ func TestPreparedHandoffCannotRestoreRemovedLegacyBriefReport(t *testing.T) {
 }
 
 func TestDesignerDisappearanceAfterProductionRequestRestoresLinkedRequirement(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{}
 	a, p, task := draftTeam(t, runner, false, "2")
 	seatDesignerOn(t, a, p.ID, "codex")
@@ -312,6 +321,7 @@ func TestDesignerDisappearanceAfterProductionRequestRestoresLinkedRequirement(t 
 }
 
 func TestProductionCorrectionCoversOnlyNamedAssetReport(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{writerReplies: []string{
 		"```owner-step\n[{\"requirement\":\"Frames\",\"why\":\"generator unavailable\",\"asset_creation\":true},{\"requirement\":\"Icons\",\"why\":\"generator unavailable\",\"asset_creation\":true}]\n```",
 		"```production\nframe: PNG 32x32\n\nRequirement: Frames\n```",
@@ -339,6 +349,7 @@ func TestProductionCorrectionCoversOnlyNamedAssetReport(t *testing.T) {
 }
 
 func TestReviewFindingsSharingCriterionAndRecurringDrafts(t *testing.T) {
+	t.Parallel()
 	for _, pm := range []bool{false, true} {
 		t.Run(fmt.Sprint("PM=", pm), func(t *testing.T) {
 			a, p, task := draftTeam(t, &scriptedRunner{}, pm, "1")
@@ -404,6 +415,7 @@ func TestReviewFindingsSharingCriterionAndRecurringDrafts(t *testing.T) {
 }
 
 func TestCriterionFreeReviewCorrectionKeepsNormalizedIdentity(t *testing.T) {
+	t.Parallel()
 	for _, note := range []string{"Animation needs timing fixed", strings.Repeat("Long unmatched note. ", 40)} {
 		a, p, task := draftTeam(t, &scriptedRunner{}, false, "1")
 		seatDesigner(t, a, p.ID)
@@ -433,6 +445,7 @@ func TestCriterionFreeReviewCorrectionKeepsNormalizedIdentity(t *testing.T) {
 }
 
 func TestCompletedRewriteDropsOmittedOrdinaryCodeReports(t *testing.T) {
+	t.Parallel()
 	a, p, task := draftTeam(t, &scriptedRunner{}, false, "2")
 	task = stepUntil(t, a, task.ID, func(t core.Task) bool { return len(t.Revisions) > 0 })
 	ctx := context.Background()
@@ -454,6 +467,7 @@ func TestCompletedRewriteDropsOmittedOrdinaryCodeReports(t *testing.T) {
 }
 
 func TestSingletonOwnerStepWithoutDesignerKeepsExistingContract(t *testing.T) {
+	t.Parallel()
 	for _, pm := range []bool{false, true} {
 		t.Run(fmt.Sprint("PM=", pm), func(t *testing.T) {
 			runner := &scriptedRunner{reviews: []string{pass}, writerText: "Done.\n```owner-step\n{\"requirement\":\"Run on owner machine\",\"why\":\"requires owner machine\"}\n```", ownerStep: []string{`{"owner_step":true,"step":"Run on owner machine","reason":"Only the owner can do this"}`}}
@@ -468,6 +482,7 @@ func TestSingletonOwnerStepWithoutDesignerKeepsExistingContract(t *testing.T) {
 }
 
 func TestUnclassifiedReviewAfterTeamChangeUsesRoundLimitDecision(t *testing.T) {
+	t.Parallel()
 	a, p, task := draftTeam(t, &scriptedRunner{}, false, "1")
 	seatDesigner(t, a, p.ID)
 	task = stepUntil(t, a, task.ID, func(t core.Task) bool { return len(t.Revisions) > 0 })
@@ -513,6 +528,7 @@ func TestUnclassifiedReviewAfterTeamChangeUsesRoundLimitDecision(t *testing.T) {
 }
 
 func TestAssetReportsRequireProductionBeforeSnapshot(t *testing.T) {
+	t.Parallel()
 	task := core.Task{Roles: []core.Role{{Name: "Dee", Kinds: []string{core.RoleDesigner}}}}
 	for _, c := range []struct {
 		name, block string
@@ -562,6 +578,7 @@ func TestAssetReportsRequireProductionBeforeSnapshot(t *testing.T) {
 }
 
 func TestCodeOnlyReviewClassificationResumesRoundLimitDecision(t *testing.T) {
+	t.Parallel()
 	for _, pm := range []bool{false, true} {
 		t.Run(map[bool]string{false: "absent PM", true: "failed PM"}[pm], func(t *testing.T) {
 			runner := &scriptedRunner{escalate: []string{"invalid", "invalid", "invalid", "invalid"}}
@@ -612,6 +629,7 @@ func TestCodeOnlyReviewClassificationResumesRoundLimitDecision(t *testing.T) {
 }
 
 func TestBusyPMDoesNotEscalateAnUnclassifiedReport(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{}
 	a, p, task := draftTeam(t, runner, true, "2")
 	seatDesigner(t, a, p.ID)
@@ -659,6 +677,7 @@ func TestBusyPMDoesNotEscalateAnUnclassifiedReport(t *testing.T) {
 }
 
 func TestTeamChangeBeforeSpecReportsTheMissingDesigner(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{}
 	a, p, task := draftTeam(t, runner, false, "2")
 	seatDesigner(t, a, p.ID)
@@ -719,6 +738,7 @@ func TestTeamChangeBeforeSpecReportsTheMissingDesigner(t *testing.T) {
 }
 
 func TestRecordedAssetReportRoutesInsteadOfEscalating(t *testing.T) {
+	t.Parallel()
 	yes, no := true, false
 	for _, c := range []struct {
 		name           string
@@ -774,6 +794,7 @@ func TestRecordedAssetReportRoutesInsteadOfEscalating(t *testing.T) {
 }
 
 func TestAssetReportCorrectionRequestsProductionWithoutADraft(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{writerReplies: []string{
 		"```owner-step\n[{\"requirement\":\"Generate every animation frame\",\"why\":\"generation unavailable in my sandbox\",\"asset_creation\":true}]\n```",
 		productionBlock(1),
@@ -791,6 +812,7 @@ func TestAssetReportCorrectionRequestsProductionWithoutADraft(t *testing.T) {
 }
 
 func TestMixedUnclassifiedCorrectionPreservesReports(t *testing.T) {
+	t.Parallel()
 	for _, correction := range []string{productionBlock(1), productionBlock(1) + "\n```owner-step\n[{\"requirement\":\"Timing\",\"why\":\"live test\",\"asset_creation\":false}]\n```"} {
 		runner := &scriptedRunner{writerReplies: []string{"```owner-step\n[{\"requirement\":\"Frames\",\"why\":\"sandbox generator unavailable\"},{\"requirement\":\"Timing\",\"why\":\"owner machine\",\"asset_creation\":false}]\n```", correction}}
 		a, p, task := draftTeam(t, runner, false, "2")
@@ -813,6 +835,7 @@ func TestMixedUnclassifiedCorrectionPreservesReports(t *testing.T) {
 }
 
 func TestProductionSpecLinksSelectedReportsAndPreservesCodeCorrections(t *testing.T) {
+	t.Parallel()
 	for _, named := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unrelated artwork with code correction", true: "named routed requirement"}[named], func(t *testing.T) {
 			runner := &scriptedRunner{}
@@ -861,6 +884,7 @@ func TestProductionSpecLinksSelectedReportsAndPreservesCodeCorrections(t *testin
 }
 
 func TestCombinedImplementerDesignerCanRequestProduction(t *testing.T) {
+	t.Parallel()
 	runner := &scriptedRunner{writerReplies: []string{"```owner-step\n[{\"requirement\":\"Frames\",\"why\":\"need generated art\",\"asset_creation\":true}]\n```", productionBlock(1)}}
 	a, p, task := draftTeam(t, runner, false, "2")
 	pb := *p.Playbook
@@ -875,6 +899,7 @@ func TestCombinedImplementerDesignerCanRequestProduction(t *testing.T) {
 }
 
 func TestPMDecisionPromptsAndExamplesUsePinnedDesigner(t *testing.T) {
+	t.Parallel()
 	with := core.Task{Roles: []core.Role{{Name: "Dee", Kinds: []string{core.RoleDesigner}}}, Revisions: []core.Revision{{N: 1}}}
 	p := core.Project{Playbook: &core.Playbook{Land: core.LandPolicy{}}}
 	for _, task := range []core.Task{with, {Revisions: with.Revisions}} {
@@ -900,6 +925,7 @@ func TestPMDecisionPromptsAndExamplesUsePinnedDesigner(t *testing.T) {
 }
 
 func TestRoundLimitAssetFindingReturnsToWriting(t *testing.T) {
+	t.Parallel()
 	for _, asset := range []bool{true, false} {
 		t.Run(map[bool]string{true: "asset", false: "code"}[asset], func(t *testing.T) {
 			runner := &scriptedRunner{escalate: []string{strings.Replace(judgement(true, false, false, false, false), `"finding": 1`, map[bool]string{true: `"finding": 1, "asset_creation": true`, false: `"finding": 1, "asset_creation": false`}[asset], 1)}}
@@ -932,6 +958,7 @@ func TestRoundLimitAssetFindingReturnsToWriting(t *testing.T) {
 }
 
 func TestProductionCoverageUsesCompleteReportIdentity(t *testing.T) {
+	t.Parallel()
 	yes := true
 	for _, same := range []bool{false, true} {
 		criteria := []string{"Blue frames", "Red frames"}
@@ -971,6 +998,7 @@ func TestProductionCoverageUsesCompleteReportIdentity(t *testing.T) {
 }
 
 func TestAmbiguousProductionCorrectionPreservesInitialReports(t *testing.T) {
+	t.Parallel()
 	task := core.Task{Roles: []core.Role{{Name: "D", Kinds: []string{core.RoleDesigner}}}}
 	in := parseWriterReply("```production\nblue: PNG\n\nRequirement: Frames\n```", true)
 	in.unmet = `[{"requirement":"Blue frames","why":"sandbox","asset_creation":true},{"requirement":"Red frames","why":"sandbox","asset_creation":true}]`

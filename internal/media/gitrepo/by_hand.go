@@ -70,3 +70,44 @@ func resolve(ctx context.Context, dir, ref string) (string, error) {
 	}
 	return strings.TrimSpace(out), nil
 }
+
+// HasBlob reports whether a commit contains the exact bytes, without running
+// filters or checking out any workspace content.
+func (r Repo) HasBlob(ctx context.Context, commit string, data []byte) (bool, error) {
+	return r.hasBlob(ctx, commit, data, nil)
+}
+
+// HasChangedBlob requires an exact blob at a path changed by this draft.
+// NUL-delimited paths preserve whitespace in asset filenames.
+func (r Repo) HasChangedBlob(ctx context.Context, from, commit string, data []byte) (bool, error) {
+	out, err := run(ctx, r.Workspace(), "diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", from+".."+commit)
+	if err != nil {
+		return false, err
+	}
+	paths := make(map[string]bool)
+	for _, path := range strings.Split(out, "\x00") {
+		if path != "" {
+			paths[path] = true
+		}
+	}
+	return r.hasBlob(ctx, commit, data, paths)
+}
+
+func (r Repo) hasBlob(ctx context.Context, commit string, data []byte, paths map[string]bool) (bool, error) {
+	hash, err := runInput(ctx, r.Workspace(), gitEnvironment(), data, "hash-object", "--no-filters", "--stdin")
+	if err != nil {
+		return false, err
+	}
+	tree, err := run(ctx, r.Workspace(), "ls-tree", "-r", "-z", commit)
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range strings.Split(tree, "\x00") {
+		metadata, path, _ := strings.Cut(entry, "\t")
+		fields := strings.Fields(metadata)
+		if len(fields) == 3 && fields[1] == "blob" && fields[2] == strings.TrimSpace(hash) && (paths == nil || paths[path]) {
+			return true, nil
+		}
+	}
+	return false, nil
+}

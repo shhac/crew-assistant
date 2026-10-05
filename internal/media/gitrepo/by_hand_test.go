@@ -103,3 +103,69 @@ func TestCheckoutDraftKeepsTheOwnersWork(t *testing.T) {
 		t.Fatal("moved the branch the owner is on")
 	}
 }
+
+func TestHasBlobUsesExactBytesWithoutFilters(t *testing.T) {
+	ctx := context.Background()
+	source := t.TempDir()
+	git(t, source, "init", "-q", "-b", "main")
+	write(t, filepath.Join(source, "asset.bin"), "exact asset bytes")
+	git(t, source, "add", ".")
+	git(t, source, "commit", "-q", "-m", "Asset")
+	r, err := Open(ctx, t.TempDir(), source, nil, SignAsOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := git(t, r.Workspace(), "rev-parse", "HEAD")
+	// A filter that always fails guards against a future hash-object --path
+	// (plain --stdin does not consult attributes, even without --no-filters).
+	git(t, r.Workspace(), "config", "filter.block.clean", "false")
+	git(t, r.Workspace(), "config", "filter.block.required", "true")
+	write(t, filepath.Join(r.Workspace(), ".gitattributes"), "* filter=block")
+	for _, data := range []string{"exact asset bytes", "changed bytes"} {
+		ok, err := r.HasBlob(ctx, commit, []byte(data))
+		if err != nil || ok != (data == "exact asset bytes") {
+			t.Fatal(ok, err)
+		}
+	}
+	if _, err = r.HasBlob(ctx, "missing", []byte("exact asset bytes")); err == nil {
+		t.Fatal("missing commit accepted")
+	}
+}
+
+// Existing coverage alone cannot turn an unrelated edit into integration.
+func TestHasChangedBlobRequiresChangedCoveredPath(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	source := t.TempDir()
+	git(t, source, "init", "-q", "-b", "main")
+	write(t, filepath.Join(source, "asset with spaces.bin"), "exact bytes")
+	git(t, source, "add", ".")
+	git(t, source, "commit", "-q", "-m", "Asset")
+	base := git(t, source, "rev-parse", "HEAD")
+	write(t, filepath.Join(source, "other.txt"), "unrelated")
+	git(t, source, "add", ".")
+	git(t, source, "commit", "-q", "-m", "Unrelated")
+	unrelated := git(t, source, "rev-parse", "HEAD")
+	write(t, filepath.Join(source, "copied asset.bin"), "exact bytes")
+	git(t, source, "add", ".")
+	git(t, source, "commit", "-q", "-m", "Copy asset")
+	changed := git(t, source, "rev-parse", "HEAD")
+	r, err := Open(ctx, t.TempDir(), source, nil, SignAsOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		from, to string
+		want     bool
+	}{
+		{base, base, false}, {base, unrelated, false}, {unrelated, changed, true},
+	} {
+		got, err := r.HasChangedBlob(ctx, tc.from, tc.to, []byte("exact bytes"))
+		if err != nil || got != tc.want {
+			t.Fatal(tc, got, err)
+		}
+	}
+	if _, err := r.HasChangedBlob(ctx, "missing", changed, []byte("exact bytes")); err == nil {
+		t.Fatal("missing comparison commit accepted")
+	}
+}

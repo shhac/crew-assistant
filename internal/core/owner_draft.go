@@ -17,7 +17,7 @@ const DraftByOwner = "owner"
 // owner, who has seen it: the reviewers' passes are theirs, but QA still
 // runs, since a broken target costs more than one check. A decision the
 // task waited on is closed, since the draft it asked about is superseded.
-func (s *Service) AdoptDraft(ctx context.Context, taskID string, r Revision, approve bool) (Task, error) {
+func (s *Service) AdoptDraft(ctx context.Context, taskID string, r Revision, approve bool, integration ...OwnerIntegration) (Task, error) {
 	return s.editTaskRecord(ctx, "", taskID, func(t *Task, v *Snapshot) error {
 		switch {
 		case t.Delivering != nil || t.PRMergePending():
@@ -34,6 +34,21 @@ func (s *Service) AdoptDraft(ctx context.Context, taskID string, r Revision, app
 		p := project(v, t.ProjectID)
 		if p == nil {
 			return ErrNotFound
+		}
+		for _, evidence := range integration {
+			if len(evidence.Requests) == 0 {
+				continue
+			}
+			if !sameAssetRecord(*t, evidence.Expected) {
+				// The draft is still adoptable; stale coverage cannot settle assets.
+				continue
+			}
+			for i := range t.Design {
+				d := &t.Design[i]
+				if slices.Contains(evidence.Requests, d.ID) && !d.Open() && d.Production != nil && len(d.Production.Remaining()) == 0 {
+					d.IntegrationPending, d.IntegrationSuspended = false, false
+				}
+			}
 		}
 		now := s.now().UTC()
 		if d := decision(v, t.DecisionID); d != nil && d.Status == DecisionOpen {
@@ -54,4 +69,11 @@ func (s *Service) AdoptDraft(ctx context.Context, taskID string, r Revision, app
 		derive(v, t)
 		return nil
 	})
+}
+
+// OwnerIntegration carries verified byte coverage and the record it was checked
+// against. Adoption and settlement share the same fenced transaction.
+type OwnerIntegration struct {
+	Expected Task
+	Requests []string
 }

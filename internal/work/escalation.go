@@ -59,11 +59,22 @@ func (lp *Loop) escalate(ctx context.Context, p core.Project, t core.Task, curre
 	}
 	if judged != nil {
 		if _, ok := t.Designer(); ok {
+			var reports []core.Unreachable
 			for _, j := range judged.Findings {
-				if j.AssetCreation != nil && *j.AssetCreation {
-					f := findings[j.Finding-1]
-					return lp.routeAsset(ctx, p, t, reviewReport(p, t, f, j.AssetCreation), seat)
+				if j.AssetCreation != nil {
+					reports = append(reports, reviewReport(p, t, findings[j.Finding-1], j.AssetCreation))
 				}
+			}
+			updated, err := lp.Core.RouteReviewAssets(ctx, t, reports, seat, p.Brief.Version)
+			if errors.Is(err, core.ErrConflict) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			t = updated
+			if t.Status == core.TaskWriting || judged.Partial {
+				return nil
 			}
 		}
 		choice, why := recommend(*judged, findings, passed, waiting)
@@ -170,6 +181,7 @@ func followUpFrom(t core.Task, findings []finding) *core.TaskInput {
 // escalationJudgement is the PM's reading of what remains at the round
 // limit.
 type escalationJudgement struct {
+	Partial  bool               `json:"-"`
 	Findings []findingJudgement `json:"findings"`
 	WrongWay *bool              `json:"wrong_way"`
 	// WaitingNeedsFix is whether a task waiting on this one needs what
@@ -311,7 +323,7 @@ func (lp *Loop) judgeEscalation(ctx context.Context, p core.Project, t core.Task
 	})
 	if err != nil || parseErr != nil {
 		if hasProductionDesigner(t) && len(assetFindings) > 0 {
-			return seat.Name, &escalationJudgement{Findings: assetFindings}, ""
+			return seat.Name, &escalationJudgement{Findings: assetFindings, Partial: true}, ""
 		}
 		return "", nil, ""
 	}
@@ -436,7 +448,7 @@ func parseOwnerSteps(block string, n int, criteria, owners, kept []string) ([]co
 	for _, e := range entries {
 		c := matchCriterion(criteria, e.Requirement)
 		if slices.Contains(kept, c) {
-			if !slices.ContainsFunc(retained, func(u core.Unreachable) bool { return u.Criterion == c }) {
+			if !slices.ContainsFunc(retained, func(u core.Unreachable) bool { return u.Criterion == c && u.ID == e.ReportID }) {
 				retained = append(retained, core.Unreachable{ID: e.ReportID, AssetCreation: e.AssetCreation, Criterion: c, Why: text.Clip(strings.TrimSpace(e.Why), 600), Revision: n})
 			}
 			continue

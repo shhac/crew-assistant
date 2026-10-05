@@ -2,8 +2,11 @@ package work
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -95,6 +98,7 @@ func (lp *Loop) AdoptDraft(ctx context.Context, projectID, taskID, ref, note str
 		unlock()
 		return core.Task{}, err
 	}
+	integrated := lp.ownerIntegratedAssets(ctx, g.repo, t, r.Ref)
 	// Kept as any revision is before it is recorded. One the record then
 	// refuses is removed when the loop next starts.
 	name, err := lp.nextRef(ctx, t.ID)
@@ -105,7 +109,11 @@ func (lp *Loop) AdoptDraft(ctx context.Context, projectID, taskID, ref, note str
 	if err != nil {
 		return core.Task{}, err
 	}
-	out, err := lp.Core.AdoptDraft(ctx, t.ID, r, approve)
+	var evidence []core.OwnerIntegration
+	if len(integrated) > 0 {
+		evidence = append(evidence, core.OwnerIntegration{Expected: t, Requests: integrated})
+	}
+	out, err := lp.Core.AdoptDraft(ctx, t.ID, r, approve, evidence...)
 	lp.nudgeUnless(err)
 	return out, err
 }
@@ -166,4 +174,62 @@ func (lp *Loop) taskAt(ctx context.Context, projectID, taskID string) (core.Task
 // running says a role is at work on the task right now.
 func (lp *Loop) running(taskID string) bool {
 	return lp.turns.has(taskID)
+}
+
+// ownerIntegratedAssets checks immutable commit contents while adoption holds
+// the task claim and repository lock. Unreadable evidence leaves work pending.
+func (lp *Loop) ownerIntegratedAssets(ctx context.Context, repo gitrepo.Repo, t core.Task, commit string) []string {
+	if len(t.Revisions) == 0 {
+		return nil
+	}
+	files, err := repo.ChangedFiles(ctx, t.Revisions[len(t.Revisions)-1].Ref, commit)
+	if err != nil || len(files) == 0 {
+		return nil
+	}
+	changed := false
+	contains := func(id, hash string) bool {
+		a, path, err := lp.Core.OpenAttachment(ctx, t.ProjectID, t.ID, id)
+		if err != nil {
+			return false
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return false
+		}
+		data, err := io.ReadAll(io.LimitReader(f, a.Size+1))
+		f.Close()
+		if err != nil || int64(len(data)) != a.Size {
+			return false
+		}
+		if hash != "" && fmt.Sprintf("%x", sha256.Sum256(data)) != hash {
+			return false
+		}
+		if !changed {
+			added, err := repo.HasChangedBlob(ctx, t.Revisions[len(t.Revisions)-1].Ref, commit, data)
+			if err != nil {
+				return false
+			}
+			if added {
+				changed = true
+				return true
+			}
+		}
+		ok, err := repo.HasBlob(ctx, commit, data)
+		return err == nil && ok
+	}
+	var integrated []string
+	for _, d := range t.Design {
+		if (!d.IntegrationPending && !d.IntegrationSuspended) || d.Open() || d.Production == nil || len(d.Production.Delivered) == 0 || len(d.Production.Remaining()) != 0 {
+			continue
+		}
+		changed = false
+		covered := d.Production.Provenance != "" && contains(d.Production.Provenance, "")
+		for _, asset := range d.Production.Delivered {
+			covered = covered && asset.SHA256 != "" && contains(asset.Attachment, asset.SHA256)
+		}
+		if covered && changed {
+			integrated = append(integrated, d.ID)
+		}
+	}
+	return integrated
 }

@@ -45,6 +45,18 @@ func writerAssetError(t core.Task, in writerReply) error {
 			return errors.New("owner-step needs valid JSON and asset_creation classification")
 		}
 		for _, e := range entries {
+			linked := t.LinkedAssetReport(core.Unreachable{ID: e.ReportID})
+			if linked != nil && matchCriterion([]string{linked.Criterion}, e.Requirement) == linked.Criterion {
+				if e.AssetCreation == nil {
+					return errors.New("classify each blocked requirement with asset_creation true or false")
+				}
+				if err := t.CheckLinkedAssetClassifications([]core.Unreachable{{ID: e.ReportID, AssetCreation: e.AssetCreation}}); err != nil {
+					return err
+				}
+				// Repeating settled evidence is harmless. An explicit production
+				// spec can still request a revision without reopening this report.
+				continue
+			}
 			if e.ReportID != "" && !slices.ContainsFunc(t.Unreachable, func(u core.Unreachable) bool {
 				return u.ID == e.ReportID && matchCriterion([]string{u.Criterion}, e.Requirement) == u.Criterion
 			}) {
@@ -108,7 +120,7 @@ func writerAssetError(t core.Task, in writerReply) error {
 		}
 		return nil
 	}
-	for _, u := range t.Unreachable {
+	for _, u := range t.WithoutLinkedAssetReports(t.Unreachable) {
 		if u.NeedsAssetReply() {
 			entries, _ := ownerStepEntries(in.unmet)
 			matched := false
@@ -364,4 +376,31 @@ func coverageKey(reports []core.Unreachable, quote string) string {
 	}
 	key, _ := resolveCoverage(entries, quote)
 	return key
+}
+
+// routedWriterReports preserves kept team asset work, including its identity.
+func routedWriterReports(p core.Project, t core.Task, block string, production ...writerReply) []core.Unreachable {
+	reports, kept := parseOwnerSteps(block, len(t.Revisions), append(slices.Clone(t.Criteria), p.Brief.Criteria...), t.OwnersAlready(), t.TeamKept)
+	for _, u := range kept {
+		covered := len(production) > 0 && len(production[0].assets) > 0 && u.AssetCreation != nil && *u.AssetCreation && (len(production[0].requirements) == 0 || productionCovers(production[0], ownerStepEntry{ReportID: u.ID, Requirement: u.Criterion}))
+		if covered || slices.ContainsFunc(t.Unreachable, func(old core.Unreachable) bool {
+			return old.Routed != "" && (u.ID != "" && u.ID == old.ID || u.ID == "" && u.Criterion == old.Criterion)
+		}) {
+			reports = append(reports, u)
+		}
+	}
+	return t.WithoutLinkedAssetReports(bindWriterReports(p, t, reports))
+}
+
+func writerAssetClassificationError(p core.Project, t core.Task, block string) error {
+	reports, kept := parseOwnerSteps(block, len(t.Revisions), append(slices.Clone(t.Criteria), p.Brief.Criteria...), t.OwnersAlready(), t.TeamKept)
+	return t.CheckLinkedAssetClassifications(bindWriterReports(p, t, append(reports, kept...)))
+}
+
+func (lp *Loop) assetClassificationFailed(ctx context.Context, t core.Task, writer string, cause error) error {
+	_, err := lp.Core.AddNote(ctx, core.NoteInput{Project: t.ProjectID, Task: t.ID, By: writer, Kind: core.RoleImplementer, While: core.TaskWriting, Text: cause.Error()})
+	if err != nil && !errors.Is(err, core.ErrConflict) {
+		return err
+	}
+	return lp.roleFailed(ctx, t, writer, cause)
 }
