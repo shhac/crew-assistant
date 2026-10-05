@@ -173,12 +173,12 @@ func (lp *Loop) offerReadyForReview(ctx context.Context, p core.Project, t core.
 	if n := len(threads.owner); n > 0 {
 		about += fmt.Sprintf(" %d outside review thread(s) you kept are still open.", n)
 	}
-	about += " Marking it ready for review asks for reviews, and starts any checks that only run once a pull request is ready. Kept a draft, it is asked about again after the team next pushes.\n\n" + pr.URL
+	about += " The team's own review and QA passed on this exact commit. Marking it ready asks other people to review it, and starts any checks that only run once a pull request is ready, so mark it ready only if you're confident it will pass someone else's scrutiny. Kept a draft, it is asked about again after the team next pushes.\n\n" + pr.URL
 	_, err := lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionReadyForReview, core.DecisionInput{
 		Against:        &core.DecisionVersions{Revision: r.N, Brief: p.Brief.Version, Text: t.TextVersion},
 		Title:          fmt.Sprintf("Mark pull request #%d ready for review", pr.Number),
 		Context:        about,
-		Recommendation: choiceMarkReady + " once you're happy for reviewers to see it",
+		Recommendation: choiceMarkReady + " only if you're confident it will pass someone else's review; otherwise keep it a draft, or answer with what should change",
 		Choices:        []string{choiceMarkReady, choiceKeepDraft},
 	})
 	return err
