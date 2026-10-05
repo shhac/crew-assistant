@@ -172,6 +172,12 @@ function RepositoryCard({
               </dd>
             </div>
             <div className="fact-row">
+              <dt>Tools</dt>
+              <dd>
+                {r.tools?.length ? <code>{r.tools.join(", ")}</code> : "None"}
+              </dd>
+            </div>
+            <div className="fact-row">
               <dt>QA runs the app</dt>
               <dd>
                 {r.run ? (
@@ -235,6 +241,7 @@ function RepositoryEditor({
   const [branch, setBranch] = useState(initial.default_branch ?? "");
   const [check, setCheck] = useState(initial.check ?? "");
   const [prepare, setPrepare] = useState((initial.prepare ?? []).join(", "));
+  const [tools, setTools] = useState((initial.tools ?? []).join(", "));
   const [inCopy, setInCopy] = useState(!!initial.check_in_copy);
   const [loopback, setLoopback] = useState(!!initial.check_loopback);
   const [areas, setAreas] = useState(areasText(initial));
@@ -297,6 +304,21 @@ function RepositoryEditor({
           />
           <span className="hint">Optional. Separate with commas.</span>
         </label>
+        <label htmlFor={`${id}-tools`}>
+          Tool folders the team may use
+          <input
+            id={`${id}-tools`}
+            className="field"
+            value={tools}
+            placeholder="/Users/you/.nvm/versions/node/v22.22.3"
+            onChange={(e) => setTools(e.target.value)}
+          />
+          <span className="hint">
+            Optional. Absolute folders, separated with commas, that the team may
+            read and run from, such as a Node install under nvm; their bin
+            folders go first on its PATH.
+          </span>
+        </label>
       </div>
       <label>
         <input
@@ -344,6 +366,7 @@ function RepositoryEditor({
                 default_branch: branch,
                 check,
                 prepare: pathList(prepare),
+                tools: pathList(tools),
                 check_in_copy: inCopy,
                 check_loopback: loopback,
                 areas: parseAreas(areas),

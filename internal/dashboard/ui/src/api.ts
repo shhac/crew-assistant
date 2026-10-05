@@ -351,6 +351,8 @@ export interface Repository {
   check_in_copy?: boolean;
   check_loopback?: boolean;
   run?: RunRecipe;
+  /** Toolchain folders outside the clone the team may read and run from. */
+  tools?: string[];
   areas?: CodeArea[];
 }
 /** A named set of paths in a repository. */

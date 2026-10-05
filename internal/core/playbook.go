@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -118,6 +119,10 @@ type Playbook struct {
 	// Otherwise it runs in the read-only checkout itself. Either way the
 	// revision checked stays exactly as it was recorded.
 	CheckInCopy bool `json:"check_in_copy,omitempty"`
+	// Tools are folders outside the repository the team may read and run
+	// from, such as a Node install under nvm: their bin folders go first on
+	// the team's PATH. Only the owner grants them.
+	Tools []string `json:"tools,omitempty"`
 	// CheckLoopback lets QA's check bind and reach this machine's own
 	// addresses, for tests that start a local server; never wider network.
 	CheckLoopback bool `json:"check_loopback,omitempty"`
@@ -225,6 +230,11 @@ func (p Playbook) Validate() error {
 				return err
 			}
 		}
+		for _, dir := range p.Tools {
+			if err := validTool(dir); err != nil {
+				return err
+			}
+		}
 		if p.Sign != "" && p.Sign != SignAlways && p.Sign != SignNever {
 			return errors.New(`sign must be empty (follow your git config), "always" or "never"`)
 		}
@@ -323,6 +333,25 @@ func validPrepare(rel string) error {
 	for _, part := range strings.Split(rel, "/") {
 		if _, err := path.Match(part, ""); err != nil {
 			return fmt.Errorf("prepare pattern %q can't be matched", rel)
+		}
+	}
+	return nil
+}
+
+// validTool refuses a tool folder that would show the team more than a
+// toolchain: the whole disk or home folder, or where credentials live.
+func validTool(dir string) error {
+	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
+		return fmt.Errorf("tool folder %q must be a clean absolute path", dir)
+	}
+	home, _ := os.UserHomeDir()
+	if dir == "/" || dir == home || dir == filepath.Dir(home) {
+		return fmt.Errorf("tool folder %q is too wide; name the toolchain's own folder, such as ~/.nvm/versions/node/v22", dir)
+	}
+	for _, private := range []string{".ssh", ".gnupg", ".aws", ".config", ".netrc", ".docker", "Library/Keychains", "Library/Application Support", ".local/state", ".kube"} {
+		under := filepath.Join(home, private)
+		if dir == under || strings.HasPrefix(dir, under+"/") || strings.HasPrefix(under, dir+"/") {
+			return fmt.Errorf("tool folder %q would show the team private files in %s", dir, under)
 		}
 	}
 	return nil

@@ -137,7 +137,7 @@ func (lp *Loop) hostedCheck(ctx context.Context, m gitMedium, from, cache, comma
 	}
 	invocation := filepath.Base(progressPath)
 	var box commandSandbox
-	box, runErr = lp.openCommands(ctx, sandbox.Options{WorkDir: copy.Dir, Env: append(copy.Env, "CREW_HOSTED_CHECK=1", checktest.ProgressEnv+"="+progressPath, checktest.InvocationEnv+"="+invocation), Read: m.readable(), Loopback: m.playbook.CheckLoopback})
+	box, runErr = lp.openCommands(ctx, sandbox.Options{WorkDir: copy.Dir, Env: append(append(copy.Env, m.toolPath()...), "CREW_HOSTED_CHECK=1", checktest.ProgressEnv+"="+progressPath, checktest.InvocationEnv+"="+invocation), Read: m.readable(), Loopback: m.playbook.CheckLoopback})
 	if runErr != nil {
 		return
 	}

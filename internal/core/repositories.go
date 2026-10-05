@@ -35,6 +35,9 @@ type Repository struct {
 	CheckLoopback bool `json:"check_loopback,omitempty"`
 	// Run is how QA starts the app on this machine, or nil.
 	Run *RunRecipe `json:"run,omitempty"`
+	// Tools are toolchain folders outside the clone the team may read and
+	// run from; see Playbook.Tools.
+	Tools []string `json:"tools,omitempty"`
 	// Areas are named sets of paths in the repository, which projects name
 	// in their scope.
 	Areas []CodeArea `json:"areas,omitempty"`
@@ -76,6 +79,7 @@ type RepositoryInput struct {
 	CheckInCopy   bool       `json:"check_in_copy"`
 	CheckLoopback bool       `json:"check_loopback"`
 	Run           *RunRecipe `json:"run"`
+	Tools         []string   `json:"tools"`
 	Areas         []CodeArea `json:"areas"`
 }
 
@@ -89,6 +93,11 @@ func (in RepositoryInput) repository(id, path string) Repository {
 	if in.Run != nil {
 		recipe := in.Run.Trimmed()
 		r.Run = &recipe
+	}
+	for _, dir := range in.Tools {
+		if dir = strings.TrimSpace(dir); dir != "" && !slices.Contains(r.Tools, dir) {
+			r.Tools = append(r.Tools, dir)
+		}
 	}
 	for _, a := range in.Areas {
 		area := CodeArea{Name: strings.TrimSpace(a.Name)}
@@ -119,6 +128,11 @@ func (r Repository) validate() error {
 	}
 	for _, rel := range r.Prepare {
 		if err := validPrepare(rel); err != nil {
+			return err
+		}
+	}
+	for _, dir := range r.Tools {
+		if err := validTool(dir); err != nil {
 			return err
 		}
 	}

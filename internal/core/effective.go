@@ -42,7 +42,7 @@ func (v Snapshot) basePlaybook(p Project) (Playbook, bool) {
 	pb := clonePlaybook(*p.Settings)
 	if r := v.Repository(firstRepository(p)); r != nil {
 		pb.Repo, pb.Check, pb.Prepare = r.Path, r.Check, slices.Clone(r.Prepare)
-		pb.CheckInCopy, pb.CheckLoopback, pb.Run = r.CheckInCopy, r.CheckLoopback, cloneRun(r.Run)
+		pb.CheckInCopy, pb.CheckLoopback, pb.Run, pb.Tools = r.CheckInCopy, r.CheckLoopback, cloneRun(r.Run), slices.Clone(r.Tools)
 	}
 	if t := v.Team(p.Team); t != nil {
 		pb.Roles, pb.MaxRounds = cloneRoles(t.Roles), t.MaxRounds
@@ -114,6 +114,7 @@ func withoutPlaybooks(projects []Project) []Project {
 func clonePlaybook(p Playbook) Playbook {
 	p.Roles = cloneRoles(p.Roles)
 	p.Prepare = slices.Clone(p.Prepare)
+	p.Tools = slices.Clone(p.Tools)
 	p.StageLimits = maps.Clone(p.StageLimits)
 	p.DisabledBundledSkills = slices.Clone(p.DisabledBundledSkills)
 	p.Run = cloneRun(p.Run)
@@ -176,8 +177,8 @@ func placePlaybook(v *Snapshot, p *Project, after Playbook) (repoID, teamID stri
 	}
 	if r != nil {
 		r.Path, r.Check, r.Prepare = after.Repo, after.Check, slices.Clone(after.Prepare)
-		r.CheckInCopy, r.CheckLoopback, r.Run = after.CheckInCopy, after.CheckLoopback, cloneRun(after.Run)
-		own.Repo, own.Check, own.Prepare, own.CheckInCopy, own.CheckLoopback, own.Run = "", "", nil, false, false, nil
+		r.CheckInCopy, r.CheckLoopback, r.Run, r.Tools = after.CheckInCopy, after.CheckLoopback, cloneRun(after.Run), slices.Clone(after.Tools)
+		own.Repo, own.Check, own.Prepare, own.CheckInCopy, own.CheckLoopback, own.Run, own.Tools = "", "", nil, false, false, nil, nil
 		repoID = r.ID
 	}
 	if t := v.Team(p.Team); t != nil {

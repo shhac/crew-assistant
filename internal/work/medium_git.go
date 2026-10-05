@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -57,8 +60,42 @@ func (m gitMedium) pushGitHub(ctx context.Context, ref, branch, lease string) er
 func (m gitMedium) url() string { return m.remote(m.playbook.Land.GitHub) }
 
 func (m gitMedium) workspace(t core.Task) string { return m.repo.Task(t.ID).Workspace() }
-func (m gitMedium) env(t core.Task) []string     { return m.repo.Task(t.ID).Env() }
-func (m gitMedium) readable() []string           { return m.repo.Readable() }
+func (m gitMedium) env(t core.Task) []string {
+	return append(m.repo.Task(t.ID).Env(), m.toolPath()...)
+}
+
+// readable is what the team may read outside its clone: what the
+// repository's own builds need, and the tool folders the owner granted.
+func (m gitMedium) readable() []string { return append(m.repo.Readable(), m.tools()...) }
+
+// tools are the granted tool folders that are there.
+func (m gitMedium) tools() []string {
+	var dirs []string
+	for _, dir := range m.playbook.Tools {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
+}
+
+// toolPath puts each granted tool's bin folder, or the folder itself when it
+// has none, ahead of the daemon's own PATH, so a toolchain installed for the
+// owner alone, such as Node under nvm, is found first.
+func (m gitMedium) toolPath() []string {
+	var bins []string
+	for _, dir := range m.tools() {
+		bin := filepath.Join(dir, "bin")
+		if info, err := os.Stat(bin); err != nil || !info.IsDir() {
+			bin = dir
+		}
+		bins = append(bins, bin)
+	}
+	if len(bins) == 0 {
+		return nil
+	}
+	return []string{"PATH=" + strings.Join(append(bins, os.Getenv("PATH")), string(os.PathListSeparator))}
+}
 
 // clone is the task's own clone, made if it has none: one removed, or never
 // made, is rebuilt from the revisions the project's clone keeps.
@@ -232,7 +269,7 @@ func (m gitMedium) check(ctx context.Context, t core.Task, r core.Revision, qa, 
 	if err != nil {
 		return checkout{}, err
 	}
-	out := checkout{ref: r.Ref, checkDir: c.Dir, workDir: c.Dir, env: c.Env, verify: c.Verify, remove: c.Remove}
+	out := checkout{ref: r.Ref, checkDir: c.Dir, workDir: c.Dir, env: append(c.Env, m.toolPath()...), verify: c.Verify, remove: c.Remove}
 	if !qa {
 		return out, nil
 	}
