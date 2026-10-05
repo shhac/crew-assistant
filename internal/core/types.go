@@ -34,7 +34,9 @@ type AssistantProfile struct {
 }
 
 // Project is an ongoing area of the owner's work: what it is for (its brief),
-// how its work gets done (its playbook) and where it lives.
+// how its work gets done (its playbook) and where it lives. Its playbook is
+// put together from its own settings, the repository it works in and the
+// team that staffs it; see effective.go.
 type Project struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
@@ -54,14 +56,30 @@ type Project struct {
 	// code freeze, while the rest of its work goes on.
 	LandingPaused *LandingPause `json:"landing_paused,omitempty"`
 	// Release holds the pending release; Releases keeps the latest successful releases.
-	Release           *ReleaseRun     `json:"release,omitempty"`
-	Releases          []ReleaseRecord `json:"releases,omitempty"`
-	Brief             Brief           `json:"brief"`
-	Playbook          *Playbook       `json:"playbook,omitempty"`
-	Directories       []string        `json:"directories"`
-	ScratchDirectory  string          `json:"scratch_directory"`
-	SourceID          string          `json:"source_id,omitempty"`
-	SourceDescription string          `json:"source_description,omitempty"`
+	Release  *ReleaseRun     `json:"release,omitempty"`
+	Releases []ReleaseRecord `json:"releases,omitempty"`
+	Brief    Brief           `json:"brief"`
+	// Playbook is how the project's work gets done as everything reads it:
+	// Settings with the repository's code settings and the team's seats laid
+	// over them, and the project's seat overrides applied. It is derived
+	// whenever state is read or changed, and never stored; change the part's
+	// owner instead.
+	Playbook *Playbook `json:"playbook,omitempty"`
+	// Settings is the project's own part of its playbook: landing, release,
+	// limits, skills and delivery. Without a team its seats are here too, and
+	// without a repository its code settings.
+	Settings *Playbook `json:"settings,omitempty"`
+	// Team is the team that staffs the project, if any; SeatOverrides adjust
+	// its seats for this project only.
+	Team          string         `json:"team,omitempty"`
+	SeatOverrides []SeatOverride `json:"seat_overrides,omitempty"`
+	// Scope is the repositories, and the code areas in them, the project
+	// expects to touch. Its work happens in the first.
+	Scope             Scope    `json:"scope,omitzero"`
+	Directories       []string `json:"directories"`
+	ScratchDirectory  string   `json:"scratch_directory"`
+	SourceID          string   `json:"source_id,omitempty"`
+	SourceDescription string   `json:"source_description,omitempty"`
 	// Linear is optional intake through the owner's configured CLI account.
 	Linear *LinearLink `json:"linear,omitempty"`
 	// LinearVersion invalidates pending reads, including after unlink/relink.
@@ -266,6 +284,8 @@ type Snapshot struct {
 	Assistant         Assistant          `json:"assistant"`
 	Assistants        []AssistantProfile `json:"assistants,omitempty"`
 	Projects          []Project          `json:"projects"`
+	Repositories      []Repository       `json:"repositories"`
+	Teams             []Team             `json:"teams"`
 	Tasks             []Task             `json:"tasks"`
 	Decisions         []Decision         `json:"decisions"`
 	Messages          []Message          `json:"messages"`

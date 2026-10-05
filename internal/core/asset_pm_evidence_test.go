@@ -53,9 +53,9 @@ func TestSchedulerRecoversRetainedLandingAssets(t *testing.T) {
 	s, current := routedDraftFixture(t)
 	current, err := s.UpdateTask(testContext, current.ID, func(task *Task, p *Project) (string, error) {
 		task.Unreachable = nil
-		p.Playbook.Land = LandPolicy{Via: LandPush, Target: "main", Approve: ApprovePM}
-		p.Playbook.Roles = append(p.Playbook.Roles, Role{Name: "PM", Kinds: []string{RolePM}, Engine: "claude"})
-		task.Playbook.Land = p.Playbook.Land
+		p.Settings.Land = LandPolicy{Via: LandPush, Target: "main", Approve: ApprovePM}
+		p.Settings.Roles = append(p.Settings.Roles, Role{Name: "PM", Kinds: []string{RolePM}, Engine: "claude"})
+		task.Playbook.Land = p.Settings.Land
 		return "", nil
 	})
 	if err != nil {

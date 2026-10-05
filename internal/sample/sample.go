@@ -92,9 +92,9 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 	docsRepo := filepath.Join(dir, "projects", "docs-site")
 	fastForward := core.LandPolicy{Via: core.LandPush, Target: "main", Method: "fast-forward", Approve: core.ApproveBefore, Means: "the next release includes it"}
 	pullRequest := core.LandPolicy{PullRequests: true, Target: "main", Merge: "squash", GitHub: "example/docs-site", Approve: core.ApproveBefore}
-	crew := core.Project{ID: "demo-crew", Title: "crew-assistant", Status: "active", Directories: []string{crewRepo}, Playbook: codePlaybook(crewRepo, fastForward, crewTeam), UpdatedAt: ago(4 * time.Minute), OrderedBy: core.OrderedByPM, OrderedAt: ago(26 * time.Minute),
+	crew := core.Project{ID: "demo-crew", Title: "crew-assistant", Status: "active", Directories: []string{crewRepo}, Team: "demo-team-core", Playbook: codePlaybook(crewRepo, fastForward, crewTeam), UpdatedAt: ago(4 * time.Minute), OrderedBy: core.OrderedByPM, OrderedAt: ago(26 * time.Minute),
 		Brief: core.Brief{Version: 3, Goal: "Make crew-assistant a software factory that can build and improve itself.", Criteria: []string{"Features land on main without losing work", "Tests never touch real services"}, UpdatedAt: ago(72 * time.Hour)}}
-	docs := core.Project{ID: "demo-docs", Title: "docs-site", Status: "active", Directories: []string{docsRepo}, Playbook: codePlaybook(docsRepo, pullRequest, codeTeam), UpdatedAt: ago(22 * time.Minute),
+	docs := core.Project{ID: "demo-docs", Title: "docs-site", Status: "active", Directories: []string{docsRepo}, Team: "demo-team-docs", Playbook: codePlaybook(docsRepo, pullRequest, codeTeam), UpdatedAt: ago(22 * time.Minute),
 		Brief: core.Brief{Version: 1, Goal: "A documentation site people can find answers in quickly.", Audience: "Developers new to the product", Criteria: []string{"Every page loads fast", "Search finds pages by their headings"}, UpdatedAt: ago(240 * time.Hour)}}
 	memo := core.Project{ID: "demo-memo", Title: "Q4 planning memo", Status: "active", UpdatedAt: ago(time.Minute),
 		Playbook: &core.Playbook{Template: "draft", Medium: core.MediumDocuments, Roles: writingTeam, MaxRounds: 3, Deliver: "owner"},
@@ -208,7 +208,10 @@ func build(dir string, ago func(time.Duration) time.Time) core.Snapshot {
 	decisions = append(decisions, core.Decision{ID: "demo-land-assets", ProjectID: crew.ID, Kind: "delivery", Title: "Land “Composer asset drop and paste” on main", Context: "Both checks passed.", Recommendation: "Approve", Choices: []string{"Approve", "Request changes"}, Status: "resolved", Disposition: "choice", Answer: "Approve", CreatedAt: ago(4 * time.Hour), ResolvedAt: &resolved})
 
 	return core.Snapshot{
-		Projects:  []core.Project{crew, docs, memo, reading},
+		Projects: []core.Project{crew, docs, memo, reading},
+		// The code projects are staffed by teams; the memo has seats of its
+		// own. Each team takes its seats from the project's playbook.
+		Teams:     []core.Team{{ID: "demo-team-core", Name: "Core team", Template: "code", MaxRounds: 3}, {ID: "demo-team-docs", Name: "Docs team", Template: "code", MaxRounds: 3}},
 		Tasks:     tasks,
 		Decisions: decisions,
 		Messages: []core.Message{

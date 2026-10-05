@@ -17,6 +17,76 @@ import (
 // with are gone, and changes only what its version changed.
 var migrations = map[int]func(doc map[string]any) error{
 	2: pullRequestsToggle,
+	3: repositoriesAndTeams,
+}
+
+// repositoryKeys and teamKeys are the parts of a project's playbook that
+// schema 4 keeps with its repository and its team.
+var (
+	repositoryKeys = map[string]string{"repo": "path", "check": "check", "prepare": "prepare", "check_in_copy": "check_in_copy", "check_loopback": "check_loopback", "run": "run"}
+	teamKeys       = map[string]string{"roles": "roles", "max_rounds": "max_rounds", "template": "template"}
+)
+
+// repositoriesAndTeams splits each project's playbook between its owners.
+// A code project becomes one repository, holding its code settings, and
+// one team, holding its seats, PM and rounds, both named for the project
+// and used by it alone; the project keeps the rest as its settings. A code
+// project not yet given a repository gets only the team. Any other project
+// keeps its whole playbook as its own settings, as a project with no team
+// or repository does. Tasks keep the playbooks they pinned, and every
+// project's playbook reads back exactly as it was.
+func repositoriesAndTeams(doc map[string]any) error {
+	snapshot, _ := doc["snapshot"].(map[string]any)
+	if snapshot == nil {
+		return nil
+	}
+	repositories, _ := snapshot["repositories"].([]any)
+	teams, _ := snapshot["teams"].([]any)
+	projects, _ := snapshot["projects"].([]any)
+	for _, item := range projects {
+		p, _ := item.(map[string]any)
+		if p == nil {
+			continue
+		}
+		playbook, ok := p["playbook"].(map[string]any)
+		delete(p, "playbook")
+		if !ok {
+			continue
+		}
+		p["settings"] = playbook
+		if playbook["medium"] != MediumGit {
+			continue
+		}
+		id, _ := p["id"].(string)
+		title, _ := p["title"].(string)
+		if repo, _ := playbook["repo"].(string); repo != "" {
+			r := map[string]any{"id": "repo-" + id, "name": filepath.Base(repo)}
+			moveKeys(playbook, r, repositoryKeys)
+			repositories = append(repositories, r)
+			p["scope"] = map[string]any{"repositories": []any{map[string]any{"id": r["id"]}}}
+		}
+		t := map[string]any{"id": "team-" + id, "name": title}
+		moveKeys(playbook, t, teamKeys)
+		// The project's settings keep the template too: it says what kind of
+		// work the project is.
+		if template, ok := t["template"]; ok {
+			playbook["template"] = template
+		}
+		teams = append(teams, t)
+		p["team"] = t["id"]
+	}
+	snapshot["repositories"], snapshot["teams"] = repositories, teams
+	return nil
+}
+
+// moveKeys moves each of keys present in from to its name in to.
+func moveKeys(from, to map[string]any, keys map[string]string) {
+	for key, name := range keys {
+		if value, ok := from[key]; ok {
+			to[name] = value
+			delete(from, key)
+		}
+	}
 }
 
 // pullRequestsToggle turns each landing policy that landed by pull request,

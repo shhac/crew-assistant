@@ -54,7 +54,7 @@ func TestTheOwnerMergesAheadOfThePMWithoutApprovingTheOpeningAgain(t *testing.T)
 	playbook.Medium = MediumGit
 	p.Playbook = &playbook
 	if err := s.store.update(testContext, func(v *Snapshot) error {
-		project(v, p.ID).Playbook = &playbook
+		project(v, p.ID).Settings = &playbook
 		return nil
 	}); err != nil {
 		t.Fatal(err)

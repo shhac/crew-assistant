@@ -138,7 +138,7 @@ func TestReleaseRefusalsPreservePMAnswer(t *testing.T) {
 			in.Note = "still ordered"
 			switch mode {
 			case "no settings":
-				s.store.update(testContext, func(v *Snapshot) error { project(v, p.ID).Playbook.Release = nil; return nil })
+				s.store.update(testContext, func(v *Snapshot) error { project(v, p.ID).Settings.Release = nil; return nil })
 			case "nothing new":
 				in.ReleaseContext.Count = 0
 			case "old version":

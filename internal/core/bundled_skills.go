@@ -20,23 +20,25 @@ func (s *Service) SetBundledSkill(ctx context.Context, projectID, name string, e
 		if p == nil {
 			return ErrNotFound
 		}
-		if p.Playbook == nil {
+		if p.Settings == nil {
 			return fmt.Errorf("choose a team first")
 		}
-		if slices.Contains(p.Playbook.DisabledBundledSkills, name) == !enabled {
+		if slices.Contains(p.Settings.DisabledBundledSkills, name) == !enabled {
 			out = *p
 			return nil
 		}
-		pb := *p.Playbook
-		pb.DisabledBundledSkills = slices.DeleteFunc(slices.Clone(pb.DisabledBundledSkills), func(n string) bool { return n == name })
+		// Skills are the project's own setting, whoever staffs it.
+		before := snapshotCopy(v)
+		own := clonePlaybook(*p.Settings)
+		own.DisabledBundledSkills = slices.DeleteFunc(own.DisabledBundledSkills, func(n string) bool { return n == name })
 		if !enabled {
-			pb.DisabledBundledSkills = append(pb.DisabledBundledSkills, name)
+			own.DisabledBundledSkills = append(own.DisabledBundledSkills, name)
 		}
-		slices.Sort(pb.DisabledBundledSkills)
-		if err := pb.Validate(); err != nil {
+		slices.Sort(own.DisabledBundledSkills)
+		p.Settings = &own
+		if err := settle(before, v, p.ID, "", "", Playbook.Validate); err != nil {
 			return err
 		}
-		p.Playbook = &pb
 		p.UpdatedAt = s.now().UTC()
 		record(v, p.UpdatedAt, p.ID, "playbook.skill", fmt.Sprintf("Bundled skill %s enabled: %t", name, enabled))
 		out = *p

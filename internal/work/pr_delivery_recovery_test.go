@@ -292,9 +292,7 @@ func TestPRPolicySwitchDefersForOwnerAndPMAcrossRestart(t *testing.T) {
 					s.gh.set(func() { s.gh.merged = task.Revisions[0].Ref })
 				}
 				if _, err := s.a.Core.UpdateTask(s.ctx, task.ID, func(_ *core.Task, p *core.Project) (string, error) {
-					pb := *p.Playbook
-					pb.Land.PullRequests = false
-					p.Playbook = &pb
+					p.Settings.Land.PullRequests = false
 					if by == "PM" {
 						p.PRChoices = append(p.PRChoices, task.ID)
 					}
@@ -357,9 +355,8 @@ func TestDeferredPRSwitchAppliesAfterMergeCancellation(t *testing.T) {
 	task := queuePR(t, s)
 	restorePRAssets(t, s)
 	if _, err := s.a.Core.UpdateTask(s.ctx, task.ID, func(_ *core.Task, p *core.Project) (string, error) {
-		pb := *p.Playbook
-		pb.Land.PullRequests = false
-		p.Playbook, p.PRChoices = &pb, []string{task.ID}
+		p.Settings.Land.PullRequests = false
+		p.PRChoices = []string{task.ID}
 		return "", nil
 	}); err != nil {
 		t.Fatal(err)
@@ -401,9 +398,7 @@ func TestDeferredPRSwitchCancellationWithoutPendingWork(t *testing.T) {
 					}
 				}
 				if _, err := s.a.Core.UpdateTask(s.ctx, task.ID, func(_ *core.Task, p *core.Project) (string, error) {
-					pb := *p.Playbook
-					pb.Land.PullRequests = false
-					p.Playbook = &pb
+					p.Settings.Land.PullRequests = false
 					if by == "PM" {
 						p.PRChoices = append(p.PRChoices, task.ID)
 					}

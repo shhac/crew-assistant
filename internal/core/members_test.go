@@ -252,7 +252,7 @@ func TestAMemberStaysIfAnyTeamWouldBeLeftBroken(t *testing.T) {
 	}
 	// A team that is already invalid can't be left valid by the change.
 	if err := s.store.update(testContext, func(v *Snapshot) error {
-		project(v, broken.ID).Playbook.MaxRounds = 0
+		project(v, broken.ID).Settings.MaxRounds = 0
 		return nil
 	}); err != nil {
 		t.Fatal(err)

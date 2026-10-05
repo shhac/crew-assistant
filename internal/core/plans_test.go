@@ -121,7 +121,7 @@ func TestOlderPlannerStateIsReadAsTheResearcher(t *testing.T) {
 	s.store.update(testContext, func(v *Snapshot) error {
 		v.Members[0].Kinds = []string{"planner", RoleImplementer}
 		v.Members[0].Learnings = []Learning{{ID: "l1", When: "Reading a repository", Text: "Start with its README.", Source: LearnedByOwner}}
-		legacy(project(v, p.ID).Playbook.Roles)
+		legacy(project(v, p.ID).Settings.Roles)
 		t := task(v, running.ID)
 		legacy(t.Roles)
 		legacy(t.Playbook.Roles)

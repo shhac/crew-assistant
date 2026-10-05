@@ -111,8 +111,8 @@ func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (Project, 
 		if !ok {
 			return Project{}, fmt.Errorf("unknown project template %q", in.Template)
 		}
-		template.Roles = append([]Role(nil), template.Roles...)
-		out.Playbook = &template
+		template = clonePlaybook(template)
+		out.Settings = &template
 	}
 	err = s.store.update(ctx, func(v *Snapshot) error {
 		if in.SourceID != "" {
@@ -145,6 +145,8 @@ func (s *Service) CreateProject(ctx context.Context, in ProjectInput) (Project, 
 		}
 		out.Prefix, out.NextTask = uniquePrefix(v, out.Title), 1
 		v.Projects = append(v.Projects, out)
+		resolvePlaybooks(v)
+		out = v.Projects[len(v.Projects)-1]
 		record(v, now, out.ID, "project.created", out.Title)
 		return nil
 	})

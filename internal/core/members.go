@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -228,8 +229,10 @@ func (s *Service) SaveMember(ctx context.Context, id string, in MemberInput) (Me
 	return out, err
 }
 
-// DeleteMember removes a member, and hands any project role it filled back to
-// the team's template. Requests under way keep the team they started with.
+// DeleteMember removes a member, and hands any role it filled back to the
+// template's seat for it: on each team, on each project with seats of its
+// own, and in each project's seat overrides. Requests under way keep the team
+// they started with.
 func (s *Service) DeleteMember(ctx context.Context, id string) error {
 	return s.store.update(ctx, func(v *Snapshot) error {
 		i := slices.IndexFunc(v.Members, func(m Member) bool { return m.ID == id })
@@ -238,36 +241,52 @@ func (s *Service) DeleteMember(ctx context.Context, id string) error {
 		}
 		gone := v.Members[i]
 		v.Members = slices.Delete(v.Members, i, i+1)
-		now := s.now().UTC()
-		// Every team is checked before any is changed: if one would be left
-		// broken, the member stays and nothing is saved.
+		before := derivedPlaybooks(*v)
+		for j := range v.Teams {
+			pb := v.Teams[j].playbook()
+			if vacate(&pb, id) {
+				v.Teams[j].Roles = pb.Roles
+			}
+		}
 		for j := range v.Projects {
 			p := &v.Projects[j]
-			vacated, err := vacate(p, id)
-			if err != nil {
+			if p.Settings == nil {
+				continue
+			}
+			if own := clonePlaybook(*p.Settings); p.Team == "" && vacate(&own, id) {
+				p.Settings = &own
+			}
+			if overrides, changed := vacateOverrides(*p.Settings, p.SeatOverrides, id); changed {
+				p.SeatOverrides = overrides
+			}
+		}
+		// Every playbook is checked before anything is saved: if one would
+		// be left unusable, the member stays and nothing changes.
+		resolvePlaybooks(v)
+		now := s.now().UTC()
+		for j := range v.Projects {
+			p := &v.Projects[j]
+			if p.Playbook == nil || reflect.DeepEqual(before[p.ID], p.Playbook) {
+				continue
+			}
+			if err := p.Playbook.Validate(); err != nil {
 				return fmt.Errorf("%s can't leave the team for %s: %w", gone.Name, p.Title, err)
 			}
-			if vacated {
-				p.UpdatedAt = now
-				record(v, now, p.ID, "playbook.set", gone.Name+" left the team for "+p.Title)
-			}
+			p.UpdatedAt = now
+			record(v, now, p.ID, "playbook.set", gone.Name+" left the team for "+p.Title)
 		}
 		return nil
 	})
 }
 
-// vacate takes a member's seat off a team and gives each kind of role it held
-// back to the template's seat for it, if the template has one, and reports
-// whether it had a seat. The team it leaves must still be valid.
-func vacate(p *Project, memberID string) (bool, error) {
-	if p.Playbook == nil {
-		return false, nil
-	}
-	playbook := *p.Playbook
+// vacate takes a member's seats off a team and gives each kind of role the
+// first held back to the template's seat for it, if the template has one,
+// and reports whether it had a seat.
+func vacate(playbook *Playbook, memberID string) bool {
 	playbook.Roles = slices.Clone(playbook.Roles)
 	k := slices.IndexFunc(playbook.Roles, func(r Role) bool { return r.Member == memberID })
 	if k < 0 {
-		return false, nil
+		return false
 	}
 	// Every seat filled from the member goes, and the template's seats for
 	// what the first held take their place.
@@ -279,11 +298,31 @@ func vacate(p *Project, memberID string) (bool, error) {
 			k++
 		}
 	}
-	if err := playbook.Validate(); err != nil {
-		return false, err
+	return true
+}
+
+// vacateOverrides takes a member's seats out of a project's overrides: a
+// seat it added goes, and a kind it took over goes to the template's seat
+// for it, or, with none, is left out.
+func vacateOverrides(settings Playbook, overrides []SeatOverride, memberID string) ([]SeatOverride, bool) {
+	changed := false
+	var out []SeatOverride
+	for _, o := range overrides {
+		if o.Seat == nil || o.Seat.Member != memberID {
+			out = append(out, o)
+			continue
+		}
+		changed = true
+		if o.Action != OverrideReplace {
+			continue
+		}
+		if seat, ok := (Playbook{Template: settings.Template}).TemplateSeat(o.Kind); ok {
+			out = append(out, SeatOverride{Action: OverrideReplace, Kind: o.Kind, Seat: &seat})
+		} else {
+			out = append(out, SeatOverride{Action: OverrideExclude, Kind: o.Kind})
+		}
 	}
-	p.Playbook = &playbook
-	return true, nil
+	return out, changed
 }
 
 // SetMemberPicture records a picture drawn for a member, and how it was
@@ -313,11 +352,7 @@ func foldLegacyKinds(v *Snapshot) {
 	for i := range v.Members {
 		fold(&v.Members[i].Kinds, &v.Members[i].LegacyKind)
 	}
-	for i := range v.Projects {
-		if v.Projects[i].Playbook != nil {
-			seats(v.Projects[i].Playbook.Roles)
-		}
-	}
+	eachTeamSeats(v, seats)
 	for i := range v.Tasks {
 		seats(v.Tasks[i].Roles)
 		if v.Tasks[i].Playbook != nil {
@@ -371,11 +406,7 @@ func foldPlanner(v *Snapshot) {
 	for i := range v.Members {
 		v.Members[i].Kinds = kinds(v.Members[i].Kinds)
 	}
-	for i := range v.Projects {
-		if v.Projects[i].Playbook != nil {
-			seats(v.Projects[i].Playbook.Roles)
-		}
-	}
+	eachTeamSeats(v, func(roles []Role) { seats(roles) })
 	status := func(s *string) {
 		if *s == legacyPlanning {
 			*s = TaskResearching
@@ -396,6 +427,29 @@ func foldPlanner(v *Snapshot) {
 		if w := &v.Wakes[i]; w.On == WakeOnTask {
 			status(&w.Match)
 			status(&w.Baseline)
+		}
+	}
+}
+
+// eachTeamSeats calls fold with every list of seats a project's playbook is
+// made from: each team's, each project's own, and each override's seat.
+// Older seats are read into the current model in place there, before any
+// playbook is derived from them.
+func eachTeamSeats(v *Snapshot, fold func([]Role)) {
+	for i := range v.Teams {
+		fold(v.Teams[i].Roles)
+	}
+	for i := range v.Projects {
+		p := &v.Projects[i]
+		if p.Settings != nil {
+			fold(p.Settings.Roles)
+		}
+		for j := range p.SeatOverrides {
+			if seat := p.SeatOverrides[j].Seat; seat != nil {
+				one := []Role{*seat}
+				fold(one)
+				*seat = one[0]
+			}
 		}
 	}
 }

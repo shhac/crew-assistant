@@ -155,20 +155,22 @@ func (s *Service) ProposeRunRecipe(ctx context.Context, projectID, by string, re
 	return out, err
 }
 
-// acceptRunRecipe sets the recipe the owner accepted, checked as the
-// project's playbook is, in the same change as the owner's choice. Tasks
-// already under way keep the playbook they started with.
+// acceptRunRecipe sets the recipe the owner accepted on the project's
+// repository, checked as every playbook using it is, in the same change as
+// the owner's choice. Tasks already under way keep the playbook they started
+// with.
 func acceptRunRecipe(v *Snapshot, d *Decision) error {
 	p := project(v, d.ProjectID)
 	if p == nil || p.Playbook == nil || d.Run == nil {
 		return fmt.Errorf("the project no longer has a team this recipe is for: %w", ErrConflict)
 	}
-	playbook := *p.Playbook
+	before := snapshotCopy(v)
+	playbook, _ := v.basePlaybook(*p)
 	recipe := *d.Run
 	playbook.Run = &recipe
-	if err := playbook.Validate(); err != nil {
+	repoID, teamID := placePlaybook(v, p, playbook)
+	if err := settle(before, v, p.ID, repoID, teamID, Playbook.Validate); err != nil {
 		return fmt.Errorf("this recipe can't be used: %w", err)
 	}
-	p.Playbook = &playbook
 	return nil
 }

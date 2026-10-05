@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"path"
 	"path/filepath"
 	"slices"
@@ -222,13 +221,8 @@ func (p Playbook) Validate() error {
 			return errors.New("branch_prefix must be a simple branch-name prefix, such as crew/")
 		}
 		for _, rel := range p.Prepare {
-			if filepath.IsAbs(rel) || strings.HasPrefix(filepath.Clean(rel), "..") {
-				return fmt.Errorf("prepare path %q must be inside the repository", rel)
-			}
-			for _, part := range strings.Split(rel, "/") {
-				if _, err := path.Match(part, ""); err != nil {
-					return fmt.Errorf("prepare pattern %q can't be matched", rel)
-				}
+			if err := validPrepare(rel); err != nil {
+				return err
 			}
 		}
 		if p.Sign != "" && p.Sign != SignAlways && p.Sign != SignNever {
@@ -254,9 +248,30 @@ func (p Playbook) Validate() error {
 	if p.DeliverTo != "" && !filepath.IsAbs(p.DeliverTo) {
 		return errors.New("deliver_to must be an absolute folder")
 	}
+	if err := validateSeats(p.Roles, strings.TrimSpace(p.Check) != ""); err != nil {
+		return err
+	}
+	if p.MaxActive < 0 || p.MaxActive > maxActiveLimit {
+		return fmt.Errorf("max_active must be between 1 and %d, or 0 for no overall limit", maxActiveLimit)
+	}
+	for stage, limit := range p.StageLimits {
+		if stage != StageTodo && !slices.Contains(limitStages, stage) {
+			return fmt.Errorf("stage_limits: %q is not a stage that can have a limit; use one of %s", stage, strings.Join(append([]string{StageTodo}, limitStages...), ", "))
+		}
+		if limit < 0 || limit > maxCapacity {
+			return fmt.Errorf("stage_limits: %s must be between 1 and %d, or 0 for the default (10; no limit for To do, PR rows or Ready)", stage, maxCapacity)
+		}
+	}
+	return nil
+}
+
+// validateSeats checks a team's seats: distinct names, engines and models
+// that exist, the kinds each holds, and at least one implementer and one
+// reviewer. QA needs a check to run, so a team with no check can't have it.
+func validateSeats(roles []Role, hasCheck bool) error {
 	implementers, reviewers := 0, 0
 	names := map[string]bool{}
-	for _, r := range p.Roles {
+	for _, r := range roles {
 		// Messages find a role by name ignoring case, so names must differ
 		// by more than case.
 		key := strings.ToLower(strings.TrimSpace(r.Name))
@@ -288,22 +303,26 @@ func (p Playbook) Validate() error {
 			implementers++
 		case r.Holds(RoleReviewer):
 			reviewers++
-		case r.Holds(RoleQA) && strings.TrimSpace(p.Check) == "":
+		case r.Holds(RoleQA) && !hasCheck:
 			return fmt.Errorf("role %s runs the check, but the team has no check command", r.Name)
 		}
 	}
 	if implementers < 1 || reviewers < 1 {
 		return errors.New("a playbook needs at least one implementer and at least one reviewer")
 	}
-	if p.MaxActive < 0 || p.MaxActive > maxActiveLimit {
-		return fmt.Errorf("max_active must be between 1 and %d, or 0 for no overall limit", maxActiveLimit)
+	return nil
+}
+
+// validPrepare checks one path, or pattern such as **/node_modules, to copy
+// into a private copy: inside the repository, and matchable segment by
+// segment.
+func validPrepare(rel string) error {
+	if filepath.IsAbs(rel) || strings.HasPrefix(filepath.Clean(rel), "..") {
+		return fmt.Errorf("prepare path %q must be inside the repository", rel)
 	}
-	for stage, limit := range p.StageLimits {
-		if stage != StageTodo && !slices.Contains(limitStages, stage) {
-			return fmt.Errorf("stage_limits: %q is not a stage that can have a limit; use one of %s", stage, strings.Join(append([]string{StageTodo}, limitStages...), ", "))
-		}
-		if limit < 0 || limit > maxCapacity {
-			return fmt.Errorf("stage_limits: %s must be between 1 and %d, or 0 for the default (10; no limit for To do, PR rows or Ready)", stage, maxCapacity)
+	for _, part := range strings.Split(rel, "/") {
+		if _, err := path.Match(part, ""); err != nil {
+			return fmt.Errorf("prepare pattern %q can't be matched", rel)
 		}
 	}
 	return nil
@@ -351,10 +370,13 @@ func (s *Service) SetPlaybook(ctx context.Context, projectID string, playbook Pl
 	})
 }
 
-// EditPlaybook changes a project's team in one step, so edits made at the
-// same time never undo each other. change gets a copy of the team, empty when
-// the project has none, and the state as it stands; it must not call back
-// into the Service, which is busy with this change until it returns. Tasks
+// EditPlaybook changes a project's playbook in one step, so edits made at
+// the same time never undo each other. change gets a copy of the playbook
+// before the project's seat overrides, empty when the project has none, and
+// the state as it stands; it must not call back into the Service, which is
+// busy with this change until it returns. Each part is written to its owner:
+// code settings to the project's repository, seats to its team, the rest to
+// the project; every project sharing them must keep a usable playbook. Tasks
 // already started keep the roles they started with.
 func (s *Service) EditPlaybook(ctx context.Context, projectID string, change func(snap *Snapshot, p *Project, pb *Playbook) error) (Project, error) {
 	var out Project
@@ -363,29 +385,23 @@ func (s *Service) EditPlaybook(ctx context.Context, projectID string, change fun
 		if p == nil {
 			return ErrNotFound
 		}
-		var playbook Playbook
-		if p.Playbook != nil {
-			playbook = *p.Playbook
-			playbook.Roles = slices.Clone(playbook.Roles)
-			playbook.StageLimits = maps.Clone(playbook.StageLimits)
-			playbook.DisabledBundledSkills = slices.Clone(playbook.DisabledBundledSkills)
-			playbook.Land.TrustedBots = slices.Clone(playbook.Land.TrustedBots)
-		}
+		before := snapshotCopy(v)
+		playbook, _ := v.basePlaybook(*p)
 		if err := change(v, p, &playbook); err != nil {
 			return err
 		}
-		if err := playbook.Validate(); err != nil {
+		repoID, teamID := placePlaybook(v, p, playbook)
+		if err := settle(before, v, p.ID, repoID, teamID, s.validPlaybook); err != nil {
 			return err
 		}
-		for _, r := range playbook.Roles {
-			if err := s.configuration().Engines.CheckProvider(r.Engine, r.Provider); err != nil {
-				return fmt.Errorf("role %s: %w", r.Name, err)
-			}
+		now := s.now().UTC()
+		using := v.projectsUsing(repoID, teamID)
+		for _, q := range using {
+			project(v, q.ID).UpdatedAt = now
 		}
-		p.Playbook = &playbook
-		p.UpdatedAt = s.now().UTC()
+		p.UpdatedAt = now
 		out = *p
-		record(v, p.UpdatedAt, p.ID, "playbook.set", "Team for "+p.Title+": "+playbookSummary(playbook))
+		record(v, p.UpdatedAt, p.ID, "playbook.set", "Team for "+p.Title+": "+playbookSummary(*p.Playbook)+sharedBy(using))
 		return nil
 	})
 	return out, err

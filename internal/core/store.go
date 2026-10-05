@@ -18,10 +18,11 @@ import (
 // stateSchema is the version of the state model this build reads and writes.
 // Version 2 is the project-teams model; version 1 (unversioned) was the worker
 // model it replaced. Version 3 makes pull requests a landing toggle rather
-// than a way. State from an earlier version is upgraded on open, see
+// than a way. Version 4 moves code settings to repositories and seats to
+// teams, which projects name. State from an earlier version is upgraded on open, see
 // migrations.go; state from a later one is refused, so an older build never
 // reads, or writes back, a model it doesn't know.
-const stateSchema = 3
+const stateSchema = 4
 
 // ErrStateSchema means the state file was written for a model this build
 // can't read.
@@ -157,7 +158,7 @@ func (s *Store) Close() error {
 	return err
 }
 func emptyState() Snapshot {
-	return Snapshot{Projects: []Project{}, Tasks: []Task{}, Decisions: []Decision{}, Messages: []Message{}, Memories: []Memory{}, Activity: []Activity{}, Integrations: []Integration{}, Members: []Member{}, Events: map[string]bool{}, ModelCalls: map[string]int{}}
+	return Snapshot{Projects: []Project{}, Repositories: []Repository{}, Teams: []Team{}, Tasks: []Task{}, Decisions: []Decision{}, Messages: []Message{}, Memories: []Memory{}, Activity: []Activity{}, Integrations: []Integration{}, Members: []Member{}, Events: map[string]bool{}, ModelCalls: map[string]int{}}
 }
 func readState(ctx context.Context, conn *sql.Conn) (Snapshot, error) {
 	var data string
@@ -194,6 +195,7 @@ func readState(ctx context.Context, conn *sql.Conn) (Snapshot, error) {
 	d.Snapshot.ModelWindows = d.ModelWindows
 	foldLegacyKinds(&d.Snapshot)
 	foldPlanner(&d.Snapshot)
+	resolvePlaybooks(&d.Snapshot)
 	deriveStages(&d.Snapshot)
 	headLegacyLearnings(&d.Snapshot)
 	return d.Snapshot, nil
@@ -245,7 +247,11 @@ func (s *Store) updateTransaction(ctx context.Context, fn func(*Snapshot, *sql.C
 	for _, d := range state.Decisions {
 		resolved[d.ID] = d.Status == DecisionResolved
 	}
+	derived := derivedPlaybooks(state)
 	if err = fn(&state, conn); err != nil {
+		return err
+	}
+	if err = rederivePlaybooks(&state, derived); err != nil {
 		return err
 	}
 	for _, d := range state.Decisions {
@@ -265,6 +271,7 @@ func (s *Store) updateTransaction(ctx context.Context, fn func(*Snapshot, *sql.C
 	}
 	stored := state
 	stored.Tasks = withoutRefs(state.Tasks)
+	stored.Projects = withoutPlaybooks(state.Projects)
 	data, err := json.Marshal(diskState{PMChats: state.PMChats, Schema: stateSchema, ChatCheckpoint: state.ChatCheckpoint, ChatSession: state.ChatSession, ConversationID: state.ConversationID, Conversations: state.Conversations, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: stored, ModelCalls: state.ModelCalls, ModelWindows: state.ModelWindows, Events: state.Events})
 	if err != nil {
 		return err

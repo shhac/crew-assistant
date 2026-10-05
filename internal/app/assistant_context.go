@@ -42,6 +42,14 @@ func assistantView(s core.Snapshot) core.Snapshot {
 		projects[i] = projectOverview(p)
 	}
 	s.Projects = projects
+	// A team's seats reach the assistant through each project's playbook;
+	// their standing instructions are for the team.
+	teams := make([]core.Team, len(s.Teams))
+	for i, t := range s.Teams {
+		t.Roles = withoutInstructions(t.Roles)
+		teams[i] = t
+	}
+	s.Teams = teams
 
 	var open, closed []core.Decision
 	for _, d := range s.Decisions {
@@ -126,18 +134,36 @@ func openBlockers(blockers []core.Blocker) []core.Blocker {
 
 // projectOverview is a project without its team's standing instructions,
 // which are for the team.
+// Its own settings are already in its playbook.
 func projectOverview(p core.Project) core.Project {
+	p.Settings = nil
+	overrides := make([]core.SeatOverride, len(p.SeatOverrides))
+	for i, o := range p.SeatOverrides {
+		if o.Seat != nil {
+			seat := withoutInstructions([]core.Role{*o.Seat})[0]
+			o.Seat = &seat
+		}
+		overrides[i] = o
+	}
+	p.SeatOverrides = overrides
 	if p.Playbook == nil {
 		return p
 	}
 	playbook := *p.Playbook
-	playbook.Roles = make([]core.Role, len(p.Playbook.Roles))
-	for i, r := range p.Playbook.Roles {
-		r.Instructions, r.Learnings = "", nil
-		playbook.Roles[i] = r
-	}
+	playbook.Roles = withoutInstructions(p.Playbook.Roles)
 	p.Playbook = &playbook
 	return p
+}
+
+// withoutInstructions is seats without their standing instructions and
+// learnings, which are for the team.
+func withoutInstructions(roles []core.Role) []core.Role {
+	out := make([]core.Role, len(roles))
+	for i, r := range roles {
+		r.Instructions, r.Learnings = "", nil
+		out[i] = r
+	}
+	return out
 }
 
 // finishedBrief is a finished task as the assistant sees it each turn: what

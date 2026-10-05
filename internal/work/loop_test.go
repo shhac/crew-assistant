@@ -468,11 +468,11 @@ func TestAPISandboxProofFailureBlocksOnceAcrossTicks(t *testing.T) {
 	lp, _, queued := loopApp(t, runner, "")
 	if _, err := lp.Core.UpdateTask(context.Background(), queued.ID, func(task *core.Task, project *core.Project) (string, error) {
 		// The queued task takes its seats from the project when it starts.
-		for i := range project.Playbook.Roles {
-			if project.Playbook.Roles[i].Holds(core.RoleImplementer) {
-				project.Playbook.Roles[i].Name = "Ash"
-				project.Playbook.Roles[i].Engine = "openai-compatible"
-				project.Playbook.Roles[i].Model = "fake-tools"
+		for i := range project.Settings.Roles {
+			if project.Settings.Roles[i].Holds(core.RoleImplementer) {
+				project.Settings.Roles[i].Name = "Ash"
+				project.Settings.Roles[i].Engine = "openai-compatible"
+				project.Settings.Roles[i].Model = "fake-tools"
 			}
 		}
 		return "", nil

@@ -197,7 +197,11 @@ func joinSeat(playbook *core.Playbook, seat int, m core.Member, kind string) {
 // SetTeam applies a team choice made in the dashboard or by the assistant.
 func (lp *Loop) SetTeam(ctx context.Context, projectID string, in TeamChoice) (core.Project, error) {
 	p, err := lp.Core.EditPlaybook(ctx, projectID, func(snap *core.Snapshot, p *core.Project, pb *core.Playbook) error {
-		playbook, err := chosenTeam(in, *snap, *p)
+		var current *core.Playbook
+		if p.Settings != nil {
+			current = pb
+		}
+		playbook, err := chosenTeam(in, *snap, *p, current)
 		if err != nil {
 			return err
 		}
@@ -212,8 +216,10 @@ func (lp *Loop) SetTeam(ctx context.Context, projectID string, in TeamChoice) (c
 }
 
 // chosenTeam is the team a choice makes for a project, keeping what the
-// choice doesn't cover from the team it has.
-func chosenTeam(in TeamChoice, snap core.Snapshot, p core.Project) (core.Playbook, error) {
+// choice doesn't cover from the playbook it has, before its seat overrides:
+// current, or nil when it has none.
+func chosenTeam(in TeamChoice, snap core.Snapshot, p core.Project, current *core.Playbook) (core.Playbook, error) {
+	p.Playbook = current
 	playbook, err := teamFrom(in, snap, p.Playbook)
 	if err != nil {
 		return core.Playbook{}, err
