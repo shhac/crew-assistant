@@ -8,6 +8,7 @@ import { AdvancedSettings } from "./AdvancedSettings";
 import { SlackBotSettings } from "./SlackBotSettings";
 import { Panel } from "./SettingsPanel";
 import { UpdatesSettings } from "./UpdatesSettings";
+import { ToolsSettings } from "./ToolsSettings";
 import { appearanceOf, applyAppearance, type Appearance } from "./appearance";
 import { href } from "./router";
 import { assistantSummary } from "./members";
@@ -30,6 +31,7 @@ const sections = [
   { id: "models", label: "Models" },
   { id: "chat", label: "Chat" },
   { id: "connections", label: "Connections" },
+  { id: "tools", label: "Tools" },
   { id: "limits", label: "Limits" },
   { id: "advanced", label: "Advanced" },
 ] as const;
@@ -209,7 +211,12 @@ export function Settings({
                   <p className="muted">
                     Reading connections below let the assistant read service
                     context through CLI accounts. Slack bot messaging above lets
-                    you talk to the assistant or a project manager.
+                    you talk to the assistant or a project manager. Missing a
+                    CLI?{" "}
+                    <a href={href({ page: "settings", section: "tools" })}>
+                      Install it from Tools
+                    </a>
+                    .
                   </p>
                   <ConnectionsSettings
                     connections={draft.connections || []}
@@ -251,6 +258,7 @@ export function Settings({
                   )}
                 </>
               )}
+              {current === "tools" && <ToolsSettings />}
               {current === "limits" && (
                 <LimitsSettings
                   config={draft}

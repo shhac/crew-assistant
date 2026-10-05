@@ -76,6 +76,55 @@
   padding: 14px;
 }
 
+.toolkit-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+}
+
+.toolkit-row p {
+  margin: 0;
+}
+
+.toolkit-confirm,
+.toolkit-job,
+.toolkit-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toolkit-confirm,
+.toolkit-job {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.toolkit-confirm p,
+.toolkit-job p,
+.toolkit-confirm .step-pre,
+.toolkit-job .step-pre {
+  margin: 0;
+}
+
+.copy-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.copy-command code {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--sunken);
+  font-size: 12px;
+}
+
 .choices {
   display: flex;
   flex-direction: column;

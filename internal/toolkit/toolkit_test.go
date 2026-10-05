@@ -319,7 +319,7 @@ func TestSkillStatusFromTheLockAndManifest(t *testing.T) {
 		"agent-slack":{"source":"shhac/agent-skills","updatedAt":"2026-08-20T10:00:00Z"}}}`)
 	o := f.manager().List(context.Background(), false)
 	lin := rowOf(t, o, "lin").Skill
-	if lin.Status != StatusOutdated || lin.Installed != "2026-08-20" || lin.Latest != "v0.36.5" || lin.Command != "npx skills add shhac/agent-skills --skill lin --global" || lin.Runnable {
+	if lin.Status != StatusOutdated || lin.Installed != "2026-08-20" || lin.Latest != "v0.36.5" || lin.Command != "npx skills add shhac/agent-skills --skill lin --global" || lin.Runnable || lin.Run != "" {
 		t.Fatalf("lin skill: %+v", lin)
 	}
 	if slack := rowOf(t, o, "agent-slack").Skill; slack.Status != StatusInstalled {
@@ -540,7 +540,7 @@ func TestSkillInstallUsesNPXWhenItCanBeFound(t *testing.T) {
 		return nil
 	}
 	m := f.manager()
-	if o := m.List(context.Background(), false); !o.NPX || !rowOf(t, o, "agent-mongo").Skill.Runnable {
+	if o := m.List(context.Background(), false); !o.NPX || rowOf(t, o, "agent-mongo").Skill.Run != "npx --yes skills add shhac/agent-skills --skill agent-mongo --global --yes" {
 		t.Fatal("npx not found")
 	}
 	started, err := m.Start("agent-mongo", ActionSkill)

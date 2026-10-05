@@ -991,6 +991,7 @@ describe("settings", () => {
       "Models",
       "Chat",
       "Connections",
+      "Tools",
       "Limits",
       "Advanced",
     ]);

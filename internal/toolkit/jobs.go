@@ -176,9 +176,7 @@ func (m *Manager) skillPlan(tool Tool) (plan, error) {
 	if npx == "" {
 		return plan{}, ErrNoNPX
 	}
-	// --yes twice: once for npx fetching the skills CLI, once for the CLI's
-	// own prompts, since the daemon has no terminal to answer them.
-	args := []string{"--yes", "skills", "add", skillsSource, "--skill", tool.Skill, "--global", "--yes"}
+	args := skillArgs(tool.Skill)
 	env := append(m.environment("HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"),
 		"PATH="+strings.Join([]string{filepath.Dir(npx), "/usr/bin", "/bin", "/usr/sbin", "/sbin"}, ":"))
 	return plan{
@@ -192,6 +190,12 @@ func (m *Manager) skillPlan(tool Tool) (plan, error) {
 			return m.skillOutcome(tool.Skill, err)
 		},
 	}, nil
+}
+
+// skillArgs passes --yes twice: once for npx fetching the skills CLI, once
+// for the CLI's own prompts, since the daemon has no terminal to answer them.
+func skillArgs(name string) []string {
+	return []string{"--yes", "skills", "add", skillsSource, "--skill", name, "--global", "--yes"}
 }
 
 func (m *Manager) skillOutcome(name string, err error) (string, string) {

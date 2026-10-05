@@ -156,6 +156,7 @@ type Row struct {
 	ID            string    `json:"id"`
 	Name          string    `json:"name"`
 	Purpose       string    `json:"purpose"`
+	Formula       string    `json:"formula"`
 	Status        string    `json:"status"`
 	Installed     string    `json:"installed,omitempty"`
 	Latest        string    `json:"latest,omitempty"`
@@ -175,10 +176,11 @@ type SkillRow struct {
 	Status    string `json:"status"`
 	Installed string `json:"installed,omitempty"`
 	Latest    string `json:"latest,omitempty"`
-	// Command is for the owner's own terminal; Runnable says the dashboard
-	// can run it here.
+	// Command is for the owner's own terminal. Run is what the dashboard
+	// runs instead, when npx can be found.
 	Command  string `json:"command"`
 	Runnable bool   `json:"runnable"`
+	Run      string `json:"run,omitempty"`
 }
 
 // List reports every tool. A source that can't be read leaves its part
@@ -218,13 +220,15 @@ func (m *Manager) List(ctx context.Context, refresh bool) Overview {
 }
 
 func (m *Manager) row(ctx context.Context, tool Tool, prefix string, remote remote, skills skillState, npx bool) Row {
-	r := Row{ID: tool.ID, Name: tool.Name, Purpose: tool.Purpose, Install: "brew install " + tool.Formula, Update: "brew upgrade " + tool.Formula, Setup: append([]string{}, tool.Setup...), Verify: len(tool.Verify) > 0, Connection: tool.Connection, Latest: remote.versions[tool.ID]}
+	r := Row{ID: tool.ID, Name: tool.Name, Purpose: tool.Purpose, Formula: tool.Formula, Install: "brew install " + tool.Formula, Update: "brew upgrade " + tool.Formula, Setup: append([]string{}, tool.Setup...), Verify: len(tool.Verify) > 0, Connection: tool.Connection, Latest: remote.versions[tool.ID]}
 	if r.Verify {
 		r.VerifyCommand = commandLine(tool.Verify)
 	}
 	if tool.Skill != "" {
 		skill := m.skillRow(tool.Skill, remote, skills)
-		skill.Runnable = npx
+		if npx {
+			skill.Runnable, skill.Run = true, commandLine(append([]string{"npx"}, skillArgs(tool.Skill)...))
+		}
 		r.Skill = &skill
 	}
 	r.Path = m.binary(tool.ID, prefix)
