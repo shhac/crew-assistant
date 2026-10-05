@@ -26,11 +26,13 @@ func (a *App) StartToolkitJob(tool, action string) (toolkit.JobView, error) {
 	return a.Toolkit.Start(tool, action)
 }
 
-func (a *App) UpdateAllTools(ctx context.Context) (toolkit.JobView, error) {
+// UpdateAllTools runs only the command the owner confirmed; it is compared,
+// never run as given.
+func (a *App) UpdateAllTools(ctx context.Context, confirmed string) (toolkit.JobView, error) {
 	if err := a.admitToolkitJob(); err != nil {
 		return toolkit.JobView{}, err
 	}
-	return a.Toolkit.UpdateAll(ctx)
+	return a.Toolkit.UpdateAll(ctx, confirmed)
 }
 
 func (a *App) admitToolkitJob() error {

@@ -52,6 +52,8 @@ export interface Toolkit {
   homebrew: { available: boolean; prefix?: string; install?: string };
   npx: boolean;
   tools: Tool[];
+  /** Updates every outdated Homebrew tool; confirming sends it back. */
+  update_all?: string;
   checked_at?: string;
   job?: ToolJob;
 }
@@ -67,8 +69,12 @@ export function startToolJob(tool: string, action: ToolAction) {
   );
 }
 
-export function updateAllTools() {
-  return api<ToolJob>("/api/toolkit/update-all", { method: "POST" });
+/** Runs the update-all command the owner confirmed, if it still applies. */
+export function updateAllTools(command: string) {
+  return api<ToolJob>("/api/toolkit/update-all", {
+    method: "POST",
+    body: JSON.stringify({ command }),
+  });
 }
 
 export function getToolJob(id: string, after: number) {

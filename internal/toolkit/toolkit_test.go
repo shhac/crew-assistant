@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -459,6 +460,7 @@ func TestInstallRunsHomebrewAndReportsTheNewVersion(t *testing.T) {
 
 func TestOneJobAtATime(t *testing.T) {
 	f := newFixture(t)
+	f.binary("agent-slack")
 	release := make(chan struct{})
 	f.job = func(ctx context.Context, c Command) error {
 		<-release
@@ -588,23 +590,157 @@ func TestUpdateAllUpgradesOnlyOutdatedTools(t *testing.T) {
 		f.versions[name] = name + " version " + versions[0]
 		f.formulas[name] = versions[1]
 	}
+	// Found only on PATH: Homebrew didn't install it, so it can't upgrade it.
+	f.versions["agent-dd"] = "agent-dd version 0.1.0"
+	f.formulas["agent-dd"] = "0.20.1"
 	m := f.manager()
-	started, err := m.UpdateAll(context.Background())
+	elsewhere := filepath.Join(t.TempDir(), "agent-dd")
+	m.opts.LookPath = func(name string) (string, error) {
+		if name == "agent-dd" {
+			return elsewhere, nil
+		}
+		return "", errors.New("not on PATH")
+	}
+	o := m.List(context.Background(), false)
+	want := "brew upgrade shhac/tap/lin shhac/tap/agent-sql"
+	if o.UpdateAll != want {
+		t.Fatalf("update all %q", o.UpdateAll)
+	}
+	if _, err := m.UpdateAll(context.Background(), "brew upgrade shhac/tap/lin"); !errors.Is(err, ErrChanged) {
+		t.Fatalf("a different confirmed list: %v", err)
+	}
+	if len(f.commands()) != 0 {
+		t.Fatal("ran an unconfirmed list", f.commands())
+	}
+	started, err := m.UpdateAll(context.Background(), o.UpdateAll)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if started.Command != "brew upgrade shhac/tap/lin shhac/tap/agent-sql" || started.Action != ActionUpdateAll {
+	if started.Command != want || started.Action != ActionUpdateAll {
 		t.Fatalf("%+v", started)
 	}
 	if done := wait(t, m, started.ID); done.State != JobSucceeded || done.Result != "Updated lin, agent-sql." {
 		t.Fatalf("%+v", done)
 	}
+	if run := f.commands()[0]; run.Path != filepath.Join(f.prefix, "bin", "brew") || !slices.Equal(run.Args, []string{"upgrade", "shhac/tap/lin", "shhac/tap/agent-sql"}) {
+		t.Fatalf("ran %+v", run)
+	}
+	f.mu.Lock()
 	f.versions["lin"] = "lin version 0.37.0"
 	f.versions["agent-sql"] = "agent-sql version 1.20.0"
-	if _, err := m.UpdateAll(context.Background()); !errors.Is(err, ErrUpToDate) {
+	f.mu.Unlock()
+	if o = m.List(context.Background(), false); o.UpdateAll != "" {
+		t.Fatalf("nothing outdated, but %q", o.UpdateAll)
+	}
+	if _, err := m.UpdateAll(context.Background(), want); !errors.Is(err, ErrUpToDate) {
 		t.Fatalf("nothing outdated: %v", err)
 	}
 }
+
+func TestUpdatingACopyOutsideHomebrewInstallsHomebrews(t *testing.T) {
+	f := newFixture(t)
+	f.versions["lin"] = "lin version 0.36.4"
+	f.formulas["lin"] = "0.37.0"
+	m := f.manager()
+	elsewhere := filepath.Join(t.TempDir(), "lin")
+	m.opts.LookPath = func(name string) (string, error) {
+		if name == "lin" {
+			return elsewhere, nil
+		}
+		return "", errors.New("not on PATH")
+	}
+	lin := rowOf(t, m.List(context.Background(), false), "lin")
+	if lin.Status != StatusOutdated || lin.Path != elsewhere || lin.Update != "brew install shhac/tap/lin" || lin.Detail == "" {
+		t.Fatalf("lin: %+v", lin)
+	}
+	started, err := m.Start("lin", ActionUpdate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait(t, m, started.ID)
+	if started.Command != lin.Update || !slices.Equal(f.commands()[0].Args, []string{"install", "shhac/tap/lin"}) {
+		t.Fatalf("shown %q, ran %q", started.Command, f.commands()[0].Args)
+	}
+}
+
+// Each process gets only the keys it needs, never the daemon's own.
+func TestCommandsGetOnlyTheirAllowedEnvironment(t *testing.T) {
+	f := newFixture(t)
+	f.binary("agent-notion")
+	f.binary("npx")
+	f.versions["agent-notion"] = "agent-notion version 0.10.2"
+	m := f.manager()
+	m.opts.LookupEnv = func(key string) (string, bool) { return "value-of-" + key, true }
+	for _, start := range []func() (JobView, error){
+		func() (JobView, error) { return m.Start("agent-notion", ActionVerify) },
+		func() (JobView, error) { return m.Start("agent-notion", ActionUpdate) },
+		func() (JobView, error) { return m.Start("agent-notion", ActionSkill) },
+	} {
+		started, err := start()
+		if err != nil {
+			t.Fatal(err)
+		}
+		wait(t, m, started.ID)
+	}
+	m.List(context.Background(), false)
+	f.mu.Lock()
+	runs := append([]Command{}, f.runs...)
+	f.mu.Unlock()
+	if len(runs) < 4 {
+		t.Fatalf("ran %d commands", len(runs))
+	}
+	allowed := []string{"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "SHELL", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "HOMEBREW_NO_ENV_HINTS", "HOMEBREW_NO_COLOR"}
+	for _, run := range runs {
+		if run.Env == nil {
+			t.Fatalf("%s has a nil environment, which exec reads as the daemon's", run.Path)
+		}
+		for _, entry := range run.Env {
+			if key, _, _ := strings.Cut(entry, "="); !slices.Contains(allowed, key) {
+				t.Errorf("%s %v got %s", run.Path, run.Args, key)
+			}
+		}
+	}
+}
+
+func TestRunNeverHandsOverTheDaemonsEnvironment(t *testing.T) {
+	t.Setenv("TOOLKIT_DAEMON_SECRET", "kept-out")
+	var out clipped
+	if err := run(context.Background(), Command{Path: "/usr/bin/env", Output: &out}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out.data), "kept-out") {
+		t.Fatalf("child saw the daemon's environment: %q", out.data)
+	}
+}
+
+func TestFailureOutcomes(t *testing.T) {
+	exit := exec.Command("/bin/sh", "-c", "exit 3").Run()
+	for _, tc := range []struct {
+		name          string
+		state, result string
+		got           [2]string
+	}{
+		{"brew failed, old version left", JobFailed, "Homebrew exited with status 3; lin v1.0.0 is installed.", pair(brewOutcome("lin", "v1.0.0", exit))},
+		{"brew failed, nothing installed", JobFailed, "Homebrew exited with status 3.", pair(brewOutcome("lin", "", exit))},
+		{"brew finished, no version", JobFailed, "Homebrew finished, but lin's version couldn't be read.", pair(brewOutcome("lin", "", nil))},
+		{"not signed in", JobFailed, "Not signed in yet (lin exited with status 3). Run the setup commands in your terminal.", pair(verifyOutcome("lin", exit))},
+		{"check timed out", JobFailed, "The check timed out.", pair(verifyOutcome("lin", context.DeadlineExceeded))},
+	} {
+		if tc.got != [2]string{tc.state, tc.result} {
+			t.Errorf("%s: %q", tc.name, tc.got)
+		}
+	}
+	f := newFixture(t)
+	m := f.manager()
+	if state, result := m.skillOutcome("lin", exit); state != JobFailed || result != "The skills CLI exited with status 3." {
+		t.Errorf("skills CLI failed: %s", result)
+	}
+	if state, result := m.skillOutcome("lin", nil); state != JobFailed || !strings.Contains(result, "isn't in") {
+		t.Errorf("skill missing afterwards: %s", result)
+	}
+}
+
+func pair(state, result string) [2]string { return [2]string{state, result} }
 
 func TestRedact(t *testing.T) {
 	for _, secret := range []string{

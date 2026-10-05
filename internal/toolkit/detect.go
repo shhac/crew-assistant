@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -61,16 +62,26 @@ func (m *Manager) ensureRemote(ctx context.Context, force bool) {
 	if fresh && !force {
 		return
 	}
-	request := ctx
+	next := m.readRemote(ctx)
+	// A caller that went away read nothing it can vouch for.
+	if ctx.Err() != nil {
+		return
+	}
+	m.mu.Lock()
+	m.remote = next
+	m.mu.Unlock()
+}
+
+// readRemote reads every formula and the skills manifest at once; whatever
+// fails is left out.
+func (m *Manager) readRemote(ctx context.Context) remote {
 	ctx, cancel := context.WithTimeout(ctx, remoteBound)
 	defer cancel()
 	next := remote{checked: m.opts.Now(), versions: map[string]string{}, skills: map[string]manifestEntry{}}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, tool := range catalog {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			body, err := m.opts.Fetch(ctx, (config.UpgradeSettings{Formula: tool.Formula}).FormulaSourceURL())
 			if err != nil {
 				return
@@ -82,7 +93,7 @@ func (m *Manager) ensureRemote(ctx context.Context, force bool) {
 			mu.Lock()
 			next.versions[tool.ID] = version
 			mu.Unlock()
-		}()
+		})
 	}
 	wg.Go(func() {
 		body, err := m.opts.Fetch(ctx, SkillsManifestURL)
@@ -95,30 +106,23 @@ func (m *Manager) ensureRemote(ctx context.Context, force bool) {
 		}
 	})
 	wg.Wait()
-	// A caller that went away read nothing it can vouch for.
-	if request.Err() != nil {
-		return
-	}
-	m.mu.Lock()
-	m.remote = next
-	m.mu.Unlock()
+	return next
 }
 
 // homebrewPrefix follows the daemon's own Homebrew install first, then
 // whichever brew is reachable, then Homebrew's standard places.
 func (m *Manager) homebrewPrefix() string {
+	var candidates []string
 	if exe, err := m.opts.Executable(); err == nil {
-		if prefix, err := upgrade.HomebrewPrefix(exe); err == nil && executable(filepath.Join(prefix, "bin", "brew")) {
-			return prefix
+		if prefix, err := upgrade.HomebrewPrefix(exe); err == nil {
+			candidates = append(candidates, prefix)
 		}
 	}
 	if brew, err := m.opts.LookPath("brew"); err == nil {
-		if prefix := filepath.Dir(filepath.Dir(brew)); executable(filepath.Join(prefix, "bin", "brew")) {
-			return prefix
-		}
+		candidates = append(candidates, filepath.Dir(filepath.Dir(brew)))
 	}
-	for _, prefix := range m.opts.Prefixes {
-		if executable(filepath.Join(prefix, "bin", "brew")) {
+	for _, prefix := range append(candidates, m.opts.Prefixes...) {
+		if executable(brewPath(prefix)) {
 			return prefix
 		}
 	}
@@ -142,6 +146,16 @@ func executable(path string) bool {
 	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
 }
 
+// installedVersion finds a tool and reads its version; either is "" when it
+// can't.
+func (m *Manager) installedVersion(ctx context.Context, name, prefix string) (path, version string) {
+	path = m.binary(name, prefix)
+	if path == "" {
+		return "", ""
+	}
+	return path, m.probeVersion(ctx, path)
+}
+
 // probeVersion reads `<tool> --version`, such as "lin version 0.36.4", and
 // returns "" when it can't.
 func (m *Manager) probeVersion(ctx context.Context, path string) string {
@@ -156,9 +170,8 @@ func (m *Manager) probeVersion(ctx context.Context, path string) string {
 
 func parseVersion(output string) string {
 	for _, word := range strings.Fields(output) {
-		word = strings.TrimRight(word, ",;)")
-		if releaseversion.Valid(word) {
-			return "v" + strings.TrimPrefix(word, "v")
+		if version := versionLabel(strings.TrimRight(word, ",;)")); version != "" {
+			return version
 		}
 	}
 	return ""
@@ -184,14 +197,33 @@ func (c *clipped) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// toolEnv is what a tool needs to find its own config and credentials, and
-// nothing of the daemon's.
+// Every process the toolkit starts gets only what it needs, and none of the
+// daemon's own settings or credentials.
+var (
+	userKeys   = []string{"HOME", "USER", "LOGNAME", "TMPDIR"}
+	xdgKeys    = []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"}
+	systemPath = []string{"/usr/bin", "/bin", "/usr/sbin", "/sbin"}
+)
+
+// toolEnv is what a tool needs to find its own config and credentials.
 func (m *Manager) toolEnv() []string {
-	return m.environment("PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME")
+	return m.environment(slices.Concat([]string{"PATH"}, userKeys, xdgKeys)...)
+}
+
+func (m *Manager) brewEnv(prefix string) []string {
+	path := slices.Concat([]string{filepath.Join(prefix, "bin"), filepath.Join(prefix, "sbin")}, systemPath)
+	return append(m.environment(slices.Concat(userKeys, []string{"LANG", "SHELL"})...),
+		"PATH="+strings.Join(path, ":"), "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_COLOR=1")
+}
+
+// skillEnv puts npx's own node first on the PATH.
+func (m *Manager) skillEnv(npx string) []string {
+	path := slices.Concat([]string{filepath.Dir(npx)}, systemPath)
+	return append(m.environment(slices.Concat(userKeys, []string{"LANG"}, xdgKeys)...), "PATH="+strings.Join(path, ":"))
 }
 
 func (m *Manager) environment(keys ...string) []string {
-	var env []string
+	env := []string{}
 	for _, key := range keys {
 		if v, ok := m.opts.LookupEnv(key); ok {
 			env = append(env, key+"="+v)

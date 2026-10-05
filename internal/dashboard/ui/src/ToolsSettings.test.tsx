@@ -10,7 +10,7 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import { ToolsSettings } from "./ToolsSettings";
 import { recordFetch, reply } from "./testFetch";
-import type { Tool, Toolkit } from "./toolkit";
+import type { Tool, ToolJob, Toolkit } from "./toolkit";
 
 afterEach(() => {
   cleanup();
@@ -37,6 +37,7 @@ const toolkit = (overrides: Partial<Toolkit> = {}): Toolkit => ({
   homebrew: { available: true, prefix: "/opt/homebrew" },
   npx: true,
   checked_at: new Date().toISOString(),
+  update_all: "brew upgrade shhac/tap/lin shhac/tap/agent-sql",
   tools: [
     tool({
       id: "lin",
@@ -158,10 +159,68 @@ it("offers update all, skills and sign-in for what each tool needs", async () =>
       "npx --yes skills add shhac/agent-skills --skill agent-mongo --global --yes",
     ),
   ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Update all (2)" }));
+});
+
+const runningJob: ToolJob = {
+  id: "job2",
+  action: "update-all",
+  command: "brew upgrade shhac/tap/lin shhac/tap/agent-sql",
+  state: "running",
+  started_at: "2026-10-05T12:00:00Z",
+  lines: [],
+  next: 0,
+};
+
+it("runs update all with the command the owner confirmed", async () => {
+  const { calls } = recordFetch((path, options) => {
+    if (path === "/api/toolkit") return reply(toolkit());
+    if (path === "/api/toolkit/update-all" && options?.method === "POST")
+      return reply(runningJob, 202);
+    if (path.startsWith("/api/toolkit/jobs/job2"))
+      return reply({ ...runningJob, state: "succeeded", result: "Updated." });
+    return reply({ error: "unexpected" }, 500);
+  });
+  render(<ToolsSettings pollMs={1} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Update all" }));
+  const confirm = screen.getByRole("group", { name: "Confirm command" });
   expect(
-    screen.getByText("brew upgrade shhac/tap/lin shhac/tap/agent-sql"),
+    within(confirm).getByText("brew upgrade shhac/tap/lin shhac/tap/agent-sql"),
   ).toBeTruthy();
+  fireEvent.click(within(confirm).getByRole("button", { name: "Run" }));
+  await screen.findByText("Updated.");
+  const post = calls.find((c) => c.path === "/api/toolkit/update-all");
+  expect(post?.options?.body).toBe(
+    JSON.stringify({
+      command: "brew upgrade shhac/tap/lin shhac/tap/agent-sql",
+    }),
+  );
+});
+
+it("picks up a job already running and recovers from a failed poll", async () => {
+  const polls: string[] = [];
+  recordFetch((path) => {
+    if (path === "/api/toolkit") return reply(toolkit({ job: runningJob }));
+    if (path.startsWith("/api/toolkit/jobs/job2")) {
+      polls.push(path);
+      if (polls.length === 1) return reply({ error: "Connection lost" }, 503);
+      return reply({
+        ...runningJob,
+        state: "succeeded",
+        result: "Updated.",
+        lines: ["==> Upgrading 2 outdated packages"],
+        next: 1,
+      });
+    }
+    return reply({ error: "unexpected" }, 500);
+  });
+  render(<ToolsSettings pollMs={1} />);
+  await screen.findByText("Connection lost");
+  await screen.findByText("Updated.");
+  expect(polls[0]).toBe("/api/toolkit/jobs/job2?after=0");
+  expect(screen.queryByText("Connection lost")).toBeNull();
+  expect(
+    screen.getByRole("region", { name: "Command output" }).textContent,
+  ).toContain("==> Upgrading 2 outdated packages");
 });
 
 it("explains Homebrew and hands over the skill command when nothing can run here", async () => {

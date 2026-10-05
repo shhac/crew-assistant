@@ -1,4 +1,10 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { criteriaLines, errorText } from "./api";
 
 const icons: Record<string, string> = {
@@ -320,4 +326,37 @@ export function useNewestInView<E extends HTMLElement>(
         : box.scrollHeight - box.scrollTop - box.clientHeight <= 2;
   }
   return { ref, onScroll, tabIndex: 0 };
+}
+
+/**
+ * A command for the owner's own terminal, with a button that copies it.
+ * Without clipboard access the command stays selectable.
+ */
+export function CopyCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  const reset = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(reset.current), []);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      clearTimeout(reset.current);
+      reset.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      return;
+    }
+  }
+  return (
+    <span className="copy-command">
+      <code>{command}</code>
+      <button
+        type="button"
+        className="btn btn-quiet btn-sm"
+        aria-label={`Copy ${command}`}
+        onClick={() => void copy()}
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </span>
+  );
 }

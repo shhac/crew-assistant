@@ -23,7 +23,13 @@ func registerToolkit(mux *http.ServeMux, a *app.App) {
 		toolkitReply(w, 200, overview, err)
 	})
 	mux.HandleFunc("POST /api/toolkit/update-all", func(w http.ResponseWriter, r *http.Request) {
-		job, err := a.UpdateAllTools(r.Context())
+		var in struct {
+			Command string `json:"command"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		job, err := a.UpdateAllTools(r.Context(), in.Command)
 		toolkitReply(w, 202, job, err)
 	})
 	mux.HandleFunc("POST /api/toolkit/{id}/{action}", func(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +60,8 @@ func toolkitReply(w http.ResponseWriter, status int, v any, err error) {
 	case errors.Is(err, toolkit.ErrUnknownTool), errors.Is(err, toolkit.ErrUnknownAction), errors.Is(err, toolkit.ErrUnknownJob):
 		fail(w, http.StatusNotFound, ownerText(err))
 	case errors.Is(err, toolkit.ErrBusy), errors.Is(err, toolkit.ErrNoHomebrew), errors.Is(err, toolkit.ErrNoNPX),
-		errors.Is(err, toolkit.ErrUnavailable), errors.Is(err, toolkit.ErrNotInstalled), errors.Is(err, toolkit.ErrUpToDate):
+		errors.Is(err, toolkit.ErrUnavailable), errors.Is(err, toolkit.ErrNotInstalled), errors.Is(err, toolkit.ErrUpToDate),
+		errors.Is(err, toolkit.ErrChanged):
 		fail(w, http.StatusConflict, ownerText(err))
 	default:
 		problem(w, err)

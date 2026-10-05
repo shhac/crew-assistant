@@ -44,7 +44,7 @@ func TestToolkitRefusesDemoAndStopping(t *testing.T) {
 	if _, err := a.StartToolkitJob("lin", toolkit.ActionInstall); !errors.Is(err, ErrToolkitDemo) {
 		t.Fatalf("demo install: %v", err)
 	}
-	if _, err := a.UpdateAllTools(context.Background()); !errors.Is(err, ErrToolkitDemo) {
+	if _, err := a.UpdateAllTools(context.Background(), "brew upgrade shhac/tap/lin"); !errors.Is(err, ErrToolkitDemo) {
 		t.Fatalf("demo update all: %v", err)
 	}
 	if _, err := a.ToolkitJob("x", 0); !errors.Is(err, ErrToolkitDemo) {
@@ -57,7 +57,7 @@ func TestToolkitRefusesDemoAndStopping(t *testing.T) {
 	if _, err := a.StartToolkitJob("lin", toolkit.ActionInstall); !errors.Is(err, ErrStopping) {
 		t.Fatalf("install while stopping: %v", err)
 	}
-	if _, err := a.UpdateAllTools(context.Background()); !errors.Is(err, ErrStopping) {
+	if _, err := a.UpdateAllTools(context.Background(), "brew upgrade shhac/tap/lin"); !errors.Is(err, ErrStopping) {
 		t.Fatalf("update all while stopping: %v", err)
 	}
 }

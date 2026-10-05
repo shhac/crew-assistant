@@ -129,11 +129,31 @@ func TestToolkitRoutesAreOwnerOnlyAndRunOnlyCatalogCommands(t *testing.T) {
 	if w := send(h, auth, "POST", "/api/toolkit/git-hunk/verify", nil, asOwner); w.Code != 409 {
 		t.Fatalf("no verify: %d %s", w.Code, w.Body.String())
 	}
+	if overview.UpdateAll != "brew upgrade shhac/tap/lin" {
+		t.Fatalf("update all: %q", overview.UpdateAll)
+	}
+	for body, code := range map[string]int{
+		`{"command":"brew upgrade shhac/tap/lin shhac/tap/curl"}`: 409,
+		`{"command":"brew upgrade shhac/tap/lin"}`:                202,
+		`{}`:                 409,
+		`{"command":1}`:      400,
+		`{"formulas":["x"]}`: 400,
+	} {
+		if w := send(h, auth, "POST", "/api/toolkit/update-all", strings.NewReader(body), asOwner); w.Code != code {
+			t.Errorf("update all %s: %d %s", body, w.Code, w.Body.String())
+		}
+	}
+	for deadline := time.Now().Add(10 * time.Second); len(runs()) < 2 && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := runs(); len(got) != 2 || !slices.Equal(got[1][1:], []string{"upgrade", "shhac/tap/lin"}) {
+		t.Fatalf("ran %q", got)
+	}
 	a.Demo = true
 	if w := send(h, auth, "GET", "/api/toolkit", nil, caller{owner: true}); w.Code != 403 {
 		t.Fatalf("demo list: %d", w.Code)
 	}
-	if w := send(h, auth, "POST", "/api/toolkit/update-all", nil, asOwner); w.Code != 403 {
+	if w := send(h, auth, "POST", "/api/toolkit/update-all", strings.NewReader(`{"command":"brew upgrade shhac/tap/lin"}`), asOwner); w.Code != 403 {
 		t.Fatalf("demo update all: %d", w.Code)
 	}
 }

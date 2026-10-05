@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Panel } from "./SettingsPanel";
 import { errorText } from "./api";
 import {
+  CopyCommand,
   ErrorNotice,
   Pill,
   sinceLabel,
@@ -20,11 +21,14 @@ import {
   type Toolkit,
 } from "./toolkit";
 
-/** An action waiting for the owner to confirm the exact command. */
+/**
+ * An action waiting for the owner to confirm the exact command: key is the
+ * tool it belongs to, or "update-all".
+ */
 interface Pending {
-  tool?: string;
-  action: ToolAction | "update-all";
+  key: string;
   command: string;
+  start: () => Promise<ToolJob>;
 }
 
 const statusLabels: Record<ToolStatus, { label: string; tone: string }> = {
@@ -42,71 +46,30 @@ const statusLabels: Record<ToolStatus, { label: string; tone: string }> = {
 export function ToolsSettings({ pollMs = 1000 }: { pollMs?: number }) {
   const [toolkit, setToolkit] = useState<Toolkit | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
-  const [job, setJob] = useState<ToolJob | null>(null);
-  // The log line the next poll reads from.
-  const cursor = useRef(0);
   const loading = useAction();
   const starting = useAction();
-  const showError = starting.setError;
   async function load(refresh: boolean) {
     const next = await getToolkit(refresh);
     setToolkit(next);
     return next;
   }
+  const following = useFollowedJob(pollMs, () => load(false));
+  const { follow } = following;
   useEffect(() => {
     void loading.run(async () => {
       const first = await load(false);
       // A job still running from before this page opened is picked up,
       // log and all.
-      if (first.job?.state !== "running") return;
-      cursor.current = 0;
-      setJob({ ...first.job, lines: [] });
+      if (first.job?.state === "running") follow(first.job, 0);
     });
-  }, []);
-  const jobID = job?.id;
-  const running = job?.state === "running";
-  useEffect(() => {
-    if (!jobID || !running) return;
-    async function poll(id: string) {
-      try {
-        const next = await getToolJob(id, cursor.current);
-        if (control.stopped) return;
-        cursor.current = next.next;
-        setJob((current) => ({
-          ...next,
-          lines: [...(current?.lines ?? []), ...(next.lines ?? [])],
-        }));
-        if (next.state === "running") {
-          control.timer = setTimeout(() => void poll(id), pollMs);
-          return;
-        }
-        await load(false).catch(() => {});
-      } catch (err) {
-        if (control.stopped) return;
-        showError(errorText(err));
-        control.timer = setTimeout(() => void poll(id), pollMs * 3);
-      }
-    }
-    const control = {
-      stopped: false,
-      timer: setTimeout(() => void poll(jobID), pollMs),
-    };
-    return () => {
-      control.stopped = true;
-      clearTimeout(control.timer);
-    };
-  }, [jobID, running, pollMs, showError]);
+  }, [follow]);
   async function confirm() {
     if (!pending) return;
     const chosen = pending;
     await starting.run(async () => {
-      const started =
-        chosen.action === "update-all"
-          ? await updateAllTools()
-          : await startToolJob(chosen.tool ?? "", chosen.action);
+      const started = await chosen.start();
       setPending(null);
-      cursor.current = started.next;
-      setJob({ ...started, lines: started.lines ?? [] });
+      follow(started, started.next);
     });
   }
   if (!toolkit)
@@ -116,13 +79,14 @@ export function ToolsSettings({ pollMs = 1000 }: { pollMs?: number }) {
         {!loading.error && <p className="muted">Looking for tools…</p>}
       </Panel>
     );
+  const { job, running } = following;
   const busy = running || starting.busy;
-  const outdated = toolkit.tools.filter((t) => t.status === "outdated");
   const ask = (next: Pending) => {
     starting.setError("");
     setPending(next);
   };
   const cancel = () => setPending(null);
+  const updateAll = toolkit.update_all;
   return (
     <Panel title="Tools">
       <p className="soft">
@@ -151,19 +115,20 @@ export function ToolsSettings({ pollMs = 1000 }: { pollMs?: number }) {
         >
           {loading.busy ? "Checking…" : "Check for updates"}
         </button>
-        {outdated.length > 0 && toolkit.homebrew.available && (
+        {updateAll && (
           <button
             type="button"
             className="btn btn-sm"
             disabled={busy}
             onClick={() =>
               ask({
-                action: "update-all",
-                command: `brew upgrade ${outdated.map((t) => t.formula).join(" ")}`,
+                key: "update-all",
+                command: updateAll,
+                start: () => updateAllTools(updateAll),
               })
             }
           >
-            Update all ({outdated.length})
+            Update all
           </button>
         )}
         {toolkit.checked_at && (
@@ -172,7 +137,7 @@ export function ToolsSettings({ pollMs = 1000 }: { pollMs?: number }) {
           </span>
         )}
       </div>
-      {pending?.action === "update-all" && (
+      {pending?.key === "update-all" && (
         <Confirm
           pending={pending}
           busy={starting.busy}
@@ -180,9 +145,12 @@ export function ToolsSettings({ pollMs = 1000 }: { pollMs?: number }) {
           onCancel={cancel}
         />
       )}
-      <ErrorNotice error={loading.error || starting.error} />
+      <ErrorNotice error={loading.error || starting.error || following.error} />
       {job && (
-        <JobLog job={job} onClose={running ? undefined : () => setJob(null)} />
+        <JobLog
+          job={job}
+          onClose={running ? undefined : () => following.close()}
+        />
       )}
       <ul className="rows toolkit-rows">
         {toolkit.tools.map((tool) => (
@@ -191,7 +159,7 @@ export function ToolsSettings({ pollMs = 1000 }: { pollMs?: number }) {
             tool={tool}
             homebrew={toolkit.homebrew.available}
             busy={busy}
-            pending={pending?.tool === tool.id ? pending : null}
+            pending={pending?.key === tool.id ? pending : null}
             confirming={starting.busy}
             onAsk={ask}
             onConfirm={() => void confirm()}
@@ -201,6 +169,61 @@ export function ToolsSettings({ pollMs = 1000 }: { pollMs?: number }) {
       </ul>
     </Panel>
   );
+}
+
+/**
+ * Follows one job's log by polling from the last line read, until it ends;
+ * then onFinished runs once. A failed poll is shown and retried, and the
+ * error clears once a poll succeeds.
+ */
+function useFollowedJob(pollMs: number, onFinished: () => Promise<unknown>) {
+  const [job, setJob] = useState<ToolJob | null>(null);
+  const [error, setError] = useState("");
+  // The log line the next poll reads from.
+  const cursor = useRef(0);
+  const finished = useRef(onFinished);
+  finished.current = onFinished;
+  const follow = useRef((next: ToolJob, from: number) => {
+    cursor.current = from;
+    setError("");
+    setJob({ ...next, lines: next.lines ?? [] });
+  }).current;
+  const jobID = job?.id;
+  const running = job?.state === "running";
+  useEffect(() => {
+    if (!jobID || !running) return;
+    const control: {
+      stopped: boolean;
+      timer?: ReturnType<typeof setTimeout>;
+    } = { stopped: false };
+    const schedule = (delay: number) => {
+      control.timer = setTimeout(() => void poll(jobID), delay);
+    };
+    async function poll(id: string) {
+      try {
+        const next = await getToolJob(id, cursor.current);
+        if (control.stopped) return;
+        cursor.current = next.next;
+        setError("");
+        setJob((current) => ({
+          ...next,
+          lines: [...(current?.lines ?? []), ...(next.lines ?? [])],
+        }));
+        if (next.state === "running") return schedule(pollMs);
+        await finished.current().catch(() => {});
+      } catch (err) {
+        if (control.stopped) return;
+        setError(errorText(err));
+        schedule(pollMs * 3);
+      }
+    }
+    schedule(pollMs);
+    return () => {
+      control.stopped = true;
+      clearTimeout(control.timer);
+    };
+  }, [jobID, running, pollMs]);
+  return { job, running, error, follow, close: () => setJob(null) };
 }
 
 function ToolRow({
@@ -231,6 +254,12 @@ function ToolRow({
   const verifyCommand =
     installed && tool.verify ? tool.verify_command : undefined;
   const setup = tool.setup ?? [];
+  const ask = (action: ToolAction, command: string) =>
+    onAsk({
+      key: tool.id,
+      command,
+      start: () => startToolJob(tool.id, action),
+    });
   return (
     <li className="toolkit-row">
       <div className="panel-head">
@@ -249,9 +278,7 @@ function ToolRow({
             type="button"
             className="btn btn-sm btn-primary"
             disabled={busy || !homebrew}
-            onClick={() =>
-              onAsk({ tool: tool.id, action: "install", command: tool.install })
-            }
+            onClick={() => ask("install", tool.install)}
           >
             Install
           </button>
@@ -261,9 +288,7 @@ function ToolRow({
             type="button"
             className="btn btn-sm btn-primary"
             disabled={busy || !homebrew}
-            onClick={() =>
-              onAsk({ tool: tool.id, action: "update", command: tool.update })
-            }
+            onClick={() => ask("update", tool.update)}
           >
             Update
           </button>
@@ -273,9 +298,7 @@ function ToolRow({
             type="button"
             className="btn btn-sm"
             disabled={busy}
-            onClick={() =>
-              onAsk({ tool: tool.id, action: "skill", command: skillRun })
-            }
+            onClick={() => ask("skill", skillRun)}
           >
             {skill?.status === "outdated" ? "Update skill" : "Install skill"}
           </button>
@@ -285,9 +308,7 @@ function ToolRow({
             type="button"
             className="btn btn-sm btn-quiet"
             disabled={busy}
-            onClick={() =>
-              onAsk({ tool: tool.id, action: "verify", command: verifyCommand })
-            }
+            onClick={() => ask("verify", verifyCommand)}
           >
             Check sign-in
           </button>
@@ -421,34 +442,5 @@ function JobLog({ job, onClose }: { job: ToolJob; onClose?: () => void }) {
       </pre>
       {job.result && <p className="small">{job.result}</p>}
     </section>
-  );
-}
-
-function CopyCommand({ command }: { command: string }) {
-  const [copied, setCopied] = useState(false);
-  const reset = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => () => clearTimeout(reset.current), []);
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      clearTimeout(reset.current);
-      reset.current = setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Without clipboard access the command stays selectable.
-    }
-  }
-  return (
-    <span className="copy-command">
-      <code>{command}</code>
-      <button
-        type="button"
-        className="btn btn-quiet btn-sm"
-        aria-label={`Copy ${command}`}
-        onClick={() => void copy()}
-      >
-        {copied ? "Copied" : "Copy"}
-      </button>
-    </span>
   );
 }

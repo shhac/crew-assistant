@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -118,7 +117,9 @@ func run(ctx context.Context, c Command) error {
 	// Its own group keeps a terminal's Ctrl-C from killing an install half
 	// way, and a timeout ends everything the installer started.
 	procgroup.Detach(cmd)
-	cmd.Env = c.Env
+	// Never nil: exec gives a command with a nil Env the daemon's whole
+	// environment.
+	cmd.Env = append([]string{}, c.Env...)
 	cmd.WaitDelay = time.Second
 	cmd.Stdout = c.Output
 	cmd.Stderr = c.Output
@@ -139,9 +140,12 @@ var (
 // Overview is what the dashboard shows: Homebrew, each tool and its skill,
 // and the latest job.
 type Overview struct {
-	Homebrew  Homebrew   `json:"homebrew"`
-	NPX       bool       `json:"npx"`
-	Tools     []Row      `json:"tools"`
+	Homebrew Homebrew `json:"homebrew"`
+	NPX      bool     `json:"npx"`
+	Tools    []Row    `json:"tools"`
+	// UpdateAll is the command that updates every outdated Homebrew tool,
+	// when there are any; confirming it sends it back unchanged.
+	UpdateAll string     `json:"update_all,omitempty"`
 	CheckedAt *time.Time `json:"checked_at,omitempty"`
 	Job       *JobView   `json:"job,omitempty"`
 }
@@ -201,16 +205,15 @@ func (m *Manager) List(ctx context.Context, refresh bool) Overview {
 	rows := make([]Row, len(catalog))
 	var wg sync.WaitGroup
 	for i, tool := range catalog {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			rows[i] = m.row(ctx, tool, prefix, remote, skills, npx != "")
-		}()
+		wg.Go(func() { rows[i] = m.row(ctx, tool, prefix, remote, skills, npx != "") })
 	}
 	wg.Wait()
 	out := Overview{Homebrew: Homebrew{Available: prefix != "", Prefix: prefix}, NPX: npx != "", Tools: rows, Job: latest}
 	if prefix == "" {
 		out.Homebrew.Install = HomebrewInstall
+	}
+	if words, names := updateAll(rows, prefix); len(names) > 0 {
+		out.UpdateAll = commandLine(words)
 	}
 	if !remote.checked.IsZero() {
 		checked := remote.checked
@@ -220,23 +223,26 @@ func (m *Manager) List(ctx context.Context, refresh bool) Overview {
 }
 
 func (m *Manager) row(ctx context.Context, tool Tool, prefix string, remote remote, skills skillState, npx bool) Row {
-	r := Row{ID: tool.ID, Name: tool.Name, Purpose: tool.Purpose, Formula: tool.Formula, Install: "brew install " + tool.Formula, Update: "brew upgrade " + tool.Formula, Setup: append([]string{}, tool.Setup...), Verify: len(tool.Verify) > 0, Connection: tool.Connection, Latest: remote.versions[tool.ID]}
+	r := Row{ID: tool.ID, Name: tool.Name, Purpose: tool.Purpose, Formula: tool.Formula, Setup: append([]string{}, tool.Setup...), Verify: len(tool.Verify) > 0, Connection: tool.Connection, Latest: remote.versions[tool.ID]}
+	r.Path = m.binary(tool.ID, prefix)
+	homebrews := inPrefix(r.Path, prefix)
+	r.Install = commandLine(brewCommand(tool, ActionInstall, homebrews))
+	r.Update = commandLine(brewCommand(tool, ActionUpdate, homebrews))
 	if r.Verify {
 		r.VerifyCommand = commandLine(tool.Verify)
 	}
 	if tool.Skill != "" {
 		skill := m.skillRow(tool.Skill, remote, skills)
 		if npx {
-			skill.Runnable, skill.Run = true, commandLine(append([]string{"npx"}, skillArgs(tool.Skill)...))
+			skill.Runnable, skill.Run = true, commandLine(skillRun(tool.Skill))
 		}
 		r.Skill = &skill
 	}
-	r.Path = m.binary(tool.ID, prefix)
 	if r.Path == "" {
 		r.Status = StatusMissing
 		return r
 	}
-	if prefix == "" || filepath.Dir(r.Path) != filepath.Join(prefix, "bin") {
+	if !homebrews {
 		r.Detail = "Found outside Homebrew; Update installs Homebrew's copy beside it."
 	}
 	r.Installed = m.probeVersion(ctx, r.Path)
