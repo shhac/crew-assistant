@@ -170,6 +170,13 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 		return err
 	case d.OwnerStep != nil && chose(choiceKeepForTeam):
 		return lp.keepForTeam(ctx, t, d.OwnerStep.Criterion, fmt.Sprintf("You kept “%s” for the team", text.Clip(d.OwnerStep.Criterion, 200)), true)
+	case d.Kind == core.DecisionUnstack && chose(core.ChoiceUnstack):
+		_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+			t.Unstack()
+			t.Status, t.DecisionID, t.Detail = core.TaskLanding, "", "Rebasing onto the target"
+			return t.Objective + " no longer builds on the work it was stacked on, and is rebased onto the target", nil
+		})
+		return err
 	case d.Kind == core.DecisionFailure && (chose(choiceTryAgain) || chose(choiceResolve)):
 		_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.Status, t.ResumeStatus = t.ResumeStatus, ""

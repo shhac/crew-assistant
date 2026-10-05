@@ -36,6 +36,9 @@ func (r roleTools) guide() string {
 		}
 		guide += "\n\n" + connections.LinGuide(r.lin.writes && !r.notesOnly)
 	}
+	if r.stacks {
+		guide += " " + r.stackGuide()
+	}
 	if r.proposes {
 		guide += " QA can also use this project's daemon-hosted app, on this machine only, when the project has a run recipe: "
 		if r.run != nil {
@@ -44,6 +47,20 @@ func (r roleTools) guide() string {
 			guide += "it has none yet."
 		}
 		guide += " If you have found out how the app starts and a better recipe would help QA, propose one with propose_run_recipe; the owner decides whether it is used. Propose only what the repository shows works, and don't propose one without cause."
+	}
+	return guide
+}
+
+// stackGuide tells a role of a project whose pull requests stack what that
+// means for it.
+func (r roleTools) stackGuide() string {
+	reads := "g2g reads how this project's stacks stand, run by the daemon in the project's own clone: give args status --json, doctor --json or github status --json, and nothing else."
+	if r.manages && !r.notesOnly {
+		return "This project stacks pull requests. When its landing is paused for a code freeze, or a task builds on work whose pull request is open but not merged, stack it on that task rather than have it wait: link_tasks with relation stacks_on, or queue_task with stacks_on. A stacked task starts from the other's pull request branch once that is open, opens its own pull request onto it, and merges only after it, replayed onto the target; stacking on a task it waits for replaces the wait. A task stacks on one other of this project at most, and only before it begins. " + reads
+	}
+	guide := "This project stacks pull requests; the daemon pushes, restacks and merges them, never you. " + reads
+	if s := r.stackedOn; s != nil {
+		guide += fmt.Sprintf(" Your task is stacked on “%s” (%s): it builds on that task's pull request branch %s, which has not merged, so the change you make is only what your task asks for.", s.Objective, s.Ref, s.Branch)
 	}
 	return guide
 }
@@ -95,6 +112,9 @@ func (r roleTools) Definitions() []session.ToolDefinition {
 	if r.checks != nil {
 		defs = append(defs, session.ToolDefinition{Name: "run_check", Description: "Run the project's check in a fresh workspace copy in a daemon-hosted sandbox. Each call waits at most 45 seconds; while still running, call again to wait for the same run. If coverage.more is true, call again to collect the remaining skip evidence from that same check. A call after the final result page starts a new check.", Schema: schema([]string{})})
 	}
+	if r.stacks {
+		defs = append(defs, session.ToolDefinition{Name: "g2g", Description: "Read how this project's stacked pull requests stand with g2g, run by the daemon in the project's clone. args is exactly one of [\"status\", \"--json\"], [\"doctor\", \"--json\"] or [\"github\", \"status\", \"--json\"].", Schema: map[string]any{"type": "object", "properties": map[string]any{"args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "required": []string{"args"}, "additionalProperties": false}})
+	}
 	if r.lin != nil {
 		defs = append(defs, session.ToolDefinition{Name: "lin", Description: "Use this project’s linked Linear account. Give args or a shipped reference (commands or output).", Schema: map[string]any{"type": "object", "properties": map[string]any{"args": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "reference": map[string]any{"type": "string"}}, "required": []string{"args", "reference"}, "additionalProperties": false}})
 	}
@@ -126,18 +146,26 @@ func (r roleTools) definitions() []session.ToolDefinition {
 		return append(defs, note)
 	}
 	if r.manages {
-		queue := session.ToolDefinition{Name: "queue_task", Description: "Ask for a new task in this project, such as part of a task split off or a sibling task. title is what it is for; requirements are its requirements, one to a line, or empty. depends_on is the ids of tasks it must wait for, separated by commas, or empty.", Schema: schema([]string{"title", "requirements", "depends_on"})}
+		fields := []string{"title", "requirements", "depends_on"}
+		queue := session.ToolDefinition{Name: "queue_task", Description: "Ask for a new task in this project, such as part of a task split off or a sibling task. title is what it is for; requirements are its requirements, one to a line, or empty. depends_on is the ids of tasks it must wait for, separated by commas, or empty."}
+		relations := []string{core.RelationDependsOn, core.RelationBlocks, core.RelationRelatesTo}
+		if r.stacks {
+			fields = append(fields, "stacks_on")
+			queue.Description += " stacks_on is the id of the task whose open pull request it builds on instead of waiting for it to land, or empty."
+			relations = append(relations, core.RelationStacksOn)
+		}
 		var linear []session.ToolDefinition
 		if r.lin != nil {
 			queue.Description += " linear_issue is the Linear issue it is for, by identifier (such as EX-123) or URL, to link it to as it is queued, or empty; with one, an empty title takes the issue's. An issue already linked to an unfinished task is refused: link that task instead."
-			queue.Schema = schema([]string{"title", "requirements", "depends_on", "linear_issue"})
+			fields = append(fields, "linear_issue")
 			linear = append(linear, session.ToolDefinition{Name: "link_task_linear", Description: "Link one of this project's tasks to a Linear issue (kind issue; ref is its identifier, such as EX-123, or URL) or project (kind project; ref is its UUID), read through this project's Linear account. Reads only; never writes to Linear. A linked issue's description reaches the team, and its pull request references it. task_id is its readable or canonical id.", Schema: schema([]string{"task_id", "kind", "ref"})})
 		}
+		queue.Schema = schema(fields)
 		return append(append(defs,
 			session.ToolDefinition{Name: "set_blocker", Description: "Hold a task on an external condition. kind is manual or daemon_includes; description is a short condition (required for manual); other_task_id names the same project task whose landing the running daemon must include, or empty for manual; holds is start or landing. Owner conditions stay under owner control.", Schema: schema([]string{"task_id", "kind", "description", "other_task_id", "holds"})},
 			session.ToolDefinition{Name: "clear_blocker", Description: "Clear an external blocker the team set, by its blocker_id.", Schema: schema([]string{"task_id", "blocker_id"})},
 			session.ToolDefinition{Name: "edit_task", Description: "Tidy an unfinished task of this project. task_id is its readable or canonical id. title replaces its title, or empty to keep it. requirements replaces all its requirements, one to a line; none removes them all; empty keeps them. Every change is kept and the owner can undo it." + ownerEditGuide, Schema: schema([]string{"task_id", "title", "requirements", "add_requirement", "owner_checks", "text_version"})},
-			session.ToolDefinition{Name: "link_tasks", Description: "Link two of this project's tasks. relation is what task_id is to other_task_id: " + relationGuide([]string{core.RelationDependsOn, core.RelationBlocks, core.RelationRelatesTo}) + " A pair has one link; the owner's links stay as they are, and a task whose work has begun can't be made to wait.", Schema: schema([]string{"task_id", "relation", "other_task_id"})},
+			session.ToolDefinition{Name: "link_tasks", Description: "Link two of this project's tasks. relation is what task_id is to other_task_id: " + relationGuide(relations) + " A pair has one link; the owner's links stay as they are, and a task whose work has begun can't be made to wait.", Schema: schema([]string{"task_id", "relation", "other_task_id"})},
 			session.ToolDefinition{Name: "unlink_tasks", Description: "Take away a link between two of this project's tasks that the team set; links the owner or assistant set stay.", Schema: schema([]string{"task_id", "other_task_id"})},
 			queue,
 			note,
@@ -188,6 +216,7 @@ func relationGuide(relations []string) string {
 		core.RelationDependsOn: "depends_on (yours cannot start or land before the other finishes)",
 		core.RelationBlocks:    "blocks (the other cannot start or land before yours finishes)",
 		core.RelationRelatesTo: "relates_to (worth reading together; nothing waits)",
+		core.RelationStacksOn:  "stacks_on (yours builds on the other's open pull request instead of waiting for it to land, and merges after it)",
 	}
 	parts := make([]string, len(relations))
 	for i, r := range relations {

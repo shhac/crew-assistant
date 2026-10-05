@@ -146,6 +146,14 @@ func executable(path string) bool {
 	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
 }
 
+// Locate finds one of the family's tools where the dashboard finds it,
+// Homebrew's copy first and then PATH, and reads its version; either is ""
+// when it can't.
+func Locate(ctx context.Context, name string) (path, version string) {
+	m := New(Options{})
+	return m.installedVersion(ctx, name, m.homebrewPrefix())
+}
+
 // installedVersion finds a tool and reads its version; either is "" when it
 // can't.
 func (m *Manager) installedVersion(ctx context.Context, name, prefix string) (path, version string) {

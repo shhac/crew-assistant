@@ -129,6 +129,10 @@ type line struct {
 	// it: its history was rewritten. Catching up then replays only the task's
 	// own change onto it, so nothing the target dropped comes back.
 	Diverged bool
+	// Required is a line a pull request takes in even when it would merge
+	// cleanly: one it no longer sits on, such as a rewritten branch it was
+	// stacked on, or the target once that has merged.
+	Required bool
 }
 
 func (lp *Loop) mediumFor(ctx context.Context, p core.Project, playbook *core.Playbook) (medium, error) {

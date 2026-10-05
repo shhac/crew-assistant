@@ -224,7 +224,7 @@ func testLoop(t *testing.T, reopen ...*func(*Loop) *Loop) *Loop {
 				t.Fatal(err)
 			}
 			fresh := New(core.NewService(s, old.Config()), old.Config, false)
-			fresh.runner, fresh.meter = old.runner, old.meter
+			fresh.runner, fresh.meter, fresh.stacker = old.runner, old.meter, old.stacker
 			after, err := fresh.Core.Snapshot(context.Background())
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("SQLite reopen changed record: %v", err)
@@ -232,7 +232,10 @@ func testLoop(t *testing.T, reopen ...*func(*Loop) *Loop) *Loop {
 			return restart(t, fresh)
 		}
 	}
-	return New(core.NewService(s, cfg), func() config.Config { return cfg }, false)
+	lp := New(core.NewService(s, cfg), func() config.Config { return cfg }, false)
+	// No test runs the owner's own g2g; one that stacks gives a fake.
+	lp.stacker = g2gTool{find: func(context.Context) (string, string) { return "", "" }}
+	return lp
 }
 
 func loopApp(t *testing.T, runner *scriptedRunner, deliverTo string, reopen ...*func(*Loop) *Loop) (*Loop, core.Project, core.Task) {

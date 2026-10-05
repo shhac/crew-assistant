@@ -72,7 +72,9 @@ type Loop struct {
 	// Both are replaced in tests.
 	github    github.Client
 	githubURL func(repo string) string
-	prSeen    sync.Map
+	// stacker finds and runs g2g for a project's stacks; replaced in tests.
+	stacker g2gTool
+	prSeen  sync.Map
 	// posting is held while the team's replies go up on a pull request, by
 	// the landing step or by a teammate answering beside it.
 	posting sync.Mutex
@@ -112,7 +114,7 @@ type Loop struct {
 }
 
 func New(s *core.Service, cfg func() config.Config, demo bool) *Loop {
-	lp := &Loop{Core: s, Config: cfg, Demo: demo, runner: roles.Native{}, meter: &quota.Meter{}, github: github.New(), linear: connections.New(), githubURL: github.URL, loopWake: make(chan struct{}, 1)}
+	lp := &Loop{Core: s, Config: cfg, Demo: demo, runner: roles.Native{}, meter: &quota.Meter{}, github: github.New(), linear: connections.New(), githubURL: github.URL, stacker: newG2G(), loopWake: make(chan struct{}, 1)}
 	// Seed admission before chat and drawing can ask for an engine. A failed
 	// read stays uninitialized; Run and EnginePause retry it before use.
 	_ = lp.loadEnginePauses(context.Background(), false)

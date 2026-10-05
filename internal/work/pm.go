@@ -209,6 +209,7 @@ The order is yours to set directly. Never ask the owner to approve or confirm an
 		b.WriteString("\nRecent conversation with the owner; keep agreed priorities in mind:\n" + history)
 	}
 	b.WriteString(pmToldText(snap, p))
+	b.WriteString(pmStackText(p))
 	pmTasks(&b, snap, p)
 	if pmTriage(&b, snap, p) {
 		b.WriteString(`
@@ -268,7 +269,50 @@ func pmTasks(b *strings.Builder, snap core.Snapshot, p core.Project) {
 		if len(t.DependsOn) > 0 {
 			fmt.Fprintf(b, "  waits for: %s\n", waitsLine(snap.Tasks, t))
 		}
+		for _, line := range stackLines(p, t) {
+			fmt.Fprintf(b, "  %s\n", line)
+		}
 	}
+}
+
+// pmStackText tells the PM of a project whose pull requests stack when to
+// stack a task rather than have it wait.
+func pmStackText(p core.Project) string {
+	if p.Playbook == nil || !p.Playbook.Land.PullRequests || !p.Playbook.Land.Stack {
+		return ""
+	}
+	out := "\nThis project stacks pull requests. When its landing is paused for a code freeze, or a task builds on work whose pull request is open but not merged, stack it on that task with link_tasks, relation stacks_on, rather than have it wait: it starts from that pull request's branch once it is open, and merges only after it. Stacking on a task it waits for replaces the wait, so leave that task out of what it waits for in depends.\n"
+	if p.LandingPaused != nil {
+		out += "Landing is paused on this project now"
+		if p.LandingPaused.Reason != "" {
+			out += ": " + p.LandingPaused.Reason
+		}
+		out += ".\n"
+	}
+	return out
+}
+
+// stackLines are what the PM is told of a task's place in a stack: what it
+// is stacked on, and its own open pull request, which others may stack on.
+func stackLines(p core.Project, t core.Task) []string {
+	if p.Playbook == nil || !p.Playbook.Land.Stack {
+		return nil
+	}
+	var out []string
+	if s := t.Stack; s != nil {
+		state := "its pull request is not open yet"
+		switch {
+		case s.Merged():
+			state = "its pull request merged"
+		case s.Open():
+			state = fmt.Sprintf("its pull request #%d is open", s.Number)
+		}
+		out = append(out, fmt.Sprintf("stacked on: %s (%s)", s.Ref, state))
+	}
+	if t.PROpen() {
+		out = append(out, fmt.Sprintf("pull request #%d is open", t.Proposal.Number))
+	}
+	return out
 }
 
 // pmTriage lists the tasks waiting in triage, with their requirements, and
@@ -292,6 +336,9 @@ func pmTriage(b *strings.Builder, snap core.Snapshot, p core.Project) bool {
 		}
 		if len(t.DependsOn) > 0 {
 			fmt.Fprintf(b, "  waits for: %s\n", waitsLine(snap.Tasks, t))
+		}
+		for _, line := range stackLines(p, t) {
+			fmt.Fprintf(b, "  %s\n", line)
 		}
 		if t.Answered {
 			b.WriteString("  the owner has answered your question about it\n")

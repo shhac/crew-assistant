@@ -98,10 +98,10 @@ func (m gitMedium) behindFor(ctx context.Context, t core.Task, required bool) (*
 		return nil, err
 	}
 	contains, err := m.repo.Contains(ctx, tip, l.Commit)
-	if err != nil || contains {
+	if err != nil || (contains && !l.Required) {
 		return nil, err
 	}
-	if _, byPR := m.way.(prWay); byPR && !l.Foreign && !required {
+	if _, byPR := m.way.(prWay); byPR && !l.Foreign && !required && !l.Required {
 		clean, err := m.repo.MergesCleanly(ctx, tip, l.Commit)
 		if err != nil || clean {
 			return nil, err
@@ -113,6 +113,12 @@ func (m gitMedium) behindFor(ctx context.Context, t core.Task, required bool) (*
 			return nil, err
 		}
 		l.Diverged = !joined
+	}
+	// A task that holds all of a line it must be on, and joined it, is on
+	// it; one built on a branch the line never held, such as a pull request
+	// it was stacked on, is replayed onto it all the same.
+	if contains && !l.Diverged {
+		return nil, nil
 	}
 	return l, nil
 }

@@ -25,6 +25,9 @@ func (lp *Loop) landPR(ctx context.Context, p core.Project, t core.Task, m gitMe
 		if done, err := lp.wokenRound(ctx, t); done || err != nil {
 			return err
 		}
+		if why := t.StackBroken(); why != "" {
+			return lp.askUnstack(ctx, t, m.playbook.Land, why)
+		}
 	}
 	r := t.Revisions[len(t.Revisions)-1]
 	prop := core.Proposal{}
@@ -32,16 +35,26 @@ func (lp *Loop) landPR(ctx context.Context, p core.Project, t core.Task, m gitMe
 		prop = *t.Proposal
 	}
 	prop.Branch = m.prBranch(t)
+	// What is stacked on this pull request follows what it did, once it is
+	// done, however this step ends.
+	moved := false
+	defer func() {
+		if moved {
+			lp.stackChanged(context.WithoutCancel(ctx), p, t.ID, m)
+		}
+	}()
 	if prop.Pushed != r.Ref && t.Delivering == nil && !t.PRMergePending() {
 		done, err := lp.publish(ctx, p, t, m, r, &prop)
 		if done || err != nil {
 			return err
 		}
+		moved = true
 	}
 	if prop.Number == 0 {
 		if done, err := lp.openPR(ctx, t, m, r, &prop); done || err != nil {
 			return err
 		}
+		moved = true
 	}
 	if t.Delivering == nil && !t.PRMergePending() {
 		if err := lp.postOutbox(ctx, t.ID, m.playbook.Land.GitHub, prop.Number); err != nil {
@@ -65,7 +78,40 @@ func (lp *Loop) landPR(ctx context.Context, p core.Project, t core.Task, m gitMe
 	if err := lp.editProposal(ctx, t.ID, "", func(p *core.Proposal) { p.Observed, p.Described = prop.Observed, prop.Described }); err != nil {
 		return err
 	}
+	if done, err := lp.retarget(ctx, t, m.playbook.Land, r, &prop, pr); done || err != nil {
+		return err
+	}
 	return lp.reactTo(ctx, p, t, m, r, prop, pr)
+}
+
+// retarget points a stacked task's pull request at the branch it now merges
+// into: the target, once the task was replayed onto it after the pull
+// request below merged. GitHub may have done so already, when that branch
+// was deleted.
+func (lp *Loop) retarget(ctx context.Context, t core.Task, land core.LandPolicy, r core.Revision, prop *core.Proposal, pr github.PR) (bool, error) {
+	want := prBase(t, land)
+	if pr.State != "OPEN" || prop.Base == "" || prop.Base == want || t.From != want {
+		return false, nil
+	}
+	if pr.BaseRefName != want {
+		if err := lp.github.EditBase(ctx, land.GitHub, prop.Number, want); err != nil {
+			return true, lp.landingFailed(ctx, t, r, err)
+		}
+	}
+	prop.Base = want
+	return false, lp.editProposal(ctx, t.ID, fmt.Sprintf("Pull request #%d now merges into %s", prop.Number, want), func(p *core.Proposal) { p.Base = want })
+}
+
+// askUnstack asks the owner what becomes of a stacked task whose parent
+// won't merge: rebased onto the target, or stopped.
+func (lp *Loop) askUnstack(ctx context.Context, t core.Task, land core.LandPolicy, why string) error {
+	_, err := lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionUnstack, core.DecisionInput{
+		Title:          fmt.Sprintf("“%s” was built on work that won't merge", t.Objective),
+		Context:        fmt.Sprintf("Its change was built on another's that won't merge: %s. Rebasing it replays only its own change onto %s, and its pull request then merges into %s; nothing of “%s” comes with it.", why, land.Target, land.Target, t.Stack.Objective),
+		Recommendation: core.ChoiceUnstack + " if this change stands on its own",
+		Choices:        []string{core.ChoiceUnstack, choiceStop},
+	})
+	return err
 }
 
 // wokenRound gives the implementer a round when a wake it asked for has come,
@@ -163,16 +209,17 @@ func (lp *Loop) openPR(ctx context.Context, t core.Task, m gitMedium, r core.Rev
 		return true, lp.landingFailed(ctx, t, r, err)
 	}
 	pr := prText(t)
+	base := prBase(t, land)
 	if !found {
 		body := description(t, pr)
-		if n, url, err = lp.github.Open(ctx, land.GitHub, land.Target, prop.Branch, pr.Title, body, land.Draft); err != nil {
+		if n, url, err = lp.github.Open(ctx, land.GitHub, base, prop.Branch, pr.Title, body, land.Draft); err != nil {
 			return true, lp.landingFailed(ctx, t, r, err)
 		}
 		prop.Described = described(pr.Title, body)
 	}
-	prop.Number, prop.URL = n, url
+	prop.Number, prop.URL, prop.Base = n, url, base
 	return false, lp.editProposal(ctx, t.ID, "Opened pull request #"+fmt.Sprint(n), func(p *core.Proposal) {
-		p.Branch, p.Number, p.URL, p.Described = prop.Branch, prop.Number, prop.URL, prop.Described
+		p.Branch, p.Number, p.URL, p.Described, p.Base = prop.Branch, prop.Number, prop.URL, prop.Described, prop.Base
 	})
 }
 
@@ -206,6 +253,7 @@ func (lp *Loop) reactTo(ctx context.Context, p core.Project, t core.Task, m gitM
 		if err := lp.editProposal(ctx, t.ID, "", func(p *core.Proposal) { p.Number, p.URL, p.MergeRequested = 0, "", "" }); err != nil {
 			return err
 		}
+		lp.stackedLook(ctx, t, fmt.Sprintf("the pull request of “%s”, which this is stacked on, was closed", t.Objective))
 		return lp.landingFailed(ctx, t, r, fmt.Errorf("pull request #%d was closed without merging; trying again opens a new one", pr.Number))
 	}
 	// The fresh observation above reconciles a recorded merge before new
@@ -244,7 +292,10 @@ func (lp *Loop) reactTo(ctx context.Context, p core.Project, t core.Task, m gitM
 			return lp.setStatus(ctx, t.ID, core.TaskWriting, "Integrate assets and pending direction after merge reconciliation")
 		}
 	}
-	if pr.HeadRefOid != prop.Pushed || pr.Behind() {
+	// A task sitting on another branch than its target, such as the pull
+	// request it is stacked on, looks there each time: what moved on that
+	// branch is never in this pull request's own state.
+	if pr.HeadRefOid != prop.Pushed || pr.Behind() || (t.From != "" && t.From != land.Target) {
 		if done, err := lp.catchUpIfBehind(ctx, t, m, r, pr.Behind()); done || err != nil {
 			return err
 		}

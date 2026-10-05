@@ -157,11 +157,19 @@ func (pushWay) note(m gitMedium, _ core.Task) string {
 }
 
 // prWay lands through a GitHub pull request. Tasks start from the target on
-// GitHub; commits someone else pushes to the pull request's branch are taken
-// in before anything is pushed over them.
+// GitHub, or a stacked task from the open pull request it is stacked on;
+// commits someone else pushes to the pull request's branch are taken in
+// before anything is pushed over them.
 type prWay struct{}
 
 func (prWay) start(ctx context.Context, m gitMedium, t core.Task) (string, string, error) {
+	if s := t.Stack; s != nil && s.Open() {
+		base, err := m.fetchGitHub(ctx, s.Branch)
+		if err != nil {
+			return "", "", err
+		}
+		return base, s.Branch, nil
+	}
 	target := m.playbook.Land.Target
 	base, err := m.fetchGitHub(ctx, target)
 	if err != nil {
@@ -179,12 +187,54 @@ func (prWay) line(ctx context.Context, m gitMedium, t core.Task) (*line, error) 
 			}
 		}
 	}
+	if t.OnParent() {
+		return stackLine(ctx, m, t)
+	}
 	target := m.playbook.Land.Target
 	tip, err := m.fetchGitHub(ctx, target)
 	if err != nil {
 		return nil, err
 	}
-	return &line{Commit: tip, Name: target, What: fmt.Sprintf("%s on GitHub moved on since this request started (it is now at %s)", target, text.Short(tip))}, nil
+	// A task built on another branch, such as one it was stacked on, takes
+	// the target in however cleanly they would merge.
+	return &line{Commit: tip, Name: target, What: fmt.Sprintf("%s on GitHub moved on since this request started (it is now at %s)", target, text.Short(tip)), Required: t.From != "" && t.From != target}, nil
+}
+
+// stackLine is what a stacked task still on its parent's branch follows:
+// that branch while its pull request is open, taken in whenever it was
+// rewritten, and the target, replayed onto, once it has merged. One whose
+// parent will not merge follows nothing until the owner decides.
+func stackLine(ctx context.Context, m gitMedium, t core.Task) (*line, error) {
+	s, target := t.Stack, m.playbook.Land.Target
+	if s.Merged() {
+		tip, err := m.fetchGitHub(ctx, target)
+		if err != nil {
+			return nil, err
+		}
+		return &line{Commit: tip, Name: target, What: fmt.Sprintf("“%s”, which this is stacked on, merged into %s", s.Objective, target), Required: true}, nil
+	}
+	if !s.Open() {
+		return nil, nil
+	}
+	tip, err := m.fetchGitHub(ctx, s.Branch)
+	if err != nil {
+		return nil, err
+	}
+	joined, err := m.repo.Contains(ctx, tip, t.Base)
+	if err != nil {
+		return nil, err
+	}
+	return &line{Commit: tip, Name: s.Branch, What: fmt.Sprintf("“%s”, which this is stacked on, moved its pull request's branch %s on (it is now at %s)", s.Objective, s.Branch, text.Short(tip)), Required: !joined}, nil
+}
+
+// prBase is the branch a task's pull request merges into: the branch of the
+// pull request it is stacked on, while it sits there and that has not
+// merged, else the target.
+func prBase(t core.Task, land core.LandPolicy) string {
+	if t.OnParent() && !t.Stack.Merged() {
+		return t.Stack.Branch
+	}
+	return land.Target
 }
 
 func (prWay) deliver(context.Context, gitMedium, core.Task, core.Revision) (string, error) {
@@ -236,7 +286,10 @@ func (prWay) note(m gitMedium, t core.Task) string {
 	if t.PROpen() {
 		return fmt.Sprintf("Approving merges pull request #%d (%s) into %s by %s. It is approved where review is asked for, its checks are green and every thread is resolved.", t.Proposal.Number, t.Proposal.URL, land.Target, land.MergeMethod())
 	}
-	note := fmt.Sprintf("Approving opens a pull request on %s from %s into %s. The team answers its reviews and checks, and it merges by %s once it's approved and green.", land.GitHub, m.prBranch(t), land.Target, land.MergeMethod())
+	note := fmt.Sprintf("Approving opens a pull request on %s from %s into %s. The team answers its reviews and checks, and it merges by %s once it's approved and green.", land.GitHub, m.prBranch(t), prBase(t, land), land.MergeMethod())
+	if t.OnParent() {
+		note += fmt.Sprintf(" It is stacked on “%s”: it merges only after that does, replayed onto %s.", t.Stack.Objective, land.Target)
+	}
 	pr := prText(t)
 	return note + "\n\nIt opens as “" + pr.Title + "”:\n" + text.Clip(pr.Body, 1500)
 }

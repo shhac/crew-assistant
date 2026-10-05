@@ -41,6 +41,9 @@ func (lp *Loop) SetWorkspace(ctx context.Context, projectID string, in Workspace
 // the policy they started with; turning pull requests off has someone choose
 // whether those that started with them carry on with them.
 func (lp *Loop) SetLanding(ctx context.Context, projectID string, land core.LandPolicy) (core.Project, error) {
+	if err := lp.mayStack(ctx, projectID, land); err != nil {
+		return core.Project{}, err
+	}
 	p, err := lp.editPlaybook(ctx, projectID, "landing policies are for code teams; choose a code team first", func(_ *core.Snapshot, _ *core.Project, playbook *core.Playbook) error {
 		land.Means, land.Target, land.GitHub = strings.TrimSpace(land.Means), strings.TrimSpace(land.Target), strings.TrimSpace(land.GitHub)
 		land.TrustedBots = trimmedLogins(land.TrustedBots)
@@ -55,6 +58,24 @@ func (lp *Loop) SetLanding(ctx context.Context, projectID string, land core.Land
 	}
 	lp.Nudge()
 	return p, nil
+}
+
+// mayStack refuses to turn stacking on without a g2g it works with. One
+// already on is kept, whatever has happened to g2g since: what it keeps
+// says so on each stack instead.
+func (lp *Loop) mayStack(ctx context.Context, projectID string, land core.LandPolicy) error {
+	if !land.Stack || !land.PullRequests {
+		return nil
+	}
+	snap, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	if p, ok := findProject(snap, projectID); ok && p.Playbook != nil && p.Playbook.Land.Stack {
+		return nil
+	}
+	_, err = lp.g2gReady(ctx)
+	return err
 }
 
 // trimmedLogins drops blanks and repeats from a list of GitHub logins, keeping

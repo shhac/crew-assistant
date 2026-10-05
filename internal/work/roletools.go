@@ -63,6 +63,11 @@ type roleTools struct {
 	proposes bool
 	run      *core.RunRecipe
 	checks   *checkRuns
+	// stacks is a project whose pull requests stack: the implementer and
+	// the PM read its stacks with g2g, and the PM stacks tasks. stackedOn is
+	// the pull request the implementer's own task is stacked on.
+	stacks    bool
+	stackedOn *core.StackParent
 }
 
 // proposing lets the role propose a run recipe, if playbook is a code team's.
@@ -78,6 +83,12 @@ const maxPMQueued = 3
 
 func (lp *Loop) toolsFor(t core.Task, kind string, r core.Role) roleTools {
 	tools := roleTools{engine: r.Engine, lp: lp, projectID: t.ProjectID, taskID: t.ID, status: t.Status, by: core.TeamLinker(r.Member, kind), name: seatName(r, kind), kind: kind, relations: relationsFor(kind)}
+	if kind == core.RoleImplementer && lp.stacking(t.ProjectID) {
+		tools.stacks = true
+		if t.OnParent() && !t.Stack.Merged() {
+			tools.stackedOn = t.Stack
+		}
+	}
 	if open := t.OpenDesign(); kind == core.RoleDesigner && t.Status == core.TaskDesigning && open != nil {
 		tools.design = open.ID
 		if open.Production != nil && len(open.Production.Turns) > 0 {
@@ -115,6 +126,7 @@ func relationsFor(kind string) []string {
 func (lp *Loop) managerTools(projectID string, seat core.Role) roleTools {
 	r := roleTools{lp: lp, projectID: projectID, by: core.LinkedByPM, name: seatName(seat, core.RolePM), kind: core.RolePM, manages: true, queued: new(int)}
 	r.lin = lp.linBinding(projectID)
+	r.stacks = lp.stacking(projectID)
 	return r
 }
 
@@ -154,6 +166,9 @@ func (r roleTools) call(ctx context.Context, name string, raw json.RawMessage) (
 func (r roleTools) execute(ctx context.Context, name string, raw json.RawMessage) (string, error) {
 	if name == "lin" {
 		return r.callLin(ctx, raw)
+	}
+	if name == "g2g" && r.stacks {
+		return r.callG2G(ctx, raw)
 	}
 	var in map[string]string
 	if err := json.Unmarshal(raw, &in); err != nil {
@@ -268,7 +283,7 @@ func (r roleTools) execute(ctx context.Context, name string, raw json.RawMessage
 	case "attach_file":
 		return r.attach(ctx, in["name"], in["content"], in["path"], in["generated"], in["asset"], in["rejected"])
 	case "queue_task":
-		return r.queue(ctx, in["title"], in["requirements"], in["depends_on"], in["linear_issue"])
+		return r.queue(ctx, in["title"], in["requirements"], in["depends_on"], in["linear_issue"], in["stacks_on"])
 	case "link_task_linear":
 		return r.linkLinear(ctx, taskID, in["kind"], in["ref"])
 	default:
@@ -294,12 +309,12 @@ func changed(done string, err error) (string, error) {
 // queue asks for a new task on the PM's behalf, which waits for what the PM
 // says it does, and is linked to the Linear issue it names, if any. The issue
 // is read first, so a failed read queues nothing.
-func (r roleTools) queue(ctx context.Context, title, requirements, dependsOn, issue string) (string, error) {
+func (r roleTools) queue(ctx context.Context, title, requirements, dependsOn, issue, stacksOn string) (string, error) {
 	if *r.queued >= maxPMQueued {
 		return "", fmt.Errorf("you can queue at most %d tasks each time you look", maxPMQueued)
 	}
 	deps := strings.FieldsFunc(dependsOn, func(c rune) bool { return c == ',' || c == ' ' || c == '\n' })
-	in := core.TaskInput{Objective: title, Criteria: lines(requirements), DependsOn: deps}
+	in := core.TaskInput{Objective: title, Criteria: lines(requirements), DependsOn: deps, StacksOn: strings.TrimSpace(stacksOn)}
 	if strings.TrimSpace(issue) == "" {
 		t, err := r.lp.Core.QueueTaskAs(ctx, r.projectID, in, core.LinkedByPM)
 		return r.tellQueued(t, "", err)

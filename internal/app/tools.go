@@ -54,6 +54,29 @@ func with[T any](act func(a *App, ctx context.Context, in T) (any, error)) toolA
 // none is a tool that takes no arguments.
 type none struct{}
 
+// stacks is whether set_landing leaves the project stacking: "yes" or "no",
+// or as it is when the assistant didn't say.
+func (a *App) stacks(ctx context.Context, projectID, said string) (bool, error) {
+	switch strings.TrimSpace(said) {
+	case "yes":
+		return true, nil
+	case "no":
+		return false, nil
+	case "":
+		snap, err := a.Core.Snapshot(ctx)
+		if err != nil {
+			return false, err
+		}
+		for _, p := range snap.Projects {
+			if p.ID == projectID && p.Playbook != nil {
+				return p.Playbook.Land.Stack, nil
+			}
+		}
+		return false, nil
+	}
+	return false, errors.New(`stack is "yes", "no" or empty`)
+}
+
 var toolActions = map[string]toolAction{
 	"lin": func(a *App, ctx context.Context, raw json.RawMessage) (any, error) { return a.runLinTool(ctx, raw) },
 	"list_connections": func(a *App, ctx context.Context, raw json.RawMessage) (any, error) {
@@ -101,7 +124,11 @@ var toolActions = map[string]toolAction{
 		return a.Work.SetTeam(ctx, in.ProjectID, work.TeamChoice{Template: in.Template, WriterEngine: in.WriterEngine, ReviewerEngine: in.ReviewerEngine, MaxRounds: in.MaxRounds, DeliverTo: in.DeliverTo, Repo: in.Repo, BranchPrefix: in.BranchPrefix, Check: in.Check, Prepare: in.Prepare, Sign: in.Sign, CheckInCopy: in.CheckInCopy, CheckLoopback: in.CheckLoopback, Implementer: in.ImplementerMember, Reviewer: in.ReviewerMember, QA: in.QAMember, Researcher: in.ResearcherMember, Designer: in.DesignerMember, PM: in.PMMember})
 	}),
 	"set_landing": with(func(a *App, ctx context.Context, in engine.SetLandingArgs) (any, error) {
-		return a.Work.SetLanding(ctx, in.ProjectID, core.LandPolicy{Means: in.Means, Via: in.Via, Target: in.Target, Method: in.Method, PullRequests: in.PullRequests == "yes", GitHub: in.GitHub, Merge: in.Merge, Open: in.Open, Approve: in.Approve, Draft: in.Draft == "yes", TrustedBots: in.TrustedBots})
+		stack, err := a.stacks(ctx, in.ProjectID, in.Stack)
+		if err != nil {
+			return nil, err
+		}
+		return a.Work.SetLanding(ctx, in.ProjectID, core.LandPolicy{Means: in.Means, Via: in.Via, Target: in.Target, Method: in.Method, PullRequests: in.PullRequests == "yes", GitHub: in.GitHub, Merge: in.Merge, Open: in.Open, Approve: in.Approve, Draft: in.Draft == "yes", TrustedBots: in.TrustedBots, Stack: stack})
 	}),
 	"set_run_recipe": with(func(a *App, ctx context.Context, in engine.SetRunRecipeArgs) (any, error) {
 		recipe := &core.RunRecipe{Setup: in.Setup, Start: in.Start, URL: in.URL, Ready: in.Ready}

@@ -88,7 +88,11 @@ type linkGroup struct {
 }
 
 func linkGroups(t core.Task) []linkGroup {
-	return []linkGroup{{"depends on", t.DependsOn}, {"blocks", t.Blocks}, {"relates to", t.RelatesTo}}
+	groups := []linkGroup{{"depends on", t.DependsOn}, {"blocks", t.Blocks}, {"relates to", t.RelatesTo}}
+	if t.StacksOn != "" {
+		groups = append(groups, linkGroup{"is stacked on", []string{t.StacksOn}})
+	}
+	return groups
 }
 
 func linkedTo(a, b core.Task) bool {
