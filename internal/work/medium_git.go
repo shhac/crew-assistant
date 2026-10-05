@@ -60,9 +60,7 @@ func (m gitMedium) pushGitHub(ctx context.Context, ref, branch, lease string) er
 func (m gitMedium) url() string { return m.remote(m.playbook.Land.GitHub) }
 
 func (m gitMedium) workspace(t core.Task) string { return m.repo.Task(t.ID).Workspace() }
-func (m gitMedium) env(t core.Task) []string {
-	return append(m.repo.Task(t.ID).Env(), m.toolPath()...)
-}
+func (m gitMedium) env(t core.Task) []string { return m.repo.Task(t.ID).Env() }
 
 // readable is what the team may read outside its clone: what the
 // repository's own builds need, and the tool folders the owner granted.
@@ -81,7 +79,9 @@ func (m gitMedium) tools() []string {
 
 // toolPath puts each granted tool's bin folder, or the folder itself when it
 // has none, ahead of the daemon's own PATH, so a toolchain installed for the
-// owner alone, such as Node under nvm, is found first.
+// owner alone, such as Node under nvm, is found first. It is for the checks
+// the daemon runs: a role's session takes its PATH from the harness, which
+// refuses one changed, so there the tools are only readable.
 func (m gitMedium) toolPath() []string {
 	var bins []string
 	for _, dir := range m.tools() {
@@ -269,7 +269,7 @@ func (m gitMedium) check(ctx context.Context, t core.Task, r core.Revision, qa, 
 	if err != nil {
 		return checkout{}, err
 	}
-	out := checkout{ref: r.Ref, checkDir: c.Dir, workDir: c.Dir, env: append(c.Env, m.toolPath()...), verify: c.Verify, remove: c.Remove}
+	out := checkout{ref: r.Ref, checkDir: c.Dir, workDir: c.Dir, env: c.Env, verify: c.Verify, remove: c.Remove}
 	if !qa {
 		return out, nil
 	}
