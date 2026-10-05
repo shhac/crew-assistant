@@ -197,3 +197,7 @@ func (lp *Loop) recoverTeamTurns(ctx context.Context, held map[string]string, co
 // time holds its member's claim until a restart, stalling every task that
 // needs them.
 const accountingWait = 2 * time.Minute
+
+// accountingHold is why a claim is kept after its turn ended but the turn's
+// accounting could not be recorded; startup releases it.
+const accountingHold = "Held: terminal team turn accounting could not be recorded"

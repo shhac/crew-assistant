@@ -225,6 +225,13 @@ func (lp *Loop) resume(ctx context.Context) error {
 		// own a command copy. Ordinary writers and independent projects recover.
 		for _, t := range snap.Tasks {
 			for _, c := range t.Claims {
+				// A claim held only because its finished turn's accounting
+				// failed owns no command: its session had already ended.
+				// Keeping it would hold its member everywhere until a sweep
+				// succeeds at some later start.
+				if c.Held == accountingHold {
+					continue
+				}
 				if c.Step == core.StepValidateMerge || c.Step == core.TaskReviewing || c.Step == core.StepMessage || c.Held != "" || (t.Playbook != nil && t.Playbook.Medium == core.MediumGit) {
 					if held[c.Token] == "" {
 						held[c.Token] = c.Held

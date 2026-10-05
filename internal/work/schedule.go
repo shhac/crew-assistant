@@ -242,7 +242,7 @@ func (lp *Loop) run(ctx context.Context, c claimed, waited bool, step, release f
 		if accounting.failure != nil {
 			err = accounting.failure
 			settle = func(ctx context.Context) error {
-				return lp.Core.HoldClaim(ctx, c.task, c.project, token, "Held: terminal team turn accounting could not be recorded")
+				return lp.Core.HoldClaim(ctx, c.task, c.project, token, accountingHold)
 			}
 		}
 		releaseErr := settle(context.WithoutCancel(ctx))

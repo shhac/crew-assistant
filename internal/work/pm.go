@@ -423,7 +423,7 @@ func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (answer s
 		taken.giveBack()
 		if accounting.failure != nil {
 			err = accounting.failure
-			if holdErr := lp.Core.HoldClaim(context.WithoutCancel(ctx), "", p.ID, c.Token, "Held: terminal team turn accounting could not be recorded"); holdErr != nil {
+			if holdErr := lp.Core.HoldClaim(context.WithoutCancel(ctx), "", p.ID, c.Token, accountingHold); holdErr != nil {
 				err = errors.Join(err, holdErr)
 			}
 			return
