@@ -115,19 +115,21 @@ func (c Check) Pending() bool {
 
 type PR struct {
 	// MergeInFlight includes automatic merge and merge queue enrollment.
-	MergeInFlight    bool      `json:"-"`
-	Number           int       `json:"number"`
-	URL              string    `json:"url"`
-	State            string    `json:"state"`
-	IsDraft          bool      `json:"isDraft"`
-	Mergeable        string    `json:"mergeable"`
-	MergeStateStatus string    `json:"mergeStateStatus"`
-	ReviewDecision   string    `json:"reviewDecision"`
-	HeadRefOid       string    `json:"headRefOid"`
-	Checks           []Check   `json:"statusCheckRollup"`
-	Reviews          []Review  `json:"reviews"`
-	Comments         []Comment `json:"comments"`
-	MergeCommit      *struct {
+	MergeInFlight    bool   `json:"-"`
+	Number           int    `json:"number"`
+	URL              string `json:"url"`
+	State            string `json:"state"`
+	IsDraft          bool   `json:"isDraft"`
+	Mergeable        string `json:"mergeable"`
+	MergeStateStatus string `json:"mergeStateStatus"`
+	ReviewDecision   string `json:"reviewDecision"`
+	HeadRefOid       string `json:"headRefOid"`
+	// BaseRefName is the branch the pull request merges into.
+	BaseRefName string    `json:"baseRefName"`
+	Checks      []Check   `json:"statusCheckRollup"`
+	Reviews     []Review  `json:"reviews"`
+	Comments    []Comment `json:"comments"`
+	MergeCommit *struct {
 		Oid string `json:"oid"`
 	} `json:"mergeCommit"`
 	// Threads are the review threads on the code, which gh's pull request
@@ -312,7 +314,7 @@ func (c Client) pr(ctx context.Context, verb, repo string, number int, args ...s
 }
 
 func (c Client) View(ctx context.Context, repo string, number int) (PR, error) {
-	out, err := c.pr(ctx, "view", repo, number, "--json", "number,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,statusCheckRollup,reviews,comments,mergeCommit")
+	out, err := c.pr(ctx, "view", repo, number, "--json", "number,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,baseRefName,statusCheckRollup,reviews,comments,mergeCommit")
 	if err != nil {
 		return PR{}, err
 	}
@@ -372,6 +374,16 @@ func (c Client) FindOpen(ctx context.Context, repo, head string) (int, string, b
 		return 0, "", false, nil
 	}
 	return found[0].Number, found[0].URL, true, nil
+}
+
+// EditBase changes the branch a pull request merges into, such as a stacked
+// pull request's once the one below it has merged.
+func (c Client) EditBase(ctx context.Context, repo string, number int, base string) error {
+	if base == "" || strings.HasPrefix(base, "-") {
+		return errors.New("not a branch to merge into")
+	}
+	_, err := c.pr(ctx, "edit", repo, number, "--base", base)
+	return err
 }
 
 // MarkReady marks a draft pull request ready for review. One already ready

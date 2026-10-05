@@ -93,3 +93,28 @@ func TestActionsJobsAndLogsAreReadThroughGH(t *testing.T) {
 		t.Fatal("read a malformed repository's log")
 	}
 }
+
+// A stacked pull request is pointed at another base, and the base it
+// merges into is read with the rest of it.
+func TestEditBasePointsAPullRequestElsewhere(t *testing.T) {
+	var calls [][]string
+	c := Client{Run: func(_ context.Context, args ...string) ([]byte, error) {
+		calls = append(calls, args)
+		if args[1] == "view" {
+			return []byte(`{"number": 8, "state": "OPEN", "headRefOid": "abc", "baseRefName": "crew/add-a"}`), nil
+		}
+		return []byte(`{"data": {"repository": {"pullRequest": {"state": "OPEN", "headRefOid": "abc", "reviewThreads": {"nodes": []}}}}}`), nil
+	}}
+	if err := c.EditBase(context.Background(), "o/r", 8, "main"); err != nil || !slices.Equal(calls[0], []string{"pr", "edit", "8", "--repo", "o/r", "--base", "main"}) {
+		t.Fatalf("edit %v %v", calls, err)
+	}
+	for _, base := range []string{"", "--admin"} {
+		if err := c.EditBase(context.Background(), "o/r", 8, base); err == nil {
+			t.Fatalf("pointed at %q", base)
+		}
+	}
+	pr, err := c.View(context.Background(), "o/r", 8)
+	if err != nil || pr.BaseRefName != "crew/add-a" || !strings.Contains(strings.Join(calls[1], " "), "baseRefName") {
+		t.Fatalf("view %+v %v %v", pr, err, calls[1])
+	}
+}
