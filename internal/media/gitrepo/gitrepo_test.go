@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -296,7 +297,7 @@ func TestACheckoutIsTheRevisionReadOnly(t *testing.T) {
 	if err = r.Publish(ctx, a, a1, TaskRef("a", 1, 1)); err != nil {
 		t.Fatal(err)
 	}
-	c, err := r.Checkout(ctx, a1, false)
+	c, err := r.Checkout(ctx, a1, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +337,7 @@ func TestACheckoutIsTheRevisionReadOnly(t *testing.T) {
 		t.Fatal("the checkout was not removed")
 	}
 	// A check that has to write into its tree gets a writable copy.
-	withTree, err := r.Checkout(ctx, a1, true)
+	withTree, err := r.Checkout(ctx, a1, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -658,5 +659,67 @@ func TestChangedFilesCountsEachChangedFileOnce(t *testing.T) {
 	git(t, dir, "mv", "c.go", "renamed.go")
 	if n, err := ChangedFiles(context.Background(), dir); err != nil || n != 4 {
 		t.Fatalf("changed %d, %v", n, err)
+	}
+}
+
+// A check gets the revision alone, not its history, plus the base it was
+// made on, named in its environment with the files the change touches.
+func TestACheckoutHoldsTheRevisionAndItsBaseOnly(t *testing.T) {
+	source := ownerRepo(t)
+	r, err := Open(ctx, t.TempDir(), source, []string{"node_modules"}, SignAsOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, err := r.Start(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := r.Task("a")
+	if err = a.Ready(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Reset(ctx, "crew-task/a", base); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(a.Workspace(), "a.go"), "package main // one\n")
+	write(t, filepath.Join(a.Workspace(), "sub", "b.go"), "package sub\n")
+	a1, _, err := a.Snapshot(ctx, base, base, "a draft 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.Publish(ctx, a, a1, TaskRef("a", 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	c, err := r.Checkout(ctx, a1, base, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Remove()
+	if shallow := git(t, c.Dir, "rev-parse", "--is-shallow-repository"); shallow != "true" {
+		t.Fatal("the checkout has the revision's history")
+	}
+	if diff := git(t, c.Dir, "diff", "--name-only", base, "HEAD"); diff != "a.go\nsub/b.go" {
+		t.Fatalf("diff against the base in the checkout: %q", diff)
+	}
+	env := strings.Join(c.Env, "\n")
+	if !strings.Contains(env, "CREW_BASE="+base) {
+		t.Fatalf("the check isn't told its base: %v", c.Env)
+	}
+	_, list, _ := strings.Cut(env, "CREW_CHANGED_FILES=")
+	list, _, _ = strings.Cut(list, "\n")
+	changed, err := os.ReadFile(list)
+	if err != nil || string(changed) != "a.go\nsub/b.go\n" {
+		t.Fatalf("changed files %q, %v", changed, err)
+	}
+	if err := c.Verify(ctx); err != nil {
+		t.Fatalf("the checkout no longer verifies: %v", err)
+	}
+	copied, err := r.CopyForCheck(c.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer copied.Remove()
+	if want := "CREW_CHANGED_FILES=" + filepath.Join(copied.Dir, ".git", "crew-changed-files"); !slices.Contains(copied.Env, want) || !slices.Contains(copied.Env, "CREW_BASE="+base) {
+		t.Fatalf("a hosted check's copy isn't told the change: %v", copied.Env)
 	}
 }

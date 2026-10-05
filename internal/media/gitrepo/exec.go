@@ -35,11 +35,21 @@ func run(ctx context.Context, dir string, args ...string) (string, error) {
 // runIn is run with a chosen environment, for the commands that sign as the
 // owner would.
 func runIn(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+	return runWith(ctx, dir, env, "", args...)
+}
+
+// runStdin is run with input on git's standard input.
+func runStdin(ctx context.Context, dir, input string, args ...string) (string, error) {
+	return runWith(ctx, dir, gitEnvironment(), input, args...)
+}
+
+func runWith(ctx context.Context, dir string, env []string, input string, args ...string) (string, error) {
 	full := append(append([]string(nil), safety...), args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	procgroup.Detach(cmd)
 	cmd.Dir = dir
 	cmd.Env = env
+	cmd.Stdin = strings.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

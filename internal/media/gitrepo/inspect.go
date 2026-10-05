@@ -41,6 +41,28 @@ var sensitiveDirs = []string{".claude/", ".codex/", ".agents/", ".husky/", ".vsc
 // runs anything on the delivered branch: sensitive files, and any change that
 // adds a symlink or makes a file executable.
 func (r Repo) Attention(ctx context.Context, base, commit string) ([]string, error) {
+	return r.attention(ctx, base, commit, nil)
+}
+
+// OwnAttention is Attention for an update from pushed to commit, counting
+// only the task's own change, what commit holds beyond its base: whatever
+// a catch-up took in from the target was the target's already.
+func (r Repo) OwnAttention(ctx context.Context, pushed, commit, base string) ([]string, error) {
+	if base == "" {
+		return r.Attention(ctx, pushed, commit)
+	}
+	out, err := run(ctx, r.Workspace(), "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-only", base+".."+commit)
+	if err != nil {
+		return nil, err
+	}
+	own := map[string]bool{}
+	for _, path := range strings.Split(strings.TrimSpace(out), "\n") {
+		own[path] = true
+	}
+	return r.attention(ctx, pushed, commit, own)
+}
+
+func (r Repo) attention(ctx context.Context, base, commit string, only map[string]bool) ([]string, error) {
 	out, err := run(ctx, r.Workspace(), "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--raw", base+".."+commit)
 	if err != nil {
 		return nil, err
@@ -52,6 +74,9 @@ func (r Repo) Attention(ctx context.Context, base, commit string) ([]string, err
 			continue
 		}
 		newMode, path := fields[1], fields[len(fields)-1]
+		if only != nil && !only[path] {
+			continue
+		}
 		name := filepath.Base(path)
 		switch {
 		case newMode == "120000":

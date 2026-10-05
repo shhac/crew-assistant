@@ -27,6 +27,19 @@ func isAncestor(ctx context.Context, dir, commit, tip string) (bool, error) {
 	return false, err
 }
 
+// MergesCleanly says whether commit merges into tip without a conflict.
+func (r Repo) MergesCleanly(ctx context.Context, tip, commit string) (bool, error) {
+	if err := r.bring(ctx, tip, commit); err != nil {
+		return false, err
+	}
+	_, err := run(ctx, r.Workspace(), "merge-tree", "--write-tree", "--no-messages", "--quiet", tip, commit)
+	var status *gitError
+	if errors.As(err, &status) && status.code == 1 {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // MergeClean merges commit into tip without touching any working tree. It
 // returns the new merge commit, or "" when the two conflict and someone has to
 // resolve them.

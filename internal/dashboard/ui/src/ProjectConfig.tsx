@@ -614,7 +614,10 @@ function WorkspaceEditor({
             placeholder="node_modules"
             onChange={(e) => setPrepare(e.target.value)}
           />
-          <span className="hint">Optional. Separate with commas.</span>
+          <span className="hint">
+            Optional. Separate with commas. A pattern such as **/node_modules
+            copies every ignored folder it matches.
+          </span>
         </label>
         <label htmlFor="config-sign">
           Sign commits

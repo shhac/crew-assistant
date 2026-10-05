@@ -68,26 +68,41 @@ func Cloned(projectDir string) bool {
 	return err == nil
 }
 
-// cloneFrom makes the clone from another repository on this machine.
+// cloneFrom makes the clone from another repository on this machine. It is
+// made aside and moved into place whole, so a clone a crash left half made
+// is never taken for a finished one.
 func (r Repo) cloneFrom(ctx context.Context, from string) error {
 	if err := os.MkdirAll(r.root, 0700); err != nil {
 		return err
 	}
-	// A clone a crash left half made is made again.
-	if err := os.RemoveAll(r.Workspace()); err != nil {
-		return err
+	partial := filepath.Join(r.root, "clone.partial")
+	for _, dir := range []string{r.Workspace(), partial} {
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
 	}
-	// An empty template: no hooks or config from the operator's own git
-	// templates reach the clone.
-	if _, err := run(ctx, r.root, "clone", "--quiet", "--template=", "--no-hardlinks", "--no-tags", "--no-recurse-submodules", from, "clone"); err != nil {
-		return fmt.Errorf("the repository could not be cloned: %w", err)
+	if err := quickClone(ctx, from, partial); err != nil {
+		if err := os.RemoveAll(partial); err != nil {
+			return err
+		}
+		// An empty template: no hooks or config from the operator's own git
+		// templates reach the clone.
+		if _, err := run(ctx, r.root, "clone", "--quiet", "--template=", "--no-hardlinks", "--no-tags", "--no-recurse-submodules", "--no-checkout", from, filepath.Base(partial)); err != nil {
+			return fmt.Errorf("the repository could not be cloned: %w", err)
+		}
 	}
-	if err := r.configure(ctx); err != nil {
+	if _, err := run(ctx, partial, "checkout", "--quiet", "--force", "--no-recurse-submodules"); err != nil {
+		return fmt.Errorf("the repository could not be checked out: %w", err)
+	}
+	if err := configure(ctx, partial); err != nil {
 		return err
 	}
 	// Only now, before any role has worked here: later, a folder a role
 	// replaced with a link could lead the copy outside the clone.
-	return r.copyPrepared(r.Workspace())
+	if err := r.copyPrepared(ctx, partial); err != nil {
+		return err
+	}
+	return os.Rename(partial, r.Workspace())
 }
 
 // serveCommits lets clones made from this one fetch any commit it holds by
@@ -174,7 +189,7 @@ func (r Repo) Holds(ctx context.Context, commit string) bool {
 	return err == nil
 }
 
-func (r Repo) configure(ctx context.Context) error {
+func configure(ctx context.Context, dir string) error {
 	for _, kv := range [][2]string{
 		{"core.hooksPath", "/dev/null"},
 		{"core.fsmonitor", "false"},
@@ -182,11 +197,11 @@ func (r Repo) configure(ctx context.Context) error {
 		{"user.email", authorKey},
 		{"uploadpack.allowAnySHA1InWant", "true"},
 	} {
-		if _, err := run(ctx, r.Workspace(), "config", kv[0], kv[1]); err != nil {
+		if _, err := run(ctx, dir, "config", kv[0], kv[1]); err != nil {
 			return err
 		}
 	}
-	exclude := filepath.Join(r.Workspace(), ".git", "info", "exclude")
+	exclude := filepath.Join(dir, ".git", "info", "exclude")
 	if err := os.MkdirAll(filepath.Dir(exclude), 0700); err != nil {
 		return err
 	}
@@ -202,8 +217,12 @@ func (r Repo) configure(ctx context.Context) error {
 // copyPrepared copies ignored dependencies, such as node_modules, from the
 // owner's checkout into a fresh clone or checkout at dir, so roles can build
 // without the network.
-func (r Repo) copyPrepared(dir string) error {
-	for _, rel := range r.prepare {
+func (r Repo) copyPrepared(ctx context.Context, dir string) error {
+	paths, err := r.preparedPaths(ctx)
+	if err != nil {
+		return err
+	}
+	for _, rel := range paths {
 		clean := filepath.Clean(rel)
 		if filepath.IsAbs(clean) || clean == "." || strings.HasPrefix(clean, "..") {
 			return fmt.Errorf("prepare path %q must be inside the repository", rel)
@@ -228,6 +247,12 @@ func (r Repo) copyPrepared(dir string) error {
 // copyTree copies a folder, with copy-on-write clones where the file system
 // has them.
 func copyTree(from, to string) error {
+	if err := cloneTree(from, to); err == nil {
+		return nil
+	}
+	if err := os.RemoveAll(to); err != nil {
+		return err
+	}
 	args := []string{"-R", from, to}
 	if runtime.GOOS == "darwin" {
 		args = []string{"-Rc", from, to} // copy-on-write clones on APFS

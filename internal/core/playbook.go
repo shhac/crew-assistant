@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -223,6 +224,11 @@ func (p Playbook) Validate() error {
 		for _, rel := range p.Prepare {
 			if filepath.IsAbs(rel) || strings.HasPrefix(filepath.Clean(rel), "..") {
 				return fmt.Errorf("prepare path %q must be inside the repository", rel)
+			}
+			for _, part := range strings.Split(rel, "/") {
+				if _, err := path.Match(part, ""); err != nil {
+					return fmt.Errorf("prepare pattern %q can't be matched", rel)
+				}
 			}
 		}
 		if p.Sign != "" && p.Sign != SignAlways && p.Sign != SignNever {

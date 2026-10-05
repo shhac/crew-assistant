@@ -22,21 +22,42 @@ type File struct {
 var ErrCheckChanged = errors.New("the check changed the revision it was checking")
 
 // RemoveReadOnly deletes dir, giving write permission back first so what a
-// check was given read-only can go.
+// check was given read-only can go. Only folders need it: removing a file
+// takes write permission on its folder, not on the file.
 func RemoveReadOnly(dir string) error {
-	_ = SetWritable(dir, true)
+	_ = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || !entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil || info.Mode().Perm()&0o200 != 0 {
+			return nil
+		}
+		return os.Chmod(path, info.Mode().Perm()|0o200)
+	})
 	return os.RemoveAll(dir)
 }
 
 // SetWritable takes write permission from, or gives it back to, every file
-// and folder under dir. Links are left alone: changing one would change
-// what it points at.
-func SetWritable(dir string, writable bool) error {
+// and folder under dir, but for the folders skip names, relative to dir,
+// which are left as they are. Links are left alone: changing one would
+// change what it points at.
+func SetWritable(dir string, writable bool, skip ...string) error {
+	skipped := map[string]bool{}
+	for _, rel := range skip {
+		skipped[filepath.Join(dir, filepath.FromSlash(rel))] = true
+	}
 	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		if skipped[path] {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		info, err := entry.Info()

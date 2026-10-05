@@ -79,6 +79,15 @@ func (m gitMedium) begin(ctx context.Context, t core.Task) (core.Task, error) {
 }
 
 func (m gitMedium) behind(ctx context.Context, t core.Task) (*line, error) {
+	return m.behindFor(ctx, t, false)
+}
+
+// behindFor is what the task must take in before it goes on. A pull request
+// takes in its target's new commits only when they conflict with it, or
+// when GitHub itself requires it (required): its checks run on the merge
+// with the target anyway, and catching up with every commit on a busy main
+// would rerun the team's checks for nothing.
+func (m gitMedium) behindFor(ctx context.Context, t core.Task, required bool) (*line, error) {
 	defer m.locked()()
 	tip := tipOf(t)
 	if tip == "" {
@@ -91,6 +100,12 @@ func (m gitMedium) behind(ctx context.Context, t core.Task) (*line, error) {
 	contains, err := m.repo.Contains(ctx, tip, l.Commit)
 	if err != nil || contains {
 		return nil, err
+	}
+	if _, byPR := m.way.(prWay); byPR && !l.Foreign && !required {
+		clean, err := m.repo.MergesCleanly(ctx, tip, l.Commit)
+		if err != nil || clean {
+			return nil, err
+		}
 	}
 	if !l.Foreign && t.Base != "" {
 		joined, err := m.repo.Contains(ctx, l.Commit, t.Base)
@@ -207,7 +222,7 @@ func (m gitMedium) published(ctx context.Context, t core.Task, h core.Handoff) (
 func (m gitMedium) check(ctx context.Context, t core.Task, r core.Revision, qa, app bool) (checkout, error) {
 	defer m.locked()()
 	inCopy := qa && m.playbook.CheckInCopy
-	c, err := m.repo.Checkout(ctx, r.Ref, inCopy || (qa && app))
+	c, err := m.repo.Checkout(ctx, r.Ref, t.Base, inCopy || (qa && app))
 	if err != nil {
 		return checkout{}, err
 	}
@@ -221,6 +236,11 @@ func (m gitMedium) check(ctx context.Context, t core.Task, r core.Revision, qa, 
 		out.note = fmt.Sprintf("\n\nThe repository root to run the check from is %s: a writable copy of the revision, in your scratch folder, for a check that writes into the tree it runs in. The revision itself is at %s, read-only.\n", c.Tree, c.Dir)
 	}
 	out.hostedNote = fmt.Sprintf("\n\nThe revision is checked out, read-only, at %s. run_check runs the check in its own writable copy, regardless of the check-in-copy setting. Your working directory is a scratch folder.\n", c.Dir)
+	if t.Base != "" && t.Base != r.Ref {
+		const change = "The check's environment names the commit this change was made on as $CREW_BASE, held in the checkout for a diff against it, and $CREW_CHANGED_FILES is a file listing the paths the change touches, one per line, for a check that checks only what changed.\n"
+		out.note += change
+		out.hostedNote += change
+	}
 	return out, nil
 }
 
