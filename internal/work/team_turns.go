@@ -111,7 +111,7 @@ func (lp *Loop) runAttempt(ctx context.Context, spec roles.Spec) (roles.Result, 
 		NativeError: result.Provider.NativeError, CleanupConfirmed: result.CleanupConfirmed,
 		Usage: result.Provider.Usage, Observed: result.Provider.Observed,
 		CompactionUsage: result.Compaction.Usage, CompactionObserved: result.Compaction.Observed}
-	accountCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	accountCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), accountingWait)
 	defer cancel()
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -190,3 +190,10 @@ func (lp *Loop) recoverTeamTurns(ctx context.Context, held map[string]string, co
 	}
 	return running
 }
+
+// accountingWait is how long a finished turn's accounting may take to be
+// recorded. Each record rewrites the whole state, which on a busy machine
+// took longer than the five seconds once allowed; a turn that runs out of
+// time holds its member's claim until a restart, stalling every task that
+// needs them.
+const accountingWait = 2 * time.Minute
