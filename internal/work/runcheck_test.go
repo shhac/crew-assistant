@@ -32,6 +32,7 @@ type fakeCommands struct {
 	runErr, startErr, closeErr error
 	started                    *fakeStarted
 	closed                     bool
+	onClose                    func()
 }
 
 func (f *fakeCommands) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
@@ -59,6 +60,9 @@ func (f *fakeCommands) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.closed = true
+	if f.onClose != nil {
+		f.onClose()
+	}
 	return commandError(f.closeErr)
 }
 
@@ -506,6 +510,7 @@ func TestStartupReclaimsStaleCommandsWithoutRunningWorkspaceContent(t *testing.T
 	if err := os.MkdirAll(stale, 0700); err != nil {
 		t.Fatal(err)
 	}
+	fake.onClose = func() { os.RemoveAll(stale) }
 	if err := lp.sweepCommands(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -514,5 +519,69 @@ func TestStartupReclaimsStaleCommandsWithoutRunningWorkspaceContent(t *testing.T
 	}
 	if _, err := os.Stat(opts.WorkDir); !os.IsNotExist(err) {
 		t.Fatal("recovery workspace remained")
+	}
+}
+
+func TestCommandRecoveryExcludesLiveSandbox(t *testing.T) {
+	lp := testLoop(t)
+	base := filepath.Join(lp.Core.StateDirectory(), "commands", "commands")
+	live := filepath.Join(base, "live")
+	entered, finish := make(chan struct{}), make(chan struct{})
+	stale := filepath.Join(base, "stale")
+	opened := 0
+	lp.commands = func(_ context.Context, _ sandbox.Options) (commandSandbox, error) {
+		opened++
+		if opened == 1 {
+			if err := os.MkdirAll(live, 0700); err != nil {
+				return nil, err
+			}
+			return &fakeCommands{run: func(context.Context, sandbox.CommandRequest) (sandbox.CommandResult, error) {
+				close(entered)
+				<-finish
+				return sandbox.CommandResult{}, nil
+			}, onClose: func() { os.RemoveAll(live) }}, nil
+		}
+		return &fakeCommands{onClose: func() { os.RemoveAll(stale) }}, nil
+	}
+	box, err := lp.openCommands(context.Background(), sandbox.Options{WorkDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer box.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		box.Run(context.Background(), sandbox.CommandRequest{Command: "synthetic check"})
+	}()
+	<-entered
+	defer func() {
+		if finish != nil {
+			close(finish)
+			<-done
+		}
+	}()
+	if err := os.MkdirAll(stale, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := lp.sweepCommands(context.Background()); err != nil {
+		t.Fatalf("live check blocked stale cleanup: %v", err)
+	}
+	if _, err := os.Stat(live); err != nil {
+		t.Fatal("live check was removed", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatal("stale check was not reclaimed", err)
+	}
+	close(finish)
+	<-done
+	finish = nil
+	// Once Close fails, the directory is uncertain rather than live and must hold recovery.
+	lp.commands = func(_ context.Context, _ sandbox.Options) (commandSandbox, error) { return &fakeCommands{}, nil }
+	box.(*trackedCommands).commandSandbox = &fakeCommands{closeErr: errors.New("cleanup unknown")}
+	if err := box.Close(); err == nil {
+		t.Fatal("expected close failure")
+	}
+	if err := lp.sweepCommands(context.Background()); !errors.Is(err, errCommandRecovery) {
+		t.Fatal("unreclaimed directory did not hold recovery", err)
 	}
 }

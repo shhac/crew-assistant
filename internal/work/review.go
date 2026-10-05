@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
@@ -18,7 +19,14 @@ import (
 // as a step of their own, side by side; see check.
 func (lp *Loop) review(ctx context.Context, p core.Project, t core.Task) error {
 	r := t.Revisions[len(t.Revisions)-1]
-	for _, checker := range t.Checkers() {
+	if t.MergeCheckPending(p.Brief.Version) {
+		m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
+		if err != nil {
+			return err
+		}
+		return lp.validateAcceptedMerge(ctx, p, t, m)
+	}
+	for _, checker := range t.AcceptanceCheckers(p.Brief.Version) {
 		if !t.Judged(checker.Name, r.N, p.Brief.Version) {
 			return nil
 		}
@@ -39,15 +47,25 @@ func (lp *Loop) check(ctx context.Context, p core.Project, t core.Task, m medium
 		return err
 	}
 	verdict, shots, end, err := lp.runCheckerAwake(ctx, p, t, r, checker, m)
-	if err != nil {
-		return lp.roleFailed(ctx, t, checker.Name, err)
+	cleanupErr := err
+	if err != nil && (!errors.Is(err, errCommandRecovery) || verdict.Ref == "") {
+		var reported error
+		if t.AcceptanceStands(p.Brief.Version) && t.MergeValidation != nil {
+			reported = lp.acceptedMergeFailure(ctx, t, checker.Name+" could not validate the merged result: "+err.Error())
+		} else {
+			reported = lp.roleFailed(ctx, t, checker.Name, err)
+		}
+		if errors.Is(err, errCommandRecovery) {
+			return errors.Join(err, reported)
+		}
+		return reported
 	}
 	if lp.checked != nil {
 		lp.checked(t.ID, checker.Name)
 	}
 	// The verdict judged the text the checker was shown: if it or anyone
 	// changed the objective or criteria meanwhile, it judges again.
-	verdict.TextVersion = t.TextVersion
+	verdict.TextVersion, verdict.BriefVersion = t.TextVersion, p.Brief.Version
 	// The screenshots are kept only with the verdict, in the same update:
 	// as updateOpen, a finished task records neither.
 	_, err = lp.Core.UpdateTaskWithVerdict(ctx, t.ID, verdict, shots, func(t *core.Task, p *core.Project, verdict core.Verdict) (string, error) {
@@ -55,11 +73,17 @@ func (lp *Loop) check(ctx context.Context, p core.Project, t core.Task, m medium
 			return "", nil
 		}
 		// Ref is what the checker's own copy held, set with the verdict.
-		verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, checker.Name, p.Brief.Version, time.Now().UTC()
+		verdict.Revision, verdict.Role, verdict.At = r.N, checker.Name, time.Now().UTC()
 		t.Verdicts = append(t.Verdicts, verdict)
 		t.Failures, t.RetryAt = 0, time.Time{}
 		return fmt.Sprintf("%s checked version %d of %s: %s", checker.Name, r.N, t.Objective, outcomeWords[verdict.Outcome]), nil
 	}, end)
+	if errors.Is(cleanupErr, errCommandRecovery) {
+		if t.AcceptanceStands(p.Brief.Version) && t.MergeValidation != nil {
+			err = errors.Join(err, lp.acceptedMergeFailure(ctx, t, checker.Name+" cleanup is unconfirmed: "+cleanupErr.Error()))
+		}
+		return errors.Join(cleanupErr, err)
+	}
 	return err
 }
 
@@ -97,7 +121,7 @@ func (lp *Loop) sleptSince(start time.Time) time.Duration {
 // Where the project has a run recipe, the daemon starts the app for QA, on
 // a port of its own, and gives the screenshots it took, to keep with its
 // verdict when that is recorded.
-func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium, note string) (core.Verdict, core.Screenshots, core.TurnEnd, error) {
+func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r core.Revision, checker core.Role, m medium, note string) (out core.Verdict, images core.Screenshots, ending core.TurnEnd, resultErr error) {
 	playbook := taskPlaybook(p, t)
 	app, err := lp.planApp(checker, playbook)
 	if err != nil {
@@ -109,10 +133,40 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 		return core.Verdict{}, core.Screenshots{}, core.TurnEnd{}, err
 	}
 	app.tree = c.tree
-	app.cleanupError = lp.commandCleanup
+	var cleanupMu sync.Mutex
+	var cleanupErrors []error
+	var retained []func()
+	retain := func(err error, remove func()) {
+		cleanupMu.Lock()
+		defer cleanupMu.Unlock()
+		cleanupErrors = append(cleanupErrors, err)
+		if remove != nil {
+			retained = append(retained, remove)
+		}
+	}
+	c.retainCleanup = retain
+	app.cleanupError = func(err error) { retain(err, nil); lp.commandCleanup(err) }
 	// The port is held until the copy the app ran from is gone.
 	defer func() {
 		app.stop()
+		cleanupMu.Lock()
+		defer cleanupMu.Unlock()
+		if len(cleanupErrors) > 0 {
+			lp.keepCommandCleanup(ctx, t.ID, func() {
+				for _, remove := range retained {
+					remove()
+				}
+				c.remove()
+				app.release()
+			})
+			_, token, claimed := core.FenceOf(ctx)
+			if claimed {
+				// Cleanup bookkeeping must survive revoked role authority.
+				resultErr = errors.Join(resultErr, lp.Core.HoldClaim(context.Background(), t.ID, p.ID, token, errCommandRecovery.Error()))
+			}
+			resultErr = errors.Join(resultErr, errCommandRecovery, errors.Join(cleanupErrors...))
+			return
+		}
 		c.remove()
 		app.release()
 	}()
@@ -135,7 +189,7 @@ func (lp *Loop) runChecker(ctx context.Context, p core.Project, t core.Task, r c
 		spec.Env = c.env
 	}
 	spec.Read = append(append([]string(nil), spec.Read...), c.read...)
-	app.cleanupError = lp.commandCleanupFor(spec.Observer)
+	app.cleanupError = func(err error) { retain(err, nil); lp.commandCleanupFor(spec.Observer)(err) }
 	app.apply(&spec)
 	var shots *screenshots
 	if app.running() && app.images {
@@ -223,12 +277,33 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 			current = append(current, v)
 		}
 	}
-	for _, checker := range t.Checkers() {
+	for _, checker := range t.AcceptanceCheckers(p.Brief.Version) {
 		if !t.Judged(checker.Name, r.N, p.Brief.Version) {
 			// The brief or the task's requirements changed after some checks:
 			// judge again against them.
 			return lp.setStatus(ctx, t.ID, core.TaskReviewing, "Checking again against the updated brief or requirements")
 		}
+	}
+	if t.AcceptanceStands(p.Brief.Version) {
+		if r.N == t.Acceptance.Revision {
+			return lp.askForDelivery(ctx, p, t, r)
+		}
+		if t.MergeCheckPending(p.Brief.Version) {
+			return lp.setStatus(ctx, t.ID, core.TaskReviewing, "Checking the merged result")
+		}
+		if t.MergeValidation != nil && t.MergeValidation.Failure != "" {
+			return lp.acceptedMergeFailure(ctx, t, t.MergeValidation.Failure)
+		}
+		for _, v := range current {
+			role, ok := t.Role(v.Role)
+			if ok && role.Holds(core.RoleQA) && v.Outcome != core.VerdictPass {
+				return lp.acceptedMergeFailure(ctx, t, acceptedVerdictFailure(v))
+			}
+		}
+		if t.AcceptedMergeReady(p.Brief.Version) {
+			return lp.askForDelivery(ctx, p, t, r)
+		}
+		return lp.setStatus(ctx, t.ID, core.TaskReviewing, "Checking the merged result")
 	}
 	var questions []core.Verdict
 	next := core.NextLand
@@ -448,6 +523,9 @@ func reviewDigest(verdicts []core.Verdict) string {
 		fmt.Fprintf(&b, "%s: %s\n", v.Role, v.Summary)
 		for _, f := range v.Findings {
 			fmt.Fprintf(&b, "- %s\n", f.Note)
+		}
+		if v.Question != "" {
+			fmt.Fprintf(&b, "- %s\n", v.Question)
 		}
 		if v.Note != "" {
 			fmt.Fprintf(&b, "- %s\n", v.Note)

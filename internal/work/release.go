@@ -269,7 +269,7 @@ func (lp *Loop) checkRelease(ctx context.Context, p core.Project, m gitMedium, _
 	}
 	defer c.remove()
 	attempt := fmt.Sprint(time.Now().UnixNano())
-	result, progress, runErr := lp.hostedCheck(ctx, m, c.checkDir, checkCache(c.env), strings.ReplaceAll(r.Policy.Check, "{version}", r.Version), lp.commandCleanup, func(progress *checktest.Progress, status string) {
+	result, progress, runErr := lp.hostedCheck(ctx, m, c.checkDir, checkCache(c.env), strings.ReplaceAll(r.Policy.Check, "{version}", r.Version), func(err error, _ func()) { lp.commandCleanup(err) }, func(progress *checktest.Progress, status string) {
 		noteCoverage(progress, status, func(text string) {
 			text = fmt.Sprintf("Release %s commit %s attempt %s: %s", r.Version, r.Commit, attempt, text)
 			if err := lp.Core.RecordActivity(context.WithoutCancel(ctx), p.ID, "release.check_coverage", text); err != nil {

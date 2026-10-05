@@ -65,6 +65,44 @@ func (lp *Loop) pass(ctx context.Context, waited bool) (bool, []<-chan any, erro
 	if err != nil {
 		return false, nil, err
 	}
+	// Cleanup outlives runnable authority, including Stop. A failed sweep holds
+	// only the affected work; owner answers and independent projects still run.
+	pending := map[string]commandCleanupObligation{}
+	lp.commandChecks.Range(func(key, value any) bool {
+		obligation := value.(commandCleanupObligation)
+		if !lp.jobs.hasTask(obligation.task) {
+			pending[key.(string)] = obligation
+		}
+		return true
+	})
+	for _, t := range snap.Tasks {
+		for _, c := range t.Claims {
+			if c.Held != errCommandRecovery.Error() || lp.jobs.hasTask(t.ID) {
+				continue
+			}
+			if _, found := pending[c.Token]; !found {
+				pending[c.Token] = commandCleanupObligation{task: t.ID, token: c.Token}
+			}
+		}
+	}
+	if len(pending) > 0 {
+		if err := lp.sweepCommands(ctx); err != nil {
+			lp.commandCleanup(err)
+		} else {
+			for key, obligation := range pending {
+				if obligation.remove != nil {
+					obligation.remove()
+					lp.commandChecks.Delete(key)
+				}
+				if obligation.task == "" {
+					continue // Orphan copies retained during startup, without runnable authority.
+				}
+				if err := lp.Core.ReleaseHeldClaim(ctx, obligation.task, obligation.token, errCommandRecovery.Error()); err != nil {
+					return false, nil, err
+				}
+			}
+		}
+	}
 	chats, err := lp.answerPMChats(ctx, snap, waited)
 	if err != nil || len(chats) > 0 || snap.Paused {
 		return len(chats) > 0, chats, err
@@ -73,6 +111,25 @@ func (lp *Loop) pass(ctx context.Context, waited bool) (bool, []<-chan any, erro
 	lp.noteChat(chatPending(snap, lp.Config().AssistantHarness().Engine, lp.now()))
 	if err := lp.settleDeliveries(ctx, snap); err != nil {
 		return false, nil, err
+	}
+	// Reconciliation can finish a task. Continue from that record rather
+	// than routing its pre-recovery state through answers or the PM.
+	beforeReconciliation := snap
+	snap, err = lp.Core.Snapshot(ctx)
+	if err != nil {
+		return false, nil, err
+	}
+	reconciled := slices.ContainsFunc(snap.Tasks, func(t core.Task) bool {
+		before, ok := beforeReconciliation.FindTask(t.ID)
+		return ok && before.Status != t.Status
+	})
+	var deferred []string
+	for _, t := range snap.Tasks {
+		before, ok := beforeReconciliation.FindTask(t.ID)
+		if ok && (before.Delivering != nil || before.PRMergePending()) && t.Delivering == nil && !t.PRMergePending() && t.Status == core.TaskWriting {
+			// Recovery hands integration back to the team on the next pass.
+			deferred = append(deferred, t.ID)
+		}
 	}
 	releases, releaseErr := lp.manageReleases(ctx, snap, waited)
 	if releaseErr != nil || len(releases) > 0 {
@@ -100,7 +157,7 @@ func (lp *Loop) pass(ctx context.Context, waited bool) (bool, []<-chan any, erro
 		return len(started) > 0, started, err
 	}
 	taken := &slots{lp: lp}
-	claimed, err := lp.Core.Schedule(ctx, taken.admit)
+	claimed, err := lp.Core.Schedule(ctx, taken.admit, deferred...)
 	if err != nil {
 		taken.giveBack()
 		return len(started) > 0, started, err
@@ -108,7 +165,7 @@ func (lp *Loop) pass(ctx context.Context, waited bool) (bool, []<-chan any, erro
 	for _, s := range claimed {
 		started = append(started, lp.launch(ctx, s, waited))
 	}
-	return len(started) > 0, started, nil
+	return reconciled || len(started) > 0, started, nil
 }
 
 // launch runs a claimed step in a goroutine of its own, under a context of
@@ -161,22 +218,33 @@ func (lp *Loop) run(ctx context.Context, c claimed, waited bool, step, release f
 		ctx = context.WithValue(ctx, accountingFailureKey{}, accounting)
 		err := step(ctx)
 		cancel()
-		lp.jobs.mu.Lock()
-		delete(lp.jobs.running, token)
-		lp.jobs.mu.Unlock()
 		if c.seat.Name != "" {
 			lp.free(c.seat.Engine)
 		}
 		event := diagnostics.Event{Component: "daemon", Stage: "task_loop", ProjectID: c.project}
 		settle := release
+		if errors.Is(err, errCommandRecovery) {
+			settle = func(ctx context.Context) error {
+				return lp.Core.HoldClaim(ctx, c.task, c.project, token, errCommandRecovery.Error())
+			}
+		}
 		if accounting.failure != nil {
 			err = accounting.failure
 			settle = func(ctx context.Context) error {
 				return lp.Core.HoldClaim(ctx, c.task, c.project, token, "Held: terminal team turn accounting could not be recorded")
 			}
 		}
-		if releaseErr := settle(context.WithoutCancel(ctx)); releaseErr != nil {
+		releaseErr := settle(context.WithoutCancel(ctx))
+		if releaseErr != nil {
 			lp.Diagnostics.Failure(event, releaseErr)
+		}
+		// Reclamation must not observe a finished job before its final hold
+		// (including failed terminal accounting) is durably settled. If that
+		// write fails too, retain registration until restart recovery.
+		if releaseErr == nil {
+			lp.jobs.mu.Lock()
+			delete(lp.jobs.running, token)
+			lp.jobs.mu.Unlock()
 		}
 		switch {
 		case errors.Is(err, core.ErrStale):
@@ -210,7 +278,7 @@ func (lp *Loop) step(ctx context.Context, s core.Scheduled) error {
 		return lp.answerMessage(ctx, p, t, s)
 	}
 	// The task moved on since the step was claimed.
-	if t.Status != s.Claim.Step {
+	if t.Status != s.Claim.Step && !(s.Claim.Step == core.StepValidateMerge && t.Status == core.TaskReviewing) {
 		return nil
 	}
 	m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
@@ -219,6 +287,12 @@ func (lp *Loop) step(ctx context.Context, s core.Scheduled) error {
 	}
 	// A check runs beside the task's other checks and never moves the task;
 	// direction that arrived meanwhile waits for them to end.
+	if s.Claim.Step == core.StepValidateMerge {
+		if len(t.Revisions) == 0 || t.Revisions[len(t.Revisions)-1].N != s.Claim.Revision {
+			return core.ErrStale
+		}
+		return lp.validateAcceptedMerge(ctx, p, t, m)
+	}
 	if s.Claim.Shared {
 		if len(t.Revisions) == 0 || t.DirectionPending > 0 || t.Revisions[len(t.Revisions)-1].N != s.Claim.Revision {
 			return nil

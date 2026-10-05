@@ -31,6 +31,9 @@ func pmApproved(t core.Task) bool {
 // approvalHolds reports whether the task's approval still lets it land: it
 // stands, and if the PM gave it, the PM still decides.
 func approvalHolds(p core.Project, t core.Task) bool {
+	if t.Acceptance != nil && !t.AcceptanceStands(p.Brief.Version) {
+		return false
+	}
 	return approvalStands(t) && (!pmApproved(t) || core.PMGates(p, t))
 }
 
@@ -43,6 +46,10 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 		return err
 	}
 	if fresh, ok := findTask(snap, p.ID, t.ID); ok {
+		current, found := findProject(snap, p.ID)
+		if !found || current.Brief.Version != p.Brief.Version || fresh.TextVersion != t.TextVersion || len(fresh.Revisions) != len(t.Revisions) || (len(fresh.Revisions) > 0 && fresh.Revisions[len(fresh.Revisions)-1].Ref != r.Ref) || fresh.DirectionPending > 0 {
+			return core.ErrStale
+		}
 		t = fresh
 	}
 	if t.NeedsAssetIntegration() {
@@ -144,15 +151,17 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 		return lp.Core.DirectFromPM(ctx, t.ID, seat.Name, sendBack)
 	}
 	decided.Revision = r.N
-	return lp.pmDecided(ctx, t, r, m, seat, decided)
+	return lp.pmDecided(ctx, t, r, m, seat, decided, p.Brief.Version)
 }
 
 // pmDecided records what the PM decided. A land that the task or the policy
 // moved out from under is not an error: the next step looks again.
-func (lp *Loop) pmDecided(ctx context.Context, t core.Task, r core.Revision, m medium, seat core.Role, decided core.LandDecision) error {
-	hold := core.DecisionInput{}
+func (lp *Loop) pmDecided(ctx context.Context, t core.Task, r core.Revision, m medium, seat core.Role, decided core.LandDecision, brief int) error {
+	against := &core.DecisionVersions{Revision: len(t.Revisions), Brief: brief, Text: t.TextVersion}
+	hold := core.DecisionInput{Against: against}
 	if !decided.Land {
 		hold = core.DecisionInput{
+			Against:        against,
 			Title:          fmt.Sprintf("%s held “%s”", seat.Name, t.Objective),
 			Context:        fmt.Sprintf("%s held it: %s\n\n%s\n\n%s", seat.Name, decided.Reason, text.Clip(r.Summary, 600), m.deliveryNote(t)),
 			Recommendation: "Leave it with the PM, which looks again once more work lands here; or approve to land it yourself",
@@ -177,6 +186,7 @@ func (lp *Loop) askOwnerToLand(ctx context.Context, p core.Project, t core.Task,
 	}
 	in.Context = strings.TrimSpace(in.Context + "\n\n" + text.Clip(r.Summary, 600) + "\n\n" + m.deliveryNote(t) + "\n\n" + t.OwnerChecklist())
 	in.Choices = []string{choiceApprove, choiceChanges}
+	in.Against = &core.DecisionVersions{Revision: r.N, Brief: p.Brief.Version, Text: t.TextVersion}
 	_, err := lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionDelivery, in)
 	return err
 }

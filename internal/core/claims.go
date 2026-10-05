@@ -43,7 +43,8 @@ type Claim struct {
 
 const (
 	// StepMessage answers a message to a reviewer or QA with a check.
-	StepMessage = "message"
+	StepValidateMerge = "validate-merge"
+	StepMessage       = "message"
 	// StepAdopt is the owner handing the task a draft of their own.
 	StepAdopt = "adopt"
 	// StepPM is the PM's look at a project's to-do list, a step of the
@@ -145,7 +146,7 @@ func newClaim(t *Task, c Claim, now time.Time) Claim {
 
 // alone reports whether the task has a claim that holds it alone.
 func (t Task) alone() bool {
-	return slices.ContainsFunc(t.Claims, func(c Claim) bool { return !c.Shared || c.Revoked })
+	return slices.ContainsFunc(t.Claims, func(c Claim) bool { return !c.Shared || c.Revoked || c.Held != "" })
 }
 
 // Scheduled is a step the loop has claimed, with the task as it was claimed
@@ -217,18 +218,45 @@ type Wait struct {
 // stage_limits.go. A task whose next step is ready and can't start records
 // what it waits for. Sent-on triage tasks fill room freed in To do in this
 // same atomic update.
-func (s *Service) Schedule(ctx context.Context, admit Admit) ([]Scheduled, error) {
+func (s *Service) Schedule(ctx context.Context, admit Admit, deferred ...string) ([]Scheduled, error) {
 	var out []Scheduled
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		if s.upgradeDraining {
 			return nil
 		}
 		now := s.now().UTC()
+		for i := range v.Tasks {
+			t := &v.Tasks[i]
+			if t.Delivering != nil || t.PRMergePending() {
+				continue
+			}
+			retireStaleDelivery(v, t, now)
+			if t.Acceptance == nil || t.Finished() || t.AcceptanceStands(briefVersion(v, *t)) {
+				continue
+			}
+			if t.Approved == t.Acceptance.Revision {
+				t.Approved = 0
+			}
+			if t.Proposal != nil {
+				t.Proposal.MergeApproved = 0
+			}
+			t.Acceptance, t.MergeValidation = nil, nil
+			for j := range t.Claims {
+				t.Claims[j].Revoked = true
+			}
+			if t.Status == TaskWaiting {
+				// A workspace retry cannot restore an obsolete landing continuation.
+				t.ResumeStatus = TaskReviewing
+			}
+			if t.Status == TaskLanding || t.Status == TaskDeciding || t.Status == TaskAwaiting {
+				t.Status, t.Detail = TaskReviewing, "Checking again after the accepted work changed"
+			}
+		}
 		// Recover asset work before stage capacity and delivery blocker gates.
 		// Never interrupt a live turn or an outward action awaiting reconciliation.
 		for i := range v.Tasks {
 			t := &v.Tasks[i]
-			if !t.Finished() && !v.ProjectPaused(t.ProjectID) && len(t.Claims) == 0 && (t.PRMergePending() || t.Delivering != nil) && t.Status != TaskAwaiting && t.Status != TaskWaiting {
+			if !t.Finished() && !v.ProjectPaused(t.ProjectID) && len(t.Claims) == 0 && (t.PRMergePending() || t.Delivering != nil) && t.Status != TaskAwaiting && t.Status != TaskWaiting && t.Status != TaskLanding {
 				t.Status, t.Detail = TaskLanding, "Reconcile the recorded delivery before continuing"
 			}
 			if t.Finished() || len(t.Claims) > 0 || t.Handoff != nil || t.Delivering != nil || t.PRMergePending() || v.ProjectPaused(t.ProjectID) {
@@ -267,6 +295,9 @@ func (s *Service) Schedule(ctx context.Context, admit Admit) ([]Scheduled, error
 			return 0
 		})
 		for _, t := range active {
+			if slices.Contains(deferred, t.ID) {
+				continue
+			}
 			// Owner answers retain their continuation, including retry and
 			// design answers. They cannot bypass a reopened start condition.
 			if t.Status == TaskWriting && len(t.Revisions) == 0 && holdsStart(*t) {
@@ -486,14 +517,18 @@ var stepKinds = map[string]string{TaskResearching: RoleResearcher, TaskDesigning
 // still needs. With nothing of the task under way or claimed, it says what
 // a step that is ready waits for.
 func offer(v *Snapshot, t *Task, busy map[string]busyWork, admit Admit, now time.Time) ([]Scheduled, *Wait) {
-	if t.alone() {
+	if t.alone() || t.Delivering != nil {
 		return nil, nil
 	}
 	whole := func(step string, seat Role) ([]Scheduled, *Wait) {
 		if kind := stepKinds[step]; kind != "" {
 			useHandOn(v, t, kind, "", seat, now)
 		}
-		c := newClaim(t, Claim{Step: step, Seat: seat.Name}, now)
+		claim := Claim{Step: step, Seat: seat.Name}
+		if step == StepValidateMerge {
+			claim.Revision = t.Revisions[len(t.Revisions)-1].N
+		}
+		c := newClaim(t, claim, now)
 		return []Scheduled{{Task: *t, Claim: c, Seat: seat}}, nil
 	}
 	if kind, ok := stepKinds[t.Status]; ok {
@@ -518,10 +553,19 @@ func offer(v *Snapshot, t *Task, busy map[string]busyWork, admit Admit, now time
 		}
 		latest := t.Revisions[len(t.Revisions)-1].N
 		brief := briefVersion(v, *t)
+		if t.MergeCheckPending(brief) || (t.AcceptanceStands(brief) && t.MergeValidation != nil && t.MergeValidation.Failure != "") {
+			if len(t.Claims) > 0 {
+				return nil, nil
+			}
+			return whole(StepValidateMerge, Role{})
+		}
 		var out []Scheduled
 		var waiting *Wait
 		pending := false
 		for _, g := range t.CheckerGroups() {
+			if t.AcceptanceStands(brief) && !g.Seats[0].Holds(RoleQA) {
+				continue
+			}
 			if t.Judged(g.Seats[0].Name, latest, brief) {
 				continue
 			}
@@ -564,7 +608,7 @@ func offer(v *Snapshot, t *Task, busy map[string]busyWork, admit Admit, now time
 			if o.ProjectID != t.ProjectID || o.ID == t.ID {
 				return false
 			}
-			return (o.Finished() && (o.Delivering != nil || o.PRMergePending())) || slices.ContainsFunc(o.Claims, func(c Claim) bool { return c.Step == TaskLanding })
+			return o.Delivering != nil || (o.Finished() && o.PRMergePending()) || slices.ContainsFunc(o.Claims, func(c Claim) bool { return c.Step == TaskLanding })
 		}) {
 			return nil, nil
 		}
@@ -795,6 +839,17 @@ func (s *Service) ReleaseClaim(ctx context.Context, taskID, token string) error 
 			return nil
 		}
 		t.Claims = slices.DeleteFunc(t.Claims, func(c Claim) bool { return c.Token == token })
+		return nil
+	})
+}
+
+// ReleaseHeldClaim discharges only the named obligation. A different hold,
+// including terminal accounting, must be settled by its own recovery path.
+func (s *Service) ReleaseHeldClaim(ctx context.Context, taskID, token, why string) error {
+	return s.store.update(ctx, func(v *Snapshot) error {
+		if t := task(v, taskID); t != nil {
+			t.Claims = slices.DeleteFunc(t.Claims, func(c Claim) bool { return c.Token == token && c.Held == why })
+		}
 		return nil
 	})
 }

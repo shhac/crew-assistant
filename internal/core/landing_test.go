@@ -5,7 +5,29 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestOutstandingDeliveryHoldsProjectLanding(t *testing.T) {
+	s, _ := fixture(t)
+	p, draft := pmLandingTask(t, s, VerdictPass, VerdictPass)
+	for _, status := range []string{TaskLanding, TaskStopped} {
+		t.Run(status, func(t *testing.T) {
+			holder := draft
+			holder.Status, holder.Delivering = status, &Delivering{Revision: 1}
+			next := draft
+			next.ID, next.Status = "next", TaskLanding
+			v := Snapshot{Projects: []Project{p}, Tasks: []Task{holder, next}}
+			admit := func(Role) string { return "" }
+			if steps, _ := offer(&v, &v.Tasks[1], nil, admit, time.Now()); len(steps) != 0 {
+				t.Fatal("another delivery started before reconciliation")
+			}
+			if steps, _ := offer(&v, &v.Tasks[0], nil, admit, time.Now()); len(steps) != 0 {
+				t.Fatal("outstanding intent started another turn")
+			}
+		})
+	}
+}
 
 // Without pull requests the owner approves unless told otherwise, and the
 // PM decides only for a push; with them, the PM decides whether a pull

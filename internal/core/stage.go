@@ -247,7 +247,7 @@ func (t Task) nextChecker(briefVersion int) (Role, bool) {
 	if n == 0 {
 		return Role{}, false
 	}
-	for _, r := range t.Checkers() {
+	for _, r := range t.AcceptanceCheckers(briefVersion) {
 		if !t.Judged(r.Name, t.Revisions[n-1].N, briefVersion) {
 			return r, true
 		}

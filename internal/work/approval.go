@@ -11,8 +11,9 @@ import (
 // approve records the owner's approval of the latest revision and moves the
 // task on to landing.
 func (lp *Loop) approve(ctx context.Context, t core.Task) error {
-	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
-		return approveLatest(t), nil
+	err := lp.Core.ApplyDeliveryApproval(ctx, t.ID, t.DecisionID, func(t *core.Task) string {
+		t.Acceptance, t.MergeValidation = nil, nil
+		return approveLatest(t)
 	})
 	return err
 }
@@ -20,20 +21,20 @@ func (lp *Loop) approve(ctx context.Context, t core.Task) error {
 // approveMerge records the owner's approval of the latest revision merging
 // through its open pull request, and moves the task on to landing.
 func (lp *Loop) approveMerge(ctx context.Context, t core.Task) error {
-	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+	err := lp.Core.ApplyDeliveryApproval(ctx, t.ID, t.DecisionID, func(t *core.Task) string {
 		if t.NeedsAssetIntegration() || t.NeedsLandingAssetReply() {
 			t.Status, t.Detail = core.TaskWriting, "Integrate delivered assets and provenance in a new draft"
 			if t.NeedsLandingAssetReply() {
 				t.Detail = "Supply production or classification for the pending asset obstacles"
 			}
-			return t.Detail, nil
+			return t.Detail
 		}
 		if len(t.Revisions) > 0 && t.Proposal != nil {
 			t.Proposal.MergeApproved = t.Revisions[len(t.Revisions)-1].N
 		}
 		t.LandDecision, t.LandingFailures = nil, nil
 		t.Status, t.DecisionID, t.ResumeStatus, t.Detail = core.TaskLanding, "", "", "Merging"
-		return fmt.Sprintf("Merging pull request #%d for %s", t.Proposal.Number, t.Objective), nil
+		return fmt.Sprintf("Merging pull request #%d for %s", t.Proposal.Number, t.Objective)
 	})
 	return err
 }
@@ -59,8 +60,13 @@ func approveLatest(t *core.Task) string {
 
 // resumeLanding moves a task whose approval still stands, or that needs none,
 // back on to landing. Its catch-ups keep counting.
-func (lp *Loop) resumeLanding(ctx context.Context, t core.Task) error {
-	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+func (lp *Loop) resumeLanding(ctx context.Context, t core.Task, brief int) error {
+	expected := t
+	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, p *core.Project) (string, error) {
+		if t.Status != expected.Status || t.DecisionID != expected.DecisionID || t.TextVersion != expected.TextVersion || p.Brief.Version != brief || len(t.Revisions) != len(expected.Revisions) || (len(t.Revisions) > 0 && t.Revisions[len(t.Revisions)-1].Ref != expected.Revisions[len(expected.Revisions)-1].Ref) ||
+			(expected.Acceptance != nil && !t.AcceptedMergeReady(p.Brief.Version)) {
+			return "", core.ErrStale
+		}
 		t.Status, t.DecisionID, t.Detail = core.TaskLanding, "", "Landing"
 		return "Landing " + t.Objective, nil
 	})
@@ -161,7 +167,7 @@ func (lp *Loop) askForDelivery(ctx context.Context, p core.Project, t core.Task,
 		return lp.askToMerge(ctx, p, t, r, m)
 	}
 	if approvalHolds(p, t) || !asksFirst(p, t) {
-		return lp.resumeLanding(ctx, t)
+		return lp.resumeLanding(ctx, t, p.Brief.Version)
 	}
 	if core.PMGates(p, t) {
 		return lp.pmLanding(ctx, p, t, r, m)
@@ -175,7 +181,7 @@ func (lp *Loop) askForDelivery(ctx context.Context, p core.Project, t core.Task,
 // at it again.
 func (lp *Loop) askToMerge(ctx context.Context, p core.Project, t core.Task, r core.Revision, m medium) error {
 	if !readyToMerge(t, r) || mergeApproved(t, r) || taskPlaybook(p, t).Land.MergeGate() == core.ApproveNone {
-		return lp.resumeLanding(ctx, t)
+		return lp.resumeLanding(ctx, t, p.Brief.Version)
 	}
 	if core.PMGates(p, t) {
 		return lp.pmLanding(ctx, p, t, r, m)

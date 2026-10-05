@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -80,15 +81,24 @@ func (lp *Loop) answerCheck(ctx context.Context, p core.Project, t core.Task, s 
 	}
 	r := t.Revisions[len(t.Revisions)-1]
 	verdict, shots, end, err := lp.runChecker(ctx, p, t, r, s.Seat, medium, messageNote(m))
-	if err != nil {
-		return failed(err)
+	cleanupErr := err
+	if err != nil && (!errors.Is(err, errCommandRecovery) || verdict.Ref == "") {
+		reported := failed(err)
+		if errors.Is(err, errCommandRecovery) {
+			return errors.Join(err, reported)
+		}
+		return reported
 	}
 	// Ref is what the checker's own copy held, set with the verdict.
 	verdict.Revision, verdict.Role, verdict.BriefVersion, verdict.At = r.N, s.Seat.Name, p.Brief.Version, time.Now().UTC()
 	// The verdict judged the text the checker was shown, not whatever it
 	// became while the checker worked.
 	verdict.TextVersion = t.TextVersion
-	return lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, &verdict, shots, "", end)
+	err = lp.Core.AnswerTeamMessage(ctx, t.ID, m.ID, &verdict, shots, "", end)
+	if errors.Is(cleanupErr, errCommandRecovery) && t.AcceptanceStands(p.Brief.Version) && t.MergeValidation != nil {
+		err = errors.Join(err, lp.acceptedMergeFailure(ctx, t, s.Seat.Name+" cleanup is unconfirmed: "+cleanupErr.Error()))
+	}
+	return errors.Join(cleanupErr, err)
 }
 
 type openMessage struct {

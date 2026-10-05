@@ -24,6 +24,19 @@ type commandSandbox interface {
 	Close() error
 }
 
+type commandCleanupObligation struct {
+	task, token string
+	remove      func()
+}
+
+func (lp *Loop) keepCommandCleanup(ctx context.Context, taskID string, cleanup func()) {
+	_, token, ok := core.FenceOf(ctx)
+	if !ok {
+		token = taskID
+	}
+	lp.commandChecks.Store(token, commandCleanupObligation{task: taskID, token: token, remove: cleanup})
+}
+
 func (lp *Loop) commandCleanupFor(observer roles.Observer) func(error) {
 	return func(err error) {
 		lp.commandCleanup(err)
@@ -34,6 +47,14 @@ func (lp *Loop) commandCleanupFor(observer roles.Observer) func(error) {
 // A forced turn end has no live tool reply. Preserve recovered check coverage
 // beside that turn, without misclassifying ordinary cancellation as cleanup failure.
 func (lp *Loop) commandNoteFor(observer roles.Observer, text string) {
+	switch wrapped := observer.(type) {
+	case *screenshots:
+		lp.commandNoteFor(wrapped.next, text)
+		return
+	case browserFallbackObserver:
+		lp.commandNoteFor(wrapped.Observer, text)
+		return
+	}
 	// Native observers have already ended when deferred command cleanup runs.
 	// Keep a note tied to their last turn instead of sending it to a closed stream.
 	if live, ok := observer.(*liveTurn); ok {
@@ -127,6 +148,30 @@ func commandError(err error) error {
 const commandTimeout = 10 * time.Minute
 
 func (lp *Loop) openCommands(ctx context.Context, opts sandbox.Options) (commandSandbox, error) {
+	lp.commandMu.Lock()
+	defer lp.commandMu.Unlock()
+	return lp.openCommandsLocked(ctx, opts)
+}
+
+type trackedCommands struct {
+	commandSandbox
+	loop *Loop
+	dirs []string
+}
+
+func (s *trackedCommands) Close() error {
+	err := s.commandSandbox.Close()
+	s.loop.commandMu.Lock()
+	defer s.loop.commandMu.Unlock()
+	for _, dir := range s.dirs {
+		delete(s.loop.liveCommands, dir)
+	}
+	return err
+}
+
+// Serialize directory discovery with other opens and recovery. The harness
+// preserves live sandboxes through their lifetime locks during its own sweep.
+func (lp *Loop) openCommandsLocked(ctx context.Context, opts sandbox.Options) (commandSandbox, error) {
 	opts.RuntimeHome = filepath.Join(lp.Core.StateDirectory(), "commands")
 	if err := os.MkdirAll(opts.RuntimeHome, 0700); err != nil {
 		return nil, err
@@ -135,20 +180,50 @@ func (lp *Loop) openCommands(ctx context.Context, opts sandbox.Options) (command
 	opts.Timeout = commandTimeout
 	opts.Env = roles.CommandEnv(opts.Env, opts.Read)
 	opts.Background = harness.Support(harness.OpenAICompatible, harness.Session, harness.Background).Usable()
-	if lp.commands != nil {
-		box, err := lp.commands(ctx, opts)
-		return box, commandError(err)
+	base := filepath.Join(opts.RuntimeHome, "commands")
+	before, err := os.ReadDir(base)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
 	}
-	s, err := sandbox.Open(ctx, opts)
+	known := map[string]bool{}
+	for _, entry := range before {
+		known[entry.Name()] = true
+	}
+	var box commandSandbox
+	if lp.commands != nil {
+		box, err = lp.commands(ctx, opts)
+	} else {
+		var native *sandbox.Sandbox
+		native, err = sandbox.Open(ctx, opts)
+		if err == nil {
+			box = &nativeCommands{inner: native}
+		}
+	}
 	if err != nil {
 		return nil, commandError(err)
 	}
-	return &nativeCommands{inner: s}, nil
+	after, err := os.ReadDir(base)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, errors.Join(err, box.Close())
+	}
+	tracked := &trackedCommands{commandSandbox: box, loop: lp}
+	if lp.liveCommands == nil {
+		lp.liveCommands = map[string]bool{}
+	}
+	for _, entry := range after {
+		if entry.IsDir() && !known[entry.Name()] {
+			tracked.dirs = append(tracked.dirs, entry.Name())
+			lp.liveCommands[entry.Name()] = true
+		}
+	}
+	return tracked, nil
 }
 
 // Opening a sandbox reclaims the harness's stale command supervisors. Do this
 // before restart cleanup removes the workspace copies they were running in.
 func (lp *Loop) sweepCommands(ctx context.Context) error {
+	lp.commandMu.Lock()
+	defer lp.commandMu.Unlock()
 	entries, err := os.ReadDir(filepath.Join(lp.Core.StateDirectory(), "commands", "commands"))
 	if os.IsNotExist(err) {
 		return nil
@@ -161,9 +236,28 @@ func (lp *Loop) sweepCommands(ctx context.Context) error {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	box, err := lp.openCommands(ctx, sandbox.Options{WorkDir: dir})
+	box, err := lp.openCommandsLocked(ctx, sandbox.Options{WorkDir: dir})
 	if err != nil {
 		return err
 	}
-	return box.Close()
+	tracked := box.(*trackedCommands)
+	err = tracked.commandSandbox.Close()
+	for _, name := range tracked.dirs {
+		delete(lp.liveCommands, name)
+	}
+	if err != nil {
+		return err
+	}
+	// Open silently preserves supervisors it cannot reclaim. Verify that
+	// every prior non-live directory disappeared before releasing its workspace.
+	for _, entry := range entries {
+		if !entry.IsDir() || lp.liveCommands[entry.Name()] {
+			continue
+		}
+		_, err := os.Lstat(filepath.Join(lp.Core.StateDirectory(), "commands", "commands", entry.Name()))
+		if !os.IsNotExist(err) {
+			return errors.Join(errCommandRecovery, err)
+		}
+	}
+	return nil
 }

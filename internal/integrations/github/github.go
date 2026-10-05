@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"slices"
@@ -35,7 +36,7 @@ func runGH(ctx context.Context, args ...string) ([]byte, error) {
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		detail := text.Clip(stderr.String(), 300)
-		return nil, fmt.Errorf("gh %s: %s", args[0], detail)
+		return nil, fmt.Errorf("gh %s: %s: %w", args[0], detail, err)
 	}
 	return stdout.Bytes(), nil
 }
@@ -348,9 +349,48 @@ func (c Client) FindOpen(ctx context.Context, repo, head string) (int, string, b
 // Merge merges the pull request only if its head is still head, so nothing
 // pushed after the checks is merged unseen.
 func (c Client) Merge(ctx context.Context, repo string, number int, method, head string) error {
+	if err := checkRepo(repo); err != nil {
+		return &MergeRefusal{Err: err}
+	}
 	if method != "squash" && method != "merge" && method != "rebase" {
-		return fmt.Errorf("unknown merge method %q", method)
+		return &MergeRefusal{Err: fmt.Errorf("unknown merge method %q", method)}
 	}
 	_, err := c.pr(ctx, "merge", repo, number, "--"+method, "--match-head-commit", head)
+	if err != nil && MergeRefused(err) {
+		return &MergeRefusal{Err: err}
+	}
 	return err
+}
+
+// MergeRefusal is a definite rejection, rather than a lost transport response.
+type MergeRefusal struct{ Err error }
+
+func (e *MergeRefusal) Error() string { return e.Err.Error() }
+func (e *MergeRefusal) Unwrap() error { return e.Err }
+
+func MergeRefused(err error) bool {
+	if err == nil {
+		return false
+	}
+	var invocation *exec.Error
+	var path *os.PathError
+	if errors.As(err, &invocation) || errors.As(err, &path) {
+		return true
+	}
+	var refusal *MergeRefusal
+	if errors.As(err, &refusal) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	// A GraphQL field error names the rejected mutation. Transport failures
+	// without a mutation response remain uncertain, even if gh exits nonzero.
+	if strings.Contains(message, "graphql:") && strings.Contains(message, "(mergepullrequest)") {
+		return true
+	}
+	for _, reason := range []string{"base branch policy prohibits", "pull request is not mergeable", "merge commits are not allowed", "squash merges are not allowed", "rebase merges are not allowed", "required approving review", "head branch was modified", "resource not accessible by integration", "resource not accessible by personal access token", "must authenticate", "http 401", "http 403", "unknown merge method", "unknown flag", "unknown command"} {
+		if strings.Contains(message, reason) {
+			return true
+		}
+	}
+	return false
 }

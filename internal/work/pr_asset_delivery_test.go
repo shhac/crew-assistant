@@ -117,7 +117,9 @@ func TestMergedObservationUsesRequestedDraft(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := gitMedium{playbook: *task.Playbook}
-	if err := s.a.reactTo(s.ctx, s.p, task, m, task.Revisions[1], *task.Proposal, github.PR{State: "MERGED"}); err != nil {
+	if err := s.a.reactTo(s.ctx, s.p, task, m, task.Revisions[1], *task.Proposal, github.PR{State: "MERGED", HeadRefOid: requested.Ref, MergeCommit: &struct {
+		Oid string `json:"oid"`
+	}{Oid: requested.Ref}}); err != nil {
 		t.Fatal(err)
 	}
 	snap, err := s.a.Core.Snapshot(s.ctx)

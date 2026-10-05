@@ -178,7 +178,15 @@ func TestServeSignalDuringRecoveryConfirmation(t *testing.T) {
 				select {
 				case <-entered:
 				case err := <-finished:
-					t.Fatal("serve ended before probe", err)
+					// An immediate health failure can finish serve after closing
+					// entered, before this select runs. Both channels are ready;
+					// preserve the result for the assertions below.
+					select {
+					case <-entered:
+						finished <- err
+					default:
+						t.Fatal("serve ended before probe", err)
+					}
 				case <-time.After(10 * time.Second):
 					t.Fatal("probe did not start")
 				}

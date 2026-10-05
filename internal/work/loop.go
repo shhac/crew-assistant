@@ -32,10 +32,10 @@ const (
 	choiceApprove      = "Approve"
 	choiceChanges      = "Request changes"
 	choiceAnotherRound = "Another round"
-	choiceAcceptDraft  = "Accept this draft"
+	choiceAcceptDraft  = core.ChoiceAcceptDraft
 	// choiceAcceptFollowUp accepts the draft and queues what the checks
 	// still raise as a follow-up task.
-	choiceAcceptFollowUp = "Accept and follow up"
+	choiceAcceptFollowUp = core.ChoiceAcceptFollowUp
 	choiceSplit          = core.ChoiceSplit
 	// choiceOwnerStep leaves a requirement the team can't meet from its
 	// sandbox to the owner after the change lands; choiceKeepForTeam keeps
@@ -96,6 +96,10 @@ type Loop struct {
 	ports    ports
 	appWait  time.Duration
 	commands func(context.Context, sandbox.Options) (commandSandbox, error)
+	// Held accepted-merge checkouts are removed only after supervisor recovery.
+	commandChecks sync.Map
+	commandMu     sync.Mutex
+	liveCommands  map[string]bool
 	// checked, when set, is told a checker's turn is over, before its
 	// verdict is recorded. Set in tests.
 	checked func(taskID, checker string)
@@ -134,11 +138,6 @@ func (lp *Loop) Run(stop lifecycle.Stop, noDispatch bool) {
 	// Learnings are copied out only while a turn runs; any left here were
 	// left by a daemon that stopped mid-turn.
 	os.RemoveAll(lp.learningsRoot())
-	if !lp.Demo && !noDispatch {
-		if err := lp.sweepCommands(stop.Force); err != nil {
-			lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "command_recovery"}, err)
-		}
-	}
 	ready := lp.Demo || noDispatch
 	defer lp.jobs.wg.Wait()
 	tick := time.NewTicker(15 * time.Second)
@@ -156,11 +155,12 @@ func (lp *Loop) Run(stop lifecycle.Stop, noDispatch bool) {
 			if err := lp.refreshEnginePauses(stop.Force); err != nil {
 				lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "engine_pauses"}, err)
 			} else {
-				if err := lp.resume(stop.Force); err != nil {
+				err := lp.resume(stop.Force)
+				if err != nil {
 					lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_resume"}, err)
 				}
-				// Recovery errors belong to the affected work. Once pauses
-				// are known, unrelated work can dispatch as before.
+				// Recovery retains affected claims and command trees. Their holds
+				// must not prevent owner answers or independent dispatch.
 				ready = true
 			}
 		}
@@ -341,6 +341,9 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 	lp.withTools(&spec, tools)
 	spec.Observer = lp.watchTurn(t, kind, r, workDir, write)
 	if tools.checks != nil {
+		if checkCopy != nil {
+			tools.checks.retainCleanup = checkCopy.retainCleanup
+		}
 		tools.checks.cleanupError = lp.commandCleanupFor(spec.Observer)
 		tools.checks.coverageNote = func(text string) { lp.commandNoteFor(spec.Observer, text) }
 	}

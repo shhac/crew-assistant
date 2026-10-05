@@ -366,8 +366,9 @@ func TestACleanCatchUpIsHandedOverAsADraftIs(t *testing.T) {
 		t.Fatalf("files %v: %v", files, err)
 	}
 	h := core.Handoff{
-		Revision: core.Revision{N: 2, Files: files, Ref: merge, Summary: "Merged in without conflicts."},
-		CatchUp:  &core.CatchUp{Base: moved.Base, From: moved.From, Carry: true, Name: l.Name, What: l.What},
+		CatchUpDecision: task.DecisionID,
+		Revision:        core.Revision{N: 2, Files: files, Ref: merge, Summary: "Merged in without conflicts."},
+		CatchUp:         &core.CatchUp{Base: moved.Base, From: moved.From, Carry: true, Name: l.Name, What: l.What},
 	}
 	a.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Attempt++
@@ -379,6 +380,11 @@ func TestACleanCatchUpIsHandedOverAsADraftIs(t *testing.T) {
 	_, task = a.testMedium(t, p.ID, task.ID)
 	if len(task.Revisions) != 2 || task.Revisions[1].Ref != merge || task.Revisions[1].CleanMergeOf != 1 || task.Handoff != nil {
 		t.Fatalf("the catch-up was not recorded once: %+v", task)
+	}
+	snap := snapshotOf(t, a)
+	prior, ok := findDecision(snap, h.CatchUpDecision)
+	if !ok || prior.Status != core.DecisionDismissed {
+		t.Fatal("recovered catch-up left its obsolete approval open", prior)
 	}
 	if at, _ := m.repo.RefAt(ctx, h.Name); at != merge {
 		t.Fatalf("the project's clone keeps %q for the catch-up, not %s", at, merge)

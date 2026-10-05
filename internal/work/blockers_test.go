@@ -248,21 +248,31 @@ func TestBlockerAddedAfterClaimStillStopsPullRequestMerge(t *testing.T) {
 }
 
 // A successful merge request can mean queued, rather than actually merged.
-func TestSuccessfulMergeRequestReleasesDeliveryMarkAndKeepsBlockersEffective(t *testing.T) {
+func TestPendingMergeHoldsBlockerChangesUntilOutcome(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	lp, p, task := loopApp(t, &scriptedRunner{}, "")
 	task, err := lp.Core.UpdateTask(ctx, task.ID, func(t *core.Task, _ *core.Project) (string, error) {
 		t.Status = core.TaskLanding
 		t.Revisions = []core.Revision{{N: 1, Ref: "abc"}}
+		t.Proposal = &core.Proposal{Number: 7, Pushed: "abc"}
 		return "", nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	calls := 0
-	lp.github = github.Client{Run: func(context.Context, ...string) ([]byte, error) { calls++; return nil, nil }}
-	m := gitMedium{playbook: core.Playbook{Land: core.LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", Approve: core.ApproveNone}}}
+	lp.github = github.Client{Run: func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) > 1 && args[0] == "pr" && args[1] == "merge" {
+			calls++
+			return nil, nil
+		}
+		if len(args) > 1 && args[0] == "api" && args[1] == "graphql" {
+			return []byte(`{"data":{"repository":{"pullRequest":{"state":"OPEN","headRefOid":"abc","reviewThreads":{"nodes":[]}}}}}`), nil
+		}
+		return []byte(`{"state":"OPEN","headRefOid":"abc"}`), nil
+	}}
+	m := gitMedium{github: lp.github, playbook: core.Playbook{Land: core.LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", Approve: core.ApproveNone}}}
 	prop := core.Proposal{Pushed: "abc"}
 	pr := github.PR{State: "OPEN", HeadRefOid: "abc", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN", ReviewDecision: "APPROVED"}
 	if err := lp.reactTo(ctx, p, task, m, task.Revisions[0], prop, pr); err != nil {
@@ -270,13 +280,21 @@ func TestSuccessfulMergeRequestReleasesDeliveryMarkAndKeepsBlockersEffective(t *
 	}
 	snap, _ := lp.Core.Snapshot(ctx)
 	fresh, _ := snap.FindTask(task.ID)
-	if fresh.Delivering != nil || calls != 1 {
-		t.Fatalf("queued merge left delivery intent: %+v calls=%d", fresh.Delivering, calls)
+	if fresh.Delivering == nil && !fresh.PRMergePending() || calls != 1 {
+		t.Fatalf("successful request lost delivery intent: %+v calls=%d", fresh.Delivering, calls)
 	}
-	if _, err := lp.SetBlocker(ctx, core.BlockerInput{Project: p.ID, Task: task.ID, Kind: core.BlockerManual, Description: "a new build", LandingOnly: true, By: core.LinkedByPM}); err != nil {
-		t.Fatalf("team still thinks it is delivering: %v", err)
+	// Reconcile before considering new landing conditions. Until observation
+	// proves it unmerged, the request still holds its durable delivery intent.
+	blocker := core.BlockerInput{Project: p.ID, Task: task.ID, Kind: core.BlockerManual, Description: "a new build", LandingOnly: true, By: core.LinkedByPM}
+	if _, err := lp.SetBlocker(ctx, blocker); !errors.Is(err, core.ErrConflict) {
+		t.Fatal("unconfirmed delivery did not retain its hold", err)
 	}
-	// The observed in-flight request must not be submitted again.
+	if _, landed, err := mergedPR(ctx, m, fresh, fresh.Revisions[0]); !errors.Is(err, errDeliveryPending) || landed {
+		t.Fatal("could not reconcile OPEN request", err)
+	}
+	if now := taskByID(t, lp, task.ID); now.Delivering == nil && !now.PRMergePending() {
+		t.Fatal("OPEN cleared a pending delivery")
+	}
 	pr.MergeInFlight = true
 	if err := lp.reactTo(ctx, p, fresh, m, fresh.Revisions[0], prop, pr); err != nil {
 		t.Fatal(err)

@@ -14,6 +14,8 @@ type Handoff struct {
 	IntegratedDesign []string `json:"integrated_design,omitempty"`
 	// Name is the ref the revision is kept under, unique to this attempt.
 	Name string `json:"name"`
+	// CatchUpDecision fences a clean merge against the continuation it replaces.
+	CatchUpDecision string `json:"catch_up_decision,omitempty"`
 	// Revision is what is appended, with Ref the commit being handed over.
 	Revision Revision `json:"revision"`
 	// Writer is the implementer seat whose draft it is, and Seat the seat as

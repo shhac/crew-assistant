@@ -144,10 +144,10 @@ func BlockerReasons(t Task) []string {
 
 func (s *Service) SetBlocker(ctx context.Context, in BlockerInput) (Task, error) {
 	return s.editTaskRecord(ctx, in.Project, in.Task, func(t *Task, v *Snapshot) error {
-		if !overrules(in.By) && (t.Finished() || t.Delivering != nil) {
+		if !overrules(in.By) && (t.Finished() || t.Delivering != nil || t.PRMergePending()) {
 			return fmt.Errorf("the task has finished or is delivering: %w", ErrConflict)
 		}
-		if !in.LandingOnly && t.Delivering == nil {
+		if !in.LandingOnly && t.Delivering == nil && !t.PRMergePending() {
 			if err := mayWait(*t, in.By); err != nil {
 				return err
 			}

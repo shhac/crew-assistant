@@ -191,8 +191,44 @@ func (prWay) deliver(context.Context, gitMedium, core.Task, core.Revision) (stri
 	return "", errors.New("a change landing by pull request is merged by GitHub, not delivered")
 }
 
-func (prWay) alreadyLanded(context.Context, gitMedium, core.Task, core.Revision) (bool, error) {
-	return false, nil
+func (prWay) alreadyLanded(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (bool, error) {
+	_, merged, err := mergedPR(ctx, m, t, r)
+	if errors.Is(err, errDeliveryClosed) {
+		err = nil
+	}
+	return merged, err
+}
+
+var errDeliveryClosed = errors.New("pull request closed without merging")
+
+// mergedPR also returns the actual target commit (which may be a squash).
+func mergedPR(ctx context.Context, m gitMedium, t core.Task, r core.Revision) (string, bool, error) {
+	if t.Proposal == nil || t.Proposal.Number == 0 {
+		return "", false, nil
+	}
+	pr, err := m.github.View(ctx, m.playbook.Land.GitHub, t.Proposal.Number)
+	if err != nil {
+		return "", false, err
+	}
+	if pr.State == "MERGED" {
+		if pr.HeadRefOid != r.Ref {
+			return "", false, errors.New("merged pull request head differs from the delivery intent")
+		}
+		if pr.MergeCommit == nil || pr.MergeCommit.Oid == "" {
+			return "", false, errors.New("pull request merge commit is unconfirmed")
+		}
+		return pr.MergeCommit.Oid, true, nil
+	}
+	if pr.State == "OPEN" {
+		if t.Delivering != nil && t.Delivering.Refused {
+			return "", false, nil
+		}
+		return "", false, errDeliveryPending
+	}
+	if pr.State != "CLOSED" {
+		return "", false, errors.New("pull request delivery state is unconfirmed")
+	}
+	return "", false, errDeliveryClosed
 }
 
 func (prWay) note(m gitMedium, t core.Task) string {

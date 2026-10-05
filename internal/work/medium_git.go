@@ -25,6 +25,7 @@ type gitMedium struct {
 	landed   *core.Landing
 	remote   func(repo string) string
 	way      landWay
+	github   github.Client
 }
 
 // projectLocks keep changes to each project's clone one at a time: fetching

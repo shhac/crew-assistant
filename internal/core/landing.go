@@ -156,6 +156,9 @@ func (s *Service) DecideLanding(ctx context.Context, taskID string, d LandDecisi
 		if !PMGates(*p, *t) {
 			return fmt.Errorf("the PM no longer decides what goes out in this project: %w", ErrConflict)
 		}
+		if b := hold.Against; b != nil && (len(t.Revisions) != b.Revision || p.Brief.Version != b.Brief || t.TextVersion != b.Text || t.DirectionPending > 0) {
+			return ErrConflict
+		}
 		if why := LandingHeld(p, *t); len(why) > 0 {
 			return fmt.Errorf("%s: %w", strings.Join(why, "; "), ErrConflict)
 		}

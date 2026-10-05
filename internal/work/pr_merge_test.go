@@ -115,21 +115,80 @@ func TestAPausedProjectHoldsAReadyPullRequestUntilLandingResumes(t *testing.T) {
 // A merge GitHub refuses, such as for branch protection, comes to the owner
 // rather than waiting on wakes that won't fire.
 func TestARefusedMergeComesToTheOwner(t *testing.T) {
-	t.Parallel()
-	s := newPRScenario(t, 2, opensUnasked, mergeBy(core.ApproveNone))
-	s.current(t)
-	run := s.a.github.Run
-	s.a.github.Run = func(ctx context.Context, args ...string) ([]byte, error) {
-		if strings.Join(args[:2], " ") == "pr merge" {
-			return nil, fmt.Errorf("base branch policy prohibits the merge")
-		}
-		return run(ctx, args...)
+	for _, refusal := range []string{"base branch policy prohibits the merge", "GraphQL: Resource not accessible by integration (mergePullRequest)"} {
+		t.Run(refusal, func(t *testing.T) {
+			t.Parallel()
+			s := newPRScenario(t, 2, opensUnasked, mergeBy(core.ApproveNone))
+			s.current(t)
+			run := s.a.github.Run
+			s.a.github.Run = func(ctx context.Context, args ...string) ([]byte, error) {
+				if strings.Join(args[:2], " ") == "pr merge" {
+					return nil, fmt.Errorf("%s", refusal)
+				}
+				return run(ctx, args...)
+			}
+			s.readyPR(t)
+			task := s.current(t)
+			d := openDecision(t, s.a, task)
+			if d.Kind != core.DecisionFailure || !strings.Contains(d.Context, "GitHub refused to merge pull request #7") || task.Delivering != nil {
+				t.Fatalf("decision %s %q, delivering %+v", d.Kind, d.Context, task.Delivering)
+			}
+			if s.gh.closed || task.Proposal.Number != 7 {
+				t.Fatal("refusal retired an open PR")
+			}
+			s.a.github.Run = run
+			if _, err := s.a.Core.ChooseDecision(s.ctx, d.ID, choiceTryAgain, core.FromOwner); err != nil {
+				t.Fatal(err)
+			}
+			if task = s.current(t); task.Status != core.TaskLanded || len(s.gh.merges) != 1 {
+				t.Fatal("fixed policy could not resume merging", task)
+			}
+		})
 	}
-	s.readyPR(t)
-	task := s.current(t)
-	d := openDecision(t, s.a, task)
-	if d.Kind != core.DecisionFailure || !strings.Contains(d.Context, "GitHub refused to merge pull request #7") || task.Delivering != nil {
-		t.Fatalf("decision %s %q, delivering %+v", d.Kind, d.Context, task.Delivering)
+}
+
+func TestPendingMergeClosedRecoveryNeedsOneRetry(t *testing.T) {
+	for _, restart := range []bool{false, true} {
+		t.Run(fmt.Sprint(restart), func(t *testing.T) {
+			t.Parallel()
+			s := newPRScenario(t, 4, opensUnasked, mergeBy(core.ApproveNone))
+			s.current(t)
+			run := s.a.github.Run
+			s.a.github.Run = func(ctx context.Context, args ...string) ([]byte, error) {
+				if strings.Join(args[:2], " ") == "pr merge" {
+					return nil, fmt.Errorf("response lost")
+				}
+				return run(ctx, args...)
+			}
+			s.readyPR(t)
+			task := s.current(t)
+			if task.Delivering == nil || task.Delivering.Refused {
+				t.Fatal("ambiguous OPEN merge lost intent", task)
+			}
+			s.gh.set(func() { s.gh.closed = true })
+			if restart {
+				fresh := New(s.a.Core, s.a.Config, false)
+				fresh.runner, fresh.meter = s.a.runner, s.a.meter
+				fresh.github, fresh.githubURL = s.a.github, s.a.githubURL
+				s.a = fresh
+				if err := s.a.resume(s.ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			task = s.current(t)
+			d := openDecision(t, s.a, task)
+			if task.Delivering != nil || task.Proposal.Number != 0 || task.Proposal.URL != "" || !strings.Contains(d.Context, "response was lost") {
+				t.Fatal("closed intent retained PR identity", task, d)
+			}
+			s.a.github.Run = run
+			if _, err := s.a.Core.ChooseDecision(s.ctx, d.ID, choiceTryAgain, core.FromOwner); err != nil {
+				t.Fatal(err)
+			}
+			task = s.current(t)
+			if task.Status != core.TaskLanded || s.gh.opened != 2 || len(s.gh.merges) != 1 {
+				t.Fatal("retry repeated closure decision", task, s.gh.opened)
+			}
+		})
 	}
 }
 

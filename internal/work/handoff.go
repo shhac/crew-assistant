@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/media"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 )
 
@@ -21,18 +23,25 @@ import (
 // stopped at any point leaves a state resume can finish or undo, so a
 // revision is neither lost nor recorded twice.
 func (lp *Loop) handOff(ctx context.Context, t core.Task, m medium, h core.Handoff) error {
-	t, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+	expectedDecision := t.DecisionID
+	prepared := false
+	t, err := lp.Core.UpdateTaskWithDecision(ctx, t.ID, func(t *core.Task, _ *core.Project, d *core.Decision) (string, error) {
+		if t.Finished() || (h.CatchUp != nil && !catchUpContinuation(t, d, expectedDecision)) {
+			return "", nil
+		}
 		// A draft recorded meanwhile, such as the owner's by hand, is newer
 		// than the one this built on, and this one never replaces it.
 		if t.Delivering != nil || t.PRMergePending() || len(t.Revisions) != h.Revision.N-1 {
 			return "", fmt.Errorf("draft %d was recorded while the implementer worked: %w", len(t.Revisions), core.ErrConflict)
 		}
+		prepared = true
+		h.CatchUpDecision = expectedDecision
 		t.Attempt++
 		h.Name = gitrepo.TaskRef(t.ID, h.Revision.N, t.Attempt)
 		t.Handoff = &h
 		return "", nil
 	})
-	if err != nil {
+	if err != nil || !prepared {
 		return err
 	}
 	if err = m.publish(ctx, t, h.Revision.Ref, h.Name); err != nil {
@@ -48,12 +57,18 @@ func (lp *Loop) handOff(ctx context.Context, t core.Task, m medium, h core.Hando
 // ref holds it, and clears the handoff in the same change.
 func (lp *Loop) commitHandoff(ctx context.Context, taskID, name string) error {
 	var conflict error
-	_, err := lp.updateOpen(ctx, taskID, func(t *core.Task, p *core.Project) (string, error) {
+	_, err := lp.Core.UpdateTaskWithDecision(ctx, taskID, func(t *core.Task, p *core.Project, d *core.Decision) (string, error) {
+		if t.Finished() {
+			return "", nil
+		}
 		h := t.Handoff
 		if h == nil || h.Name != name {
 			return "", nil
 		}
 		t.Handoff = nil
+		if h.CatchUp != nil && !catchUpContinuation(t, d, h.CatchUpDecision) {
+			return "", nil // Keep the original draft and attached answer for settlement.
+		}
 		if t.Delivering != nil || t.PRMergePending() || len(t.Revisions) != h.Revision.N-1 {
 			conflict = fmt.Errorf("draft %d was recorded while the implementer worked: %w", len(t.Revisions), core.ErrConflict)
 			return "", nil
@@ -119,6 +134,18 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 		t.Revisions = append(t.Revisions, r)
 		t.DecisionID, t.Failures, t.RetryAt = "", 0, time.Time{}
 		t.Status, t.Detail = core.TaskReviewing, c.Detail
+		if t.AcceptanceStands(p.Brief.Version) {
+			t.MergeValidation = &core.MergeValidation{Revision: r.N, Ref: r.Ref, BriefVersion: p.Brief.Version, TextVersion: t.TextVersion}
+			t.Detail = "Checking the accepted draft merged with " + c.Name
+		} else {
+			if t.Acceptance != nil {
+				t.Approved = 0
+				if t.Proposal != nil {
+					t.Proposal.MergeApproved = 0
+				}
+			}
+			t.Acceptance, t.MergeValidation = nil, nil
+		}
 		return fmt.Sprintf("%s caught up cleanly: %s", t.Objective, c.What)
 	}
 	t.Revisions = append(t.Revisions, r)
@@ -180,7 +207,10 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 // checks were given are deleted, and so is anything kept for tasks that
 // have settled, as are images a designer generated and never attached. A
 // step not finished is claimed again as usual.
+var errCommandRecovery = errors.New("command cleanup is unconfirmed")
+
 func (lp *Loop) resume(ctx context.Context) error {
+	commandErr := lp.sweepCommands(ctx)
 	snap, err := lp.Core.Snapshot(ctx)
 	if err != nil {
 		return err
@@ -189,6 +219,52 @@ func (lp *Loop) resume(ctx context.Context) error {
 	if why := held[""]; why != "" {
 		return errors.New(why)
 	}
+	if commandErr != nil {
+		lp.commandCleanup(commandErr)
+		// Command state is shared, so conservatively retain claims that may
+		// own a command copy. Ordinary writers and independent projects recover.
+		for _, t := range snap.Tasks {
+			for _, c := range t.Claims {
+				if c.Step == core.StepValidateMerge || c.Step == core.TaskReviewing || c.Step == core.StepMessage || c.Held != "" || (t.Playbook != nil && t.Playbook.Medium == core.MediumGit) {
+					if held[c.Token] == "" {
+						held[c.Token] = c.Held
+						if held[c.Token] == "" {
+							held[c.Token] = errCommandRecovery.Error()
+						}
+					}
+				}
+			}
+		}
+		// Remember only the copies present at startup, independently of task
+		// authority (Stop may remove every claim). Later reclamation must not
+		// delete copies created by independent turns after startup.
+		for _, p := range snap.Projects {
+			if p.ScratchDirectory == "" || running {
+				continue
+			}
+			root := filepath.Join(p.ScratchDirectory, "checks")
+			entries, err := os.ReadDir(root)
+			if err != nil {
+				continue
+			}
+			for _, entry := range entries {
+				path := filepath.Join(root, entry.Name())
+				lp.commandChecks.LoadOrStore(path, commandCleanupObligation{remove: func() {
+					if err := media.RemoveReadOnly(path); err != nil {
+						lp.commandCleanup(err)
+					}
+				}})
+			}
+		}
+	}
+	lp.commandChecks.Range(func(key, value any) bool {
+		if commandErr == nil && held[key.(string)] == "" {
+			if cleanup, ok := lp.commandChecks.LoadAndDelete(key); ok {
+				cleanup.(commandCleanupObligation).remove()
+			}
+		}
+		return true
+	})
 	// Generated images are kept only while the turn that made them runs, and
 	// only its tools, which stopped with the daemon, could attach them: any
 	// left were left by a turn that never finished. Which session made which
@@ -206,11 +282,17 @@ func (lp *Loop) resume(ctx context.Context) error {
 	}
 	errs = append(errs, lp.Core.RecoverClaims(ctx, held))
 	for _, p := range snap.Projects {
-		if m, ok := lp.keptMedium(ctx, p); ok {
+		if m, ok := lp.keptMedium(ctx, p); ok && commandErr == nil {
 			errs = append(errs, m.removeChecks())
 		}
 	}
-	return errors.Join(append(errs, lp.tidy(ctx, true))...)
+	if commandErr == nil {
+		errs = append(errs, lp.tidy(ctx, true))
+	}
+	if commandErr != nil {
+		errs = append(errs, errors.Join(errCommandRecovery, commandErr))
+	}
+	return errors.Join(errs...)
 }
 
 // keptMedium is the project's medium, when it already keeps anything: a code
@@ -290,4 +372,11 @@ func (lp *Loop) tidy(ctx context.Context, strays bool) error {
 		errs = append(errs, m.tidy(ctx, tasks, settled, strays))
 	}
 	return errors.Join(errs...)
+}
+
+// A clean catch-up may replace an open approval, never an answer, new
+// instruction, or a different decision attached while the merge was built.
+func catchUpContinuation(t *core.Task, d *core.Decision, expected string) bool {
+	return t.DecisionID == expected && t.DirectionPending == 0 &&
+		(expected == "" || (t.Status == core.TaskWaiting && d != nil && d.Status == core.DecisionOpen))
 }

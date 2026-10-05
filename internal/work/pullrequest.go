@@ -35,7 +35,7 @@ func (lp *Loop) landPR(ctx context.Context, p core.Project, t core.Task, m gitMe
 		prop.Branch = m.branchName(t)
 	}
 	if prop.Pushed != r.Ref && t.Delivering == nil && !t.PRMergePending() {
-		done, err := lp.publish(ctx, t, m, r, &prop)
+		done, err := lp.publish(ctx, p, t, m, r, &prop)
 		if done || err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func (lp *Loop) catchUpIfBehind(ctx context.Context, t core.Task, m gitMedium, r
 // publish pushes the revision to the pull request's branch under a lease, after
 // catching up and, for an update to an open pull request, after the owner has
 // seen anything in it that runs or instructs on their side.
-func (lp *Loop) publish(ctx context.Context, t core.Task, m gitMedium, r core.Revision, prop *core.Proposal) (bool, error) {
+func (lp *Loop) publish(ctx context.Context, p core.Project, t core.Task, m gitMedium, r core.Revision, prop *core.Proposal) (bool, error) {
 	if done, err := lp.catchUpIfBehind(ctx, t, m, r); done || err != nil {
 		return true, err
 	}
@@ -122,6 +122,7 @@ func (lp *Loop) publish(ctx context.Context, t core.Task, m gitMedium, r core.Re
 		}
 		if len(notes) > 0 {
 			_, err = lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionUpdate, core.DecisionInput{
+				Against:        &core.DecisionVersions{Revision: r.N, Brief: p.Brief.Version, Text: t.TextVersion},
 				Title:          fmt.Sprintf("Check the update to “%s” before it's pushed", t.Objective),
 				Context:        "It changes things that run or instruct on your side:\n- " + strings.Join(notes, "\n- ") + "\n\nApproving pushes it to " + prop.Branch + " on " + m.playbook.Land.GitHub + ".",
 				Recommendation: choiceApprove + " if these changes are expected",
@@ -183,6 +184,11 @@ func (lp *Loop) reactTo(ctx context.Context, p core.Project, t core.Task, m gitM
 	}
 	if pr.State == "MERGED" {
 		landed := mergeRevision(t, r)
+		if t.Delivering != nil || t.PRMergePending() {
+			if pr.HeadRefOid != landed.Ref || pr.MergeCommit == nil || pr.MergeCommit.Oid == "" {
+				return fmt.Errorf("pull request merge outcome does not confirm the intended head and merge commit")
+			}
+		}
 		if pr.MergeCommit != nil && pr.MergeCommit.Oid != "" {
 			landed.Ref = pr.MergeCommit.Oid
 		}
@@ -207,6 +213,12 @@ func (lp *Loop) reactTo(ctx context.Context, p core.Project, t core.Task, m gitM
 				if err := lp.acknowledgeMerge(ctx, t.ID, mergeRevision(t, r), prop.Number); err != nil {
 					return err
 				}
+			}
+			return lp.awaitPR(ctx, t, land.GitHub, pr)
+		}
+		if t.Delivering != nil && (t.Delivering.Requested || t.Delivering.Failure != "") {
+			if t.Delivering.Refused {
+				return lp.settleDelivery(ctx, p, t)
 			}
 			return lp.awaitPR(ctx, t, land.GitHub, pr)
 		}
@@ -273,32 +285,45 @@ func (lp *Loop) mergeReady(ctx context.Context, p core.Project, t core.Task, lan
 	if len(held) > 0 {
 		return lp.holdReadyPR(ctx, t, land.GitHub, pr, held)
 	}
+	intentSnapshot, err := lp.Core.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	intentTask, ok := intentSnapshot.FindTask(t.ID)
+	if !ok || intentTask.Delivering == nil {
+		return core.ErrStale
+	}
+	intent := *intentTask.Delivering
+	if _, err := lp.updateOpen(ctx, t.ID, func(now *core.Task, _ *core.Project) (string, error) {
+		if now.Delivering == nil || !now.Delivering.At.Equal(intent.At) {
+			return "", core.ErrStale
+		}
+		now.Delivering.Requested = true
+		return "", nil
+	}); err != nil {
+		return err
+	}
 	merged := lp.github.Merge(ctx, land.GitHub, prop.Number, land.MergeMethod(), r.Ref)
 	// A successful request may only enqueue the merge. The next observation
-	// records MERGED; retain its intent until that outcome is reconciled.
+	// records MERGED; until then external conditions must still hold landing.
 	if merged != nil {
-		// Transport errors can follow a successful enqueue. Preserve the
-		// uncertain intent until a fresh observation establishes its outcome.
-		observation, readErr := lp.github.View(ctx, land.GitHub, prop.Number)
-		if readErr == nil {
-			if observation.State == "MERGED" {
-				landed := r
-				if observation.MergeCommit != nil {
-					landed.Ref = observation.MergeCommit.Oid
-				}
-				return lp.recordLanded(ctx, t, landed, land.Target, fmt.Sprintf("pull request #%d", prop.Number))
-			}
-			if observation.MergeInFlight {
-				return lp.acknowledgeMerge(ctx, t.ID, r, prop.Number)
-			}
-			if observation.State == "OPEN" || observation.State == "CLOSED" {
-				if err := lp.notDelivering(ctx, t.ID); err != nil {
-					return err
-				}
-				return lp.landingFailed(ctx, t, r, fmt.Errorf("GitHub refused to merge pull request #%d: %w", prop.Number, merged))
-			}
+		if err := lp.Core.RecordDeliveryOutcome(context.WithoutCancel(ctx), t.ID, intent, text.Clip(fmt.Sprintf("GitHub refused to merge pull request #%d or its response was lost: %v", prop.Number, merged), 900), github.MergeRefused(merged)); err != nil {
+			return err
 		}
-		return lp.landingFailed(ctx, t, r, fmt.Errorf("The merge request for pull request #%d could not be confirmed: %w", prop.Number, merged))
+		// A lost response may follow a remotely applied merge. Observe its
+		// outcome without discarding the durable intent or retrying the merge.
+		current, err := lp.Core.Snapshot(context.Background())
+		if err != nil {
+			return err
+		}
+		now, ok := findTask(current, t.ProjectID, t.ID)
+		if !ok {
+			return core.ErrNotFound
+		}
+		if err := lp.settleDelivery(context.Background(), p, now); err != nil {
+			return lp.reportDeliveryObservation(context.Background(), now, "Delivery observation could not be confirmed: "+text.Clip(err.Error(), 900))
+		}
+		return nil
 	}
 	return lp.acknowledgeMerge(ctx, t.ID, r, prop.Number)
 }

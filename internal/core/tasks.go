@@ -187,7 +187,9 @@ type Task struct {
 	WakeErrors []string `json:"wake_errors,omitempty"`
 	// Approved is the revision the owner approved to land. A revision that
 	// only merged it cleanly with landed work keeps that approval.
-	Approved int `json:"approved,omitempty"`
+	Approved        int              `json:"approved,omitempty"`
+	Acceptance      *DraftAcceptance `json:"acceptance,omitempty"`
+	MergeValidation *MergeValidation `json:"merge_validation,omitempty"`
 	// LandDecision is the PM's latest decision to land or hold the change,
 	// on a project where the PM decides; see landing.go.
 	LandDecision *LandDecision `json:"land_decision,omitempty"`
@@ -365,8 +367,11 @@ func (t Task) UsesPRs() bool { return t.Playbook != nil && t.Playbook.Land.PullR
 
 // Delivering is a landing under way: the revision going out, and when.
 type Delivering struct {
-	Revision int       `json:"revision"`
-	At       time.Time `json:"at"`
+	Requested bool      `json:"requested,omitempty"` // An outward merge request may have been submitted.
+	Refused   bool      `json:"refused,omitempty"`
+	Failure   string    `json:"failure,omitempty"`
+	Revision  int       `json:"revision"`
+	At        time.Time `json:"at"`
 }
 
 // Revision is one snapshot of the artifact, stamped with the brief it answers.
@@ -718,6 +723,22 @@ func (s *Service) updateTask(ctx context.Context, id string, fn func(*Snapshot, 
 	return out, err
 }
 
+// UpdateTaskWithDecision reconciles a continuation with the owner's current
+// decision in the same transaction as the task mutation. An open decision
+// detached by the mutation is retired there too.
+func (s *Service) UpdateTaskWithDecision(ctx context.Context, id string, fn func(*Task, *Project, *Decision) (string, error)) (Task, error) {
+	return s.updateTask(ctx, id, func(v *Snapshot, t *Task, p *Project) (string, error) {
+		d := decision(v, t.DecisionID)
+		activity, err := fn(t, p, d)
+		if err == nil && d != nil && d.Status == DecisionOpen && t.DecisionID != d.ID {
+			// Recovery has no outer catch-up caller to retire this approval.
+			// Superseding it belongs in the transaction that commits the work.
+			dismiss(v, d, s.now().UTC(), "Superseded: "+activity)
+		}
+		return activity, err
+	})
+}
+
 // OpenTaskDecision puts a choice about a task in front of the owner and holds
 // the task until it is answered.
 func (s *Service) OpenTaskDecision(ctx context.Context, taskID, kind string, in DecisionInput) (Decision, error) {
@@ -729,6 +750,12 @@ func (s *Service) OpenTaskDecision(ctx context.Context, taskID, kind string, in 
 		t := task(v, taskID)
 		if t == nil {
 			return ErrNotFound
+		}
+		if d := decision(v, t.DecisionID); t.Status == TaskWaiting && d != nil && d.Status != DecisionOpen && (d.Kind == DecisionDelivery || d.Kind == DecisionEscalation) {
+			return ErrStale // Apply the owner answer before replacing its continuation.
+		}
+		if b := in.Against; b != nil && (t.Finished() || t.Delivering != nil || len(t.Revisions) != b.Revision || briefVersion(v, *t) != b.Brief || t.TextVersion != b.Text || t.DirectionPending > 0) {
+			return ErrStale
 		}
 		out = openTaskDecision(v, t, kind, in, s.now().UTC())
 		return nil
@@ -745,7 +772,7 @@ func (in DecisionInput) validTaskDecision() error {
 
 // openTaskDecision holds a task for a decision, within a change.
 func openTaskDecision(v *Snapshot, t *Task, kind string, in DecisionInput, now time.Time) Decision {
-	d := Decision{ID: uid(), Kind: kind, TaskID: t.ID, ProjectID: t.ProjectID, Title: in.Title, Context: in.Context, Recommendation: in.Recommendation, Choices: in.Choices, FollowUp: in.FollowUp, OwnerStep: in.OwnerStep, Status: DecisionOpen, CreatedAt: now}
+	d := Decision{ID: uid(), Kind: kind, TaskID: t.ID, ProjectID: t.ProjectID, Title: in.Title, Context: in.Context, Recommendation: in.Recommendation, Choices: in.Choices, FollowUp: in.FollowUp, OwnerStep: in.OwnerStep, Status: DecisionOpen, CreatedAt: now, Revision: len(t.Revisions), BriefVersion: briefVersion(v, *t), TextVersion: t.TextVersion}
 	t.Status = TaskWaiting
 	t.DecisionID = d.ID
 	t.UpdatedAt = now

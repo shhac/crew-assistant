@@ -40,8 +40,13 @@ const maxCatchUps = 4
 // started. A clean merge is recorded by the daemon; only conflicts need the
 // implementer. A target that keeps moving is brought to the owner.
 func (lp *Loop) catchUpRound(ctx context.Context, t core.Task, c catcher, l line) error {
-	tooMany := false
-	t, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+	tooMany, proceed := false, false
+	expectedDecision := t.DecisionID
+	t, err := lp.Core.UpdateTaskWithDecision(ctx, t.ID, func(t *core.Task, _ *core.Project, d *core.Decision) (string, error) {
+		if t.Finished() || !catchUpContinuation(t, d, expectedDecision) {
+			return "", nil
+		}
+		proceed = true
 		t.CatchUps++
 		if t.CatchUps > maxCatchUps {
 			tooMany = true
@@ -49,7 +54,7 @@ func (lp *Loop) catchUpRound(ctx context.Context, t core.Task, c catcher, l line
 		}
 		return "", nil
 	})
-	if err != nil {
+	if err != nil || !proceed {
 		return err
 	}
 	if tooMany {
@@ -68,7 +73,18 @@ func (lp *Loop) catchUpRound(ctx context.Context, t core.Task, c catcher, l line
 	if commit != "" {
 		return lp.recordCatchUp(ctx, moved, c, commit, l)
 	}
-	_, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+	if t.Acceptance != nil {
+		_, err = lp.Core.FailAcceptedCatchUp(ctx, t.ID, t.Revisions[len(t.Revisions)-1].N, t.Acceptance.BriefVersion, t.Acceptance.TextVersion, true, core.DecisionInput{
+			Title:          fmt.Sprintf("“%s” conflicts with what landed", t.Objective),
+			Context:        "The accepted draft could not be merged without conflicts: " + l.What + ". The team needs to resolve them before ordinary checks can run.",
+			Recommendation: choiceResolve, Choices: []string{choiceResolve, choiceStop},
+		})
+		return err
+	}
+	_, err = lp.Core.UpdateTaskWithDecision(ctx, t.ID, func(t *core.Task, _ *core.Project, d *core.Decision) (string, error) {
+		if t.Finished() || !catchUpContinuation(t, d, expectedDecision) {
+			return "", nil
+		}
 		dropLandingApproval(t)
 		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", "Catching up: "+l.What
 		return t.Objective + " conflicts with what landed: " + l.What + "; the implementer is resolving it", nil

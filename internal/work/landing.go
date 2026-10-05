@@ -17,6 +17,8 @@ import (
 // The update rolls back and the next schedule pass shows the normal blocker wait.
 var errDeliveryBlocked = errors.New("delivery waits on an external condition")
 
+var errDeliveryPending = errors.New("pull request merge outcome is still pending")
+
 // land takes the approved revision where the project's landing policy says:
 // a new branch, a fast-forward push onto the target, or the delivery folder.
 // It never forces anything: a moved target sends the task back to catch up.
@@ -40,7 +42,7 @@ func (lp *Loop) land(ctx context.Context, p core.Project, t core.Task, m medium)
 		if _, git := m.(gitMedium); git {
 			// Branch delivery may have used a numbered name. Reconcile the
 			// actual destination before releasing any outward-action intent.
-			target, done, err = delivered(ctx, m, t, r)
+			target, done, err = delivered(ctx, m, t, &r)
 		} else {
 			done, err = c.alreadyLanded(ctx, t, r)
 		}
@@ -111,13 +113,21 @@ func (lp *Loop) beginDelivering(ctx context.Context, taskID string, r core.Revis
 			held = why
 			return "", errDeliveryBlocked
 		}
+		if t.Status != core.TaskLanding || len(t.Revisions) == 0 || t.Revisions[len(t.Revisions)-1].Ref != r.Ref || t.Revisions[len(t.Revisions)-1].N != r.N {
+			return "", core.ErrStale
+		}
+		if t.Acceptance != nil && (!t.AcceptanceStands(p.Brief.Version) || !t.AcceptedMergeReady(p.Brief.Version)) {
+			t.Status, t.Detail = core.TaskReviewing, "Checking again before landing"
+			held = []string{t.Detail}
+			return "", nil
+		}
 		t.Delivering = &core.Delivering{Revision: r.N, At: time.Now().UTC()}
 		return "", nil
 	})
 	if errors.Is(err, errDeliveryBlocked) {
 		return held, nil
 	}
-	return nil, err
+	return held, err
 }
 
 // proposed reports a task whose pull request is open: updates to it go out
@@ -185,24 +195,28 @@ func (lp *Loop) notDelivering(ctx context.Context, taskID string) error {
 // starting to deliver and recording where the change went, once no step of
 // the task is running: a change that landed is recorded as landed, however
 // the task was stopped meanwhile, and one that didn't leaves the task as it
-// stands. A task still landing needs nothing: its landing looks first for a
-// change already there.
+// stands. Outstanding intents are reconciled before requirement edits can
+// invalidate approval or start fresh checks.
 func (lp *Loop) settleDeliveries(ctx context.Context, snap core.Snapshot) error {
-	var errs []error
 	for _, t := range snap.Tasks {
 		if snap.ProjectPaused(t.ProjectID) {
 			continue
 		}
-		if t.Delivering == nil && !t.PRMergePending() || !t.Finished() || len(t.Claims) > 0 || lp.jobs.hasTask(t.ID) {
+		if t.Delivering == nil && !t.PRMergePending() || len(t.Claims) > 0 || lp.jobs.hasTask(t.ID) {
 			continue
 		}
 		p, ok := findProject(snap, t.ProjectID)
 		if !ok {
 			continue
 		}
-		errs = append(errs, lp.settleDelivery(ctx, p, t))
+		if err := lp.settleDelivery(ctx, p, t); err != nil {
+			message := "Delivery observation could not be confirmed: " + text.Clip(err.Error(), 900)
+			if noteErr := lp.reportDeliveryObservation(ctx, t, message); noteErr != nil && !errors.Is(noteErr, core.ErrStale) {
+				return noteErr
+			}
+		}
 	}
-	return errors.Join(errs...)
+	return nil
 }
 
 func (lp *Loop) settleDelivery(ctx context.Context, p core.Project, t core.Task) error {
@@ -214,35 +228,66 @@ func (lp *Loop) settleDelivery(ctx context.Context, p core.Project, t core.Task)
 		if err != nil {
 			return err
 		}
-		if pr.State == "OPEN" && pr.MergeInFlight {
+		if pr.State == "OPEN" && t.Status == core.TaskWaiting && t.DecisionID != "" {
 			return nil
 		}
-		if pr.State == "MERGED" && i >= 0 {
-			if pr.MergeCommit != nil {
-				r.Ref = pr.MergeCommit.Oid
-			}
-			_, err = lp.Core.UpdateTask(ctx, t.ID, func(task *core.Task, p *core.Project) (string, error) {
-				if task.Delivering == nil && !task.PRMergePending() {
-					return "", nil
+		if pr.State == "OPEN" && pr.MergeInFlight {
+			if !t.Finished() && t.Delivering != nil {
+				if err := lp.acknowledgeMerge(ctx, t.ID, r, t.Proposal.Number); err != nil {
+					return err
 				}
-				return landedOn(task, p, r, policy.Target, "It landed as you stopped it"), nil
-			})
-			if err != nil {
-				return err
 			}
-			return lp.supersedeStaleApprovals(ctx, t.ProjectID)
+			if !t.Finished() {
+				return lp.awaitPR(ctx, t, policy.GitHub, pr)
+			}
+			return nil
+		}
+
+		if pr.State == "OPEN" && t.Delivering != nil && !t.Delivering.Requested && t.Delivering.Failure == "" && !pr.MergeInFlight {
+			// No merge was submitted or acknowledged, and the queue read proves none is pending.
+			_, err := lp.Core.UpdateTask(ctx, t.ID, func(now *core.Task, _ *core.Project) (string, error) {
+				if now.Delivering == nil || !now.Delivering.At.Equal(t.Delivering.At) {
+					return "", core.ErrStale
+				}
+				now.Delivering = nil
+				if !now.Finished() && (now.NeedsAssetIntegration() || now.DirectionPending > 0) {
+					now.Status = core.TaskWriting
+				}
+				return "", nil
+			})
+			return err
 		}
 	}
 	target, landed := "", false
+	closed := false
 	if i >= 0 {
-		r := t.Revisions[i]
+		r = t.Revisions[i]
 		m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
 		if err != nil {
 			return err
 		}
-		if target, landed, err = delivered(ctx, m, t, r); err != nil {
-			return err
+		if target, landed, err = delivered(ctx, m, t, &r); err != nil {
+			if errors.Is(err, errDeliveryPending) {
+				return nil
+			}
+			if !errors.Is(err, errDeliveryClosed) {
+				return err
+			}
+			closed = true
 		}
+	}
+	if !landed && t.UsesPRs() {
+		reason := ""
+		if t.Delivering != nil {
+			reason = t.Delivering.Failure
+		}
+		if reason == "" {
+			reason = "The pull request was closed without merging"
+		}
+		return lp.Core.FailDelivery(ctx, t.ID, r.N, closed, core.DecisionInput{
+			Title: fmt.Sprintf("“%s” couldn't land", t.Objective), Context: text.Clip(reason, 900),
+			Recommendation: choiceTryAgain + " once the cause is fixed", Choices: []string{choiceTryAgain, choiceStop},
+		})
 	}
 	_, err := lp.Core.UpdateTask(ctx, t.ID, func(task *core.Task, p *core.Project) (string, error) {
 		if task.Delivering == nil && !task.PRMergePending() {
@@ -253,9 +298,12 @@ func (lp *Loop) settleDelivery(ctx context.Context, p core.Project, t core.Task)
 			task.Proposal.MergeRequested = ""
 		}
 		if !landed {
+			if !task.Finished() && (task.NeedsAssetIntegration() || task.DirectionPending > 0) {
+				task.Status = core.TaskWriting
+			}
 			return "", nil
 		}
-		landedOn(task, p, t.Revisions[i], target, "It landed as you stopped it")
+		landedOn(task, p, r, target, "It landed as you stopped it")
 		return fmt.Sprintf("%s had already landed when it was stopped", task.Objective), nil
 	})
 	if err != nil || !landed {
@@ -266,7 +314,7 @@ func (lp *Loop) settleDelivery(ctx context.Context, p core.Project, t core.Task)
 
 // delivered reports whether revision r of t already went where it lands,
 // and where, without delivering anything.
-func delivered(ctx context.Context, m medium, t core.Task, r core.Revision) (string, bool, error) {
+func delivered(ctx context.Context, m medium, t core.Task, r *core.Revision) (string, bool, error) {
 	g, ok := m.(gitMedium)
 	if !ok || r.Ref == "" {
 		return "", false, nil
@@ -275,7 +323,14 @@ func delivered(ctx context.Context, m medium, t core.Task, r core.Revision) (str
 		defer g.locked()()
 		return g.repo.Delivered(ctx, r.Ref, g.branchName(t))
 	}
-	there, err := g.alreadyLanded(ctx, t, r)
+	if g.playbook.Land.Way() == core.LandPullRequest {
+		commit, there, err := mergedPR(ctx, g, t, *r)
+		if there {
+			r.Ref = commit
+		}
+		return g.playbook.Land.Target, there, err
+	}
+	there, err := g.alreadyLanded(ctx, t, *r)
 	return g.playbook.Land.Target, there, err
 }
 
@@ -370,7 +425,9 @@ func (lp *Loop) LandTask(ctx context.Context, projectID, taskID string) (core.Ta
 			return "", core.ErrConflict
 		}
 		t.Playbook = &pinned
-		t.Approved = t.Revisions[len(t.Revisions)-1].N
+		if t.Acceptance == nil {
+			t.Approved = t.Revisions[len(t.Revisions)-1].N
+		}
 		t.MaxRounds = max(t.MaxRounds, t.Round+2)
 		t.CatchUps = 0
 		t.Status, t.Detail = core.TaskLanding, "Landing on "+pinned.Land.Target
@@ -378,4 +435,8 @@ func (lp *Loop) LandTask(ctx context.Context, projectID, taskID string) (core.Ta
 	})
 	lp.Nudge()
 	return landing, err
+}
+
+func (lp *Loop) reportDeliveryObservation(ctx context.Context, t core.Task, message string) error {
+	return lp.Core.ObserveDeliveryFailure(context.WithoutCancel(ctx), t.ID, t, core.DecisionInput{Title: fmt.Sprintf("“%s” needs its delivery checked", t.Objective), Context: message, Recommendation: choiceTryAgain + " once the observation is available", Choices: []string{choiceTryAgain, choiceStop}})
 }

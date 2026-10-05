@@ -98,6 +98,11 @@ func (t Task) OwnerChecklist() string {
 // accepted task by a link only the owner or the assistant can take away, and
 // starts right after it. A task that has finished is left alone.
 func (s *Service) AcceptWithFollowUp(ctx context.Context, taskID, decisionID string, accept func(*Task) string) (Task, Task, error) {
+	return s.AcceptDraft(ctx, taskID, decisionID, true, accept)
+}
+
+// AcceptDraft applies either explicit acceptance choice exactly once.
+func (s *Service) AcceptDraft(ctx context.Context, taskID, decisionID string, followUp bool, accept func(*Task) string) (Task, Task, error) {
 	var out, follow Task
 	err := s.store.update(ctx, func(v *Snapshot) error {
 		i := slices.IndexFunc(v.Tasks, func(t Task) bool { return t.ID == taskID })
@@ -106,27 +111,69 @@ func (s *Service) AcceptWithFollowUp(ctx context.Context, taskID, decisionID str
 		}
 		t := &v.Tasks[i]
 		d := decision(v, decisionID)
+		choice := ChoiceAcceptDraft
+		if followUp {
+			choice = ChoiceAcceptFollowUp
+		}
+		if d != nil && (d.Status != DecisionResolved || d.Kind != DecisionEscalation || d.Disposition != DispositionChoice || d.Answer != choice) {
+			return ErrConflict
+		}
 		switch {
-		case d == nil || d.TaskID != t.ID || d.FollowUp == nil:
+		case d == nil || d.TaskID != t.ID || (followUp && d.FollowUp == nil):
 			return fmt.Errorf("the decision proposes no follow-up: %w", ErrNotFound)
+		case d.Applied:
+			out = *t
+			if queued := task(v, d.FollowUpID); queued != nil {
+				follow = *queued
+			}
+			return nil
 		case t.Finished():
 			out = *t
 			return nil
-		case !required(d.FollowUp.Objective):
+		case followUp && !required(d.FollowUp.Objective):
 			return errors.New("a follow-up needs an objective")
 		}
 		p := project(v, t.ProjectID)
 		if p == nil {
 			return ErrNotFound
 		}
+		if t.DecisionID != d.ID || t.Status != TaskWaiting {
+			return ErrConflict
+		}
+		if len(t.Revisions) == 0 || !d.matchesWork(t, p.Brief.Version) || t.DirectionPending > 0 {
+			if t.Proposal != nil {
+				t.Proposal.MergeApproved = 0
+			}
+			t.DecisionID, t.ResumeStatus = "", ""
+			t.Acceptance, t.MergeValidation, t.Approved = nil, nil, 0
+			t.Status = TaskReviewing
+			if len(t.Revisions) == 0 || t.DirectionPending > 0 {
+				t.Status = TaskWriting
+			}
+			t.Detail = "Checking again because the work changed after the acceptance decision"
+			t.UpdatedAt = s.now().UTC()
+			recordTask(v, t.UpdatedAt, t, "task.acceptance_stale", t.Detail)
+			derive(v, t)
+			out = *t
+			return nil
+		}
 		now := s.now().UTC()
+		t.Acceptance = &DraftAcceptance{Revision: t.Revisions[len(t.Revisions)-1].N, Decision: d.ID, BriefVersion: p.Brief.Version, TextVersion: t.TextVersion}
+		t.MergeValidation = nil
+		d.Applied = true
 		activity := accept(t)
 		t.UpdatedAt = now
 		recordTask(v, now, t, "task."+t.Status, activity)
+		if !followUp {
+			derive(v, t)
+			out = *t
+			return nil
+		}
 		follow = Task{ID: uid(), ProjectID: t.ProjectID, Objective: text.Clip(strings.TrimSpace(d.FollowUp.Objective), maxObjective), Status: TaskQueued, Stage: StageTodo, DependsOn: []string{t.ID}, Revisions: []Revision{}, Verdicts: []Verdict{}, CreatedAt: now, UpdatedAt: now}
 		for _, c := range cleanList(d.FollowUp.Criteria) {
 			follow.Criteria = append(follow.Criteria, text.Clip(c, maxCriterion))
 		}
+		d.FollowUpID = follow.ID
 		mark(&follow, RelationDependsOn, t.ID, LinkedByOwner, now)
 		numberTask(p, &follow)
 		v.Tasks = slices.Insert(v.Tasks, i+1, follow)

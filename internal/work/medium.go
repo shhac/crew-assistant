@@ -75,8 +75,9 @@ type checkout struct {
 	// QA was given one: to run the check in, or the app's commands.
 	tree string
 	// verify says the copy is still exactly the revision; remove deletes it.
-	verify func(context.Context) error
-	remove func()
+	verify        func(context.Context) error
+	remove        func()
+	retainCleanup func(error, func())
 }
 
 // catcher is a medium whose work can fall behind what lands, and catch up.
@@ -151,7 +152,7 @@ func (lp *Loop) gitMediumFor(ctx context.Context, p core.Project, playbook *core
 	if err != nil {
 		return gitMedium{}, err
 	}
-	return gitMedium{repo: repo, playbook: *playbook, landed: p.Landed, remote: lp.githubURL, way: wayFor(playbook.Land)}, nil
+	return gitMedium{repo: repo, playbook: *playbook, landed: p.Landed, remote: lp.githubURL, way: wayFor(playbook.Land), github: lp.github}, nil
 }
 
 var signing = map[string]gitrepo.Signing{"": gitrepo.SignAsOwner, core.SignAlways: gitrepo.SignAlways, core.SignNever: gitrepo.SignNever}

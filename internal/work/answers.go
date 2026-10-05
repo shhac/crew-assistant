@@ -48,8 +48,23 @@ func (lp *Loop) roleFailed(ctx context.Context, t core.Task, role string, cause 
 	if !permanent && failures <= roleRetries {
 		return nil
 	}
-	if _, err = lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+	if _, err = lp.Core.UpdateTaskWithDecision(ctx, t.ID, func(t *core.Task, _ *core.Project, d *core.Decision) (string, error) {
+		if t.Finished() {
+			return "", nil
+		}
+		if t.Status == core.TaskWaiting && d != nil && d.Status != core.DecisionOpen {
+			return "", core.ErrStale
+		}
 		t.ResumeStatus = t.Status
+		if t.Status == core.TaskWaiting {
+			// The failed workspace operation was catching up for delivery, rather
+			// than waiting for an answer that this failure decision replaces.
+			if d != nil && (d.Approves() || d.Kind == core.DecisionEscalation) {
+				t.ResumeStatus = core.TaskLanding
+			} else if t.ResumeStatus == core.TaskWaiting {
+				t.ResumeStatus = core.TaskWriting
+			}
+		}
 		return "", nil
 	}); err != nil {
 		return err
@@ -134,9 +149,11 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 		return lp.stopTask(ctx, t, "You stopped it")
 	case d.Kind == core.DecisionDelivery && t.PROpen() && chose(choiceApprove):
 		return lp.approveMerge(ctx, t)
-	case d.Approves() && chose(choiceApprove),
-		d.Kind == core.DecisionEscalation && chose(choiceAcceptDraft):
+	case d.Approves() && chose(choiceApprove):
 		return lp.approve(ctx, t)
+	case d.Kind == core.DecisionEscalation && chose(choiceAcceptDraft):
+		_, _, err := lp.Core.AcceptDraft(ctx, t.ID, d.ID, false, approveLatest)
+		return err
 	// The follow-up queued is the one the owner was shown.
 	case d.Kind == core.DecisionEscalation && d.FollowUp != nil && chose(choiceAcceptFollowUp):
 		_, _, err := lp.Core.AcceptWithFollowUp(ctx, t.ID, d.ID, approveLatest)
@@ -152,12 +169,27 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 	case d.Kind == core.DecisionFailure && (chose(choiceTryAgain) || chose(choiceResolve)):
 		_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
 			t.Status, t.ResumeStatus = t.ResumeStatus, ""
-			if t.Status == "" {
+			if t.Status == "" || t.Status == core.TaskWaiting {
 				t.Status = core.TaskWriting
 			}
 			// The owner's retry starts the count of catch-ups afresh.
 			t.Failures, t.RetryAt, t.DecisionID, t.Detail, t.CatchUps = 0, time.Time{}, "", "Trying again", 0
 			t.LandingFailures = nil
+			if t.MergeValidation != nil && t.Acceptance != nil && t.Status == core.TaskReviewing {
+				// Superseded turns retain their scheduling hold until they end,
+				// but may no longer write results into this new attempt.
+				for i := range t.Claims {
+					t.Claims[i].Revoked = true
+				}
+				validation := *t.MergeValidation
+				validation.Checked, validation.Failure, validation.Evidence = false, "", ""
+				t.MergeValidation = &validation
+				for i := range t.Verdicts {
+					if t.Verdicts[i].Revision == t.MergeValidation.Revision {
+						t.Verdicts[i].Answered = true
+					}
+				}
+			}
 			if chose(choiceResolve) {
 				t.Detail = "Resolving the conflict"
 				return t.Objective + " is resolving its conflict with what landed", nil
@@ -169,6 +201,16 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 	// Anything else is direction for another round: the owner asked for
 	// changes, answered a question or wants one more attempt.
 	_, err := lp.updateOpen(ctx, t.ID, func(t *core.Task, _ *core.Project) (string, error) {
+		if t.Acceptance != nil {
+			for i := range t.Claims {
+				t.Claims[i].Revoked = true
+			}
+			t.Approved = 0
+			if t.Proposal != nil {
+				t.Proposal.MergeApproved = 0
+			}
+		}
+		t.Acceptance, t.MergeValidation = nil, nil
 		// The owner stepped in: landings the PM approved count afresh.
 		t.LandingFailures = nil
 		if d.Kind == core.DecisionQuestion || (!chose(choiceAnotherRound) && !chose(choiceChanges)) {

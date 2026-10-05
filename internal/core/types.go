@@ -141,6 +141,13 @@ const (
 )
 
 type Decision struct {
+	// Acceptance applies only to the work shown when the decision opened.
+	// Applied and FollowUpID make applying that choice replay-safe.
+	Revision         int    `json:"revision,omitempty"`
+	BriefVersion     int    `json:"brief_version,omitempty"`
+	TextVersion      int    `json:"text_version,omitempty"`
+	Applied          bool   `json:"applied,omitempty"`
+	FollowUpID       string `json:"follow_up_id,omitempty"`
 	AnsweredBy       string `json:"answered_by,omitempty"`
 	Disposition      string `json:"disposition,omitempty"`
 	ResolutionReason string `json:"resolution_reason,omitempty"`
@@ -283,15 +290,21 @@ type ProjectInput struct {
 }
 
 type DecisionInput struct {
-	ProjectID      string   `json:"project_id,omitempty"`
-	Title          string   `json:"title"`
-	Context        string   `json:"context"`
-	Recommendation string   `json:"recommendation"`
-	Choices        []string `json:"choices"`
+	// Against fences a checked continuation before stamping current versions.
+	Against        *DecisionVersions `json:"-"`
+	ProjectID      string            `json:"project_id,omitempty"`
+	Title          string            `json:"title"`
+	Context        string            `json:"context"`
+	Recommendation string            `json:"recommendation"`
+	Choices        []string          `json:"choices"`
 	// FollowUp and OwnerStep are what a task decision's choices act on; only
 	// the loop sets them. See Decision.
 	FollowUp  *TaskInput `json:"-"`
 	OwnerStep *OwnerStep `json:"-"`
+}
+
+type DecisionVersions struct {
+	Revision, Brief, Text int
 }
 
 // ProjectPaused reports whether coordination is held for this project.

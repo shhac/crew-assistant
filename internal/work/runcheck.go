@@ -15,23 +15,23 @@ import (
 	"github.com/shhac/lib-agent-harness/sandbox"
 
 	"github.com/shhac/crew-assistant/internal/checktest"
-	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 )
 
 // checkRuns owns checks for the entire turn, not an individual MCP call.
 // Call cancellation stops waiting only; cleanup cancels and settles the run.
 type checkRuns struct {
-	mu           sync.Mutex
-	lp           *Loop
-	medium       gitMedium
-	from, cache  string
-	ctx          context.Context
-	cancel       context.CancelFunc
-	wait         time.Duration
-	cleanupError func(error)
-	coverageNote func(string)
-	current      *checkRun
-	closed       bool
+	mu            sync.Mutex
+	lp            *Loop
+	medium        gitMedium
+	from, cache   string
+	ctx           context.Context
+	cancel        context.CancelFunc
+	wait          time.Duration
+	cleanupError  func(error)
+	retainCleanup func(error, func())
+	coverageNote  func(string)
+	current       *checkRun
+	closed        bool
 }
 type checkRun struct {
 	done       chan struct{}
@@ -96,7 +96,16 @@ func (r *checkRuns) call(ctx context.Context) (string, error) {
 }
 func (r *checkRuns) run(run *checkRun) {
 	defer close(run.done)
-	run.result, run.progress, run.err = r.lp.hostedCheck(r.ctx, r.medium, r.from, r.cache, r.medium.playbook.Check, r.cleanupError, func(p *checktest.Progress, status string) {
+	run.result, run.progress, run.err = r.lp.hostedCheck(r.ctx, r.medium, r.from, r.cache, r.medium.playbook.Check, func(err error, remove func()) {
+		if r.retainCleanup != nil {
+			r.retainCleanup(err, remove)
+		}
+		if r.cleanupError != nil {
+			r.cleanupError(err)
+		} else {
+			r.lp.commandCleanup(err)
+		}
+	}, func(p *checktest.Progress, status string) {
 		if r.coverageNote != nil {
 			noteCoverage(p, status, r.coverageNote)
 			r.mu.Lock()
@@ -105,13 +114,17 @@ func (r *checkRuns) run(run *checkRun) {
 		}
 	})
 }
-func (lp *Loop) hostedCheck(ctx context.Context, m gitMedium, from, cache, command string, cleanupError func(error), note func(*checktest.Progress, string)) (result sandbox.CommandResult, progress *checktest.Progress, runErr error) {
-	var copy gitrepo.Checkout
-	copy, runErr = m.repo.CopyForCheck(from, cache)
-	if runErr != nil {
-		return
+func (lp *Loop) hostedCheck(ctx context.Context, m gitMedium, from, cache, command string, cleanupError func(error, func()), note func(*checktest.Progress, string)) (result sandbox.CommandResult, progress *checktest.Progress, runErr error) {
+	copy, err := m.repo.CopyForCheck(from, cache)
+	if err != nil {
+		return result, nil, err
 	}
-	defer copy.Remove()
+	remove := true
+	defer func() {
+		if remove {
+			copy.Remove()
+		}
+	}()
 	progressFile, err := os.CreateTemp(copy.Dir, ".crew-check-progress-")
 	if err != nil {
 		runErr = err
@@ -130,8 +143,9 @@ func (lp *Loop) hostedCheck(ctx context.Context, m gitMedium, from, cache, comma
 	}
 	defer func() {
 		if err := box.Close(); err != nil {
+			remove = false
 			if cleanupError != nil {
-				cleanupError(err)
+				cleanupError(err, copy.Remove)
 			} else {
 				lp.commandCleanup(err)
 			}

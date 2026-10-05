@@ -32,6 +32,7 @@ func (lp *Loop) escalate(ctx context.Context, p core.Project, t core.Task, curre
 	passed := checksPassed(t, current)
 	waiting := waitingOn(snap, t)
 	in := core.DecisionInput{
+		Against:        &core.DecisionVersions{Revision: len(t.Revisions), Brief: p.Brief.Version, Text: t.TextVersion},
 		Title:          fmt.Sprintf("“%s” still has review points after %d rounds", t.Objective, t.Round),
 		Recommendation: "Another round if these points matter; otherwise accept it as it is, or accept it and queue them as a follow-up",
 		Choices:        escalationChoices,
@@ -540,6 +541,7 @@ func (lp *Loop) proposeOwnerStep(ctx context.Context, p core.Project, t core.Tas
 	fmt.Fprintf(&b, "\n\nAs an owner step, it leaves the team's requirements and the delivery carries:\nAfter it lands, check:\n- [ ] %s", step.Step)
 	b.WriteString("\n\nYou can split it: keep part with the team and check the rest after it lands.")
 	_, err := lp.Core.OpenTaskDecision(ctx, t.ID, core.DecisionEscalation, core.DecisionInput{
+		Against:        &core.DecisionVersions{Revision: len(t.Revisions), Brief: p.Brief.Version, Text: t.TextVersion},
 		Title:          fmt.Sprintf("“%s” has a requirement the team can't meet from its sandbox", t.Objective),
 		Context:        b.String(),
 		Recommendation: rec,
