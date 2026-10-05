@@ -98,7 +98,7 @@ func TestARemovedCheckoutIsGoneAtOnceAndDeletedBehind(t *testing.T) {
 			t.Fatalf("%s is still in place", gone)
 		}
 	}
-	trash := filepath.Join(r.checksDir(), trashDir)
+	trash := filepath.Join(r.root, trashDir)
 	for range 100 {
 		if entries, _ := os.ReadDir(trash); len(entries) == 0 {
 			return

@@ -2,6 +2,7 @@ package gitrepo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -214,7 +215,7 @@ func (c Checkout) Remove() {
 		return
 	}
 	_ = media.SetWritable(c.Dir, true, c.dependencies()...)
-	trash := filepath.Join(filepath.Dir(c.root), trashDir, filepath.Base(c.root))
+	trash := filepath.Join(filepath.Dir(filepath.Dir(c.root)), trashDir, filepath.Base(c.root))
 	if err := os.MkdirAll(filepath.Dir(trash), 0700); err == nil && os.Rename(c.root, trash) == nil {
 		go func() { _ = media.RemoveReadOnly(trash) }()
 		return
@@ -222,13 +223,14 @@ func (c Checkout) Remove() {
 	_ = media.RemoveReadOnly(c.root)
 }
 
-// trashDir holds checkouts being deleted, beside the checks still running.
-const trashDir = ".trash"
+// trashDir holds checkouts being deleted, beside the folder of checks
+// still running.
+const trashDir = "checks-trash"
 
 // RemoveChecks deletes every checkout a check left behind, such as one a
 // daemon stopped mid-check never removed.
 func (r Repo) RemoveChecks() error {
-	return media.RemoveReadOnly(r.checksDir())
+	return errors.Join(media.RemoveReadOnly(r.checksDir()), media.RemoveReadOnly(filepath.Join(r.root, trashDir)))
 }
 
 // CopyForCheck copies uncommitted and prepared files into a disposable writable

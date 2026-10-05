@@ -717,7 +717,9 @@ func TestAcceptedContinuationKeepsMergeApprovalGate(t *testing.T) {
 					for i := 0; i <= roleRetries; i++ {
 						current := taskByID(t, a, task.ID)
 						gm, current := a.testMedium(t, p.ID, current.ID)
-						_, behind, err := lag(context.Background(), gm, current)
+						// GitHub requires it, as it does of a branch behind a
+						// target that wants branches up to date.
+						behind, err := gm.behindFor(context.Background(), current, true)
 						if err != nil || behind == nil {
 							t.Fatal("no catch-up", err)
 						}
@@ -741,7 +743,9 @@ func TestAcceptedContinuationKeepsMergeApprovalGate(t *testing.T) {
 					}
 					current = stepUntil(t, a, task.ID, func(t core.Task) bool { return t.Status == core.TaskWaiting && t.DecisionID != failure.ID })
 					next := openDecision(t, a, current)
-					if len(current.Revisions) != 3 || current.Round != 1 || next.Kind != core.DecisionDelivery {
+					// Retried, the pull request leaves main's clean move to GitHub
+					// rather than taking it in again.
+					if len(current.Revisions) != 2 || current.Round != 1 || next.Kind != core.DecisionDelivery {
 						t.Fatal("retry did not validate and resume merge approval", current, next)
 					}
 					if _, err := a.Core.ChooseDecision(context.Background(), next.ID, choiceApprove, core.FromOwner); err != nil {
