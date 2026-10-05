@@ -40,6 +40,10 @@ type LandPolicy struct {
 	// comments the team weighs as advice, though the repository never let
 	// them in.
 	TrustedBots []string `json:"trusted_bots,omitempty"`
+	// Stack lets a task build on another task's open pull request instead
+	// of waiting for it to merge, with g2g keeping the stack's record and
+	// its comments on GitHub; see stacks.go.
+	Stack bool `json:"stack,omitempty"`
 }
 
 const (
@@ -176,6 +180,8 @@ func (l LandPolicy) validate() error {
 		return errors.New("a GitHub repository, merge method and who opens are only for pull requests")
 	} else if l.Draft || len(l.TrustedBots) > 0 {
 		return errors.New("draft pull requests and trusted automated reviewers are only for pull requests")
+	} else if l.Stack {
+		return errors.New("stacking is only for changes that land by pull request")
 	}
 	switch l.Via {
 	case "", LandBranch:

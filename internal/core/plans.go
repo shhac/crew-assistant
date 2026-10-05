@@ -82,6 +82,9 @@ func waitsFor(v *Snapshot, t Task) []string {
 			out = append(out, name)
 		}
 	}
+	if parent := stackWait(v, t); parent != nil {
+		out = append(out, parent.Objective)
+	}
 	return out
 }
 
@@ -108,7 +111,8 @@ func dependencies(v *Snapshot, t Task, ids []string, anyProject bool) ([]string,
 				return nil, fmt.Errorf("there is no task %q", id)
 			}
 			return nil, fmt.Errorf("there is no task %q in this project", id)
-		case slices.Contains(out, dep.ID):
+		// Stacked on it, a task already builds on it without waiting.
+		case slices.Contains(out, dep.ID) || dep.ID == t.StacksOn:
 			continue
 		case reaches(v, dep.ID, t.ID, map[string]bool{}):
 			return nil, fmt.Errorf("“%s” already waits for this task, so this task cannot wait for it", dep.Objective)
@@ -162,7 +166,8 @@ func PlanDependencies(v Snapshot, t Task, ids []string) []string {
 	return out
 }
 
-// reaches reports whether from depends on to, directly or through others.
+// reaches reports whether from depends on, or is stacked on, to, directly
+// or through others.
 func reaches(v *Snapshot, from, to string, seen map[string]bool) bool {
 	if from == to {
 		return true
@@ -180,7 +185,7 @@ func reaches(v *Snapshot, from, to string, seen map[string]bool) bool {
 			return true
 		}
 	}
-	return false
+	return t.StacksOn != "" && reaches(v, t.StacksOn, to, seen)
 }
 
 // RecordPlan keeps a researcher's plan on its task and moves the task on.

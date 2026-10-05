@@ -130,9 +130,16 @@ type Task struct {
 	// note, and the designer's, with a design; see attachments.go.
 	Attachments []Attachment `json:"attachments,omitempty"`
 	// DependsOn names tasks in any project that must have landed before
-	// this one starts. Without stacking, a task never builds on work that has
-	// not landed.
+	// this one starts. Only a task stacked on another, StacksOn, builds on
+	// work that has not landed.
 	DependsOn []string `json:"depends_on,omitempty"`
+	// StacksOn is the task of the same project this one is stacked on: it
+	// starts from that task's open pull request instead of waiting for it to
+	// land, and merges only after it does; see stacks.go.
+	StacksOn string `json:"stacks_on,omitempty"`
+	// Stack is the task it is stacked on, as that is now. Derived with
+	// Stage.
+	Stack *StackParent `json:"stack,omitempty"`
 	// RelatesTo names tasks in the same project worth looking at alongside
 	// this one. It is kept on both tasks.
 	RelatesTo []string `json:"relates_to,omitempty"`
@@ -305,6 +312,9 @@ type Proposal struct {
 	OutsideAsked []string `json:"outside_asked,omitempty"`
 	LetIn        []LetIn  `json:"let_in,omitempty"`
 	OwnerThreads []string `json:"owner_threads,omitempty"`
+	// Base is the branch the pull request was opened onto, or last pointed
+	// at: a stacked task's parent's branch until it is retargeted.
+	Base string `json:"base,omitempty"`
 }
 
 // LetIn is a review thread from outside the repository that the owner let
@@ -495,6 +505,8 @@ type TaskInput struct {
 	Criteria    []string `json:"criteria"`
 	OwnerChecks []string `json:"owner_checks,omitempty"`
 	DependsOn   []string `json:"depends_on,omitempty"`
+	// StacksOn is the task it is stacked on, or empty; see stacks.go.
+	StacksOn string `json:"stacks_on,omitempty"`
 }
 
 // task is the task id names: its canonical ID, or failing that its
@@ -566,6 +578,14 @@ func (s *Service) queueTaskAs(ctx context.Context, projectID string, in TaskInpu
 		}
 		if err := queueTask(v, p, &out, in.DependsOn, by, ""); err != nil {
 			return err
+		}
+		if in.StacksOn != "" {
+			queued := task(v, out.ID)
+			if err := stackOn(v, queued, in.StacksOn, by, now); err != nil {
+				return err
+			}
+			derive(v, queued)
+			out = *queued
 		}
 		if linked != "" {
 			recordTask(v, now, &out, "task.linear-linked", linked)
@@ -735,6 +755,7 @@ func (s *Service) updateTask(ctx context.Context, id string, fn func(*Snapshot, 
 			closeMessages(t, t.UpdatedAt)
 			if !wasFinished {
 				p.listChanged()
+				wakeStackedOn(v, t)
 			}
 		}
 		// A delivered task may still land later and resume its writer, so it

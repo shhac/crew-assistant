@@ -12,6 +12,7 @@ import (
 // How one task relates to another. Depending on a task holds this one back
 // until that one finishes; blocking is the same link seen from the other
 // end. Relating is only a pointer, for whoever works on either to look at.
+// Stacking is in stacks.go.
 const (
 	RelationDependsOn = "depends_on"
 	RelationBlocks    = "blocks"
@@ -83,6 +84,10 @@ func markAll(t *Task, ids []string, by string, now time.Time) {
 // pair keeps what the owner sees unambiguous.
 func linked(a, b Task) string {
 	switch {
+	case a.StacksOn == b.ID:
+		return RelationStacksOn
+	case b.StacksOn == a.ID:
+		return RelationCarries
 	case slices.Contains(a.DependsOn, b.ID):
 		return RelationDependsOn
 	case slices.Contains(b.DependsOn, a.ID):
@@ -119,7 +124,8 @@ func (s *Service) LinkTasks(ctx context.Context, l Link) (Task, error) {
 		if err != nil {
 			return err
 		}
-		if existing := linked(*t, *other); existing != "" {
+		// Stacking on a task it waits for replaces the wait.
+		if existing := linked(*t, *other); existing != "" && (existing != RelationDependsOn || l.Relation != RelationStacksOn) {
 			return fmt.Errorf("“%s” and “%s” are already linked (%s); unlink them first: %w", t.Objective, other.Objective, relationWords(existing), ErrConflict)
 		}
 		if err := l.allows(l.Relation); err != nil {
@@ -139,6 +145,21 @@ func (s *Service) LinkTasks(ctx context.Context, l Link) (Task, error) {
 			dependent.DependsOn = deps
 			mark(dependent, RelationDependsOn, dep.ID, l.By, now)
 			recordTask(v, now, dependent, "task.linked", fmt.Sprintf("%s waits for %s", dependent.Objective, dep.Objective))
+		case RelationStacksOn:
+			if slices.Contains(t.DependsOn, other.ID) {
+				if !overrules(l.By) && t.HeldByOwner(RelationDependsOn, other.ID) {
+					return ownersLink(t, other)
+				}
+				t.DependsOn = slices.DeleteFunc(t.DependsOn, func(id string) bool { return id == other.ID })
+				unmark(t, RelationDependsOn, other.ID)
+			}
+			if err := mayWait(*t, l.By); err != nil {
+				return err
+			}
+			if err := stackOn(v, t, other.ID, l.By, now); err != nil {
+				return err
+			}
+			recordTask(v, now, t, "task.linked", fmt.Sprintf("%s is stacked on %s", t.Objective, other.Objective))
 		case RelationRelatesTo:
 			t.RelatesTo = append(t.RelatesTo, other.ID)
 			other.RelatesTo = append(other.RelatesTo, t.ID)
@@ -146,7 +167,7 @@ func (s *Service) LinkTasks(ctx context.Context, l Link) (Task, error) {
 			mark(other, RelationRelatesTo, t.ID, l.By, now)
 			recordTask(v, now, t, "task.linked", fmt.Sprintf("%s relates to %s", t.Objective, other.Objective))
 		default:
-			return fmt.Errorf("a task depends on, blocks or relates to another, not %q", l.Relation)
+			return fmt.Errorf("a task depends on, blocks, stacks on or relates to another, not %q", l.Relation)
 		}
 		t.UpdatedAt, other.UpdatedAt = now, now
 		linksChanged(v, t.ProjectID, l.By)
@@ -173,7 +194,8 @@ func (s *Service) UnlinkTasks(ctx context.Context, l Link) (Task, error) {
 		if err := l.allows(relation); err != nil {
 			return err
 		}
-		if relation == RelationRelatesTo {
+		switch relation {
+		case RelationRelatesTo:
 			if !overrules(l.By) && t.HeldByOwner(RelationRelatesTo, other.ID) {
 				return ownersLink(t, other)
 			}
@@ -181,7 +203,13 @@ func (s *Service) UnlinkTasks(ctx context.Context, l Link) (Task, error) {
 			other.RelatesTo = slices.DeleteFunc(other.RelatesTo, func(id string) bool { return id == t.ID })
 			unmark(t, RelationRelatesTo, other.ID)
 			unmark(other, RelationRelatesTo, t.ID)
-		} else {
+		case RelationStacksOn, RelationCarries:
+			child, parent := orient(relation, t, other)
+			if err := unstack(child, parent, l.By); err != nil {
+				return err
+			}
+			derive(v, child)
+		default:
 			dependent, dep := orient(relation, t, other)
 			if !overrules(l.By) && dependent.HeldByOwner(RelationDependsOn, dep.ID) {
 				return ownersLink(t, other)
@@ -208,10 +236,10 @@ func (l Link) allows(relation string) error {
 	return nil
 }
 
-// orient is which of two linked tasks waits for which: blocking is
-// depending seen from the other end.
+// orient is which of two linked tasks waits for, or builds on, which:
+// blocking is depending seen from the other end, and carrying is stacking.
 func orient(relation string, t, other *Task) (dependent, dep *Task) {
-	if relation == RelationBlocks {
+	if relation == RelationBlocks || relation == RelationCarries {
 		return other, t
 	}
 	return t, other
@@ -271,6 +299,10 @@ func relationWords(relation string) string {
 		return "the first waits for the second"
 	case RelationBlocks:
 		return "the second waits for the first"
+	case RelationStacksOn:
+		return "the first is stacked on the second"
+	case RelationCarries:
+		return "the second is stacked on the first"
 	}
 	return "they relate"
 }
@@ -289,7 +321,7 @@ func pmSetsDepends(v *Snapshot, t *Task, proposed []string, now time.Time) bool 
 		}
 		return false
 	})
-	proposed = slices.DeleteFunc(slices.Clone(proposed), func(dep string) bool { return slices.Contains(owners, dep) })
+	proposed = slices.DeleteFunc(slices.Clone(proposed), func(dep string) bool { return slices.Contains(owners, dep) || dep == t.StacksOn })
 	if mayWait(*t, LinkedByPM) != nil {
 		proposed = slices.DeleteFunc(proposed, func(dep string) bool { return !slices.Contains(team, dep) })
 	}

@@ -107,6 +107,7 @@ func deriveWith(v *Snapshot, t *Task, index map[string][]string) {
 		}
 	}
 	t.Blocks = index[t.ID]
+	t.Stack = stackParent(v, *t)
 	t.WaitingOn = nil
 	t.Ref = ""
 	if p := project(v, t.ProjectID); p != nil {

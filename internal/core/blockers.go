@@ -84,6 +84,9 @@ func LandingHeld(p *Project, t Task) []string {
 		}
 	}
 	out := BlockerReasons(t)
+	if held := stackHold(t); held != "" {
+		out = append(out, held)
+	}
 	if paused := p.pausedLanding(); paused != "" && (!t.UsesPRs() || t.PROpen()) {
 		out = append(out, paused)
 	}

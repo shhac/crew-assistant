@@ -34,6 +34,11 @@ func waitingOn(v *Snapshot, t Task) []WaitOn {
 		}
 		out = append(out, WaitOn{dep.ID, p.TaskRef(dep.Number), p.ID, p.Title, dep.Objective})
 	}
+	if parent := stackWait(v, t); parent != nil {
+		if p := project(v, parent.ProjectID); p != nil {
+			out = append(out, WaitOn{parent.ID, p.TaskRef(parent.Number), p.ID, p.Title, parent.Objective})
+		}
+	}
 	return out
 }
 
