@@ -43,30 +43,30 @@ func TestWhatTheLoopObservesOfAPullRequest(t *testing.T) {
 	green := []github.Check{{Status: "COMPLETED", Conclusion: "SUCCESS"}}
 	ready := github.PR{State: "OPEN", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN", Checks: green}
 	pushed := core.Proposal{PushedAt: now.Add(-time.Minute)}
-	if o := observed(ready, pushed, now); !o.Ready || o.Checks != "SUCCESS" {
+	if o := observed(ready, pushed, core.LandPolicy{}, now); !o.Ready || o.Checks != "SUCCESS" {
 		t.Fatalf("a green, clean pull request: %+v", o)
 	}
 	for name, pr := range map[string]github.PR{
 		"merged":  {State: "MERGED", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN", Checks: green},
 		"unknown": {State: "OPEN", Mergeable: "UNKNOWN", MergeStateStatus: "UNKNOWN", Checks: green},
 	} {
-		if o := observed(pr, pushed, now); o.Ready || o.Conflicting {
+		if o := observed(pr, pushed, core.LandPolicy{}, now); o.Ready || o.Conflicting {
 			t.Errorf("%s: %+v", name, o)
 		}
 	}
-	if o := observed(github.PR{State: "OPEN", Mergeable: "MERGEABLE", MergeStateStatus: "DIRTY", Checks: green}, pushed, now); !o.Conflicting || o.Ready {
+	if o := observed(github.PR{State: "OPEN", Mergeable: "MERGEABLE", MergeStateStatus: "DIRTY", Checks: green}, pushed, core.LandPolicy{}, now); !o.Conflicting || o.Ready {
 		t.Errorf("dirty: %+v", o)
 	}
 	// Checks GitHub reports are taken as they are, however recent the push.
 	failing := ready
 	failing.Checks = []github.Check{{Status: "COMPLETED", Conclusion: "FAILURE"}}
-	if o := observed(failing, pushed, now); o.Checks != "FAILURE" || o.Ready {
+	if o := observed(failing, pushed, core.LandPolicy{}, now); o.Checks != "FAILURE" || o.Ready {
 		t.Errorf("failing just after a push: %+v", o)
 	}
 	said := ready
 	said.Reviews = []github.Review{{Association: "NONE", State: "COMMENTED", SubmittedAt: now}}
 	said.Comments = []github.Comment{{Association: "NONE", Body: "Our reply.\n" + ownPost, CreatedAt: now}, {Association: "NONE", Body: "Please change it.", CreatedAt: now}}
-	if o := observed(said, pushed, now); o.Ignored != 1 {
+	if o := observed(said, pushed, core.LandPolicy{}, now); o.Ignored != 1 {
 		t.Errorf("ignored %d, want only the outsider's real comment", o.Ignored)
 	}
 }

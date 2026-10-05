@@ -131,6 +131,12 @@ const (
 	DecisionQuestion   = "question"
 	DecisionEscalation = "escalation"
 	DecisionFailure    = "failure"
+	// DecisionReadyForReview asks whether a draft pull request, with
+	// nothing else left for the team, is marked ready for review.
+	DecisionReadyForReview = "ready-for-review"
+	// DecisionOutsideThreads asks who answers review threads from people
+	// outside the repository, once they are all that holds a pull request.
+	DecisionOutsideThreads = "outside-threads"
 )
 
 // Decision statuses.

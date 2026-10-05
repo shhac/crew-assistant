@@ -2,7 +2,9 @@ package core
 
 import (
 	"errors"
+	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -31,6 +33,13 @@ type LandPolicy struct {
 	// the owner unless set, and the PM only for a push; with them it is who
 	// approves a ready pull request merging, the PM unless set.
 	Approve string `json:"approve,omitempty"`
+	// Draft opens each pull request as a draft. Only the owner's choice
+	// marks one ready for review; until then it can't be ready to merge.
+	Draft bool `json:"draft,omitempty"`
+	// TrustedBots are the GitHub logins of automated reviewers whose
+	// comments the team weighs as advice, though the repository never let
+	// them in.
+	TrustedBots []string `json:"trusted_bots,omitempty"`
 }
 
 const (
@@ -64,6 +73,22 @@ func (l LandPolicy) Way() string {
 		return LandBranch
 	}
 	return l.Via
+}
+
+// Unset reports a policy with nothing in it.
+func (l LandPolicy) Unset() bool {
+	if len(l.TrustedBots) > 0 {
+		return false
+	}
+	l.TrustedBots = nil
+	return reflect.ValueOf(l).IsZero()
+}
+
+// TrustsBot reports a login among TrustedBots. GitHub names an app's
+// account with a [bot] suffix in some places and without it in others.
+func (l LandPolicy) TrustsBot(login string) bool {
+	bare := func(s string) string { return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(s), "[bot]")) }
+	return login != "" && slices.ContainsFunc(l.TrustedBots, func(b string) bool { return bare(b) == bare(login) })
 }
 
 // MergeMethod is how a pull request merges, squash unless set.
@@ -108,7 +133,13 @@ func (l LandPolicy) ByPM() bool {
 	return l.Approve == ApprovePM && l.Way() == LandPush
 }
 
-var githubRepo = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
+var (
+	githubRepo  = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
+	githubLogin = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}(?:\[bot\])?$`)
+)
+
+// maxTrustedBots keeps the list to the few reviewers a repository runs.
+const maxTrustedBots = 20
 
 func (l LandPolicy) validate() error {
 	if len(l.Means) > 2000 {
@@ -133,8 +164,18 @@ func (l LandPolicy) validate() error {
 		if l.Open != "" && l.Open != OpenPM && l.Open != OpenOwner && l.Open != OpenImplementer {
 			return errors.New("who opens a pull request is pm, owner or implementer")
 		}
+		if len(l.TrustedBots) > maxTrustedBots {
+			return errors.New("trust at most 20 automated reviewers")
+		}
+		for _, b := range l.TrustedBots {
+			if !githubLogin.MatchString(b) {
+				return errors.New("a trusted automated reviewer is named by its GitHub login, such as review-bot[bot]")
+			}
+		}
 	} else if l.GitHub != "" || l.Merge != "" || l.Open != "" {
 		return errors.New("a GitHub repository, merge method and who opens are only for pull requests")
+	} else if l.Draft || len(l.TrustedBots) > 0 {
+		return errors.New("draft pull requests and trusted automated reviewers are only for pull requests")
 	}
 	switch l.Via {
 	case "", LandBranch:

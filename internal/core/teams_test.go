@@ -159,6 +159,12 @@ func TestLandingPoliciesSayOnlyWhatTheWayNeeds(t *testing.T) {
 		{LandPolicy{PullRequests: true, Target: "main", GitHub: "shhac/crew-assistant", Approve: ApprovePM}, true},
 		{LandPolicy{Via: LandBranch, Approve: ApprovePM}, false},
 		{LandPolicy{Approve: ApprovePM}, false},
+		// Drafts and trusted automated reviewers are for pull requests.
+		{LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", Draft: true, TrustedBots: []string{"review-bot[bot]", "lint-bot"}}, true},
+		{LandPolicy{Via: LandPush, Target: "main", Draft: true}, false},
+		{LandPolicy{TrustedBots: []string{"review-bot[bot]"}}, false},
+		{LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", TrustedBots: []string{"not a login"}}, false},
+		{LandPolicy{PullRequests: true, Target: "main", GitHub: "o/r", TrustedBots: []string{"-bot"}}, false},
 	} {
 		code.Land = tc.land
 		if err := code.Validate(); (err == nil) != tc.ok {
@@ -169,5 +175,9 @@ func TestLandingPoliciesSayOnlyWhatTheWayNeeds(t *testing.T) {
 	docs.Land = LandPolicy{Via: LandPush, Target: "main"}
 	if docs.Validate() == nil {
 		t.Error("a writing team accepted a landing policy")
+	}
+	trusting := LandPolicy{TrustedBots: []string{"Review-Bot[bot]"}}
+	if !trusting.TrustsBot("review-bot") || !trusting.TrustsBot("review-bot[bot]") || trusting.TrustsBot("review") || trusting.TrustsBot("") {
+		t.Error("a trusted bot is named with or without its [bot] suffix, in any case, and nothing else")
 	}
 }

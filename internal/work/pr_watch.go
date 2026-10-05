@@ -16,7 +16,7 @@ import (
 const checksGrace = 3 * time.Minute
 
 // observed is what the loop records of a pull request it looked at.
-func observed(pr github.PR, prop core.Proposal, now time.Time) *core.Observed {
+func observed(pr github.PR, prop core.Proposal, land core.LandPolicy, now time.Time) *core.Observed {
 	checks := pr.CheckState()
 	if checks == "NONE" && now.Sub(prop.PushedAt) < checksGrace {
 		checks = "PENDING"
@@ -27,7 +27,8 @@ func observed(pr github.PR, prop core.Proposal, now time.Time) *core.Observed {
 		Unresolved:  pr.Unresolved(),
 		Conflicting: pr.Mergeable == "CONFLICTING" || pr.MergeStateStatus == "DIRTY",
 		Ready:       pr.Ready() && checks != "PENDING",
-		Ignored:     len(untrusted(pr, prop)),
+		Draft:       pr.IsDraft,
+		Ignored:     len(untrusted(pr, prop, land)),
 		At:          now,
 	}
 }
@@ -41,6 +42,9 @@ func (lp *Loop) awaitPR(ctx context.Context, t core.Task, repo string, pr github
 	review := strings.ToLower(strings.ReplaceAll(pr.ReviewDecision, "_", " "))
 	if review == "" {
 		review = "no review required"
+	}
+	if pr.IsDraft {
+		review = "a draft"
 	}
 	return lp.setStatus(ctx, t.ID, core.TaskAwaiting, fmt.Sprintf("Waiting on pull request #%d: checks %s, %s", pr.Number, strings.ToLower(pr.CheckState()), review))
 }
@@ -78,9 +82,11 @@ func (lp *Loop) watchPR(ctx context.Context, t core.Task, repo string, pr github
 }
 
 // prChecksValue changes when the checks, the head, mergeability or the pull
-// request's own state do: a pull request closed on GitHub wakes the task too.
+// request's own state do: a pull request closed on GitHub, or marked ready
+// for review there, wakes the task too. A draft's merge state never moves
+// on, so whether it merges cleanly is watched apart.
 func prChecksValue(pr github.PR) string {
-	return fmt.Sprintf("%s@%s/%s/%s/merge:%t", pr.CheckState(), text.Short(pr.HeadRefOid), pr.MergeStateStatus, pr.State, pr.MergeInFlight)
+	return fmt.Sprintf("%s@%s/%s/%s/%s/draft:%t/merge:%t", pr.CheckState(), text.Short(pr.HeadRefOid), pr.MergeStateStatus, pr.Mergeable, pr.State, pr.IsDraft, pr.MergeInFlight)
 }
 
 // prReviewValue changes with any review, comment or thread comment, the

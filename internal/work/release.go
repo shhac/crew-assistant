@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/integrations/github"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
+	"github.com/shhac/crew-assistant/internal/text"
 )
 
 func (lp *Loop) SetRelease(ctx context.Context, id string, policy *core.ReleasePolicy) (core.Project, error) {
@@ -244,10 +244,8 @@ func (lp *Loop) releaseTurn(ctx context.Context, id string, m gitMedium, seat co
 	return lp.Core.FinishRelease(ctx, id, published, note)
 }
 
-var releaseSecrets = regexp.MustCompile(`gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|(?i:authorization:[^\r\n]+)|https?://[^/\s]*:[^@\s]+@`)
-
 func releaseTail(s string) string {
-	s = releaseSecrets.ReplaceAllString(s, "[redacted]")
+	s = text.Redact(s)
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	if len(lines) > 40 {
 		lines = lines[len(lines)-40:]

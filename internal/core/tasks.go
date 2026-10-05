@@ -294,6 +294,26 @@ type Proposal struct {
 	// Outbox is what the team has to say on the pull request, posted once
 	// the revision it came with has been pushed.
 	Outbox []PRPost `json:"outbox,omitempty"`
+	// ReadyFor is the head the owner chose to have marked ready for review,
+	// and KeptDraft the head they chose to keep a draft: they are asked
+	// again only about a later push.
+	ReadyFor  string `json:"ready_for,omitempty"`
+	KeptDraft string `json:"kept_draft,omitempty"`
+	// OutsideAsked are the review threads from people outside the
+	// repository last put to the owner. The owner let the team answer
+	// those in LetIn, and keeps those in OwnerThreads.
+	OutsideAsked []string `json:"outside_asked,omitempty"`
+	LetIn        []LetIn  `json:"let_in,omitempty"`
+	OwnerThreads []string `json:"owner_threads,omitempty"`
+}
+
+// LetIn is a review thread from outside the repository that the owner let
+// the team answer. Only what was written in it by Through, when the owner
+// was asked, reaches the team, once; Given is when it has.
+type LetIn struct {
+	Thread  string    `json:"thread"`
+	Through time.Time `json:"through"`
+	Given   bool      `json:"given,omitempty"`
 }
 
 // PRPost is a reply on a pull request: in a review thread, or with Thread
@@ -334,8 +354,10 @@ type Observed struct {
 	// Ready is approved where review is asked for, green, every thread
 	// resolved and mergeable: ready to land.
 	Ready bool `json:"ready,omitempty"`
+	// Draft is a pull request not yet marked ready for review.
+	Draft bool `json:"draft,omitempty"`
 	// Ignored counts feedback from people outside the repository, which
-	// the team never acts on.
+	// the team never acts on unless the owner lets it.
 	Ignored int       `json:"ignored,omitempty"`
 	At      time.Time `json:"at"`
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -102,13 +103,13 @@ func TestALandingPolicyByPullRequestBecomesOneWithPullRequestsOn(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := LandPolicy{Means: "merged", Target: "main", PullRequests: true, GitHub: "o/r", Merge: "rebase", Open: OpenOwner, Approve: ApproveNone}
-	if got := snap.Projects[0].Playbook.Land; got != want || got.Way() != LandPullRequest || got.validate() != nil {
+	if got := snap.Projects[0].Playbook.Land; !reflect.DeepEqual(got, want) || got.Way() != LandPullRequest || got.validate() != nil {
 		t.Fatalf("project %+v %v", got, got.validate())
 	}
-	if got := snap.Tasks[0].Playbook.Land; got != want {
+	if got := snap.Tasks[0].Playbook.Land; !reflect.DeepEqual(got, want) {
 		t.Fatalf("task %+v", got)
 	}
-	if got := snap.Projects[1].Playbook.Land; got != (LandPolicy{Via: LandPush, Target: "main", Method: "fast-forward"}) {
+	if got := snap.Projects[1].Playbook.Land; !reflect.DeepEqual(got, LandPolicy{Via: LandPush, Target: "main", Method: "fast-forward"}) {
 		t.Fatalf("a push policy changed: %+v", got)
 	}
 }

@@ -318,7 +318,7 @@ func waitingStage(v *Snapshot, t Task) string {
 		kind = d.Kind
 	}
 	switch kind {
-	case DecisionDelivery:
+	case DecisionDelivery, DecisionReadyForReview, DecisionOutsideThreads:
 		return landingStage(t)
 	case DecisionUpdate:
 		if t.UsesPRs() {

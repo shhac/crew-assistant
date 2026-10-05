@@ -149,6 +149,10 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 		return lp.stopTask(ctx, t, "You stopped it")
 	case d.Kind == core.DecisionDelivery && t.PROpen() && chose(choiceApprove):
 		return lp.approveMerge(ctx, t)
+	case d.Kind == core.DecisionReadyForReview && (chose(choiceMarkReady) || chose(choiceKeepDraft)):
+		return lp.chooseDraft(ctx, t, d, chose(choiceMarkReady))
+	case d.Kind == core.DecisionOutsideThreads && (chose(choiceLetTeam) || chose(choiceLeaveToMe)):
+		return lp.chooseOutsideThreads(ctx, t, d, chose(choiceLetTeam))
 	case d.Approves() && chose(choiceApprove):
 		return lp.approve(ctx, t)
 	case d.Kind == core.DecisionEscalation && chose(choiceAcceptDraft):

@@ -119,6 +119,7 @@ type PR struct {
 	Number           int       `json:"number"`
 	URL              string    `json:"url"`
 	State            string    `json:"state"`
+	IsDraft          bool      `json:"isDraft"`
 	Mergeable        string    `json:"mergeable"`
 	MergeStateStatus string    `json:"mergeStateStatus"`
 	ReviewDecision   string    `json:"reviewDecision"`
@@ -169,7 +170,11 @@ var trusted = map[string]bool{"OWNER": true, "MEMBER": true, "COLLABORATOR": tru
 
 // Trusted reports feedback from the repository's owner, members or
 // collaborators.
-func (f Feedback) Trusted() bool { return trusted[f.Association] }
+func (f Feedback) Trusted() bool { return TrustedStanding(f.Association) }
+
+// TrustedStanding reports an author association of the repository's owner,
+// a member or a collaborator.
+func TrustedStanding(association string) bool { return trusted[association] }
 
 // FeedbackSince lists reviews, comments and thread comments newer than since.
 func (p PR) FeedbackSince(since time.Time) []Feedback {
@@ -230,20 +235,38 @@ func later(a, b time.Time) time.Time {
 	return a
 }
 
-// Ready reports a pull request ready to land: approved where the
-// repository asks for review, every check green, no review thread left
-// unresolved, and nothing behind or in conflict.
+// Ready reports a pull request ready to land: marked ready for review,
+// approved where the repository asks for review, every check green, no
+// review thread left unresolved, and nothing behind or in conflict.
 func (p PR) Ready() bool {
-	if p.State != "OPEN" || p.Mergeable != "MERGEABLE" || p.Unresolved() > 0 {
+	return p.ReadyButThreads() && p.Unresolved() == 0 && (p.MergeStateStatus == "CLEAN" || p.MergeStateStatus == "HAS_HOOKS")
+}
+
+// ReadyButThreads reports a pull request that would be ready to land but
+// for its unresolved review threads, which may be all that has GitHub
+// call it blocked.
+func (p PR) ReadyButThreads() bool {
+	if p.State != "OPEN" || p.IsDraft || p.Mergeable != "MERGEABLE" || !p.Green() {
 		return false
 	}
 	if p.ReviewDecision != "" && p.ReviewDecision != "APPROVED" {
 		return false
 	}
-	if s := p.CheckState(); s != "SUCCESS" && s != "NONE" {
-		return false
-	}
-	return p.MergeStateStatus == "CLEAN" || p.MergeStateStatus == "HAS_HOOKS"
+	return p.MergeStateStatus == "CLEAN" || p.MergeStateStatus == "HAS_HOOKS" || p.MergeStateStatus == "BLOCKED"
+}
+
+// ReadyForReview reports a draft whose checks are green and that merges
+// cleanly with its base: threads aside, all it lacks is being marked ready
+// for review. A check still running is not green; one that only runs on a
+// pull request ready for review hasn't reported at all.
+func (p PR) ReadyForReview() bool {
+	return p.State == "OPEN" && p.IsDraft && p.Mergeable == "MERGEABLE" && p.Green() && !p.Behind()
+}
+
+// Green reports every check passed, or none to pass.
+func (p PR) Green() bool {
+	s := p.CheckState()
+	return s == "SUCCESS" || s == "NONE"
 }
 
 // Behind reports a base that moved on, or a conflict with it.
@@ -289,7 +312,7 @@ func (c Client) pr(ctx context.Context, verb, repo string, number int, args ...s
 }
 
 func (c Client) View(ctx context.Context, repo string, number int) (PR, error) {
-	out, err := c.pr(ctx, "view", repo, number, "--json", "number,url,state,mergeable,mergeStateStatus,reviewDecision,headRefOid,statusCheckRollup,reviews,comments,mergeCommit")
+	out, err := c.pr(ctx, "view", repo, number, "--json", "number,url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,headRefOid,statusCheckRollup,reviews,comments,mergeCommit")
 	if err != nil {
 		return PR{}, err
 	}
@@ -305,12 +328,17 @@ func (c Client) View(ctx context.Context, repo string, number int) (PR, error) {
 
 var prNumber = regexp.MustCompile(`/pull/(\d+)\s*$`)
 
-// Open creates a pull request and returns its number and address.
-func (c Client) Open(ctx context.Context, repo, base, head, title, body string) (int, string, error) {
+// Open creates a pull request, as a draft if asked, and returns its number
+// and address.
+func (c Client) Open(ctx context.Context, repo, base, head, title, body string, draft bool) (int, string, error) {
 	if err := checkRepo(repo); err != nil {
 		return 0, "", err
 	}
-	out, err := c.Run(ctx, "pr", "create", "--repo", repo, "--base", base, "--head", head, "--title", title, "--body", body)
+	args := []string{"pr", "create", "--repo", repo, "--base", base, "--head", head, "--title", title, "--body", body}
+	if draft {
+		args = append(args, "--draft")
+	}
+	out, err := c.Run(ctx, args...)
 	if err != nil {
 		return 0, "", err
 	}
@@ -344,6 +372,16 @@ func (c Client) FindOpen(ctx context.Context, repo, head string) (int, string, b
 		return 0, "", false, nil
 	}
 	return found[0].Number, found[0].URL, true, nil
+}
+
+// MarkReady marks a draft pull request ready for review. One already ready
+// is left as it is.
+func (c Client) MarkReady(ctx context.Context, repo string, number int) error {
+	_, err := c.pr(ctx, "ready", repo, number)
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "already") {
+		return nil
+	}
+	return err
 }
 
 // Merge merges the pull request only if its head is still head, so nothing

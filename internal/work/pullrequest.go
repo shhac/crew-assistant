@@ -61,7 +61,7 @@ func (lp *Loop) landPR(ctx context.Context, p core.Project, t core.Task, m gitMe
 	if err != nil {
 		return lp.landingFailed(ctx, t, r, err)
 	}
-	prop.Observed = observed(pr, prop, time.Now().UTC())
+	prop.Observed = observed(pr, prop, m.playbook.Land, time.Now().UTC())
 	if err := lp.editProposal(ctx, t.ID, "", func(p *core.Proposal) { p.Observed, p.Described = prop.Observed, prop.Described }); err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (lp *Loop) openPR(ctx context.Context, t core.Task, m gitMedium, r core.Rev
 	}
 	pr := prText(t)
 	if !found {
-		if n, url, err = lp.github.Open(ctx, land.GitHub, land.Target, prop.Branch, pr.Title, description(pr)); err != nil {
+		if n, url, err = lp.github.Open(ctx, land.GitHub, land.Target, prop.Branch, pr.Title, description(pr), land.Draft); err != nil {
 			return true, lp.landingFailed(ctx, t, r, err)
 		}
 		prop.Described = described(pr)
@@ -176,11 +176,12 @@ func (lp *Loop) openPR(ctx context.Context, t core.Task, m gitMedium, r core.Rev
 
 // reactTo does what the pull request's state calls for: record a merge, bring
 // a closed one to the owner, take in someone else's push, answer feedback,
-// catch up with a moved base, merge when ready, or wait.
+// catch up with a moved base, ask the owner about outsiders' threads or
+// about a draft ready for review, merge when ready, or wait.
 func (lp *Loop) reactTo(ctx context.Context, p core.Project, t core.Task, m gitMedium, r core.Revision, prop core.Proposal, pr github.PR) error {
 	land := m.playbook.Land
 	if prop.Observed == nil {
-		prop.Observed = observed(pr, prop, time.Now().UTC())
+		prop.Observed = observed(pr, prop, land, time.Now().UTC())
 	}
 	if pr.State == "MERGED" {
 		landed := mergeRevision(t, r)
@@ -246,8 +247,22 @@ func (lp *Loop) reactTo(ctx context.Context, p core.Project, t core.Task, m gitM
 			return err
 		}
 	}
-	if feedback := prFeedback(pr, prop, r); len(feedback) > 0 {
+	if done, err := lp.markReady(ctx, t, land, r, prop, pr); done || err != nil {
+		return err
+	}
+	if feedback := prFeedback(pr, prop, r, land); len(feedback) > 0 {
+		lp.addCILogs(ctx, land.GitHub, pr, feedback)
 		return lp.answerPR(ctx, t, r, pr, prop, feedback)
+	}
+	threads := sortThreads(pr, prop, land)
+	if len(threads.unasked) > 0 && heldOnlyByThreads(pr, *prop.Observed, threads) {
+		return lp.askAboutOutsideThreads(ctx, p, t, land, r, pr, threads.unasked)
+	}
+	if pr.IsDraft {
+		return lp.offerReadyForReview(ctx, p, t, land, r, prop, pr, threads)
+	}
+	if !prop.Observed.Ready && len(threads.owner) > 0 && heldOnlyByThreads(pr, *prop.Observed, threads) {
+		return lp.awaitKeptThreads(ctx, t, land, pr, threads)
 	}
 	if !prop.Observed.Ready {
 		return lp.awaitPR(ctx, t, land.GitHub, pr)

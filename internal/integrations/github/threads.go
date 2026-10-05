@@ -21,12 +21,21 @@ type Thread struct {
 	Comments []ThreadComment
 }
 
+// Opener is the thread's first comment, which says whose thread it is.
+func (th Thread) Opener() ThreadComment {
+	if len(th.Comments) == 0 {
+		return ThreadComment{}
+	}
+	return th.Comments[0]
+}
+
 // ThreadComment is one comment in a review thread.
 type ThreadComment struct {
 	Author      Author
 	Association string
 	Body        string
 	CreatedAt   time.Time
+	URL         string
 }
 
 // threadsQuery reads merge enrollment plus up to 100 threads and 50 comments in each: a
@@ -47,7 +56,7 @@ const threadsQuery = `query($owner: String!, $name: String!, $number: Int!) {
           path
           line
           comments(first: 50) {
-            nodes { author { login } authorAssociation body createdAt }
+            nodes { author { login } authorAssociation body createdAt url }
           }
         }
       }
@@ -83,6 +92,7 @@ func (c Client) threads(ctx context.Context, repo string, number int, pr *PR) ([
 									AuthorAssociation string    `json:"authorAssociation"`
 									Body              string    `json:"body"`
 									CreatedAt         time.Time `json:"createdAt"`
+									URL               string    `json:"url"`
 								} `json:"nodes"`
 							} `json:"comments"`
 						} `json:"nodes"`
@@ -111,7 +121,7 @@ func (c Client) threads(ctx context.Context, repo string, number int, pr *PR) ([
 	for _, n := range answer.Data.Repository.PullRequest.ReviewThreads.Nodes {
 		th := Thread{ID: n.ID, Resolved: n.IsResolved, Outdated: n.IsOutdated, Path: n.Path, Line: n.Line}
 		for _, c := range n.Comments.Nodes {
-			th.Comments = append(th.Comments, ThreadComment{Author: c.Author, Association: c.AuthorAssociation, Body: c.Body, CreatedAt: c.CreatedAt})
+			th.Comments = append(th.Comments, ThreadComment{Author: c.Author, Association: c.AuthorAssociation, Body: c.Body, CreatedAt: c.CreatedAt, URL: c.URL})
 		}
 		threads = append(threads, th)
 	}

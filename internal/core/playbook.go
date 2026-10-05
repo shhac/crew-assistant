@@ -207,7 +207,7 @@ func (p Playbook) Validate() error {
 	}
 	switch p.Medium {
 	case MediumDocuments:
-		if p.Land != (LandPolicy{}) {
+		if !p.Land.Unset() {
 			return errors.New("landing policies are for code teams")
 		}
 		if p.Run != nil {
@@ -363,6 +363,7 @@ func (s *Service) EditPlaybook(ctx context.Context, projectID string, change fun
 			playbook.Roles = slices.Clone(playbook.Roles)
 			playbook.StageLimits = maps.Clone(playbook.StageLimits)
 			playbook.DisabledBundledSkills = slices.Clone(playbook.DisabledBundledSkills)
+			playbook.Land.TrustedBots = slices.Clone(playbook.Land.TrustedBots)
 		}
 		if err := change(v, p, &playbook); err != nil {
 			return err

@@ -41,6 +41,10 @@ type fakeGitHub struct {
 	posts   [][]string
 	// created is how the pull request was opened.
 	created []string
+	// draft is a pull request not marked ready for review, and readied how
+	// often gh was asked to mark it so.
+	draft   bool
+	readied int
 }
 
 func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
@@ -86,7 +90,12 @@ func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
 		f.closed = false
 		f.created = args
 		f.head = args[slices.Index(args, "--head")+1]
+		f.draft = slices.Contains(args, "--draft")
 		return []byte("https://github.com/o/r/pull/7\n"), nil
+	case "pr ready":
+		f.readied++
+		f.draft = false
+		return nil, nil
 	case "pr merge":
 		f.merges = append(f.merges, args)
 		sha := args[slices.Index(args, "--match-head-commit")+1]
@@ -97,7 +106,7 @@ func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
 		return nil, nil
 	case "pr view":
 		head := ownerGit(f.t, f.remote, "rev-parse", "refs/heads/"+f.head)
-		pr := map[string]any{"number": 7, "url": "https://github.com/o/r/pull/7", "state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED", "reviewDecision": f.decision,
+		pr := map[string]any{"number": 7, "url": "https://github.com/o/r/pull/7", "state": "OPEN", "isDraft": f.draft, "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED", "reviewDecision": f.decision,
 			"headRefOid": head, "reviews": f.reviews, "comments": f.comments}
 		checks := f.checks
 		if f.checksOn != "" && f.checksOn != head {
@@ -113,6 +122,9 @@ func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
 			}
 		default:
 			pr["statusCheckRollup"] = []map[string]string{{"name": "build", "status": "IN_PROGRESS"}}
+		}
+		if f.draft {
+			pr["mergeStateStatus"] = "DRAFT"
 		}
 		if f.merged != "" {
 			pr["state"], pr["mergeCommit"] = "MERGED", map[string]string{"oid": f.merged}

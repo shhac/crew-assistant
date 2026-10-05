@@ -101,7 +101,7 @@ var toolActions = map[string]toolAction{
 		return a.Work.SetTeam(ctx, in.ProjectID, work.TeamChoice{Template: in.Template, WriterEngine: in.WriterEngine, ReviewerEngine: in.ReviewerEngine, MaxRounds: in.MaxRounds, DeliverTo: in.DeliverTo, Repo: in.Repo, BranchPrefix: in.BranchPrefix, Check: in.Check, Prepare: in.Prepare, Sign: in.Sign, CheckInCopy: in.CheckInCopy, CheckLoopback: in.CheckLoopback, Implementer: in.ImplementerMember, Reviewer: in.ReviewerMember, QA: in.QAMember, Researcher: in.ResearcherMember, Designer: in.DesignerMember, PM: in.PMMember})
 	}),
 	"set_landing": with(func(a *App, ctx context.Context, in engine.SetLandingArgs) (any, error) {
-		return a.Work.SetLanding(ctx, in.ProjectID, core.LandPolicy{Means: in.Means, Via: in.Via, Target: in.Target, Method: in.Method, PullRequests: in.PullRequests == "yes", GitHub: in.GitHub, Merge: in.Merge, Open: in.Open, Approve: in.Approve})
+		return a.Work.SetLanding(ctx, in.ProjectID, core.LandPolicy{Means: in.Means, Via: in.Via, Target: in.Target, Method: in.Method, PullRequests: in.PullRequests == "yes", GitHub: in.GitHub, Merge: in.Merge, Open: in.Open, Approve: in.Approve, Draft: in.Draft == "yes", TrustedBots: in.TrustedBots})
 	}),
 	"set_run_recipe": with(func(a *App, ctx context.Context, in engine.SetRunRecipeArgs) (any, error) {
 		recipe := &core.RunRecipe{Setup: in.Setup, Start: in.Start, URL: in.URL, Ready: in.Ready}

@@ -514,10 +514,10 @@ func TestNoChecksRightAfterAPushAreChecksStillToStart(t *testing.T) {
 	pushed := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	pr := github.PR{State: "OPEN", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN"}
 	prop := core.Proposal{PushedAt: pushed}
-	if o := observed(pr, prop, pushed.Add(time.Minute)); o.Checks != "PENDING" || o.Ready {
+	if o := observed(pr, prop, core.LandPolicy{}, pushed.Add(time.Minute)); o.Checks != "PENDING" || o.Ready {
 		t.Fatalf("a minute after the push: %+v", o)
 	}
-	if o := observed(pr, prop, pushed.Add(checksGrace+time.Second)); o.Checks != "NONE" || !o.Ready {
+	if o := observed(pr, prop, core.LandPolicy{}, pushed.Add(checksGrace+time.Second)); o.Checks != "NONE" || !o.Ready {
 		t.Fatalf("after the grace: %+v", o)
 	}
 }

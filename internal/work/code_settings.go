@@ -43,6 +43,7 @@ func (lp *Loop) SetWorkspace(ctx context.Context, projectID string, in Workspace
 func (lp *Loop) SetLanding(ctx context.Context, projectID string, land core.LandPolicy) (core.Project, error) {
 	p, err := lp.editPlaybook(ctx, projectID, "landing policies are for code teams; choose a code team first", func(_ *core.Snapshot, _ *core.Project, playbook *core.Playbook) error {
 		land.Means, land.Target, land.GitHub = strings.TrimSpace(land.Means), strings.TrimSpace(land.Target), strings.TrimSpace(land.GitHub)
+		land.TrustedBots = trimmedLogins(land.TrustedBots)
 		playbook.Land = land
 		return nil
 	})
@@ -54,6 +55,19 @@ func (lp *Loop) SetLanding(ctx context.Context, projectID string, land core.Land
 	}
 	lp.Nudge()
 	return p, nil
+}
+
+// trimmedLogins drops blanks and repeats from a list of GitHub logins, keeping
+// the first spelling of each.
+func trimmedLogins(logins []string) []string {
+	var out []string
+	for _, l := range logins {
+		l = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "@"))
+		if l != "" && !slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(o, l) }) {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 // SetRunRecipe sets how QA starts a code project to use it, or with nil

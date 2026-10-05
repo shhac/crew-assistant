@@ -81,7 +81,7 @@ func TestMergeIsPinnedToTheCheckedHeadAndOpenReadsTheNumber(t *testing.T) {
 		calls = append(calls, args)
 		return []byte("https://github.com/o/r/pull/42\n"), nil
 	}}
-	n, url, err := c.Open(context.Background(), "o/r", "main", "crew/x", "Title", "Body")
+	n, url, err := c.Open(context.Background(), "o/r", "main", "crew/x", "Title", "Body", false)
 	if err != nil || n != 42 || url != "https://github.com/o/r/pull/42" {
 		t.Fatalf("opened %d %s %v", n, url, err)
 	}
@@ -201,7 +201,7 @@ func TestEveryPullRequestCommandRefusesAMalformedRepository(t *testing.T) {
 		return nil, nil
 	}}
 	ctx, bad := context.Background(), "o/r --admin"
-	if _, _, err := c.Open(ctx, bad, "main", "crew/x", "T", "B"); err == nil {
+	if _, _, err := c.Open(ctx, bad, "main", "crew/x", "T", "B", false); err == nil {
 		t.Error("open")
 	}
 	if err := c.Merge(ctx, bad, 1, "squash", "abc"); err == nil {
