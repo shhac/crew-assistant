@@ -97,6 +97,24 @@ describe("landing", () => {
     ).toBe(
       "Once it's approved where review is asked for, green and every thread is resolved, the PM decides whether it merges once it's ready, by squash.",
     );
+    // Drafts wait on the owner to be marked ready; trusted bots are named.
+    expect(
+      whatHappens(
+        code({
+          pull_requests: true,
+          target: "main",
+          github: "o/r",
+          open: "owner",
+          draft: true,
+          trusted_bots: ["review-bot[bot]"],
+        }),
+      ),
+    ).toEqual([
+      "A draft pull request opens on o/r into main.",
+      "The team answers its reviews and fixes failing checks. It weighs what review-bot[bot] says as advice.",
+      "Once its checks are green and nothing is left for the team, you're asked whether to mark it ready for review.",
+      "Once it's approved where review is asked for, green and every thread is resolved, the PM decides whether it merges once it's ready, by squash.",
+    ]);
     // A way this dashboard doesn't know lands as a new branch.
     expect(landsBy(code({ via: "carrier-pigeon" }))).toBe("New local branch");
     expect(reversibility({ via: "carrier-pigeon" })).toBe("Undoable");
@@ -206,6 +224,8 @@ describe("the landing editor", () => {
     open: "owner",
     merging: "none",
     approve: "pm",
+    draft: true,
+    bots: "review-bot[bot]",
   };
   it("saves only what the way needs", () => {
     expect(landingInput(form)).toEqual({
@@ -218,6 +238,8 @@ describe("the landing editor", () => {
       merge: "",
       open: "",
       approve: "pm",
+      draft: false,
+      trusted_bots: [],
     });
     // With pull requests, who approves merging is what is saved.
     expect(landingInput({ ...form, pullRequests: true })).toMatchObject({
@@ -226,6 +248,8 @@ describe("the landing editor", () => {
       merge: "rebase",
       open: "owner",
       approve: "none",
+      draft: true,
+      trusted_bots: ["review-bot[bot]"],
     });
     // A branch has no target, and never leaves landing to the PM.
     expect(landingInput({ ...form, via: "branch" })).toMatchObject({

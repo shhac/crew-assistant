@@ -46,12 +46,35 @@ export const landingWays: Record<string, LandingWay> = {
     reversibility: "Permanent once merged",
     approve: () => "Open pull request",
     happens: (land) => [
-      `A pull request opens on ${land.github} into ${land.target}.`,
-      "The team answers its reviews and fixes failing checks.",
+      `A ${land.draft ? "draft " : ""}pull request opens on ${land.github} into ${land.target}.`,
+      `The team answers its reviews and fixes failing checks.${botsWords(land)}`,
+      ...(land.draft
+        ? [
+            "Once its checks are green and nothing is left for the team, you're asked whether to mark it ready for review.",
+          ]
+        : []),
       `Once it's approved where review is asked for, green and every thread is resolved, ${mergeWords[mergeGate(land)] ?? mergeWords.pm}, by ${mergeMethod(land)}.`,
     ],
   },
 };
+
+/** Which automated reviewers the team weighs, as a sentence after another. */
+function botsWords(land: LandPolicy): string {
+  const bots = land.trusted_bots ?? [];
+  return bots.length
+    ? ` It weighs what ${bots.join(", ")} say${bots.length === 1 ? "s" : ""} as advice.`
+    : "";
+}
+
+/** The GitHub logins written in a list, one per line or comma-separated. */
+export const loginsIn = (written: string): string[] => [
+  ...new Set(
+    written
+      .split(/[\s,]+/)
+      .map((login) => login.replace(/^@/, ""))
+      .filter(Boolean),
+  ),
+];
 
 /** The way named, if this dashboard knows it. */
 export const wayFor = (via?: string): LandingWay | undefined =>
@@ -226,6 +249,9 @@ export interface LandingForm {
   open: string;
   merging: string;
   approve: string;
+  draft: boolean;
+  /** The trusted automated reviewers, as written. */
+  bots: string;
 }
 
 /**
@@ -247,5 +273,15 @@ export function landingInput(form: LandingForm): LandingInput {
     approve: form.pullRequests
       ? form.merging
       : effectiveApprove(form.approve, way),
+    draft: form.pullRequests && form.draft,
+    trusted_bots: form.pullRequests ? loginsIn(form.bots) : [],
   };
 }
+
+/** The hint under opening pull requests as drafts. */
+export const draftHint =
+  "The team still answers its reviews and checks. Once nothing is left for it, you're asked whether to mark it ready for review; only you do.";
+
+/** The hint under the automated reviewers the team trusts. */
+export const botsHint =
+  "GitHub logins, such as review-bot[bot]. The team weighs their comments as advice. Anyone else outside the repository is only acted on if you let the team answer their threads.";

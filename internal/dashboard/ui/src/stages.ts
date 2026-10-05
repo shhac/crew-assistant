@@ -209,6 +209,16 @@ const decisionKinds: Record<string, DecisionKindWords> = {
     badge: "Pull requests are off",
     step: () => "Waiting on whether it keeps its pull request",
   },
+  "ready-for-review": {
+    ...otherDecision,
+    badge: "Ready for review?",
+    step: () => "Waiting on whether its draft is marked ready for review",
+  },
+  "outside-threads": {
+    ...otherDecision,
+    badge: "Outside review threads",
+    step: () => "Waiting on who answers review threads from outside",
+  },
   failure: {
     badge: "Stuck",
     step: () => "Stuck until you decide",
@@ -498,6 +508,7 @@ export function prWords(observed?: Observed): string {
   };
   const unresolved = observed.unresolved ?? 0;
   return [
+    observed.draft ? "a draft" : "",
     checks[observed.checks] ?? `checks ${observed.checks.toLowerCase()}`,
     observed.review ? (review[observed.review] ?? observed.review) : "",
     unresolved

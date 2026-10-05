@@ -243,6 +243,10 @@ export interface LandPolicy {
    * team's PM). With pull requests it is who approves merging, pm unless set.
    */
   approve?: "before" | "none" | "pm" | (string & {});
+  /** Opens each pull request as a draft, which only the owner marks ready. */
+  draft?: boolean;
+  /** GitHub logins of automated reviewers the team weighs as advice. */
+  trusted_bots?: string[];
 }
 /** The PM's decision to land or hold a task's change, and why. */
 export interface LandDecision {
@@ -264,6 +268,8 @@ export interface LandingInput {
   merge: string;
   open: string;
   approve: string;
+  draft: boolean;
+  trusted_bots: string[];
 }
 export interface LinearLink {
   connection_id: string;
@@ -577,7 +583,9 @@ export interface Observed {
   unresolved?: number;
   conflicting?: boolean;
   ready?: boolean;
-  /** Feedback from people outside the repository, never acted on. */
+  /** Not yet marked ready for review. */
+  draft?: boolean;
+  /** Feedback from people outside the repository, not acted on unless you let it be. */
   ignored?: number;
   at: string;
 }

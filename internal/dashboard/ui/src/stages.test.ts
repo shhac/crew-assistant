@@ -813,6 +813,12 @@ describe("a task landing through a pull request", () => {
     expect(prWords({ checks: "NONE", conflicting: true, at: "" })).toBe(
       "no checks, conflicts with its base",
     );
+    expect(prWords({ checks: "SUCCESS", draft: true, at: "" })).toBe(
+      "a draft, checks passed",
+    );
+    expect(decisionKind(decision("ready-for-review")).badge).toBe(
+      "Ready for review?",
+    );
   });
 });
 

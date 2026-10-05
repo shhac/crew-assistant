@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from "react";
 import {
   approveHint,
+  botsHint,
+  draftHint,
   effectiveApprove,
   landingInput,
   landingWays,
@@ -32,6 +34,8 @@ export function LandingEditor({
   const [merging, setMerging] = useState(mergeGate(land));
   const [target, setTarget] = useState(land?.target || "main");
   const [chosenApprove, setApprove] = useState(land?.approve || "before");
+  const [draft, setDraft] = useState(!!land?.draft);
+  const [bots, setBots] = useState((land?.trusted_bots ?? []).join(", "));
   const way = pullRequests ? "pull-request" : via;
   const approve = effectiveApprove(chosenApprove, way);
   const hasPM = !!project.playbook?.roles.some((r) => r.kinds.includes("pm"));
@@ -53,6 +57,8 @@ export function LandingEditor({
           open,
           merging,
           approve: chosenApprove,
+          draft,
+          bots,
         }),
       );
       await refresh();
@@ -70,6 +76,22 @@ export function LandingEditor({
         />
         <span>Use pull requests</span>
       </label>
+      {pullRequests && (
+        <>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={draft}
+              onChange={(e) => setDraft(e.target.checked)}
+              aria-describedby="land-draft-hint"
+            />
+            <span>Open them as drafts</span>
+          </label>
+          <p className="hint" id="land-draft-hint">
+            {draftHint}
+          </p>
+        </>
+      )}
       <div className="form-row">
         <label htmlFor="land-via">
           {pullRequests ? "Without pull requests, lands as" : "Lands as"}
@@ -156,6 +178,19 @@ export function LandingEditor({
               <option value="none">Merge once it's ready</option>
             </select>
             <span className="hint">{mergeHint(merging, hasPM)}</span>
+          </label>
+        )}
+        {pullRequests && (
+          <label htmlFor="land-bots">
+            Automated reviewers the team trusts
+            <input
+              id="land-bots"
+              className="field"
+              value={bots}
+              placeholder="review-bot[bot]"
+              onChange={(e) => setBots(e.target.value)}
+            />
+            <span className="hint">{botsHint}</span>
           </label>
         )}
         {!pullRequests && (
