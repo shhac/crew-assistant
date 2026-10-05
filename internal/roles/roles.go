@@ -230,7 +230,7 @@ func (n Native) Run(ctx context.Context, spec Spec) (out Result, err error) {
 		out.Session, _ = json.Marshal(s.Ref())
 		budget := n.cleanupTimeout
 		if budget == 0 {
-			budget = 10 * time.Second
+			budget = releaseWait
 		}
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
 		defer cancel()
@@ -529,3 +529,10 @@ func within(root, dir string) bool {
 	rel, err := filepath.Rel(root, dir)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
+
+// releaseWait is how long ending a turn's session may take: stopping the
+// CLI and tearing down its sandbox, often after a long test run. On a busy
+// machine that took longer than the ten seconds once allowed, and a turn
+// that had done its work was reported as failed ("context deadline
+// exceeded") and its result thrown away.
+const releaseWait = 2 * time.Minute
