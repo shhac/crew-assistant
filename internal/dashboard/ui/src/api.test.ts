@@ -6,6 +6,7 @@ import {
   taskTeamTurns,
   memberTeamTurns,
 } from "./api";
+import type { Repository, Team } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -114,4 +115,19 @@ it("preserves upgrade journals and rollback pins, including null waiting lists",
   });
   expect(normalizeState({}).upgrade).toBeUndefined();
   expect(normalizeState({}).rollback).toBeUndefined();
+});
+
+it("keeps the repositories and teams the daemon sends", () => {
+  const repositories: Repository[] = [
+    { id: "repo-1", name: "app", path: "/work/app" },
+  ];
+  const teams: Team[] = [
+    { id: "team-1", name: "App", template: "code", roles: [], max_rounds: 3 },
+  ];
+  expect(normalizeState({ repositories, teams })).toMatchObject({
+    repositories,
+    teams,
+  });
+  expect(normalizeState({}).repositories).toEqual([]);
+  expect(normalizeState({}).teams).toEqual([]);
 });

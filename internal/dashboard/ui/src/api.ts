@@ -1191,6 +1191,8 @@ export function normalizeState(raw: Partial<State>): State {
     assistants: raw.assistants ?? [],
     pending_operations: raw.pending_operations ?? [],
     projects: raw.projects ?? [],
+    repositories: raw.repositories ?? [],
+    teams: raw.teams ?? [],
     members: (raw.members ?? []).map((m) => ({
       ...m,
       learnings: m.learnings ?? [],
