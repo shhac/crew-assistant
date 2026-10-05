@@ -31,9 +31,7 @@ func (lp *Loop) landPR(ctx context.Context, p core.Project, t core.Task, m gitMe
 	if t.Proposal != nil {
 		prop = *t.Proposal
 	}
-	if prop.Branch == "" {
-		prop.Branch = m.branchName(t)
-	}
+	prop.Branch = m.prBranch(t)
 	if prop.Pushed != r.Ref && t.Delivering == nil && !t.PRMergePending() {
 		done, err := lp.publish(ctx, p, t, m, r, &prop)
 		if done || err != nil {

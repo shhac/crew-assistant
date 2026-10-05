@@ -171,9 +171,37 @@ func startedFrom(t core.Task) string {
 	return t.From + " at " + text.Short(t.Base)
 }
 
-// slugify keeps whole words, up to 40 characters, so a branch name never ends
-// mid-word.
-func slugify(text string) string {
+// maxSlug is the longest a branch name's slug grows.
+const maxSlug = 40
+
+// branchSlug leads with the task's Linear issue, as repositories that link
+// branches to issues by name expect, within the slug's usual length.
+func branchSlug(t core.Task) string {
+	for _, issue := range t.LinearIssues() {
+		if !core.LinearTicket(issue.Identifier) {
+			continue
+		}
+		ticket := strings.ToLower(issue.Identifier)
+		room := maxSlug - len(ticket) - 1
+		if room < 8 {
+			break
+		}
+		// A picked-up task's objective already starts with its identifier.
+		objective := strings.TrimSpace(t.Objective)
+		if rest, ok := strings.CutPrefix(strings.ToLower(objective), ticket); ok && (rest == "" || rest[0] < '0' || rest[0] > '9') {
+			objective = rest
+		}
+		return ticket + "-" + slugWithin(objective, room)
+	}
+	return slugify(t.Objective)
+}
+
+// slugify keeps whole words, up to maxSlug characters, so a branch name never
+// ends mid-word.
+func slugify(text string) string { return slugWithin(text, maxSlug) }
+
+// slugWithin keeps whole words, up to limit characters.
+func slugWithin(text string, limit int) string {
 	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
 		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
 	})
@@ -183,13 +211,13 @@ func slugify(text string) string {
 		if out != "" {
 			next = out + "-" + word
 		}
-		if len(next) > 40 {
+		if len(next) > limit {
 			break
 		}
 		out = next
 	}
 	if out == "" && len(words) > 0 {
-		out = words[0][:min(len(words[0]), 40)]
+		out = words[0][:min(len(words[0]), limit)]
 	}
 	if out == "" {
 		return "change"

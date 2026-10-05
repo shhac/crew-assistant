@@ -386,6 +386,39 @@ func TestBranchNamesKeepWholeWords(t *testing.T) {
 	}
 }
 
+// A task for a Linear issue goes out on a branch named for it, within the
+// same length, and a pull request's branch keeps the name it was pushed with.
+func TestBranchNamesLeadWithTheLinearIssue(t *testing.T) {
+	t.Parallel()
+	issue := func(identifier string) []core.LinearRef {
+		return []core.LinearRef{{Kind: "issue", LinearIssue: core.LinearIssue{ID: identifier, Identifier: identifier}}}
+	}
+	for _, c := range []struct {
+		task core.Task
+		want string
+	}{
+		{core.Task{Objective: "Membership renewal", LinearLinks: issue("EX-1454")}, "ex-1454-membership-renewal"},
+		{core.Task{Objective: "EX-1454: Membership renewal", Linear: issue("EX-1454")}, "ex-1454-membership-renewal"},
+		{core.Task{Objective: "EX-14540 follow-up", LinearLinks: issue("EX-1454")}, "ex-1454-ex-14540-follow-up"},
+		{core.Task{Objective: "Renew memberships automatically on the first of each month", LinearLinks: issue("EX-1454")}, "ex-1454-renew-memberships-automatically"},
+		{core.Task{Objective: "Membership renewal", LinearLinks: issue(strings.Repeat("X", 30) + "-1")}, "membership-renewal"},
+		{core.Task{Objective: "Membership renewal", LinearLinks: []core.LinearRef{{Kind: "project", LinearIssue: core.LinearIssue{ID: "p", Identifier: "Roadmap"}}}}, "membership-renewal"},
+	} {
+		if got := branchSlug(c.task); got != c.want || len(got) > maxSlug {
+			t.Errorf("branchSlug(%q) = %q, want %q", c.task.Objective, got, c.want)
+		}
+	}
+	m := gitMedium{playbook: core.Playbook{BranchPrefix: "paul/"}}
+	pushed := core.Task{Objective: "Membership renewal", LinearLinks: issue("EX-1454"), Proposal: &core.Proposal{Branch: "paul/membership-renewal"}}
+	if got := m.prBranch(pushed); got != "paul/membership-renewal" {
+		t.Errorf("a pushed branch was renamed to %q", got)
+	}
+	pushed.Proposal.Branch = ""
+	if got := m.prBranch(pushed); got != "paul/ex-1454-membership-renewal" {
+		t.Errorf("prBranch = %q", got)
+	}
+}
+
 // The owner approves one change; the other, which started from the same
 // point and touched the same file, catches up, resolves the conflict with its
 // team and asks again, building on what landed. The owner only approves.

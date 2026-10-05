@@ -309,6 +309,18 @@ func (m gitMedium) removeChecks() error {
 	return m.repo.RemoveChecks()
 }
 
+// branchName is the branch a task's change goes out on. A pull request's
+// branch, once pushed, is recorded with it and never renamed; this is the
+// name before then.
 func (m gitMedium) branchName(t core.Task) string {
-	return m.playbook.BranchPrefix + slugify(t.Objective)
+	return m.playbook.BranchPrefix + branchSlug(t)
+}
+
+// prBranch is the task's pull request branch: the one recorded, once it was
+// pushed, or else the one it will be.
+func (m gitMedium) prBranch(t core.Task) string {
+	if t.Proposal != nil && t.Proposal.Branch != "" {
+		return t.Proposal.Branch
+	}
+	return m.branchName(t)
 }
