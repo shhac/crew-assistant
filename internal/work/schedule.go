@@ -15,6 +15,7 @@ import (
 
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/diagnostics"
+	"github.com/shhac/crew-assistant/internal/lifecycle"
 )
 
 // jobs are the claimed steps running now, each in a goroutine of its own.
@@ -58,6 +59,13 @@ func (j *jobs) cancelTask(taskID string) {
 // caller can wait for those steps to end; with waited, a step that panics
 // hands its panic to whoever waits for it.
 func (lp *Loop) pass(ctx context.Context, waited bool) (bool, []<-chan any, error) {
+	return lp.passWhile(lifecycle.Now(ctx), waited)
+}
+
+// passWhile is pass for the daemon's loop: its steps run on stop.Force, and
+// none is claimed once stop.Graceful has ended.
+func (lp *Loop) passWhile(stop lifecycle.Stop, waited bool) (bool, []<-chan any, error) {
+	ctx := stop.Force
 	if err := lp.refreshEnginePauses(ctx); err != nil {
 		return false, nil, err
 	}
@@ -157,9 +165,12 @@ func (lp *Loop) pass(ctx context.Context, waited bool) (bool, []<-chan any, erro
 		return len(started) > 0, started, err
 	}
 	taken := &slots{lp: lp}
-	claimed, err := lp.Core.Schedule(ctx, taken.admit, deferred...)
+	claimed, err := lp.Core.Schedule(stop.Graceful, taken.admit, deferred...)
 	if err != nil {
 		taken.giveBack()
+		if stop.Stopping() {
+			return len(started) > 0, started, nil
+		}
 		return len(started) > 0, started, err
 	}
 	for _, s := range claimed {

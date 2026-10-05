@@ -165,7 +165,7 @@ func (lp *Loop) Run(stop lifecycle.Stop, noDispatch bool) {
 			}
 		}
 		for ready && !stop.Stopping() && !lp.Demo && !noDispatch {
-			progressed, _, err := lp.pass(stop.Force, false)
+			progressed, _, err := lp.passWhile(stop, false)
 			if err != nil && stop.Force.Err() == nil {
 				lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "task_loop"}, err)
 			}

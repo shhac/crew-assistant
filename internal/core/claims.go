@@ -224,6 +224,11 @@ func (s *Service) Schedule(ctx context.Context, admit Admit, deferred ...string)
 		if s.upgradeDraining {
 			return nil
 		}
+		// Checked again under the write lock, so a step freed after a stop
+		// began is never claimed.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		now := s.now().UTC()
 		for i := range v.Tasks {
 			t := &v.Tasks[i]
