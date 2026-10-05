@@ -203,11 +203,27 @@ func (c Checkout) prepared(path string) bool {
 }
 
 // Remove deletes the checkout and its scratch folder.
+//
+// Only the revision's own files are locked, so unlocking them takes
+// moments; the folder is then moved aside at once and deleted in the
+// background, since a large repository's copied dependencies take many
+// minutes to delete. What a stopped daemon left there goes with
+// RemoveChecks.
 func (c Checkout) Remove() {
-	if c.root != "" {
-		_ = media.RemoveReadOnly(c.root)
+	if c.root == "" {
+		return
 	}
+	_ = media.SetWritable(c.Dir, true, c.dependencies()...)
+	trash := filepath.Join(filepath.Dir(c.root), trashDir, filepath.Base(c.root))
+	if err := os.MkdirAll(filepath.Dir(trash), 0700); err == nil && os.Rename(c.root, trash) == nil {
+		go func() { _ = media.RemoveReadOnly(trash) }()
+		return
+	}
+	_ = media.RemoveReadOnly(c.root)
 }
+
+// trashDir holds checkouts being deleted, beside the checks still running.
+const trashDir = ".trash"
 
 // RemoveChecks deletes every checkout a check left behind, such as one a
 // daemon stopped mid-check never removed.
@@ -230,7 +246,10 @@ func (r Repo) CopyForCheck(from string, cache ...string) (Checkout, error) {
 		c.Remove()
 		return Checkout{}, err
 	}
-	if err = media.SetWritable(c.Dir, true, preparedIn(c.Dir)...); err != nil {
+	for _, rel := range preparedIn(c.Dir) {
+		c.skip = append(c.skip, rel+"/")
+	}
+	if err = media.SetWritable(c.Dir, true, c.dependencies()...); err != nil {
 		c.Remove()
 		return Checkout{}, err
 	}

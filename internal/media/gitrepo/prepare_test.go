@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPatternsMatchFolderNames(t *testing.T) {
@@ -68,4 +69,41 @@ func TestAPreparePatternCopiesEveryIgnoredMatch(t *testing.T) {
 	if err := c.Verify(ctx); err != nil {
 		t.Fatalf("matched folders count as changes to the revision: %v", err)
 	}
+}
+
+// Removing a checkout returns at once, and what it held is deleted
+// behind it, locked revision and copied dependencies alike.
+func TestARemovedCheckoutIsGoneAtOnceAndDeletedBehind(t *testing.T) {
+	source := ownerRepo(t)
+	r, err := Open(ctx, t.TempDir(), source, []string{"**/node_modules"}, SignAsOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, err := r.Start(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := r.Checkout(ctx, base, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copied, err := r.CopyForCheck(c.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Remove()
+	copied.Remove()
+	for _, gone := range []string{c.Dir, copied.Dir} {
+		if _, err := os.Stat(gone); err == nil {
+			t.Fatalf("%s is still in place", gone)
+		}
+	}
+	trash := filepath.Join(r.checksDir(), trashDir)
+	for range 100 {
+		if entries, _ := os.ReadDir(trash); len(entries) == 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("the removed checkouts were never deleted")
 }
