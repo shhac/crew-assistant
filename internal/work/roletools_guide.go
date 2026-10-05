@@ -17,6 +17,10 @@ const ownerAnswerGuide = " When folding an owner's answer into a task, put clear
 
 const ownerEditGuide = " requirements also accepts a JSON array of strings, copied from Requirements JSON in read_task; use this lossless form for multiline criteria.  owner_checks adds quoted owner clauses, one per line or a JSON array of strings for multiline wording, or empty. read_task includes Owner checks JSON for lossless replay. text_version is the current version from read_task when replacing requirements with owner checks, or empty for additive edits. add_requirement appends team work without replacing other criteria, or empty."
 
+// linearTicketGuide is how the PM of a Linear-linked project takes on a
+// ticket the owner names.
+const linearTicketGuide = "When the owner names a Linear issue, such as EX-123, look it up with lin (args: issue get EX-123) before acting on it, then keep it with its task: list_tasks with its identifier as text finds a task that already has it; queue_task with linear_issue queues a new one linked to it; link_task_linear links an existing task. The issue's description then reaches the team, and its pull request and branch reference it. Never link an issue you have not looked up, or one the owner didn't mean."
+
 // guide tells the role what its tools are for.
 func (r roleTools) guide() string {
 	guide := r.guideTools()
@@ -27,6 +31,9 @@ func (r roleTools) guide() string {
 		guide += " Use run_check for the project's check; repeat while it says still running. The daemon hosts its sandbox, including localhost when the project allows it, whatever your engine."
 	}
 	if r.lin != nil {
+		if r.manages && !r.notesOnly {
+			guide += " " + linearTicketGuide
+		}
 		guide += "\n\n" + connections.LinGuide(r.lin.writes && !r.notesOnly)
 	}
 	if r.proposes {
@@ -119,15 +126,22 @@ func (r roleTools) definitions() []session.ToolDefinition {
 		return append(defs, note)
 	}
 	if r.manages {
-		return append(defs,
+		queue := session.ToolDefinition{Name: "queue_task", Description: "Ask for a new task in this project, such as part of a task split off or a sibling task. title is what it is for; requirements are its requirements, one to a line, or empty. depends_on is the ids of tasks it must wait for, separated by commas, or empty.", Schema: schema([]string{"title", "requirements", "depends_on"})}
+		var linear []session.ToolDefinition
+		if r.lin != nil {
+			queue.Description += " linear_issue is the Linear issue it is for, by identifier (such as EX-123) or URL, to link it to as it is queued, or empty; with one, an empty title takes the issue's. An issue already linked to an unfinished task is refused: link that task instead."
+			queue.Schema = schema([]string{"title", "requirements", "depends_on", "linear_issue"})
+			linear = append(linear, session.ToolDefinition{Name: "link_task_linear", Description: "Link one of this project's tasks to a Linear issue (kind issue; ref is its identifier, such as EX-123, or URL) or project (kind project; ref is its UUID), read through this project's Linear account. Reads only; never writes to Linear. A linked issue's description reaches the team, and its pull request references it. task_id is its readable or canonical id.", Schema: schema([]string{"task_id", "kind", "ref"})})
+		}
+		return append(append(defs,
 			session.ToolDefinition{Name: "set_blocker", Description: "Hold a task on an external condition. kind is manual or daemon_includes; description is a short condition (required for manual); other_task_id names the same project task whose landing the running daemon must include, or empty for manual; holds is start or landing. Owner conditions stay under owner control.", Schema: schema([]string{"task_id", "kind", "description", "other_task_id", "holds"})},
 			session.ToolDefinition{Name: "clear_blocker", Description: "Clear an external blocker the team set, by its blocker_id.", Schema: schema([]string{"task_id", "blocker_id"})},
 			session.ToolDefinition{Name: "edit_task", Description: "Tidy an unfinished task of this project. task_id is its readable or canonical id. title replaces its title, or empty to keep it. requirements replaces all its requirements, one to a line; none removes them all; empty keeps them. Every change is kept and the owner can undo it." + ownerEditGuide, Schema: schema([]string{"task_id", "title", "requirements", "add_requirement", "owner_checks", "text_version"})},
 			session.ToolDefinition{Name: "link_tasks", Description: "Link two of this project's tasks. relation is what task_id is to other_task_id: " + relationGuide([]string{core.RelationDependsOn, core.RelationBlocks, core.RelationRelatesTo}) + " A pair has one link; the owner's links stay as they are, and a task whose work has begun can't be made to wait.", Schema: schema([]string{"task_id", "relation", "other_task_id"})},
 			session.ToolDefinition{Name: "unlink_tasks", Description: "Take away a link between two of this project's tasks that the team set; links the owner or assistant set stay.", Schema: schema([]string{"task_id", "other_task_id"})},
-			session.ToolDefinition{Name: "queue_task", Description: "Ask for a new task in this project, such as part of a task split off or a sibling task. title is what it is for; requirements are its requirements, one to a line, or empty. depends_on is the ids of tasks it must wait for, separated by commas, or empty.", Schema: schema([]string{"title", "requirements", "depends_on"})},
+			queue,
 			note,
-		)
+		), linear...)
 	}
 	if r.taskID == "" {
 		return defs

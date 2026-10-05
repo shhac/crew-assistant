@@ -528,6 +528,13 @@ func (s *Service) QueueTask(ctx context.Context, projectID string, in TaskInput)
 // project's PM for triage first, when it has one; what the team asks for
 // joins the to-do list directly.
 func (s *Service) QueueTaskAs(ctx context.Context, projectID string, in TaskInput, by string) (Task, error) {
+	return s.queueTaskAs(ctx, projectID, in, by, nil)
+}
+
+// queueTaskAs queues the task, applying link to it first in the same change
+// when there is one; what link says it changed is recorded once the task is
+// queued.
+func (s *Service) queueTaskAs(ctx context.Context, projectID string, in TaskInput, by string, link func(*Snapshot, *Project, *Task) (string, error)) (Task, error) {
 	if !required(in.Objective) {
 		return Task{}, errors.New("a task needs an objective")
 	}
@@ -550,7 +557,20 @@ func (s *Service) QueueTaskAs(ctx context.Context, projectID string, in TaskInpu
 		if p == nil {
 			return ErrNotFound
 		}
-		return queueTask(v, p, &out, in.DependsOn, by, "")
+		linked := ""
+		if link != nil {
+			var err error
+			if linked, err = link(v, p, &out); err != nil {
+				return err
+			}
+		}
+		if err := queueTask(v, p, &out, in.DependsOn, by, ""); err != nil {
+			return err
+		}
+		if linked != "" {
+			recordTask(v, now, &out, "task.linear-linked", linked)
+		}
+		return nil
 	})
 	return out, err
 }

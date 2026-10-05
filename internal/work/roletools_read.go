@@ -55,7 +55,7 @@ func (r roleTools) list(ctx context.Context, which, relatedTo, contains string) 
 			continue
 		case relatedTo != "" && !linkedTo(related, t):
 			continue
-		case contains != "" && !strings.Contains(strings.ToLower(t.Objective), strings.ToLower(contains)):
+		case contains != "" && !mentions(t, contains):
 			continue
 		}
 		mine := ""
@@ -68,6 +68,17 @@ func (r roleTools) list(ctx context.Context, which, relatedTo, contains string) 
 		return "No tasks match.", nil
 	}
 	return b.String(), nil
+}
+
+// mentions is whether the task's objective or one of its Linear issues'
+// identifiers contains s, so a task is found by its ticket however it was
+// linked.
+func mentions(t core.Task, s string) bool {
+	s = strings.ToLower(s)
+	if strings.Contains(strings.ToLower(t.Objective), s) {
+		return true
+	}
+	return slices.ContainsFunc(t.LinearIssues(), func(l core.LinearRef) bool { return strings.Contains(strings.ToLower(l.Identifier), s) })
 }
 
 // linkGroup is one kind of link a task has, with the tasks at the other end.
@@ -168,6 +179,9 @@ func taskBrief(snap core.Snapshot, projectID string, t core.Task, designFiles st
 	}
 	if n := len(t.Edits); n > 0 {
 		fmt.Fprintf(&b, "- title or requirements changed %d times, last by %s\n", n, t.Edits[n-1].By)
+	}
+	for _, issue := range t.LinearIssues() {
+		fmt.Fprintf(&b, "- Linear issue %s: %s\n", issue.Identifier, text.Clip(issue.Title, 200))
 	}
 	for _, l := range linkGroups(t) {
 		for _, other := range l.ids {

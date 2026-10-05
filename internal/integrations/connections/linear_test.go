@@ -325,6 +325,39 @@ func TestTaskLinearRefReads(t *testing.T) {
 		t.Fatal("mutation query")
 	}
 }
+func TestLinearLinkRefBringsTheIssueDescriptionBounded(t *testing.T) {
+	const id = "22222222-2222-2222-2222-222222222222"
+	ctx := context.Background()
+	reading := func(description string) Client {
+		return Client{Run: func(_ context.Context, _ string, args []string) ([]byte, error) {
+			switch {
+			case args[0] == "auth":
+				return []byte(`{"alias":"home"}`), nil
+			case args[2] == LinearIssueRefQuery:
+				return []byte(`{"issue":{"id":"` + id + `","identifier":"EX-1454","title":"Renew","url":"https://linear.app/issue/EX-1454"}}`), nil
+			case args[2] == LinearIssueContextQuery && args[4] == `{"id":"`+id+`"}`:
+				return []byte(description), nil
+			}
+			t.Fatal(args)
+			return nil, nil
+		}}
+	}
+	ref, err := mustLinearSession(t, reading(`{"issue":{"id":"`+id+`","description":"Renew on the 1st."}}`)).LinearLinkRef(ctx, "issue", "EX-1454")
+	if err != nil || ref.Identifier != "EX-1454" || ref.Description != "Renew on the 1st." || ref.ConnectionID != "lin" || ref.Profile != "home" {
+		t.Fatal(ref, err)
+	}
+	long, _ := json.Marshal(map[string]any{"issue": map[string]string{"id": id, "description": strings.Repeat("x", LinearDescriptionLimit+100)}})
+	ref, err = mustLinearSession(t, reading(string(long))).LinearLinkRef(ctx, "issue", "EX-1454")
+	if err != nil || len(ref.Description) > LinearDescriptionLimit || !strings.HasSuffix(ref.Description, LinearDescriptionTruncated) {
+		t.Fatal(len(ref.Description), err)
+	}
+	if _, err = mustLinearSession(t, reading(`{"errors":[{"message":"private output"}]}`)).LinearLinkRef(ctx, "issue", "EX-1454"); err == nil || strings.Contains(err.Error(), "private output") {
+		t.Fatal("failed description read linked", err)
+	}
+	if _, err = mustLinearSession(t, reading("")).LinearLinkRef(ctx, "team", "EX-1454"); err == nil {
+		t.Fatal("unknown kind read")
+	}
+}
 func TestTaskLinearRefRejectsInvalidReads(t *testing.T) {
 	for _, data := range []string{
 		`{"errors":[{"message":"private output"}]}`, `{"issue":null}`,

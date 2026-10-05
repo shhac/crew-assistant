@@ -268,7 +268,9 @@ func (r roleTools) execute(ctx context.Context, name string, raw json.RawMessage
 	case "attach_file":
 		return r.attach(ctx, in["name"], in["content"], in["path"], in["generated"], in["asset"], in["rejected"])
 	case "queue_task":
-		return r.queue(ctx, in["title"], in["requirements"], in["depends_on"])
+		return r.queue(ctx, in["title"], in["requirements"], in["depends_on"], in["linear_issue"])
+	case "link_task_linear":
+		return r.linkLinear(ctx, taskID, in["kind"], in["ref"])
 	default:
 		return "", fmt.Errorf("there is no tool %q", name)
 	}
@@ -290,21 +292,64 @@ func changed(done string, err error) (string, error) {
 }
 
 // queue asks for a new task on the PM's behalf, which waits for what the PM
-// says it does.
-func (r roleTools) queue(ctx context.Context, title, requirements, dependsOn string) (string, error) {
+// says it does, and is linked to the Linear issue it names, if any. The issue
+// is read first, so a failed read queues nothing.
+func (r roleTools) queue(ctx context.Context, title, requirements, dependsOn, issue string) (string, error) {
 	if *r.queued >= maxPMQueued {
 		return "", fmt.Errorf("you can queue at most %d tasks each time you look", maxPMQueued)
 	}
 	deps := strings.FieldsFunc(dependsOn, func(c rune) bool { return c == ',' || c == ' ' || c == '\n' })
-	t, err := r.lp.Core.QueueTaskAs(ctx, r.projectID, core.TaskInput{Objective: title, Criteria: lines(requirements), DependsOn: deps}, core.LinkedByPM)
+	in := core.TaskInput{Objective: title, Criteria: lines(requirements), DependsOn: deps}
+	if strings.TrimSpace(issue) == "" {
+		t, err := r.lp.Core.QueueTaskAs(ctx, r.projectID, in, core.LinkedByPM)
+		return r.tellQueued(t, "", err)
+	}
+	ref, err := r.linearRef(ctx, "issue", issue)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(in.Objective) == "" {
+		in.Objective = ref.Identifier + ": " + ref.Title
+	}
+	t, err := r.lp.Core.QueueLinearTask(ctx, r.projectID, in, ref, core.LinkedByPM)
+	return r.tellQueued(t, ref.Identifier, err)
+}
+
+// tellQueued counts a task the PM queued and tells it, and the owner's chat,
+// what came of it.
+func (r roleTools) tellQueued(t core.Task, issue string, err error) (string, error) {
 	if err != nil {
 		return "", hideProjects(err)
 	}
 	*r.queued++
-	if r.chat != nil {
-		r.chat.items = append(r.chat.items, core.PMChatChange{Kind: "queued", Summary: "Queued “" + t.Objective + "”", Tasks: []string{t.ID}})
+	linked := ""
+	if issue != "" {
+		linked = ", linked to Linear " + issue
 	}
-	return "Queued " + t.Label() + ".", nil
+	if r.chat != nil {
+		r.chat.items = append(r.chat.items, core.PMChatChange{Kind: "queued", Summary: "Queued “" + t.Objective + "”" + linked, Tasks: []string{t.ID}})
+	}
+	return "Queued " + t.Label() + linked + ".", nil
+}
+
+// linkLinear links one of the project's tasks to a Linear issue or project
+// the PM names, read through the project's own Linear account.
+func (r roleTools) linkLinear(ctx context.Context, taskID, kind, input string) (string, error) {
+	if kind != "issue" && kind != "project" {
+		return "", errors.New("kind is issue or project")
+	}
+	ref, err := r.linearRef(ctx, kind, input)
+	if err != nil {
+		return "", err
+	}
+	t, err := r.lp.Core.AddTaskLinear(ctx, r.projectID, taskID, ref, core.LinkedByPM)
+	if err != nil {
+		return "", hideProjects(err)
+	}
+	if r.chat != nil {
+		r.chat.items = append(r.chat.items, core.PMChatChange{Kind: "linked", Summary: "Linked “" + t.Objective + "” to Linear " + ref.Identifier, Tasks: []string{t.ID}})
+	}
+	return "Linked " + t.Label() + " to Linear " + kind + " " + ref.Identifier + ".", nil
 }
 
 // attach keeps a file with the design input the designer is giving: text

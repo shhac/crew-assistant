@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -138,6 +139,82 @@ func TestTaskLinearConcurrentAddsAndPickUp(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatal("duplicate link activity", count)
+	}
+}
+
+func TestTaskLinearPMLinksOnlyThroughItsProjectAndRefreshesDescription(t *testing.T) {
+	s, p, task, ref := taskLinearFixture(t)
+	ref.Description = "Renew on the 1st."
+	out, err := s.AddTaskLinear(testContext, p.ID, task.ID, ref, LinkedByPM)
+	if err != nil || len(out.LinearLinks) != 1 || out.LinearLinks[0].By != LinkedByPM || out.LinearLinks[0].Description != ref.Description {
+		t.Fatal(out, err)
+	}
+	before := stateVersion(t, s)
+	if _, err = s.AddTaskLinear(testContext, p.ID, task.ID, ref, LinkedByPM); err != nil || stateVersion(t, s) != before {
+		t.Fatal("unchanged link wrote state", err)
+	}
+	ref.Description = "Renew on the 2nd."
+	if out, err = s.AddTaskLinear(testContext, p.ID, task.ID, ref, LinkedByOwner); err != nil || len(out.LinearLinks) != 1 || out.LinearLinks[0].Description != ref.Description || out.LinearLinks[0].By != LinkedByPM {
+		t.Fatal("relink did not refresh the description", out, err)
+	}
+	other := ref
+	other.ID, other.Identifier = "33333333-3333-3333-3333-333333333333", "EX-2"
+	other.Profile = "work"
+	before = stateVersion(t, s)
+	if _, err = s.AddTaskLinear(testContext, p.ID, task.ID, other, LinkedByPM); err == nil || stateVersion(t, s) != before {
+		t.Fatal("PM linked through another account", err)
+	}
+	if _, err = s.ClearProjectLinear(testContext, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	other.Profile = "home"
+	before = stateVersion(t, s)
+	if _, err = s.AddTaskLinear(testContext, p.ID, task.ID, other, LinkedByPM); err == nil || stateVersion(t, s) != before {
+		t.Fatal("PM linked after the project was unlinked", err)
+	}
+	if _, err = s.AddTaskLinear(testContext, p.ID, task.ID, other, LinkedByOwner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.AddTaskLinear(testContext, p.ID, task.ID, other, "researcher"); err == nil {
+		t.Fatal("a team role linked Linear")
+	}
+}
+
+func TestQueueLinearTaskLinksInOneChangeAndOnce(t *testing.T) {
+	s, p, _, ref := taskLinearFixture(t)
+	ref.Description = "Renew on the 1st."
+	task, err := s.QueueLinearTask(testContext, p.ID, TaskInput{Objective: "EX-1: Renew"}, ref, LinkedByPM)
+	if err != nil || len(task.LinearLinks) != 1 || task.LinearLinks[0].Description != ref.Description || task.Status != TaskQueued {
+		t.Fatal(task, err)
+	}
+	made, err := s.PickUpLinearIssue(testContext, p.ID, p.Linear.Version, ref.LinearIssue)
+	if err != nil || made {
+		t.Fatal("pick-up queued the linked issue again", made, err)
+	}
+	before := stateVersion(t, s)
+	if _, err = s.QueueLinearTask(testContext, p.ID, TaskInput{Objective: "Again"}, ref, LinkedByPM); err == nil || !strings.Contains(err.Error(), task.Label()) || stateVersion(t, s) != before {
+		t.Fatal("issue queued twice", err)
+	}
+	project := ref
+	project.Kind = "project"
+	if _, err = s.QueueLinearTask(testContext, p.ID, TaskInput{Objective: "Project"}, project, LinkedByPM); err == nil || stateVersion(t, s) != before {
+		t.Fatal("queued for a project", err)
+	}
+	bad := ref
+	bad.ID = "44444444-4444-4444-4444-444444444444"
+	bad.Profile = "gone"
+	if _, err = s.QueueLinearTask(testContext, p.ID, TaskInput{Objective: "Bad"}, bad, LinkedByPM); err == nil || stateVersion(t, s) != before {
+		t.Fatal("bad link queued a task", err)
+	}
+	snap, _ := s.Snapshot(testContext)
+	linked := 0
+	for _, a := range snap.Activity {
+		if a.Kind == "task.linear-linked" && a.TaskID == task.ID {
+			linked++
+		}
+	}
+	if len(snap.Tasks) != 2 || linked != 1 {
+		t.Fatal(len(snap.Tasks), linked)
 	}
 }
 

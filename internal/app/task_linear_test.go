@@ -29,19 +29,26 @@ func TestLinkTaskLinearFallbackAndAssistantTools(t *testing.T) {
 			return []byte(`{"alias":"home"}`), nil
 		}
 		reads++
-		if args[2] != connections.LinearIssueRefQuery || args[len(args)-1] != "home" {
+		if args[len(args)-1] != "home" {
 			t.Fatal(args)
 		}
-		return []byte(taskIssueRead), nil
+		switch args[2] {
+		case connections.LinearIssueRefQuery:
+			return []byte(taskIssueRead), nil
+		case connections.LinearIssueContextQuery:
+			return []byte(`{"issue":{"id":"` + taskIssueID + `","description":"Renew memberships on time."}}`), nil
+		}
+		t.Fatal(args)
+		return nil, nil
 	}}
 	out, err := a.LinkTaskLinear(ctx, p.ID, task.ID, "", "", "issue", "EX-1", core.LinkedByOwner)
-	if err != nil || len(out.LinearLinks) != 1 || out.LinearLinks[0].ConnectionID != "lin" || out.LinearLinks[0].By != "owner" {
+	if err != nil || len(out.LinearLinks) != 1 || out.LinearLinks[0].ConnectionID != "lin" || out.LinearLinks[0].By != "owner" || out.LinearLinks[0].Description != "Renew memberships on time." {
 		t.Fatal(out, err)
 	}
 	if _, err = a.UnlinkTaskLinear(ctx, p.ID, task.ID, "issue", taskIssueID, core.LinkedByOwner); err != nil {
 		t.Fatal(err)
 	}
-	if reads != 1 {
+	if reads != 2 {
 		t.Fatal("removal read Linear")
 	}
 	args := map[string]string{"project_id": p.ID, "task_id": task.Ref, "connection_id": "", "profile": "", "kind": "issue", "ref": "EX-1"}

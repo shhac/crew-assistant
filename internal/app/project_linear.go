@@ -199,13 +199,7 @@ func (a *App) LinkTaskLinear(ctx context.Context, projectID, taskID, connectionI
 	if err != nil {
 		return core.Task{}, err
 	}
-	var ref core.LinearRef
-	switch kind {
-	case "issue":
-		ref, err = session.LinearIssueRef(ctx, input)
-	case "project":
-		ref, err = session.LinearProjectRef(ctx, input)
-	}
+	ref, err := session.LinearLinkRef(ctx, kind, input)
 	if err != nil {
 		return core.Task{}, err
 	}

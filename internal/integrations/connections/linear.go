@@ -325,6 +325,29 @@ func (s *LinearSession) LinearIssueRef(ctx context.Context, input string) (core.
 	}
 	return s.linearRef(ctx, "issue", input, LinearIssueRefQuery)
 }
+
+// LinearLinkRef reads what a task's link to an issue or project keeps. An
+// issue also brings its description, read and bounded as pick-up reads it,
+// so a linked issue reaches the team as a picked-up one does; any failed
+// read links nothing.
+func (s *LinearSession) LinearLinkRef(ctx context.Context, kind, input string) (core.LinearRef, error) {
+	switch kind {
+	case "project":
+		return s.LinearProjectRef(ctx, input)
+	case "issue":
+	default:
+		return core.LinearRef{}, errors.New("choose a Linear issue or project")
+	}
+	ref, err := s.LinearIssueRef(ctx, input)
+	if err != nil {
+		return core.LinearRef{}, err
+	}
+	ref.Description, err = s.LinearIssueContext(ctx, core.LinearLink{ConnectionID: s.id, Profile: s.profile}, ref.LinearIssue)
+	if err != nil {
+		return core.LinearRef{}, err
+	}
+	return ref, nil
+}
 func (s *LinearSession) LinearProjectRef(ctx context.Context, id string) (core.LinearRef, error) {
 	if !core.ValidLinearID(id) {
 		return core.LinearRef{}, errors.New("choose a Linear project")

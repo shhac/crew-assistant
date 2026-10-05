@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"regexp"
 	"slices"
@@ -122,45 +123,17 @@ func (s *Service) AddTaskLinear(ctx context.Context, projectID, taskID string, r
 		if p == nil {
 			return ErrNotFound
 		}
-		if by != LinkedByOwner && by != LinkedByAssistant {
-			return errors.New("only the owner or assistant can link Linear")
-		}
-		if err := LinearBinding(s.configuration().Connections, ref.ConnectionID, ref.Profile); err != nil {
+		now := s.now().UTC()
+		summary, err := s.linkTaskLinear(p, t, ref, by, now)
+		if err != nil {
 			return err
 		}
-		if err := ValidateTaskLinear(ref); err != nil {
-			return err
+		if summary == "" {
+			unchanged = *t
+			return errLinearUnchanged
 		}
-		if ref.Kind == "issue" {
-			count := 0
-			for _, l := range t.Linear {
-				if l.ID == ref.ID {
-					unchanged = *t
-					return errLinearUnchanged
-				}
-			}
-			for _, l := range t.LinearLinks {
-				if l.Kind == "issue" {
-					count++
-					if l.ID == ref.ID {
-						unchanged = *t
-						return errLinearUnchanged
-					}
-				}
-			}
-			if count >= 50 {
-				return errors.New("a task can have at most 50 Linear issue links")
-			}
-			if !slices.Contains(p.LinearImported, ref.ID) {
-				p.LinearImported = append(p.LinearImported, ref.ID)
-			}
-		} else {
-			t.LinearLinks = slices.DeleteFunc(t.LinearLinks, func(l LinearRef) bool { return l.Kind == "project" })
-		}
-		ref.By, ref.At, ref.Description = by, s.now().UTC(), ""
-		t.LinearLinks = append(t.LinearLinks, ref)
-		t.UpdatedAt = ref.At
-		recordTask(v, ref.At, t, "task.linear-linked", "Linear "+ref.Kind+" "+ref.Identifier+" linked")
+		t.UpdatedAt = now
+		recordTask(v, now, t, "task.linear-linked", summary)
 		return nil
 	})
 	if errors.Is(err, errLinearUnchanged) {
@@ -168,6 +141,108 @@ func (s *Service) AddTaskLinear(ctx context.Context, projectID, taskID string, r
 	}
 	return out, err
 }
+
+// QueueLinearTask queues a task linked to a Linear issue in one change, so
+// the task never exists without the issue it was asked for. An issue already
+// linked to one of the project's unfinished tasks is refused rather than
+// queued twice.
+func (s *Service) QueueLinearTask(ctx context.Context, projectID string, in TaskInput, ref LinearRef, by string) (Task, error) {
+	if ref.Kind != "issue" {
+		return Task{}, errors.New("a task is queued for a Linear issue, not a project")
+	}
+	return s.queueTaskAs(ctx, projectID, in, by, func(v *Snapshot, p *Project, t *Task) (string, error) {
+		for _, other := range v.Tasks {
+			if other.ProjectID == p.ID && !other.Finished() && slices.ContainsFunc(other.LinearIssues(), func(l LinearRef) bool { return l.ID == ref.ID }) {
+				return "", fmt.Errorf("%s is already linked to %s", ref.Identifier, other.Label())
+			}
+		}
+		return s.linkTaskLinear(p, t, ref, by, t.CreatedAt)
+	})
+}
+
+// linkTaskLinear adds ref to the task's links, or refreshes the description
+// a link to the same issue holds, and says what changed: nothing, when it
+// gives no summary.
+func (s *Service) linkTaskLinear(p *Project, t *Task, ref LinearRef, by string, now time.Time) (string, error) {
+	if err := mayLinkLinear(p, ref, by); err != nil {
+		return "", err
+	}
+	if err := LinearBinding(s.configuration().Connections, ref.ConnectionID, ref.Profile); err != nil {
+		return "", err
+	}
+	if err := ValidateTaskLinear(ref); err != nil {
+		return "", err
+	}
+	if ref.Kind != "issue" {
+		t.LinearLinks = slices.DeleteFunc(t.LinearLinks, func(l LinearRef) bool { return l.Kind == "project" })
+		ref.Description = ""
+		ref.By, ref.At = by, now
+		t.LinearLinks = append(t.LinearLinks, ref)
+		return "Linear project " + ref.Identifier + " linked", nil
+	}
+	if slices.ContainsFunc(t.Linear, func(l LinearRef) bool { return l.ID == ref.ID }) {
+		return "", nil
+	}
+	count := 0
+	for i, l := range t.LinearLinks {
+		if l.Kind != "issue" {
+			continue
+		}
+		count++
+		if l.ID != ref.ID {
+			continue
+		}
+		// Linking an issue again brings the team its current description.
+		if ref.Description == "" || ref.Description == l.Description {
+			return "", nil
+		}
+		t.LinearLinks[i].Description = ref.Description
+		return "Linear issue " + l.Identifier + " description refreshed", nil
+	}
+	if count >= 50 {
+		return "", errors.New("a task can have at most 50 Linear issue links")
+	}
+	if !slices.Contains(p.LinearImported, ref.ID) {
+		p.LinearImported = append(p.LinearImported, ref.ID)
+	}
+	ref.By, ref.At = by, now
+	t.LinearLinks = append(t.LinearLinks, ref)
+	return "Linear issue " + ref.Identifier + " linked", nil
+}
+
+// mayLinkLinear is whether by may link a task to ref. The PM reaches Linear
+// only through its project's own connection, so it links only what that
+// connection read, and only while the project still uses it.
+func mayLinkLinear(p *Project, ref LinearRef, by string) error {
+	switch by {
+	case LinkedByOwner, LinkedByAssistant:
+		return nil
+	case LinkedByPM:
+		if p.Linear == nil || p.Linear.ConnectionID != ref.ConnectionID || p.Linear.Profile != ref.Profile {
+			return errors.New("this project is no longer linked to that Linear account")
+		}
+		return nil
+	}
+	return errors.New("only the owner, assistant or PM can link Linear")
+}
+
+// LinearIssues are the Linear issues a task is for: the one it was picked up
+// from, then those linked to it, each once.
+func (t Task) LinearIssues() []LinearRef {
+	var out []LinearRef
+	for _, l := range slices.Concat(t.Linear, t.LinearLinks) {
+		if l.Kind == "issue" && !slices.ContainsFunc(out, func(o LinearRef) bool { return o.ID == l.ID }) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+var linearTicket = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*-[0-9]+$`)
+
+// LinearTicket reports an issue identifier in Linear's team-key form, such
+// as EX-123, which is safe to name a branch or a pull request reference by.
+func LinearTicket(identifier string) bool { return linearTicket.MatchString(identifier) }
 
 func (s *Service) RemoveTaskLinear(ctx context.Context, projectID, taskID, kind, id, by string) (Task, error) {
 	return s.editTaskRecord(ctx, projectID, taskID, func(t *Task, v *Snapshot) error {
