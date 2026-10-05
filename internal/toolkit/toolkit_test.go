@@ -419,7 +419,11 @@ func TestStartRefusesWhatTheCatalogDoesntOffer(t *testing.T) {
 
 func TestInstallRunsHomebrewAndReportsTheNewVersion(t *testing.T) {
 	f := newFixture(t)
+	// The install waits until the test has seen it start, so a fast machine
+	// can't finish it first.
+	release := make(chan struct{})
 	f.job = func(_ context.Context, c Command) error {
+		<-release
 		fmt.Fprintf(c.Output, "==> Fetching shhac/tap/lin\nAuthorization: Bearer abcdefghijkl\r\nlin_api_secretvalue123 token=hunter2hunter2\n")
 		f.binary("lin")
 		f.mu.Lock()
@@ -435,6 +439,7 @@ func TestInstallRunsHomebrewAndReportsTheNewVersion(t *testing.T) {
 	if started.State != JobRunning || started.Command != "brew install shhac/tap/lin" || started.Tool != "lin" {
 		t.Fatalf("started: %+v", started)
 	}
+	close(release)
 	done := wait(t, m, started.ID)
 	if done.State != JobSucceeded || done.Result != "lin v0.36.4 is installed." || done.FinishedAt == nil {
 		t.Fatalf("done: %+v", done)
