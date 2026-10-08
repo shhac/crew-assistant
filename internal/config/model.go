@@ -89,11 +89,10 @@ func (m Models) validate(engines Engines) error {
 }
 
 // approvedSmallModels are what small jobs use unless the owner chooses a
-// model for them, one per CLI engine. Luna runs at low effort; Haiku 4.5
-// has no effort setting, so none is sent for it.
+// model for them, one per CLI engine. Both run at low effort.
 var approvedSmallModels = map[string]struct{ model, effort string }{
 	"codex":  {"gpt-6-luna", "low"},
-	"claude": {"haiku", ""},
+	"claude": {"haiku", "low"},
 }
 
 // SmallModels lists the models to try in order for a small job. A model the

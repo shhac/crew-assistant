@@ -167,7 +167,7 @@ func (s *smallModels) verify(ctx context.Context, m config.Harness, reserve func
 			ec.Effort = m.Effort
 			return ec, nil
 		}
-		// An approved model without effort levels (Haiku 4.5) gets none.
+		// An approved model without effort levels (Haiku before 5.5) gets none.
 		for _, effort := range option.Efforts {
 			if effort.ID == m.Effort {
 				ec.Effort = m.Effort

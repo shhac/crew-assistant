@@ -239,8 +239,7 @@ func TestSmallModelsTryOwnEngineFirstThenOnlyTheOtherApprovedModel(t *testing.T)
 	if codex.Engine != "codex" || codex.Model != "gpt-6-luna" || codex.Effort != "low" || codex.Home != "/synthetic/codex" {
 		t.Fatal(codex)
 	}
-	// Haiku 4.5 has no effort setting; none is sent.
-	if claude.Engine != "claude" || claude.Model != "haiku" || claude.Effort != "" || claude.Home != "/synthetic/claude" {
+	if claude.Engine != "claude" || claude.Model != "haiku" || claude.Effort != "low" || claude.Home != "/synthetic/claude" {
 		t.Fatal(claude)
 	}
 	c.Assistants[0].Model.Engine = "claude"

@@ -13,12 +13,11 @@ export type EngineUse = Exclude<
 
 /**
  * The small model each CLI login uses for suggestions and loading lines
- * unless the owner picks another. Haiku 4.5 has no effort setting, so none is
- * sent for it.
+ * unless the owner picks another.
  */
 export const smallModels: Record<string, { name: string; detail: string }> = {
   codex: { name: "Luna", detail: "gpt-6-luna, low effort" },
-  claude: { name: "Haiku", detail: "haiku" },
+  claude: { name: "Haiku", detail: "haiku, low effort" },
 };
 
 let known: readonly EngineChoice[] = [];

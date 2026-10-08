@@ -45,7 +45,7 @@ func suggestionApp(t *testing.T, engineName string) (*App, *fakeCLIs) {
 }
 
 func TestSuggestionRoutesToTheOwnEnginesApprovedModel(t *testing.T) {
-	for engineName, want := range map[string]string{"codex": "codex/gpt-6-luna/low", "claude": "claude/haiku/"} {
+	for engineName, want := range map[string]string{"codex": "codex/gpt-6-luna/low", "claude": "claude/haiku/low"} {
 		a, f := suggestionApp(t, engineName)
 		after := settledReply(t, a, "one", "Plan the garden", "Here is a planting plan.")
 		complete := a.small.complete
@@ -69,13 +69,13 @@ func TestSuggestionFallsBackToTheOtherCLIInEachDirection(t *testing.T) {
 	a, f := suggestionApp(t, "codex")
 	f.discoverErr["codex"] = errors.New("codex: not logged in")
 	after := settledReply(t, a, "one", "Hello", "Hi there.")
-	if got, err := a.SuggestNextMessage(context.Background(), after); err != nil || got == "" || !equalStrings(f.used(), []string{"claude/haiku/"}) {
+	if got, err := a.SuggestNextMessage(context.Background(), after); err != nil || got == "" || !equalStrings(f.used(), []string{"claude/haiku/low"}) {
 		t.Fatal(got, err, f.used())
 	}
 	a, f = suggestionApp(t, "claude")
 	f.replyErr["claude"] = errors.New("429 rate limited")
 	after = settledReply(t, a, "one", "Hello", "Hi there.")
-	if got, err := a.SuggestNextMessage(context.Background(), after); err != nil || got == "" || !equalStrings(f.used(), []string{"claude/haiku/", "codex/gpt-6-luna/low"}) {
+	if got, err := a.SuggestNextMessage(context.Background(), after); err != nil || got == "" || !equalStrings(f.used(), []string{"claude/haiku/low", "codex/gpt-6-luna/low"}) {
 		t.Fatal(got, err, f.used())
 	}
 }

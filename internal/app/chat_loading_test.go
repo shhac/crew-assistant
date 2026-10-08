@@ -47,7 +47,7 @@ func TestLoadingCaptionFallsBackToTheOtherCLI(t *testing.T) {
 	f = newFakeCLIs(t)
 	f.replyErr["codex"] = errors.New("usage limit reached")
 	phrase, err = generateLoadingPhrase(context.Background(), f.models(), smallModelsFor(t, "codex"), "hello", nil, nil)
-	if err != nil || phrase == "" || !equalStrings(f.used(), []string{"codex/gpt-6-luna/low", "claude/haiku/"}) {
+	if err != nil || phrase == "" || !equalStrings(f.used(), []string{"codex/gpt-6-luna/low", "claude/haiku/low"}) {
 		t.Fatal(phrase, err, f.used())
 	}
 }

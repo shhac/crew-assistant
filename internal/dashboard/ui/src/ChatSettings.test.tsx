@@ -60,7 +60,7 @@ it("toggles loading phrases without fetching a model catalog", () => {
 it("names the seated assistant's CLI's small model first and the other as fallback, and where to choose another", () => {
   const view = render(<ChatSettings config={config} onChange={() => {}} />);
   expect(hint()).toBe(
-    "Loading messages and next-message suggestions use your Codex login (gpt-6-luna, low effort), or your Claude login (haiku) if that isn't working. No other model is used. Choose the model",
+    "Loading messages and next-message suggestions use your Codex login (gpt-6-luna, low effort), or your Claude login (haiku, low effort) if that isn't working. No other model is used. Choose the model",
   );
   expect(
     screen.getByRole("link", { name: "Choose the model" }).getAttribute("href"),
@@ -74,7 +74,7 @@ it("names the seated assistant's CLI's small model first and the other as fallba
     />,
   );
   expect(hint()).toMatch(
-    /^Loading messages and next-message suggestions use your Claude login \(haiku\), or your Codex login \(gpt-6-luna, low effort\) if that isn't working\./,
+    /^Loading messages and next-message suggestions use your Claude login \(haiku, low effort\), or your Codex login \(gpt-6-luna, low effort\) if that isn't working\./,
   );
 });
 it("names the model the owner chose in Models", () => {

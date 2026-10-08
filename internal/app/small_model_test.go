@@ -33,7 +33,7 @@ func newFakeCLIs(t *testing.T) *fakeCLIs {
 		t: t,
 		offered: map[string][]catalog.Model{
 			"codex":  {{ID: "gpt-6-astra", EffortsKnown: true, Efforts: []catalog.Effort{{ID: "high"}}}, {ID: "gpt-5.6-luna", EffortsKnown: true, Efforts: []catalog.Effort{{ID: "low"}}}, {ID: "gpt-6-luna", EffortsKnown: true, Efforts: []catalog.Effort{{ID: "low"}, {ID: "high"}}}},
-			"claude": {{ID: "opus"}, {ID: "haiku"}},
+			"claude": {{ID: "opus"}, {ID: "haiku", EffortsKnown: true, Efforts: []catalog.Effort{{ID: "low"}, {ID: "high"}}}},
 		},
 		discoverErr: map[string]error{},
 		replyErr:    map[string]error{},
@@ -127,7 +127,7 @@ func equalStrings(a, b []string) bool {
 }
 
 func TestSmallModelsUseTheOwnEngineFirst(t *testing.T) {
-	for engineName, want := range map[string]string{"codex": "codex/gpt-6-luna/low", "claude": "claude/haiku/"} {
+	for engineName, want := range map[string]string{"codex": "codex/gpt-6-luna/low", "claude": "claude/haiku/low"} {
 		f := newFakeCLIs(t)
 		if _, err := f.models().ask(context.Background(), smallModelsFor(t, engineName), nil, nil); err != nil {
 			t.Fatal(engineName, err)
@@ -152,19 +152,31 @@ func TestSmallModelsFallBackFromCodexToClaude(t *testing.T) {
 		if err != nil || reply.Content == "" {
 			t.Fatal(name, err)
 		}
-		// Haiku is used with no effort, and never Luna 5.6, Astra or Opus.
+		// Haiku is used at low effort, and never Luna 5.6, Astra or Opus.
 		used := f.used()
-		if used[len(used)-1] != "claude/haiku/" {
+		if used[len(used)-1] != "claude/haiku/low" {
 			t.Fatal(name, used)
 		}
 	}
 }
 
+func TestSmallModelsSendNoEffortToAHaikuWithoutEffortLevels(t *testing.T) {
+	f := newFakeCLIs(t)
+	f.offered["claude"][1].Efforts = []catalog.Effort{}
+	if _, err := f.models().ask(context.Background(), smallModelsFor(t, "claude"), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.used(); !equalStrings(got, []string{"claude/haiku/"}) {
+		t.Fatal(got)
+	}
+}
+
 func TestSmallModelsFallBackFromClaudeToCodex(t *testing.T) {
 	for name, outage := range map[string]func(*fakeCLIs){
-		"not installed":     func(f *fakeCLIs) { f.discoverErr["claude"] = errors.New("claude: executable not found") },
-		"haiku not offered": func(f *fakeCLIs) { f.offered["claude"] = f.offered["claude"][:1] },
-		"call fails":        func(f *fakeCLIs) { f.replyErr["claude"] = errors.New("overloaded") },
+		"not installed":          func(f *fakeCLIs) { f.discoverErr["claude"] = errors.New("claude: executable not found") },
+		"haiku not offered":      func(f *fakeCLIs) { f.offered["claude"] = f.offered["claude"][:1] },
+		"low effort not offered": func(f *fakeCLIs) { f.offered["claude"][1].Efforts = []catalog.Effort{{ID: "high"}} },
+		"call fails":             func(f *fakeCLIs) { f.replyErr["claude"] = errors.New("overloaded") },
 	} {
 		f := newFakeCLIs(t)
 		outage(f)
@@ -191,7 +203,7 @@ func TestSmallModelsSkipAFailedEngineForAWhile(t *testing.T) {
 	if _, err := s.ask(context.Background(), models, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !equalStrings(f.discovered, []string{"claude"}) || !equalStrings(f.used(), []string{"claude/haiku/"}) {
+	if !equalStrings(f.discovered, []string{"claude"}) || !equalStrings(f.used(), []string{"claude/haiku/low"}) {
 		t.Fatal(f.discovered, f.used())
 	}
 	// Once the rest is over, the assistant's own engine is tried again.

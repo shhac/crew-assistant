@@ -104,7 +104,7 @@ func TestSmallModelsSkipAnEngineOutOfUsage(t *testing.T) {
 	if err != nil || reply.Content == "" {
 		t.Fatal(err)
 	}
-	if !equalStrings(f.used(), []string{"claude/haiku/"}) || !equalStrings(f.discovered, []string{"claude"}) {
+	if !equalStrings(f.used(), []string{"claude/haiku/low"}) || !equalStrings(f.discovered, []string{"claude"}) {
 		t.Fatal(f.used(), f.discovered)
 	}
 	if !equalStrings(asked, []string{"codex/gpt-6-luna", "claude/haiku"}) {
