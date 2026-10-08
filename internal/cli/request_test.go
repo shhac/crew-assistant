@@ -2,6 +2,7 @@ package cli
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -39,6 +40,28 @@ func TestRequestReportsTheDaemonsRefusal(t *testing.T) {
 				t.Fatalf("requestInto: %v", err)
 			}
 		})
+	}
+}
+
+// paddedState is a state reply padded with size bytes of activity.
+func paddedState(size int) string {
+	return `{"paused":true,"activity":["` + strings.Repeat("x", size) + `"]}`
+}
+
+func TestRequestReadsAStateLargerThanTheOldLimit(t *testing.T) {
+	o := replyingDaemon(t, 200, paddedState(14<<20))
+	var out struct {
+		Paused bool `json:"paused"`
+	}
+	if err := o.requestInto("GET", "/api/state", nil, &out); err != nil || !out.Paused {
+		t.Fatal(out, err)
+	}
+}
+
+func TestRequestNamesTheLimitWhenAReplyOutgrowsIt(t *testing.T) {
+	o := replyingDaemon(t, 200, paddedState(maxReplyBytes))
+	if _, err := o.request("GET", "/api/state", nil); err == nil || err.Error() != "the daemon's reply is larger than 128 MiB" {
+		t.Fatal(err)
 	}
 }
 

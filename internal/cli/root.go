@@ -170,8 +170,24 @@ func (o *options) request(method, path string, value any) (any, error) {
 	return result, nil
 }
 
+// maxReplyBytes bounds a daemon reply. The full state carries every task,
+// decision and activity entry, so it grows with use; a long-lived daemon's
+// passed 13 MB.
+const maxReplyBytes = 128 << 20
+
 func (o *options) requestInto(method, path string, value, out any) error {
-	return o.requestBody(method, path, value, func(r io.Reader) error { return json.NewDecoder(io.LimitReader(r, 4<<20)).Decode(out) })
+	return o.requestBody(method, path, value, func(r io.Reader) error { return decodeReply(r, out) })
+}
+
+// decodeReply reads one JSON reply. One cut off at the limit says so, rather
+// than reporting a truncated reply as an unexpected EOF.
+func decodeReply(r io.Reader, out any) error {
+	limited := &io.LimitedReader{R: r, N: maxReplyBytes}
+	err := json.NewDecoder(limited).Decode(out)
+	if err != nil && limited.N == 0 {
+		return fmt.Errorf("the daemon's reply is larger than %d MiB", maxReplyBytes>>20)
+	}
+	return err
 }
 
 func (o *options) requestBody(method, path string, value any, consume func(io.Reader) error) error {
