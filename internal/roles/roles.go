@@ -64,8 +64,10 @@ type Spec struct {
 	// still reaches no network.
 	Web bool
 	// Loopback lets what the role runs bind and reach this machine's own
-	// addresses, such as an app it starts to use, and nothing else: every
-	// other host stays closed. The harness proves it before launch.
+	// addresses, such as a server its tests start; outbound traffic to every
+	// other host stays closed. On macOS a bind is admitted on every local
+	// interface, so a server bound to 0.0.0.0 or a LAN address may be
+	// reachable from other machines. The harness proves it before launch.
 	Loopback bool
 	// Browser turns on the browser the engine ships, such as Claude in
 	// Chrome, which drives the owner's real browser outside the sandbox.

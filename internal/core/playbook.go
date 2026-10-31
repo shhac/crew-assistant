@@ -123,9 +123,6 @@ type Playbook struct {
 	// from, such as a Node install under nvm: their bin folders go first on
 	// the team's PATH. Only the owner grants them.
 	Tools []string `json:"tools,omitempty"`
-	// CheckLoopback lets QA's check bind and reach this machine's own
-	// addresses, for tests that start a local server; never wider network.
-	CheckLoopback bool `json:"check_loopback,omitempty"`
 	// Run is how QA starts the project and reaches it on this machine, to
 	// use the app as well as run the check; nil keeps QA to the check.
 	Run *RunRecipe `json:"run,omitempty"`

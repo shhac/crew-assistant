@@ -843,16 +843,19 @@ func saveReleaseProgress(t *testing.T, opts sandbox.Options, skips []checktest.S
 		t.Fatal(err)
 	}
 }
-func TestReleaseHostedLoopbackForCodex(t *testing.T) {
-	for _, on := range []bool{true, false} {
-		t.Run(fmt.Sprint(on), func(t *testing.T) {
-			if on {
+
+// The release's hosted check always has this machine's own addresses, even
+// for a QA whose engine's session doesn't, and a required test it skipped
+// still fails the release though the check exited cleanly.
+func TestReleaseHostedCheckHasLoopbackForCodex(t *testing.T) {
+	for _, skipped := range []bool{false, true} {
+		t.Run(fmt.Sprint("skipped=", skipped), func(t *testing.T) {
+			if !skipped {
 				listener := testutil.ListenLoopback(t)
 				listener.Close()
 			}
 			a, p, r, source, _, _ := releaseFixture(t, core.ApprovePM, false, false, 0)
 			book := *p.Playbook
-			book.CheckLoopback = on
 			for i := range book.Roles {
 				if book.Roles[i].Holds(core.RoleQA) {
 					book.Roles[i].Engine = "codex"
@@ -869,7 +872,7 @@ func TestReleaseHostedLoopbackForCodex(t *testing.T) {
 			called := false
 			a.commands = func(_ context.Context, opts sandbox.Options) (commandSandbox, error) {
 				called = true
-				if opts.Loopback != on || !strings.Contains(strings.Join(opts.Env, " "), "CREW_HOSTED_CHECK=1") || opts.WorkDir == source || opts.WorkDir == releaseCheckoutForTest(t, opts.WorkDir) {
+				if !opts.Loopback || !strings.Contains(strings.Join(opts.Env, " "), "CREW_HOSTED_CHECK=1") || opts.WorkDir == source || opts.WorkDir == releaseCheckoutForTest(t, opts.WorkDir) {
 					t.Fatal(opts)
 				}
 				return &fakeCommands{run: func(_ context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
@@ -877,11 +880,11 @@ func TestReleaseHostedLoopbackForCodex(t *testing.T) {
 						t.Fatal(req)
 					}
 					skips := []checktest.Skip{}
-					if opts.Loopback {
+					if skipped {
+						skips = append(skips, checktest.Skip{Package: "p", Test: "TestBindsLoopback", Reason: "listen tcp 127.0.0.1: operation not permitted"})
+					} else {
 						listener := testutil.ListenLoopback(t)
 						listener.Close()
-					} else {
-						skips = append(skips, checktest.Skip{Package: "p", Test: "TestBindsLoopback", Reason: "listen tcp 127.0.0.1: operation not permitted"})
 					}
 					saveReleaseProgress(t, opts, skips)
 					return sandbox.CommandResult{}, nil // Required skips must override exit zero.
@@ -893,7 +896,7 @@ func TestReleaseHostedLoopbackForCodex(t *testing.T) {
 			if !called || len(r.specs) != 1 {
 				t.Fatal("hosted check not used", r.specs)
 			}
-			if on {
+			if !skipped {
 				if checked.Release.State != "approved" {
 					t.Fatal(checked.Release)
 				}

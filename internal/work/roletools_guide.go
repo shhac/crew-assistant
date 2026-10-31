@@ -28,7 +28,7 @@ func (r roleTools) guide() string {
 		guide += ownerAnswerGuide
 	}
 	if r.checks != nil {
-		guide += " Use run_check for the project's check; repeat while it says still running. The daemon hosts its sandbox, including localhost when the project allows it, whatever your engine."
+		guide += " Use run_check for the project's check; repeat while it says still running. The daemon hosts its sandbox, with this machine's own addresses (localhost), whatever your engine."
 	}
 	if r.lin != nil {
 		if r.manages && !r.notesOnly {

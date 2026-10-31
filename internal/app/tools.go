@@ -121,7 +121,7 @@ var toolActions = map[string]toolAction{
 		return a.Core.SetProjectTitle(ctx, in.ProjectID, in.Title)
 	}),
 	"set_team": with(func(a *App, ctx context.Context, in engine.SetTeamArgs) (any, error) {
-		return a.Work.SetTeam(ctx, in.ProjectID, work.TeamChoice{Template: in.Template, WriterEngine: in.WriterEngine, ReviewerEngine: in.ReviewerEngine, MaxRounds: in.MaxRounds, DeliverTo: in.DeliverTo, Repo: in.Repo, BranchPrefix: in.BranchPrefix, Check: in.Check, Prepare: in.Prepare, Sign: in.Sign, CheckInCopy: in.CheckInCopy, CheckLoopback: in.CheckLoopback, Implementer: in.ImplementerMember, Reviewer: in.ReviewerMember, QA: in.QAMember, Researcher: in.ResearcherMember, Designer: in.DesignerMember, PM: in.PMMember})
+		return a.Work.SetTeam(ctx, in.ProjectID, work.TeamChoice{Template: in.Template, WriterEngine: in.WriterEngine, ReviewerEngine: in.ReviewerEngine, MaxRounds: in.MaxRounds, DeliverTo: in.DeliverTo, Repo: in.Repo, BranchPrefix: in.BranchPrefix, Check: in.Check, Prepare: in.Prepare, Sign: in.Sign, CheckInCopy: in.CheckInCopy, Implementer: in.ImplementerMember, Reviewer: in.ReviewerMember, QA: in.QAMember, Researcher: in.ResearcherMember, Designer: in.DesignerMember, PM: in.PMMember})
 	}),
 	"set_landing": with(func(a *App, ctx context.Context, in engine.SetLandingArgs) (any, error) {
 		stack, err := a.stacks(ctx, in.ProjectID, in.Stack)

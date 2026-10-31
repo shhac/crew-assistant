@@ -158,7 +158,6 @@ function RepositoryCard({
               <dd>
                 {r.check ? <code>{r.check}</code> : "None"}
                 {r.check_in_copy && " · in a writable copy"}
-                {r.check_loopback && " · may use this machine's addresses"}
               </dd>
             </div>
             <div className="fact-row">
@@ -243,7 +242,6 @@ function RepositoryEditor({
   const [prepare, setPrepare] = useState((initial.prepare ?? []).join(", "));
   const [tools, setTools] = useState((initial.tools ?? []).join(", "));
   const [inCopy, setInCopy] = useState(!!initial.check_in_copy);
-  const [loopback, setLoopback] = useState(!!initial.check_loopback);
   const [areas, setAreas] = useState(areasText(initial));
   const { busy, error, run } = useAction();
   const id = initial.path ? `repo-${initial.path}` : "repo-new";
@@ -328,14 +326,6 @@ function RepositoryEditor({
         />
         Run the check in a writable copy
       </label>
-      <label>
-        <input
-          type="checkbox"
-          checked={loopback}
-          onChange={(e) => setLoopback(e.target.checked)}
-        />
-        Let the check use this machine's own addresses
-      </label>
       <label htmlFor={`${id}-areas`}>
         Code areas
         <textarea
@@ -368,7 +358,6 @@ function RepositoryEditor({
                 prepare: pathList(prepare),
                 tools: pathList(tools),
                 check_in_copy: inCopy,
-                check_loopback: loopback,
                 areas: parseAreas(areas),
               }),
             )

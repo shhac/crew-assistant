@@ -278,13 +278,6 @@ func taskPlaybook(p core.Project, t core.Task) *core.Playbook {
 	return p.Playbook
 }
 
-// checkLoopback lets the implementer's own session run individual tests
-// with local servers where its engine offers it. The project's full check
-// uses run_check independently of this session capability.
-func checkLoopback(playbook *core.Playbook, r core.Role) bool {
-	return playbook != nil && playbook.CheckLoopback && config.Supports(r.Engine, config.UseLoopback)
-}
-
 // roleSpec is how a role runs for one turn. The files it reads its learnings
 // from last only as long as the turn: run it before cleanup.
 func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m medium, prompt string, checkCopy *checkout, performed ...string) (spec roles.Spec, cleanup func(), err error) {
@@ -293,6 +286,10 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 		return spec, nil, spec.PreparationError
 	}
 	spec.Write, spec.Env, spec.Read = write, m.env(t), m.readable()
+	// Every task role may use this machine's own addresses, such as for
+	// tests that start a local server, wherever its engine's sandbox offers
+	// them, whatever the project.
+	spec.Loopback = config.Supports(r.Engine, config.UseLoopback)
 	learned, err := lp.prepareLearnings(t, r)
 	if err != nil {
 		return spec, nil, err
@@ -458,7 +455,7 @@ func (lp *Loop) memberBrowser(r core.Role) core.Browser {
 
 // browserGuide is what a member allowed the browser is told about it.
 func browserGuide(b core.Browser) string {
-	return roles.BrowserGuide("You can use a browser this turn; your shell reaches no network, so it can't open an app you start.", b.Name)
+	return roles.BrowserGuide("You can use a browser this turn; your shell reaches no network beyond, at most, this machine's own addresses, so don't count on the browser opening an app you start.", b.Name)
 }
 
 // lookUp is a project's task as the state holds it now, with the project

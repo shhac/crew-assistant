@@ -170,7 +170,7 @@ func TestClaudeQARunsTheAppAndKeepsWhatItSaw(t *testing.T) {
 	}
 	qa := runner.qa[0]
 	port := "43001"
-	if qa.Loopback || !qa.Browser || !qa.Write || qa.Web || portOf(qa) != "" {
+	if qa.Loopback != config.Supports("claude", config.UseLoopback) || !qa.Browser || !qa.Write || qa.Web || portOf(qa) != "" {
 		t.Fatalf("QA was not given the app to run: loopback %v browser %v port %q", qa.Loopback, qa.Browser, port)
 	}
 	// The app's commands run in a writable copy of the revision in QA's
@@ -188,9 +188,9 @@ func TestClaudeQARunsTheAppAndKeepsWhatItSaw(t *testing.T) {
 			t.Errorf("QA's prompt does not say %q", want)
 		}
 	}
-	// Everyone else runs as before.
+	// Everyone else runs as before, with localhost as their engines offer.
 	for _, spec := range runner.seen {
-		if !strings.Contains(spec.Prompt, "Use run_check for the project check") && (spec.Loopback || spec.Browser || portOf(spec) != "") {
+		if !strings.Contains(spec.Prompt, "Use run_check for the project check") && (spec.Loopback != config.Supports(spec.Engine, config.UseLoopback) || spec.Browser || portOf(spec) != "") {
 			t.Fatalf("a role other than QA was given the app: %+v", spec)
 		}
 	}
@@ -356,7 +356,7 @@ func TestQAWithoutARecipeRunsTheCheckAsBefore(t *testing.T) {
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add Feature"})
 	task = settleCode(t, a, task.ID)
 	qa := runner.qa[0]
-	if qa.Loopback || qa.Web || portOf(qa) != "" || strings.Contains(qa.Prompt, "use the app") || strings.Contains(qa.Prompt, "evidence") {
+	if qa.Loopback != config.Supports("claude", config.UseLoopback) || qa.Web || portOf(qa) != "" || strings.Contains(qa.Prompt, "use the app") || strings.Contains(qa.Prompt, "evidence") {
 		t.Fatalf("QA without a recipe was given the app: %+v", qa)
 	}
 	// Its member allows the browser, so it has one all the same, for looking.
@@ -478,19 +478,13 @@ func TestTheRecipeAndQAsBrowserAreProjectSettings(t *testing.T) {
 	if qa, _ = seatHolding(p, core.RoleQA); qa.Browser != (core.Browser{On: true}) {
 		t.Fatalf("the project's own setting: %+v", qa)
 	}
-	// Loopback for the check changes only that setting, never the seats.
+	// The check command changes only that setting, never the seats, and a
+	// team with QA keeps one.
 	extra, err := a.AddToRole(ctx, p.ID, core.RoleReviewer, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	seats := len(extra.Playbook.Roles)
-	if p, err = a.SetCheckLoopback(ctx, p.ID, true); err != nil || !p.Playbook.CheckLoopback || len(p.Playbook.Roles) != seats {
-		t.Fatalf("turning check loopback on: %+v %v", p.Playbook, err)
-	}
-	if p, err = a.SetCheckLoopback(ctx, p.ID, false); err != nil || p.Playbook.CheckLoopback || len(p.Playbook.Roles) != seats {
-		t.Fatalf("turning check loopback off: %+v %v", p.Playbook, err)
-	}
-	// So does the check command, and a team with QA keeps one.
 	if p, err = a.SetCheck(ctx, p.ID, "  make check lint  "); err != nil || p.Playbook.Check != "make check lint" || len(p.Playbook.Roles) != seats {
 		t.Fatalf("setting the check: %+v %v", p.Playbook, err)
 	}
@@ -615,7 +609,8 @@ func TestHowQARunsTheAppFollowsWhatTheHarnessOffers(t *testing.T) {
 		}
 		spec := roles.Spec{Engine: c.role.Engine, Env: []string{"GOCACHE=/x"}}
 		app.apply(&spec)
-		if app.running() != c.running || spec.Loopback != (c.running && !c.browser) || spec.Browser != c.browser || app.images != c.shots || (app.unavailable != "") != c.unavailable {
+		// QA's session localhost comes with its turn, never with the app.
+		if app.running() != c.running || spec.Loopback || spec.Browser != c.browser || app.images != c.shots || (app.unavailable != "") != c.unavailable {
 			t.Errorf("%s %v: app %+v spec %+v", c.role.Engine, c.role.Kinds, app, spec)
 		}
 		if c.running && !slices.Equal(spec.Env, []string{"GOCACHE=/x"}) {
@@ -642,7 +637,7 @@ func TestAPIQAAppRunFollowsLoopbackSupportAndCarriesPort(t *testing.T) {
 	spec := roles.Spec{Env: []string{"GOCACHE=/cache", "GOPROXY=off"}}
 	app.apply(&spec)
 	if config.Supports("openai-compatible", config.UseLoopback) {
-		if !app.running() || reserved != 1 || !spec.Loopback || !slices.Equal(spec.Env, []string{"GOCACHE=/cache", "GOPROXY=off"}) {
+		if !app.running() || reserved != 1 || !slices.Equal(spec.Env, []string{"GOCACHE=/cache", "GOPROXY=off"}) {
 			t.Fatalf("%+v %+v", app, spec)
 		}
 		prompt := appPrompt(app)

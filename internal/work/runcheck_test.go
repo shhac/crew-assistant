@@ -18,6 +18,7 @@ import (
 	"github.com/shhac/lib-agent-harness/sandbox"
 	"github.com/shhac/lib-agent-harness/session"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 	"github.com/shhac/crew-assistant/internal/roles"
@@ -93,8 +94,9 @@ func checkFixture(t *testing.T) (*Loop, gitMedium, string) {
 	return lp, gitMedium{repo: repo, playbook: core.Playbook{Medium: core.MediumGit, Check: "make check"}}, source
 }
 
-// The same hosted tool serves all engines, with loopback chosen by the
-// playbook rather than the engine's session capabilities.
+// The same hosted tool serves all engines and always has this machine's own
+// addresses, whatever the engine's session offers; the session itself has
+// them exactly where its engine's sandbox offers them.
 func TestRunCheckOnEveryEngineAndRole(t *testing.T) {
 	lp, m, source := checkFixture(t)
 	if err := os.WriteFile(filepath.Join(source, "uncommitted.txt"), []byte("draft"), 0600); err != nil {
@@ -102,59 +104,59 @@ func TestRunCheckOnEveryEngineAndRole(t *testing.T) {
 	}
 	for _, engine := range []string{"codex", "claude", "openai-compatible"} {
 		for _, kind := range []string{core.RoleImplementer, core.RoleQA} {
-			for _, loopback := range []bool{false, true} {
-				t.Run(engine+"/"+kind+"/"+map[bool]string{false: "offline", true: "localhost"}[loopback], func(t *testing.T) {
-					m.playbook.CheckLoopback = loopback
-					var opts sandbox.Options
-					fake := &fakeCommands{result: sandbox.CommandResult{Stdout: "tests passed"}}
-					lp.commands = func(_ context.Context, o sandbox.Options) (commandSandbox, error) {
-						opts = o
-						if o.Timeout > 10*time.Minute {
-							return nil, errors.New("command timeout exceeds the v0.22.0 limit")
-						}
-						body, err := os.ReadFile(filepath.Join(o.WorkDir, "uncommitted.txt"))
-						if err != nil || string(body) != "draft" {
-							t.Errorf("copy missed draft: %s %v", body, err)
-						}
-						return fake, nil
+			t.Run(engine+"/"+kind, func(t *testing.T) {
+				var opts sandbox.Options
+				fake := &fakeCommands{result: sandbox.CommandResult{Stdout: "tests passed"}}
+				lp.commands = func(_ context.Context, o sandbox.Options) (commandSandbox, error) {
+					opts = o
+					if o.Timeout > 10*time.Minute {
+						return nil, errors.New("command timeout exceeds the v0.22.0 limit")
 					}
-					status := core.TaskWriting
-					if kind == core.RoleQA {
-						status = core.TaskReviewing
+					body, err := os.ReadFile(filepath.Join(o.WorkDir, "uncommitted.txt"))
+					if err != nil || string(body) != "draft" {
+						t.Errorf("copy missed draft: %s %v", body, err)
 					}
-					spec, cleanup, err := lp.roleSpec(core.Task{ID: "task", Status: status}, core.Role{Name: "Member", Engine: engine, Kinds: []string{kind}}, source, true, m, "check", nil)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if !hasTool(spec, "run_check") {
-						t.Fatal("run_check missing")
-					}
-					result, err := spec.Handler.CallTool(context.Background(), session.ToolCall{Name: "run_check", Arguments: json.RawMessage("{}")})
-					if err != nil || result.IsError || !strings.Contains(result.Content, "tests passed") {
-						t.Fatalf("%+v %v", result, err)
-					}
-					if opts.WorkDir == source || opts.WorkDir == "" || opts.Loopback != loopback || !opts.Write || opts.Timeout != commandTimeout {
-						t.Fatalf("sandbox options %+v", opts)
-					}
-					if !slices.Contains(opts.Env, "CREW_HOSTED_CHECK=1") {
-						t.Fatal("missing hosted-check marker")
-					}
-					if len(fake.runs) != 1 || fake.runs[0].Command != "make check" {
-						t.Fatalf("runs %+v", fake.runs)
-					}
-					if !fake.closed {
-						t.Fatal("finished check sandbox not closed")
-					}
-					if _, err := os.Stat(opts.WorkDir); !os.IsNotExist(err) {
-						t.Fatal("copy remained")
-					}
-					cleanup()
-					after, _ := spec.Handler.CallTool(context.Background(), session.ToolCall{Name: "run_check", Arguments: json.RawMessage("{}")})
-					if !after.IsError {
-						t.Fatal("tool ran after turn ended")
-					}
-				})
-			}
+					return fake, nil
+				}
+				status := core.TaskWriting
+				if kind == core.RoleQA {
+					status = core.TaskReviewing
+				}
+				spec, cleanup, err := lp.roleSpec(core.Task{ID: "task", Status: status}, core.Role{Name: "Member", Engine: engine, Kinds: []string{kind}}, source, true, m, "check", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if spec.Loopback != config.Supports(engine, config.UseLoopback) {
+					t.Fatalf("%s's %s session loopback %v", engine, kind, spec.Loopback)
+				}
+				if !hasTool(spec, "run_check") {
+					t.Fatal("run_check missing")
+				}
+				result, err := spec.Handler.CallTool(context.Background(), session.ToolCall{Name: "run_check", Arguments: json.RawMessage("{}")})
+				if err != nil || result.IsError || !strings.Contains(result.Content, "tests passed") {
+					t.Fatalf("%+v %v", result, err)
+				}
+				if opts.WorkDir == source || opts.WorkDir == "" || !opts.Loopback || !opts.Write || opts.Timeout != commandTimeout {
+					t.Fatalf("sandbox options %+v", opts)
+				}
+				if !slices.Contains(opts.Env, "CREW_HOSTED_CHECK=1") {
+					t.Fatal("missing hosted-check marker")
+				}
+				if len(fake.runs) != 1 || fake.runs[0].Command != "make check" {
+					t.Fatalf("runs %+v", fake.runs)
+				}
+				if !fake.closed {
+					t.Fatal("finished check sandbox not closed")
+				}
+				if _, err := os.Stat(opts.WorkDir); !os.IsNotExist(err) {
+					t.Fatal("copy remained")
+				}
+				cleanup()
+				after, _ := spec.Handler.CallTool(context.Background(), session.ToolCall{Name: "run_check", Arguments: json.RawMessage("{}")})
+				if !after.IsError {
+					t.Fatal("tool ran after turn ended")
+				}
+			})
 		}
 	}
 	for _, kind := range []string{core.RoleReviewer, core.RoleResearcher} {
@@ -169,6 +171,25 @@ func TestRunCheckOnEveryEngineAndRole(t *testing.T) {
 	tools := lp.toolsFor(core.Task{}, core.RoleImplementer, core.Role{})
 	if tools.offers("run_check") {
 		t.Fatal("documents offered check")
+	}
+}
+
+// Every task role's session, reading or writing, has this machine's own
+// addresses exactly where its engine's sandbox offers them.
+func TestEveryTaskRoleSessionHasLoopbackWhereItsEngineOffersIt(t *testing.T) {
+	lp, m, source := checkFixture(t)
+	statuses := map[string]string{core.RoleResearcher: core.TaskResearching, core.RoleDesigner: core.TaskDesigning, core.RoleImplementer: core.TaskWriting, core.RoleReviewer: core.TaskReviewing, core.RoleQA: core.TaskReviewing}
+	for _, engine := range []string{"codex", "claude", "openai-compatible"} {
+		for kind, status := range statuses {
+			spec, cleanup, err := lp.roleSpec(core.Task{ID: "task", Status: status}, core.Role{Name: "Member", Engine: engine, Kinds: []string{kind}}, source, kind == core.RoleImplementer, m, "work", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cleanup()
+			if spec.Role != kind || spec.Loopback != config.Supports(engine, config.UseLoopback) {
+				t.Fatalf("%s's %s turn (%s): loopback %v", engine, kind, spec.Role, spec.Loopback)
+			}
+		}
 	}
 }
 

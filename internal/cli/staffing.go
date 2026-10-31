@@ -100,7 +100,6 @@ func (f *repositoryFlags) add(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.in.Check, "check", "", "The full check QA and releases run")
 	cmd.Flags().StringSliceVar(&f.in.Prepare, "prepare", nil, "Ignored paths or patterns, such as **/node_modules, copied into each private copy")
 	cmd.Flags().BoolVar(&f.in.CheckInCopy, "check-in-copy", false, "Run the check in a writable copy of the revision")
-	cmd.Flags().BoolVar(&f.in.CheckLoopback, "check-loopback", false, "Let the check bind and reach this machine's own addresses")
 	cmd.Flags().StringArrayVar(&f.areas, "area", nil, "A code area, as name=path,path; repeat for more; replaces all areas")
 	cmd.Flags().StringVar(&f.runStart, "run-start", "", "How QA starts the app (with --run-url)")
 	cmd.Flags().StringVar(&f.runURL, "run-url", "", "Where the app answers, with {port}, such as http://127.0.0.1:{port}/")
@@ -111,12 +110,11 @@ func (f *repositoryFlags) add(cmd *cobra.Command) {
 
 // over is the repository's settings with the flags given laid over them.
 func (f *repositoryFlags) over(cmd *cobra.Command, r core.Repository) (core.RepositoryInput, error) {
-	in := core.RepositoryInput{Name: r.Name, Path: r.Path, DefaultBranch: r.DefaultBranch, Check: r.Check, Prepare: r.Prepare, CheckInCopy: r.CheckInCopy, CheckLoopback: r.CheckLoopback, Run: r.Run, Areas: r.Areas}
+	in := core.RepositoryInput{Name: r.Name, Path: r.Path, DefaultBranch: r.DefaultBranch, Check: r.Check, Prepare: r.Prepare, CheckInCopy: r.CheckInCopy, Run: r.Run, Areas: r.Areas}
 	changed := cmd.Flags().Changed
 	for flag, apply := range map[string]func(){
 		"name": func() { in.Name = f.in.Name }, "path": func() { in.Path = f.in.Path }, "default-branch": func() { in.DefaultBranch = f.in.DefaultBranch },
 		"check": func() { in.Check = f.in.Check }, "prepare": func() { in.Prepare = f.in.Prepare }, "check-in-copy": func() { in.CheckInCopy = f.in.CheckInCopy },
-		"check-loopback": func() { in.CheckLoopback = f.in.CheckLoopback },
 	} {
 		if changed(flag) {
 			apply()

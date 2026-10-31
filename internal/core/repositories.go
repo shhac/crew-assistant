@@ -30,9 +30,6 @@ type Repository struct {
 	Prepare []string `json:"prepare,omitempty"`
 	// CheckInCopy runs the check in a writable copy of the revision.
 	CheckInCopy bool `json:"check_in_copy,omitempty"`
-	// CheckLoopback lets the check bind and reach this machine's own
-	// addresses, for tests that start a local server; never wider network.
-	CheckLoopback bool `json:"check_loopback,omitempty"`
 	// Run is how QA starts the app on this machine, or nil.
 	Run *RunRecipe `json:"run,omitempty"`
 	// Tools are toolchain folders outside the clone the team may read and
@@ -77,14 +74,13 @@ type RepositoryInput struct {
 	Check         string     `json:"check"`
 	Prepare       []string   `json:"prepare"`
 	CheckInCopy   bool       `json:"check_in_copy"`
-	CheckLoopback bool       `json:"check_loopback"`
 	Run           *RunRecipe `json:"run"`
 	Tools         []string   `json:"tools"`
 	Areas         []CodeArea `json:"areas"`
 }
 
 func (in RepositoryInput) repository(id, path string) Repository {
-	r := Repository{ID: id, Name: strings.TrimSpace(in.Name), Path: path, DefaultBranch: strings.TrimSpace(in.DefaultBranch), Check: strings.TrimSpace(in.Check), CheckInCopy: in.CheckInCopy, CheckLoopback: in.CheckLoopback}
+	r := Repository{ID: id, Name: strings.TrimSpace(in.Name), Path: path, DefaultBranch: strings.TrimSpace(in.DefaultBranch), Check: strings.TrimSpace(in.Check), CheckInCopy: in.CheckInCopy}
 	for _, p := range in.Prepare {
 		if p = strings.TrimSpace(p); p != "" {
 			r.Prepare = append(r.Prepare, p)

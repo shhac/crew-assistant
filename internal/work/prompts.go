@@ -194,7 +194,7 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string, fresh bool) stri
 		b.WriteString("\nIf kept requirements still can't be met from your sandbox, report them too. Keep quoting them in the owner-step block with why; the loop reports them in your hand-over instead of opening another escalation.\n")
 	}
 	if playbook := taskPlaybook(p, t); isCode(p, t) && playbook != nil && playbook.Check != "" {
-		b.WriteString("\nUse run_check for the project's check before handing over; repeat while it says still running. The project's check, including tests that start local servers when the project allows localhost, is within reach through run_check and is never an owner step.")
+		b.WriteString("\nUse run_check for the project's check before handing over; repeat while it says still running. The project's check, including tests that start local servers, is within reach through run_check and is never an owner step.")
 	}
 	b.WriteString("\nIf a requirement needs something outside your sandbox, such as the owner's machine, their browser or the network, do everything else it asks, then end your reply with a ```owner-step block holding a JSON list: [{\"requirement\": \"the requirement, quoted\", \"why\": \"why you can't meet it from here\"}]. It goes to the owner to check after the change lands, instead of another round.\n")
 	account := "."

@@ -23,7 +23,7 @@ var migrations = map[int]func(doc map[string]any) error{
 // repositoryKeys and teamKeys are the parts of a project's playbook that
 // schema 4 keeps with its repository and its team.
 var (
-	repositoryKeys = map[string]string{"repo": "path", "check": "check", "prepare": "prepare", "check_in_copy": "check_in_copy", "check_loopback": "check_loopback", "run": "run"}
+	repositoryKeys = map[string]string{"repo": "path", "check": "check", "prepare": "prepare", "check_in_copy": "check_in_copy", "run": "run"}
 	teamKeys       = map[string]string{"roles": "roles", "max_rounds": "max_rounds", "template": "template"}
 )
 

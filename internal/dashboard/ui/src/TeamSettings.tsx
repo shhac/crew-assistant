@@ -184,7 +184,6 @@ function TeamEditor({
   const [template, setTemplate] = useState(playbook?.template ?? "draft");
   const code = template === "code";
   const [check, setCheck] = useState(playbook?.check ?? "");
-  const [loopback, setLoopback] = useState(playbook?.check_loopback === true);
   const [writer, setWriter] = useState(current?.writer_engine || "claude");
   const [reviewer, setReviewer] = useState(current?.reviewer_engine || "codex");
   const [rounds, setRounds] = useState(String(playbook?.max_rounds ?? 3));
@@ -202,10 +201,7 @@ function TeamEditor({
         check: check.trim(),
         deliver_to: deliverTo,
       });
-      await setTeam(
-        project.id,
-        code ? { ...team, check_loopback: loopback ? "yes" : "no" } : team,
-      );
+      await setTeam(project.id, team);
       await refresh();
       onDone();
     });
@@ -269,22 +265,17 @@ function TeamEditor({
                 value={check}
                 placeholder="make check"
                 onChange={(e) => setCheck(e.target.value)}
+                aria-describedby="team-check-hint"
                 required
               />
             </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={loopback}
-                onChange={(e) => setLoopback(e.target.checked)}
-                aria-describedby="team-loopback-hint"
-              />
-              <span>Let the check use this machine's own network</span>
-            </label>
-            <p className="hint" id="team-loopback-hint">
-              For tests that start a local server. The project's check runs in a
-              sandbox crew-assistant hosts, for the implementer and QA on any
-              engine; nothing beyond this machine is reachable.
+            <p className="hint" id="team-check-hint">
+              The project's check runs in a sandbox crew-assistant hosts, for
+              the implementer and QA on any engine. It, and every role whose
+              engine offers it, may use this machine's own addresses for tests
+              that start a local server. Nothing they run reaches other
+              machines, though on macOS a server listening on every address may
+              be reachable from them.
             </p>
           </>
         ) : (

@@ -55,7 +55,7 @@ func TestRepositoryTeamAndProjectCommands(t *testing.T) {
 		}
 	}
 	run(repositoryCommand(o), "add", "--path", dir, "--name", "Mono", "--check", "make check", "--prepare", "**/node_modules", "--area", "web=web/**,shared")
-	run(repositoryCommand(o), "set", "Mono", "--check-loopback", "--run-start", "npm start", "--run-url", "http://127.0.0.1:{port}/")
+	run(repositoryCommand(o), "set", "Mono", "--check-in-copy", "--run-start", "npm start", "--run-url", "http://127.0.0.1:{port}/")
 	run(teamCommand(o), "add", "Core")
 	run(teamCommand(o), "set", "core", "--max-rounds", "5")
 	run(projectCommand(o), "setup", "Web", "--team", "Core", "--repository", "Mono", "--area", "web")
@@ -65,7 +65,7 @@ func TestRepositoryTeamAndProjectCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, team, project := snap.Repositories[0], snap.Teams[0], snap.Projects[0]
-	if r.Name != "Mono" || r.Check != "make check" || !r.CheckLoopback || r.Run == nil || r.Run.Start != "npm start" || len(r.Areas) != 1 || len(r.Areas[0].Paths) != 2 {
+	if r.Name != "Mono" || r.Check != "make check" || !r.CheckInCopy || r.Run == nil || r.Run.Start != "npm start" || len(r.Areas) != 1 || len(r.Areas[0].Paths) != 2 {
 		t.Fatalf("repository %+v", r)
 	}
 	if team.Name != "Core" || team.MaxRounds != 5 {
@@ -75,7 +75,7 @@ func TestRepositoryTeamAndProjectCommands(t *testing.T) {
 		t.Fatalf("project %+v", project)
 	}
 	pb := project.Playbook
-	if pb.Repo != dir || !pb.CheckLoopback || pb.MaxRounds != 5 || pb.Roles[0].Name == "Researcher" || pb.Roles[len(pb.Roles)-2].Member != ada.ID {
+	if pb.Repo != dir || !pb.CheckInCopy || pb.MaxRounds != 5 || pb.Roles[0].Name == "Researcher" || pb.Roles[len(pb.Roles)-2].Member != ada.ID {
 		t.Fatalf("playbook %+v", pb)
 	}
 	// Ada can join the team once Web no longer adds her seat itself.

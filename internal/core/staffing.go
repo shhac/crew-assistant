@@ -319,7 +319,7 @@ func (s *Service) SetProjectSetup(ctx context.Context, projectID string, in Proj
 					return fmt.Errorf("%s has no code area %q", repo.Name, name)
 				}
 			}
-			own.Repo, own.Check, own.Prepare, own.CheckInCopy, own.CheckLoopback, own.Run = "", "", nil, false, false, nil
+			own.Repo, own.Check, own.Prepare, own.CheckInCopy, own.Run = "", "", nil, false, nil
 			p.Scope = Scope{Repositories: []ScopeRepository{{ID: repo.ID, Areas: slices.Compact(slices.Sorted(slices.Values(in.Areas)))}}}
 		} else {
 			if len(in.Areas) > 0 {

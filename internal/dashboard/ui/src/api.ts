@@ -178,8 +178,6 @@ export interface Playbook {
   sign?: string;
   /** QA runs the check in a writable copy of the revision. */
   check_in_copy?: boolean;
-  /** QA's check may bind and reach this machine's own addresses. */
-  check_loopback?: boolean;
   land?: LandPolicy;
   /** How QA starts the app to use it; none keeps QA to the check. */
   run?: RunRecipe;
@@ -349,7 +347,6 @@ export interface Repository {
   check?: string;
   prepare?: string[];
   check_in_copy?: boolean;
-  check_loopback?: boolean;
   run?: RunRecipe;
   /** Toolchain folders outside the clone the team may read and run from. */
   tools?: string[];
@@ -416,8 +413,6 @@ export interface TeamInput {
   check?: string;
   prepare?: string[];
   sign?: string;
-  /** "yes" or "no"; absent keeps the team's choice. */
-  check_loopback?: "yes" | "no";
 }
 export interface WorkspaceInput {
   repo: string;

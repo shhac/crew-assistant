@@ -1127,7 +1127,7 @@ describe("a request", () => {
     ).toEqual(["Keep it short"]);
   });
   it("moves a request waiting on the owner onto a team changed since it started", async () => {
-    const quinn = { ...codeTeam(), check_loopback: true };
+    const quinn = codeTeam();
     quinn.roles = quinn.roles.map((r) =>
       r.name === "QA" ? { ...r, name: "Quinn", engine: "claude" } : r,
     );
@@ -2340,14 +2340,13 @@ describe("the project's tabs", () => {
     fireEvent.change(within(team).getByLabelText("QA runs"), {
       target: { value: "make check" },
     });
-    fireEvent.click(
-      within(team).getByLabelText(
-        "Let the check use this machine's own network",
-      ),
-    );
     expect(
-      within(team).getByText(/sandbox crew-assistant hosts/).textContent,
-    ).toMatch(/implementer and QA on any engine/);
+      within(team).queryByLabelText(/this machine's own network/),
+    ).toBeNull();
+    const checkHint = within(team).getByText(/sandbox crew-assistant hosts/);
+    expect(checkHint.textContent).toMatch(/implementer and QA on any engine/);
+    expect(checkHint.textContent).toMatch(/this machine's own addresses/);
+    expect(checkHint.textContent).toMatch(/reachable from them/);
     expect(
       within(team).queryByText(/Each member must use an engine/),
     ).toBeNull();
@@ -2382,7 +2381,6 @@ describe("the project's tabs", () => {
           check: "make check",
           prepare: [],
           sign: "",
-          check_loopback: "yes",
         },
       },
     ]);

@@ -16,10 +16,10 @@ import (
 )
 
 // appRun is the daemon-hosted app for one QA turn, from the project's
-// run recipe: on a port of its own, reached on this machine only, and
-// through the engine's own browser when its seat says so. Without a recipe,
-// or with a checker that isn't QA, it is the zero value and QA's check is
-// exactly as it was.
+// run recipe: on a port of its own on this machine, reached through the
+// engine's own browser when its seat says so, or the session's localhost.
+// Without a recipe, or with a checker that isn't QA, it is the zero value
+// and QA's check is exactly as it was.
 type appRun struct {
 	recipe  *core.RunRecipe
 	port    int
@@ -34,12 +34,11 @@ type appRun struct {
 	// tree is the writable copy of the revision the app's commands run in,
 	// in QA's scratch folder, so setup can build without touching the
 	// revision checked.
-	tree            string
-	sandbox         commandSandbox
-	process         startedCommand
-	sessionLoopback bool
-	log             string
-	cleanupError    func(error)
+	tree         string
+	sandbox      commandSandbox
+	process      startedCommand
+	log          string
+	cleanupError func(error)
 }
 
 // running reports whether the app is available for QA in this check.
@@ -72,18 +71,16 @@ func (lp *Loop) planApp(checker core.Role, playbook *core.Playbook) (appRun, err
 	if browser.On && config.Supports(checker.Engine, config.UseBrowser) {
 		run.browser = browser
 	}
-	run.sessionLoopback = !run.browser.On && config.Supports(checker.Engine, config.UseLoopback)
 	run.images = harness.Support(harness.Engine(checker.Engine), harness.Session, harness.ToolImages).Usable()
 	return run, nil
 }
 
-// apply gives QA its allowed browser, or session localhost for requesting
-// the daemon-hosted app where the engine offers it.
+// apply gives QA its allowed browser for using the daemon-hosted app. QA's
+// session already has localhost wherever its engine offers it.
 func (a appRun) apply(spec *roles.Spec) {
 	if !a.running() {
 		return
 	}
-	spec.Loopback = a.sessionLoopback
 	// The member may already allow the browser everywhere; QA's own setting
 	// adds it for using the app, never takes it away.
 	spec.Browser = spec.Browser || a.browser.On

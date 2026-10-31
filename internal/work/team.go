@@ -30,9 +30,6 @@ type TeamChoice struct {
 	// CheckInCopy is "yes" for QA to run the check in a writable copy, "no"
 	// for the read-only checkout, and empty to keep what the team has.
 	CheckInCopy string `json:"check_in_copy"`
-	// CheckLoopback is "yes" to let QA's check use this machine's own
-	// addresses, "no" to refuse it, and empty to keep what the team has.
-	CheckLoopback string `json:"check_loopback"`
 	// Run, when given, is how QA starts the app to use it; nil keeps the
 	// recipe the team has.
 	Run *core.RunRecipe `json:"run,omitempty"`
@@ -113,7 +110,6 @@ func teamFrom(in TeamChoice, snap core.Snapshot, current *core.Playbook) (core.P
 		playbook.Prepare = append([]string(nil), in.Prepare...)
 		playbook.Sign = in.Sign
 		playbook.CheckInCopy = in.CheckInCopy == "yes"
-		playbook.CheckLoopback = in.CheckLoopback == "yes"
 	}
 	return playbook, nil
 }
@@ -256,9 +252,6 @@ func chosenTeam(in TeamChoice, snap core.Snapshot, p core.Project, current *core
 			playbook.Run = p.Playbook.Run
 			if in.CheckInCopy == "" {
 				playbook.CheckInCopy = p.Playbook.CheckInCopy
-			}
-			if in.CheckLoopback == "" {
-				playbook.CheckLoopback = p.Playbook.CheckLoopback
 			}
 		}
 	}

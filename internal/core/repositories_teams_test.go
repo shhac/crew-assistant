@@ -88,7 +88,7 @@ func TestSchema3ProjectsBecomeRepositoriesAndTeamsWithTheSamePlaybooks(t *testin
 	if repo == nil || team == nil || app.Team != team.ID || firstRepository(app) != repo.ID {
 		t.Fatalf("app is not linked to its own repository and team: %+v %+v %+v", app.Scope, repo, team)
 	}
-	if repo.Name != "app" || repo.Path != "/work/app" || repo.Check != "make check" || !slices.Equal(repo.Prepare, []string{"node_modules", "**/vendor"}) || !repo.CheckInCopy || !repo.CheckLoopback || repo.Run == nil || repo.Run.Setup != "npm ci" {
+	if repo.Name != "app" || repo.Path != "/work/app" || repo.Check != "make check" || !slices.Equal(repo.Prepare, []string{"node_modules", "**/vendor"}) || !repo.CheckInCopy || repo.Run == nil || repo.Run.Setup != "npm ci" {
 		t.Fatalf("repository %+v", repo)
 	}
 	if team.Name != "App" || team.Template != "code" || team.MaxRounds != 4 || len(team.Roles) != 4 || team.Roles[3].Member != "m-pim" || !team.Roles[3].Holds(RolePM) {

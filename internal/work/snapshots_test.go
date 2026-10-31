@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shhac/crew-assistant/internal/config"
 	"github.com/shhac/crew-assistant/internal/core"
 	"github.com/shhac/crew-assistant/internal/media/gitrepo"
 	"github.com/shhac/crew-assistant/internal/media/localdocs"
@@ -23,9 +24,13 @@ type checkRunner struct {
 	*codeRunner
 	onCheck func(spec roles.Spec)
 	onWrite func(spec roles.Spec)
+	onAny   func(spec roles.Spec)
 }
 
 func (r checkRunner) Run(ctx context.Context, spec roles.Spec) (roles.Result, error) {
+	if r.onAny != nil {
+		r.onAny(spec)
+	}
 	if r.onCheck != nil && ((strings.Contains(spec.Prompt, "Use run_check for the project check") || strings.Contains(spec.Prompt, "Run exactly this")) || strings.Contains(spec.Prompt, "Do not modify anything")) {
 		r.onCheck(spec)
 	}
@@ -704,9 +709,10 @@ func TestQACheckInCopyKeepsHostedCheckGuidance(t *testing.T) {
 	}
 }
 
-// Hosted checks cover QA localhost independently; only the implementer
-// retains session localhost for individual tests. Saving keeps the setting.
-func TestHostedCheckDoesNotGiveQASessionLoopback(t *testing.T) {
+// Every role's session may use this machine's own addresses wherever its
+// engine's sandbox offers it, whatever the project says, and never where the
+// engine doesn't. Saving the team keeps the check's other settings.
+func TestEveryRoleSessionHasLoopbackWhereItsEngineOffersIt(t *testing.T) {
 	t.Parallel()
 	a, code, p, task := codeTask(t, pass, pass)
 	ctx := context.Background()
@@ -714,30 +720,29 @@ func TestHostedCheckDoesNotGiveQASessionLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", QA: quinn.ID, CheckInCopy: "yes", CheckLoopback: "yes"}); err != nil {
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", QA: quinn.ID, CheckInCopy: "yes"}); err != nil {
 		t.Fatal(err)
 	}
 	saved, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", QA: quinn.ID})
-	if err != nil || !saved.Playbook.CheckLoopback || !saved.Playbook.CheckInCopy {
+	if err != nil || !saved.Playbook.CheckInCopy {
 		t.Fatalf("saving the team without them dropped the check's settings: %+v, %v", saved.Playbook, err)
 	}
-	loopback := map[bool]bool{}
-	var writerLoopback []bool
-	a.runner = checkRunner{codeRunner: code, onCheck: func(spec roles.Spec) {
-		loopback[spec.Write] = spec.Loopback
-	}, onWrite: func(spec roles.Spec) {
-		writerLoopback = append(writerLoopback, spec.Loopback)
-	}}
+	var specs []roles.Spec
+	a.runner = checkRunner{codeRunner: code, onAny: func(spec roles.Spec) { specs = append(specs, spec) }}
 	task = settleCode(t, a, task.ID)
-	if task.Status != core.TaskWaiting || loopback[true] || loopback[false] {
-		t.Fatalf("hosted checks must not give QA (true) or reviewer (false) session loopback: %v, task %s", loopback, task.Status)
+	if task.Status != core.TaskWaiting {
+		t.Fatalf("task %s", task.Status)
 	}
-	if len(writerLoopback) == 0 || slices.Contains(writerLoopback, false) {
-		t.Fatalf("the implementer can't run tests that need a local server: %v", writerLoopback)
+	offered := map[bool]bool{}
+	for _, spec := range specs {
+		supported := config.Supports(spec.Engine, config.UseLoopback)
+		if spec.Loopback != supported {
+			t.Fatalf("%s's %s turn on %s: loopback %v, engine offers it %v", spec.Seat, spec.Role, spec.Engine, spec.Loopback, supported)
+		}
+		offered[supported] = true
 	}
-	off, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", QA: quinn.ID, CheckLoopback: "no"})
-	if err != nil || off.Playbook.CheckLoopback || !off.Playbook.CheckInCopy {
-		t.Fatalf("turning it off: %+v, %v", off.Playbook, err)
+	if !offered[true] || !offered[false] {
+		t.Fatalf("the team needs an engine that offers loopback and one that doesn't: %v over %d turns", offered, len(specs))
 	}
 }
 
@@ -774,7 +779,7 @@ func TestATaskWaitingForTheOwnerCanTakeOnTheProjectsTeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", QA: quinn.ID, CheckLoopback: "yes"}); err != nil {
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", QA: quinn.ID, CheckInCopy: "yes"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.UseProjectTeam(ctx, "elsewhere", task.ID); !errors.Is(err, core.ErrNotFound) {
@@ -785,7 +790,7 @@ func TestATaskWaitingForTheOwnerCanTakeOnTheProjectsTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	qa := slices.IndexFunc(moved.Playbook.Roles, func(r core.Role) bool { return r.Holds(core.RoleQA) })
-	if !moved.Playbook.CheckLoopback || qa < 0 || moved.Playbook.Roles[qa].Member != quinn.ID || moved.Roles[qa].Member != quinn.ID {
+	if !moved.Playbook.CheckInCopy || qa < 0 || moved.Playbook.Roles[qa].Member != quinn.ID || moved.Roles[qa].Member != quinn.ID {
 		t.Fatalf("the task's team: %+v", moved.Playbook)
 	}
 	// Back in the queue after it started, such as behind a dependency, it
@@ -796,11 +801,11 @@ func TestATaskWaitingForTheOwnerCanTakeOnTheProjectsTeam(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", CheckLoopback: "no"}); err != nil {
+	if _, err := a.SetTeam(ctx, p.ID, TeamChoice{Template: "code", BranchPrefix: "paul/", Check: "make check", CheckInCopy: "no"}); err != nil {
 		t.Fatal(err)
 	}
 	requeued, err := a.UseProjectTeam(ctx, p.ID, task.ID)
-	if err != nil || requeued.Playbook.CheckLoopback {
+	if err != nil || requeued.Playbook.CheckInCopy {
 		t.Fatalf("a started task back in the queue kept its old team: %v, %+v", err, requeued.Playbook)
 	}
 }
