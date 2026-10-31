@@ -62,13 +62,13 @@ func TestCleanupReleasesOnlyItsOwnHeldObligation(t *testing.T) {
 	if err := s.HoldClaim(testContext, task.ID, p.ID, c.Token, "accounting"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ReleaseHeldClaim(testContext, task.ID, c.Token, "command cleanup"); err != nil {
+	if err := s.ReleaseHeldClaim(testContext, task.ID, "", c.Token, "command cleanup"); err != nil {
 		t.Fatal(err)
 	}
 	if len(taskNow(t, s, task.ID).Claims) != 1 {
 		t.Fatal("released accounting obligation")
 	}
-	if err := s.ReleaseHeldClaim(testContext, task.ID, c.Token, "accounting"); err != nil {
+	if err := s.ReleaseHeldClaim(testContext, task.ID, "", c.Token, "accounting"); err != nil {
 		t.Fatal(err)
 	}
 	if len(taskNow(t, s, task.ID).Claims) != 0 {

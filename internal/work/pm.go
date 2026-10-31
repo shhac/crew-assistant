@@ -438,7 +438,9 @@ func (lp *Loop) AskPM(ctx context.Context, projectID, question string) (answer s
 			err = accounting.failure
 			if holdErr := lp.Core.HoldClaim(context.WithoutCancel(ctx), "", p.ID, c.Token, accountingHold); holdErr != nil {
 				err = errors.Join(err, holdErr)
+				return
 			}
+			lp.keepAccounting(claimed{project: p.ID, token: c.Token}, accounting.failure)
 			return
 		}
 		_ = lp.Core.ReleaseProjectClaim(context.WithoutCancel(ctx), p.ID, c.Token)

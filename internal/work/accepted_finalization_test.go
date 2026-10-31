@@ -49,7 +49,7 @@ func TestFinalAccountingHoldPrecedesJobRemoval(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	err = lp.Core.ReleaseHeldClaim(ctx, task.ID, claim.Token, errCommandRecovery.Error())
+	err = lp.Core.ReleaseHeldClaim(ctx, task.ID, "", claim.Token, errCommandRecovery.Error())
 	now := taskByID(t, lp, task.ID)
 	lp.jobs.mu.Unlock()
 	for value := range done {

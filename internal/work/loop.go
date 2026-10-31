@@ -102,8 +102,10 @@ type Loop struct {
 	commands func(context.Context, sandbox.Options) (commandSandbox, error)
 	// Held accepted-merge checkouts are removed only after supervisor recovery.
 	commandChecks sync.Map
-	commandMu     sync.Mutex
-	liveCommands  map[string]bool
+	// accountingRetries are held claims' accounting, by token; see retryAccounting.
+	accountingRetries sync.Map
+	commandMu         sync.Mutex
+	liveCommands      map[string]bool
 	// checked, when set, is told a checker's turn is over, before its
 	// verdict is recorded. Set in tests.
 	checked func(taskID, checker string)

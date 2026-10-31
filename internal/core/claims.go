@@ -36,6 +36,8 @@ type Claim struct {
 	// Held says why a turn a stopped daemon left behind could not be
 	// confirmed ended: its task waits rather than run the step again.
 	Held string `json:"held,omitempty"`
+	// HeldAt is when it was held for that reason.
+	HeldAt time.Time `json:"held_at,omitzero"`
 	// Revoked keeps a superseded turn's scheduling hold and launch identity
 	// until it ends, but denies it authority to change the task.
 	Revoked bool `json:"revoked,omitempty"`
@@ -859,10 +861,16 @@ func (s *Service) ReleaseClaim(ctx context.Context, taskID, token string) error 
 
 // ReleaseHeldClaim discharges only the named obligation. A different hold,
 // including terminal accounting, must be settled by its own recovery path.
-func (s *Service) ReleaseHeldClaim(ctx context.Context, taskID, token, why string) error {
+func (s *Service) ReleaseHeldClaim(ctx context.Context, taskID, projectID, token, why string) error {
 	return s.store.update(ctx, func(v *Snapshot) error {
+		heldFor := func(c Claim) bool { return c.Token == token && c.Held == why }
 		if t := task(v, taskID); t != nil {
-			t.Claims = slices.DeleteFunc(t.Claims, func(c Claim) bool { return c.Token == token && c.Held == why })
+			t.Claims = slices.DeleteFunc(t.Claims, heldFor)
+			return nil
+		}
+		if p := project(v, projectID); taskID == "" && p != nil && slices.ContainsFunc(p.Claims, heldFor) {
+			s.stopPMChat(v, projectID, token)
+			p.Claims = slices.DeleteFunc(p.Claims, heldFor)
 		}
 		return nil
 	})
@@ -884,7 +892,7 @@ func (s *Service) HoldClaim(ctx context.Context, taskID, projectID, token, why s
 		}
 		for i := range claims {
 			if claims[i].Token == token {
-				claims[i].Held = why
+				hold(&claims[i], why, s.now())
 				if heldTask != nil {
 					heldTask.Detail = why
 				}
@@ -913,7 +921,7 @@ func (s *Service) RecoverClaims(ctx context.Context, held map[string]string) err
 			var kept []Claim
 			for _, c := range t.Claims {
 				if why, ok := held[c.Token]; ok {
-					c.Held = why
+					hold(&c, why, s.now())
 					kept = append(kept, c)
 				}
 			}
@@ -937,11 +945,23 @@ func (s *Service) RecoverClaims(ctx context.Context, held map[string]string) err
 				return !ok
 			})
 			for k := range p.Claims {
-				p.Claims[k].Held = held[p.Claims[k].Token]
+				hold(&p.Claims[k], held[p.Claims[k].Token], s.now())
 			}
 		}
 		return nil
 	})
+}
+
+// hold keeps c for why, from now unless it was already held for it.
+func hold(c *Claim, why string, now time.Time) {
+	if why == "" {
+		c.Held, c.HeldAt = "", time.Time{}
+		return
+	}
+	if c.Held != why || c.HeldAt.IsZero() {
+		c.HeldAt = now.UTC()
+	}
+	c.Held = why
 }
 
 // ActiveCap is the optional overall limit; 0 means no overall limit.

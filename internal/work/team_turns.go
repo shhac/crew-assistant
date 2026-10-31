@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shhac/crew-assistant/internal/core"
+	"github.com/shhac/crew-assistant/internal/diagnostics"
 	"github.com/shhac/crew-assistant/internal/roles"
 	"github.com/shhac/lib-agent-harness/session"
 )
@@ -15,6 +16,8 @@ import (
 type teamAccountingFailure struct {
 	run, accounting error
 	result          roles.Result
+	// record makes the same accounting writes again.
+	record func(context.Context) error
 }
 
 type accountingFailureKey struct{}
@@ -122,24 +125,28 @@ func (lp *Loop) runAttempt(ctx context.Context, spec roles.Spec) (roles.Result, 
 		NativeError: result.Provider.NativeError, CleanupConfirmed: result.CleanupConfirmed,
 		Usage: result.Provider.Usage, Observed: result.Provider.Observed,
 		CompactionUsage: result.Compaction.Usage, CompactionObserved: result.Compaction.Observed}
+	record := func(ctx context.Context) error {
+		if actualOpening != nil {
+			if err := lp.Core.OpenTeamTurn(ctx, id, *actualOpening); err != nil {
+				return err
+			}
+		}
+		if actualAccepted != nil {
+			if err := lp.Core.AcceptTeamTurn(ctx, id, *actualAccepted); err != nil {
+				return err
+			}
+		}
+		finish := lp.finishTeamTurn
+		if finish == nil {
+			finish = lp.Core.FinishTeamTurn
+		}
+		return finish(ctx, id, terminal)
+	}
 	accountCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), accountingWait)
 	defer cancel()
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
-		err = nil
-		if actualOpening != nil {
-			err = lp.Core.OpenTeamTurn(accountCtx, id, *actualOpening)
-		}
-		if err == nil && actualAccepted != nil {
-			err = lp.Core.AcceptTeamTurn(accountCtx, id, *actualAccepted)
-		}
-		if err == nil {
-			finish := lp.finishTeamTurn
-			if finish == nil {
-				finish = lp.Core.FinishTeamTurn
-			}
-			err = finish(accountCtx, id, terminal)
-		}
+		err = record(accountCtx)
 		if err == nil {
 			return result, runErr
 		}
@@ -148,19 +155,19 @@ func (lp *Loop) runAttempt(ctx context.Context, spec roles.Spec) (roles.Result, 
 		}
 		select {
 		case <-accountCtx.Done():
-			return result, accountingFailed(ctx, result, runErr, err)
+			return result, accountingFailed(ctx, result, runErr, err, record)
 		case <-time.After(time.Duration(attempt+1) * 50 * time.Millisecond):
 		}
 	}
 	// runRole recognizes this separate accounting failure and stops immediate
 	// fallback even when the runner also reported a browser refusal.
-	return result, accountingFailed(ctx, result, runErr, err)
+	return result, accountingFailed(ctx, result, runErr, err, record)
 }
 
 // Retain the result and signal the scheduler even when a caller handles
 // the error locally, as PM, message and release paths may do.
-func accountingFailed(ctx context.Context, result roles.Result, runErr, writeErr error) error {
-	failure := &teamAccountingFailure{run: runErr, accounting: writeErr, result: result}
+func accountingFailed(ctx context.Context, result roles.Result, runErr, writeErr error, record func(context.Context) error) error {
+	failure := &teamAccountingFailure{run: runErr, accounting: writeErr, result: result, record: record}
 	if state, ok := ctx.Value(accountingFailureKey{}).(*accountingFailureState); ok {
 		state.failure = failure
 	}
@@ -210,5 +217,62 @@ func (lp *Loop) recoverTeamTurns(ctx context.Context, held map[string]string, co
 const accountingWait = 2 * time.Minute
 
 // accountingHold is why a claim is kept after its turn ended but the turn's
-// accounting could not be recorded; startup releases it.
-const accountingHold = "Held: terminal team turn accounting could not be recorded"
+// accounting could not be recorded. The loop retries the accounting and lets
+// the claim go once it is recorded; startup lets it go regardless.
+const accountingHold = core.AccountingHold
+
+// accountingRetry is a held claim's accounting, tried again until recorded.
+type accountingRetry struct {
+	task, project, token string
+	record               func(context.Context) error
+	due                  time.Time
+	wait                 time.Duration
+}
+
+// keepAccounting has the loop try a failed turn's accounting again, from a
+// little later, and let its held claim go once it is recorded.
+func (lp *Loop) keepAccounting(c claimed, failure *teamAccountingFailure) {
+	if failure.record == nil {
+		return
+	}
+	lp.accountingRetries.Store(c.token, &accountingRetry{task: c.task, project: c.project, token: c.token,
+		record: failure.record, due: lp.now().Add(accountingRetryWait), wait: accountingRetryWait})
+}
+
+// retryAccounting tries again each held claim's accounting that is due, on
+// its own terms, whatever else the loop could not settle, such as a command
+// sweep. A claim whose accounting is recorded now, or was already, goes.
+func (lp *Loop) retryAccounting(ctx context.Context) {
+	lp.accountingRetries.Range(func(key, value any) bool {
+		r := value.(*accountingRetry)
+		if lp.now().Before(r.due) {
+			return true
+		}
+		writeCtx, cancel := context.WithTimeout(ctx, accountingWait)
+		err := r.record(writeCtx)
+		cancel()
+		if err == nil || errors.Is(err, core.ErrConflict) || errors.Is(err, core.ErrNotFound) {
+			if _, cleanup := lp.commandChecks.Load(r.token); cleanup {
+				// Its command's cleanup is still owed: the sweep lets it go.
+				err = lp.Core.HoldClaim(ctx, r.task, r.project, r.token, errCommandRecovery.Error())
+			} else {
+				err = lp.Core.ReleaseHeldClaim(ctx, r.task, r.project, r.token, accountingHold)
+			}
+			if err == nil {
+				lp.accountingRetries.Delete(key)
+				return true
+			}
+		}
+		lp.Diagnostics.Failure(diagnostics.Event{Component: "daemon", Stage: "turn_accounting", ProjectID: r.project}, err)
+		r.wait = min(2*r.wait, accountingRetryMax)
+		r.due = lp.now().Add(r.wait)
+		return true
+	})
+}
+
+// A held claim's accounting is tried again after accountingRetryWait, then
+// at doubling waits of up to accountingRetryMax.
+const (
+	accountingRetryWait = 30 * time.Second
+	accountingRetryMax  = 10 * time.Minute
+)

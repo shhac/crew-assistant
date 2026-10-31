@@ -198,6 +198,8 @@ type Decision struct {
 	CreatedAt  time.Time   `json:"created_at"`
 	ResolvedAt *time.Time  `json:"resolved_at,omitempty"`
 	BlockerID  string      `json:"blocker_id,omitempty"`
+	// Claim is the held step a DecisionHeldClaim is about.
+	Claim string `json:"claim,omitempty"`
 }
 
 // Approves reports a decision whose approval lets the task's change go out.

@@ -127,6 +127,9 @@ func (s *Service) finishDecisionUsing(ctx context.Context, id, answer, dispositi
 			}
 			resolveRelease(v, d, choice, now)
 		}
+		if d.Kind == DecisionHeldClaim && disposition == DispositionChoice && answer == ChoiceLetGo {
+			s.letHeldClaimGo(v, d)
+		}
 		if d.Kind == DecisionPRFlow && disposition == DispositionChoice {
 			choosePRFlow(v, d.TaskID, answer == ChoiceKeepPR, "You", now)
 		}

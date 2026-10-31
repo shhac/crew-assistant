@@ -105,10 +105,16 @@ func (lp *Loop) passWhile(stop lifecycle.Stop, waited bool) (bool, []<-chan any,
 				if obligation.task == "" {
 					continue // Orphan copies retained during startup, without runnable authority.
 				}
-				if err := lp.Core.ReleaseHeldClaim(ctx, obligation.task, obligation.token, errCommandRecovery.Error()); err != nil {
+				if err := lp.Core.ReleaseHeldClaim(ctx, obligation.task, "", obligation.token, errCommandRecovery.Error()); err != nil {
 					return false, nil, err
 				}
 			}
+		}
+	}
+	lp.retryAccounting(ctx)
+	if snap.HeldClaimsToNotice(lp.now()) {
+		if err := lp.Core.NoticeHeldClaims(ctx, lp.now()); err != nil {
+			return false, nil, err
 		}
 	}
 	chats, err := lp.answerPMChats(ctx, snap, waited)
@@ -242,7 +248,11 @@ func (lp *Loop) run(ctx context.Context, c claimed, waited bool, step, release f
 		if accounting.failure != nil {
 			err = accounting.failure
 			settle = func(ctx context.Context) error {
-				return lp.Core.HoldClaim(ctx, c.task, c.project, token, accountingHold)
+				if err := lp.Core.HoldClaim(ctx, c.task, c.project, token, accountingHold); err != nil {
+					return err
+				}
+				lp.keepAccounting(c, accounting.failure)
+				return nil
 			}
 		}
 		releaseErr := settle(context.WithoutCancel(ctx))
