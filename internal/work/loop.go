@@ -290,6 +290,8 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 	// tests that start a local server, wherever its engine's sandbox offers
 	// them, whatever the project.
 	spec.Loopback = config.Supports(r.Engine, config.UseLoopback)
+	// Subagents are for task turns only, never the PM's decisions.
+	spec.Subagents = lp.memberSubagents(r)
 	learned, err := lp.prepareLearnings(t, r)
 	if err != nil {
 		return spec, nil, err
@@ -439,18 +441,35 @@ func (lp *Loop) baseSpec(r core.Role, workDir, prompt string) roles.Spec {
 // who has left and an engine whose sandboxed sessions refuse the browser
 // have none.
 func (lp *Loop) memberBrowser(r core.Role) core.Browser {
-	if r.Member == "" || !config.Supports(r.Engine, config.UseBrowser) {
+	if !config.Supports(r.Engine, config.UseBrowser) {
 		return core.Browser{}
+	}
+	m, _ := lp.seatMember(r)
+	return m.Browser
+}
+
+// memberSubagents is whether a seat's member allows its task turns their
+// CLI's own subagents. Like the browser it is read as the turn starts, and a
+// template seat, a member who has left and an engine whose sandboxed sessions
+// can't start subagents have none.
+func (lp *Loop) memberSubagents(r core.Role) bool {
+	if !config.Supports(r.Engine, config.UseSubagents) {
+		return false
+	}
+	m, _ := lp.seatMember(r)
+	return m.Subagents
+}
+
+// seatMember is the member filling a seat as the state holds it now.
+func (lp *Loop) seatMember(r core.Role) (core.Member, bool) {
+	if r.Member == "" {
+		return core.Member{}, false
 	}
 	snap, err := lp.Core.Snapshot(context.Background())
 	if err != nil {
-		return core.Browser{}
+		return core.Member{}, false
 	}
-	m, ok := snap.Member(r.Member)
-	if !ok {
-		return core.Browser{}
-	}
-	return m.Browser
+	return snap.Member(r.Member)
 }
 
 // browserGuide is what a member allowed the browser is told about it.

@@ -31,6 +31,9 @@ const (
 	// UseLoopback lets a role's sandboxed shell start the project and reach
 	// it on this machine, while every other host stays closed.
 	UseLoopback Use = "loopback"
+	// UseSubagents lets a role's sandboxed session split its work across its
+	// CLI's own subagents, under the same sandbox.
+	UseSubagents Use = "subagents"
 )
 
 // Supports says whether engine can be chosen for use. lib-agent-harness
@@ -63,6 +66,8 @@ func Supports(engine string, use Use) bool {
 		return e.Transport() != harness.APITransport && Supports(engine, UseRoles) && harness.Support(e, harness.Session, harness.Browser).Usable() && harness.Support(e, harness.Session, harness.SandboxedBrowser).Usable()
 	case UseLoopback:
 		return Supports(engine, UseRoles) && harness.Support(e, harness.Session, harness.Loopback).Usable()
+	case UseSubagents:
+		return Supports(engine, UseRoles) && harness.Support(e, harness.Session, harness.SandboxedSubagents).Usable()
 	}
 	return false
 }
@@ -135,6 +140,15 @@ func CheckRoleEngine(engine string) error {
 		return err
 	}
 	return fmt.Errorf("%w. %s", err, reason)
+}
+
+// CheckSubagents refuses subagents allowed on an engine whose sandboxed
+// sessions can't start them.
+func CheckSubagents(engine string, on bool) error {
+	if !on || Supports(engine, UseSubagents) {
+		return nil
+	}
+	return fmt.Errorf("%s can't use subagents here; choose %s, or switch subagents off first", EngineLabel(engine), engineLabels(EnginesFor(UseSubagents)))
 }
 
 // CheckTemplateRoleEngine keeps engine-only seats on CLIs. API members carry

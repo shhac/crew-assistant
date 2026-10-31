@@ -10,6 +10,7 @@ const none = {
   models: false,
   efforts: false,
   browser: false,
+  subagents: false,
 } satisfies Omit<EngineChoice, "engine" | "label">;
 
 /**
@@ -30,6 +31,7 @@ export const testChoices: EngineChoice[] = [
     usage: true,
     models: true,
     efforts: true,
+    subagents: true,
   },
   {
     ...none,
@@ -43,6 +45,7 @@ export const testChoices: EngineChoice[] = [
     models: true,
     efforts: true,
     browser: true,
+    subagents: true,
   },
   {
     ...none,

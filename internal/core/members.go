@@ -32,8 +32,12 @@ type Member struct {
 	Personality  string `json:"personality,omitempty"`
 	// Browser is whether the member, as QA, uses its engine's own browser;
 	// a seat copies it.
-	Browser Browser       `json:"browser,omitzero"`
-	Avatar  config.Avatar `json:"avatar"`
+	Browser Browser `json:"browser,omitzero"`
+	// Subagents is whether the member's task turns may split their work
+	// across their CLI's own subagents, under the same sandbox. It is read
+	// as each turn starts, not copied into seats.
+	Subagents bool          `json:"subagents,omitempty"`
+	Avatar    config.Avatar `json:"avatar"`
 	// AvatarSVG is filled in when the state is read, and the drawing status
 	// by the app, which does the drawing; neither is stored.
 	AvatarSVG string     `json:"avatar_svg,omitempty"`
@@ -60,6 +64,7 @@ type MemberInput struct {
 	Description          string         `json:"description"`
 	Personality          string         `json:"personality"`
 	Browser              Browser        `json:"browser"`
+	Subagents            bool           `json:"subagents"`
 	Avatar               *config.Avatar `json:"avatar,omitempty"`
 }
 
@@ -164,6 +169,9 @@ func (in MemberInput) validate(v *Snapshot, id string) error {
 	if err := in.Browser.Validate(in.Engine); err != nil {
 		return err
 	}
+	if err := config.CheckSubagents(in.Engine, in.Subagents); err != nil {
+		return err
+	}
 	if in.Avatar != nil {
 		if err := in.Avatar.Normalized().Validate(); err != nil {
 			return fmt.Errorf("avatar: %w", err)
@@ -212,7 +220,7 @@ func (s *Service) SaveMember(ctx context.Context, id string, in MemberInput) (Me
 		m.Model, m.Effort, m.Instructions = strings.TrimSpace(in.Model), strings.TrimSpace(in.Effort), strings.TrimSpace(in.Instructions)
 		m.Description, m.Personality = strings.TrimSpace(in.Description), strings.TrimSpace(in.Personality)
 		m.Provider = in.Provider
-		m.Browser = in.Browser.Trimmed()
+		m.Browser, m.Subagents = in.Browser.Trimmed(), in.Subagents
 		// A drawn picture is changed only by drawing again; a new member
 		// keeps the look it is to be drawn with.
 		if in.Avatar != nil {

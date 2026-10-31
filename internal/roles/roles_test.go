@@ -31,8 +31,23 @@ func TestEveryRoleRunsSandboxedWithOnlyWhatItWasGiven(t *testing.T) {
 	if reviewer.Sandbox == nil || reviewer.Sandbox.Write || reviewer.RuntimeHome != "" || reviewer.Instructions.Text != "" {
 		t.Fatalf("a read-only Claude role got more than it was given: %+v", reviewer)
 	}
-	if codex.Sandbox.Loopback || codex.Sandbox.Web || codex.Browser || reviewer.Sandbox.Loopback || reviewer.Browser {
+	if codex.Sandbox.Loopback || codex.Sandbox.Web || codex.Browser || codex.Sandbox.Subagents || reviewer.Sandbox.Loopback || reviewer.Browser || reviewer.Sandbox.Subagents {
 		t.Fatalf("a role reached further than it was given: %+v %+v", codex, reviewer)
+	}
+}
+
+// A role given subagents has them switched on in its sandbox and nothing else
+// widened; an API workbench has no sandbox to switch them on in.
+func TestSubagentsReachTheSandboxOnlyWhenGiven(t *testing.T) {
+	for _, engine := range []string{"claude", "codex"} {
+		o := options(Spec{Engine: engine, WorkDir: "/work", Subagents: true})
+		if o.Sandbox == nil || !o.Sandbox.Subagents || o.Sandbox.Write || o.Sandbox.Web || o.Sandbox.Loopback || o.Browser {
+			t.Fatalf("%s: %+v", engine, o.Sandbox)
+		}
+	}
+	api := options(Spec{Engine: "openai-compatible", WorkDir: "/work", Subagents: true})
+	if api.Sandbox != nil {
+		t.Fatalf("an API role got a CLI sandbox: %+v", api.Sandbox)
 	}
 }
 

@@ -1423,6 +1423,7 @@ describe("the team", () => {
       description: "A tall woman with silver hair.",
       personality: "",
       browser: { on: false, name: "" },
+      subagents: false,
     });
   });
   const milo = () => ({

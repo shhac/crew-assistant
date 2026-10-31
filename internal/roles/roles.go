@@ -69,6 +69,11 @@ type Spec struct {
 	// interface, so a server bound to 0.0.0.0 or a LAN address may be
 	// reachable from other machines. The harness proves it before launch.
 	Loopback bool
+	// Subagents lets the session start its CLI's own subagents, which run
+	// under the same sandbox as far as the CLI documents. On Claude a subagent
+	// asked for worktree isolation has the CLI itself, outside the OS sandbox,
+	// create a git worktree under WorkDir.
+	Subagents bool
 	// Browser turns on the browser the engine ships, such as Claude in
 	// Chrome, which drives the owner's real browser outside the sandbox.
 	Browser bool
@@ -358,7 +363,7 @@ func options(spec Spec) session.Options {
 		WorkDir:     spec.WorkDir,
 		Model:       spec.Model,
 		Effort:      spec.Effort,
-		Sandbox:     &session.Sandbox{Write: spec.Write, Read: spec.Read, Web: spec.Web, Loopback: spec.Loopback},
+		Sandbox:     &session.Sandbox{Write: spec.Write, Read: spec.Read, Web: spec.Web, Loopback: spec.Loopback, Subagents: spec.Subagents},
 		Env:         spec.Env,
 		Browser:     spec.Browser,
 		Skills:      spec.Skills,

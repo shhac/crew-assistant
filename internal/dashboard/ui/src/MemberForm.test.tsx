@@ -138,6 +138,7 @@ it("chooses a new member's model from the models its engine offers", async () =>
       description: "Tall, silver-haired, fond of tidy diffs.",
       personality: "Dry wit, short sentences.",
       browser: { on: false, name: "" },
+      subagents: false,
     },
   });
 });
@@ -179,6 +180,60 @@ it("lets any member be allowed browser use on an engine with one, and says whose
     engine: "claude",
     browser: { on: true, name: "Work laptop" },
   });
+});
+
+it("lets a member be allowed subagents only on an engine that offers them", async () => {
+  const onSaved = vi.fn();
+  render(<MemberForm onSaved={onSaved} onCancel={() => {}} />);
+  await screen.findByRole("option", { name: "Test Sonnet (recommended)" });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Allow subagents" }));
+  expect(screen.getByText(/under the same sandbox/)).toBeTruthy();
+  expect(screen.getByText(/Uses more of your subscription/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Name"), {
+    target: { value: "Ida" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add member" }));
+  await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  expect(saved().body).toMatchObject({ engine: "claude", subagents: true });
+});
+
+it("hides subagents where the engine has none, and holds a save left on there", async () => {
+  const onSaved = vi.fn();
+  const member: Member = {
+    id: "m1",
+    name: "Gus",
+    kinds: ["implementer"],
+    engine: "openai-compatible",
+    provider: "openrouter",
+    model: "some-model",
+    subagents: true,
+    learnings: [],
+  };
+  const view = render(
+    <MemberForm member={member} onSaved={onSaved} onCancel={() => {}} />,
+  );
+  expect(screen.getByText(/Another API can't use subagents/)).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Save" }).hasAttribute("disabled"),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Allow subagents" }));
+  expect(
+    screen.queryByRole("checkbox", { name: "Allow subagents" }),
+  ).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Save" }).hasAttribute("disabled"),
+  ).toBe(false);
+  view.unmount();
+  render(
+    <MemberForm
+      member={{ ...member, subagents: false }}
+      onSaved={onSaved}
+      onCancel={() => {}}
+    />,
+  );
+  expect(
+    screen.queryByRole("checkbox", { name: "Allow subagents" }),
+  ).toBeNull();
 });
 
 it("fills a new member in from a suggestion, and has its look drawn", async () => {
@@ -281,6 +336,7 @@ it("keeps a member's saved model that the engine no longer lists", async () => {
       description: "Quiet, exact, wears a green cap.",
       personality: "Terse.",
       browser: { on: false, name: "" },
+      subagents: false,
     },
   });
 });

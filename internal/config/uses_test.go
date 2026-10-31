@@ -22,7 +22,11 @@ func TestEnginesAreOfferedForWhatTheHarnessSupports(t *testing.T) {
 		UseEfforts:   {"codex", "claude", "grok"},
 		UseBrowser:   {"codex", "claude"},
 		UseLoopback:  {"claude"},
+		UseSubagents: {"codex", "claude"},
 	} {
+		if use == UseSubagents && runtime.GOOS == "windows" {
+			want = nil
+		}
 		if (use == UseRoles && (runtime.GOOS == "darwin" || runtime.GOOS == "linux")) || (use == UseLoopback && runtime.GOOS == "darwin") {
 			want = append(want, "openai-compatible")
 		}
@@ -40,7 +44,7 @@ func TestEnginesAreOfferedForWhatTheHarnessSupports(t *testing.T) {
 		t.Fatalf("known engines %v", got)
 	}
 	for _, unset := range []harness.Engine{harness.CommandCode, harness.Antigravity, harness.Fx} {
-		for _, use := range []Use{UseAssistant, UseRoles, UseSmall, UseUsage, UseModels, UseEfforts} {
+		for _, use := range []Use{UseAssistant, UseRoles, UseSmall, UseUsage, UseModels, UseEfforts, UseSubagents} {
 			if Supports(string(unset), use) {
 				t.Errorf("%s was offered for %s without settings for it", unset, use)
 			}
@@ -140,6 +144,30 @@ func TestRoleFileToolsReportHarnessAbsence(t *testing.T) {
 	}
 	if got := RoleFileTools("codex"); len(got) != 0 {
 		t.Fatal(got)
+	}
+}
+
+// Subagents are offered only where the harness says a sandboxed session can
+// start them, and only switching them on is refused elsewhere.
+func TestSubagentsAreOfferedOnlyWhereASandboxedSessionAdmitsThem(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		return
+	}
+	for _, engine := range []string{"claude", "codex"} {
+		if !Supports(engine, UseSubagents) || CheckSubagents(engine, true) != nil {
+			t.Errorf("%s: subagents refused", engine)
+		}
+	}
+	for _, engine := range []string{"grok", "openai-compatible", "gemini", ""} {
+		if Supports(engine, UseSubagents) {
+			t.Errorf("%s: subagents offered", engine)
+		}
+		if err := CheckSubagents(engine, true); err == nil || !strings.Contains(err.Error(), "Codex or Claude") {
+			t.Errorf("%s: %v", engine, err)
+		}
+		if err := CheckSubagents(engine, false); err != nil {
+			t.Errorf("%s off: %v", engine, err)
+		}
 	}
 }
 

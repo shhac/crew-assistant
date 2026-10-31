@@ -48,6 +48,9 @@ type engineChoice struct {
 	Efforts     bool   `json:"efforts"`
 	// Browser is whether QA on it can use the browser the engine ships.
 	Browser bool `json:"browser"`
+	// Subagents is whether a member on it can be allowed its CLI's own
+	// subagents.
+	Subagents bool `json:"subagents"`
 }
 
 func engineChoices() []engineChoice {
@@ -61,6 +64,7 @@ func engineChoices() []engineChoice {
 			Small: config.Supports(name, config.UseSmall), Compact: config.Supports(name, config.UseCompact),
 			Usage: config.Supports(name, config.UseUsage), Models: config.Supports(name, config.UseModels),
 			Efforts: config.Supports(name, config.UseEfforts), Browser: config.Supports(name, config.UseBrowser),
+			Subagents: config.Supports(name, config.UseSubagents),
 		})
 	}
 	return choices

@@ -10,6 +10,7 @@ import {
   savedBrowser,
   useBrowserOffered,
 } from "./BrowserFields";
+import { SubagentsField, useSubagentsOffered } from "./SubagentsField";
 import { saveMember, type Browser, type Member, type MemberKind } from "./api";
 
 export function MemberForm({
@@ -61,6 +62,9 @@ export function MemberForm({
   const browserOffered = useBrowserOffered(choice.engine);
   const browserOn = !!browser.on;
   const browserProblem = browserOn && !browserOffered;
+  const [subagents, setSubagents] = useState(!!member?.subagents);
+  const subagentsOffered = useSubagentsOffered(choice.engine);
+  const subagentsProblem = subagents && !subagentsOffered;
   useEffect(() => {
     if (!suggestion) return;
     setName(suggestion.name);
@@ -83,6 +87,7 @@ export function MemberForm({
         description: description.trim(),
         personality: personality.trim(),
         browser: savedBrowser(browser),
+        subagents,
         ...(!member && suggestion ? { avatar: suggestion.avatar } : {}),
       });
       await onSaved(saved);
@@ -143,6 +148,11 @@ export function MemberForm({
         onChange={setBrowser}
         purpose="member"
       />
+      <SubagentsField
+        engine={choice.engine}
+        value={subagents}
+        onChange={setSubagents}
+      />
       <PersonalityField
         id="member-personality"
         value={personality}
@@ -189,6 +199,7 @@ export function MemberForm({
             !!problem ||
             !choice.engine ||
             browserProblem ||
+            subagentsProblem ||
             modelProblem
           }
         >

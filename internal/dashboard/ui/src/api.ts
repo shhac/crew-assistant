@@ -105,6 +105,8 @@ export interface Member extends Drawable {
   /** How they write. */
   personality?: string;
   browser?: Browser;
+  /** Whether their task turns may split work across their CLI's subagents. */
+  subagents?: boolean;
   learnings: Learning[];
   created_at?: string;
 }
@@ -119,6 +121,7 @@ export interface MemberInput {
   description: string;
   personality: string;
   browser: Browser;
+  subagents: boolean;
   /** A new member's stand-in face and the look to draw, from a suggestion. */
   avatar?: AvatarSpec;
 }
@@ -1308,6 +1311,8 @@ export interface EngineChoice {
   efforts: boolean;
   /** QA on it can use the browser the engine ships. */
   browser: boolean;
+  /** A member on it can be allowed its CLI's own subagents. */
+  subagents: boolean;
 }
 /** What a blank engine setting falls back to, for showing in its place. */
 export interface ConfigDefaults {
