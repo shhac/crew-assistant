@@ -10,11 +10,11 @@ import (
 func TestDecisionsExportWritesRawJSONL(t *testing.T) {
 	const body = "{\"decision_id\":\"one\"}\n{\"decision_id\":\"two\"}\n"
 	o := standIn(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/decisions/evaluations.jsonl" || r.Header.Get("Authorization") != "Bearer test-token" {
+		if r.URL.Path != "/api/decisions/evaluations.jsonl" || r.Header.Get("Authorization") != "" {
 			t.Fatalf("bad request %v", r)
 		}
 		w.Write([]byte(body))
-	}), "test-token")
+	}))
 	path := filepath.Join(t.TempDir(), "evaluations.jsonl")
 	cmd := decisionsCommand(o)
 	cmd.SetArgs([]string{"export", "--output", path})

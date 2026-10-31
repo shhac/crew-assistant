@@ -265,14 +265,13 @@ func TestTeamTurnHistoryReadFailuresDoNotWrite(t *testing.T) {
 	request := func() *http.Request {
 		r := httptest.NewRequest("GET", "http://127.0.0.1:8340"+path, nil)
 		r.RemoteAddr = "127.0.0.1:4321"
-		r.Header.Set("Authorization", "Bearer "+auth.admin)
-		return r
+		return fromTheOwnersSocket(r)
 	}
 	h.ServeHTTP(&failedHistoryWriter{header: http.Header{}}, request())
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, request().WithContext(cancelled))
+	h.ServeHTTP(w, fromTheOwnersSocket(request().WithContext(cancelled)))
 	if w.Code != 500 || strings.Contains(w.Body.String(), "context") {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -310,7 +309,9 @@ func TestTeamTurnRoutesOwnerAuthentication(t *testing.T) {
 		request := func(token, host string, cookie *http.Cookie) *httptest.ResponseRecorder {
 			r := httptest.NewRequest("GET", "http://"+host+path, nil)
 			r.RemoteAddr = "127.0.0.1:4321"
-			if token != "" {
+			if token == "owner" {
+				r = fromTheOwnersSocket(r)
+			} else if token != "" {
 				r.Header.Set("Authorization", "Bearer "+token)
 			}
 			if cookie != nil {
@@ -325,16 +326,13 @@ func TestTeamTurnRoutesOwnerAuthentication(t *testing.T) {
 				t.Fatal(w.Code, w.Body.String())
 			}
 		}
-		if w := request(auth.admin, "evil.example", nil); w.Code != 403 {
+		if w := request("", "evil.example", nil); w.Code != 403 {
 			t.Fatal(w.Code)
 		}
-		if w := request(auth.admin, "127.0.0.1:8340", nil); w.Code != 200 {
+		if w := request("owner", "127.0.0.1:8340", nil); w.Code != 200 {
 			t.Fatal(w.Code)
 		}
-		code, err := Pair(filepath.Dir(auth.pairingPath))
-		if err != nil {
-			t.Fatal(err)
-		}
+		code := auth.Pair()
 		login := send(h, auth, "POST", "/api/session", strings.NewReader(`{"token":"`+code+`"}`), caller{csrf: true})
 		if login.Code != 200 {
 			t.Fatal(login.Body.String())

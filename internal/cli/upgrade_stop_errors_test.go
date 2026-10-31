@@ -141,7 +141,7 @@ func TestServeSignalDuringRecoveryConfirmation(t *testing.T) {
 				if err := os.WriteFile(blocker, []byte("blocker"), 0600); err != nil {
 					t.Fatal(err)
 				}
-				h.probe = func(ctx context.Context, _, _ string) error {
+				h.probe = func(ctx context.Context, _ string) error {
 					defer close(probeDone)
 					if outcome == "observer-first" {
 						if err := h.engine.StopProbation(); err != nil {

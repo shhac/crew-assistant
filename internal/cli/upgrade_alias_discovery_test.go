@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/shhac/crew-assistant/internal/testutil"
-	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,10 +14,6 @@ import (
 	"github.com/shhac/crew-assistant/internal/lifecycle"
 	"github.com/shhac/crew-assistant/internal/upgrade"
 )
-
-type aliasTransport func(*http.Request) (*http.Response, error)
-
-func (f aliasTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func aliasCommand(t *testing.T, state, config string, args ...string) map[string]any {
 	t.Helper()
@@ -90,29 +86,38 @@ func TestCommandsDiscoverDaemonAndUpgradeThroughAliases(t *testing.T) {
 				if err := os.MkdirAll(runtime, 0700); err != nil {
 					t.Fatal(err)
 				}
-				for name, body := range map[string]string{"daemon.json": `{"url":"http://dashboard.fixture","local_url":"http://daemon.fixture"}`, "admin-token": "synthetic-token"} {
-					if err := os.WriteFile(filepath.Join(runtime, name), []byte(body), 0600); err != nil {
-						t.Fatal(err)
-					}
+				sockets, err := os.MkdirTemp("", "crew-alias-")
+				if err != nil {
+					t.Fatal(err)
 				}
-				original := http.DefaultTransport
-				defer func() { http.DefaultTransport = original }()
+				defer os.RemoveAll(sockets)
+				socket := filepath.Join(sockets, "owner.sock")
+				listener, err := net.Listen("unix", socket)
+				if err != nil {
+					t.Skip("this environment refuses a Unix socket:", err)
+				}
 				requests := []string{}
-				http.DefaultTransport = aliasTransport(func(r *http.Request) (*http.Response, error) {
-					if r.URL.Host != "daemon.fixture" || r.Header.Get("Authorization") != "Bearer synthetic-token" {
-						t.Fatal("wrong daemon or token", r.URL)
+				daemon := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/api/pairing" {
+						w.Write([]byte(`{"code":"fixture-code","expires":"5 minutes"}`))
+						return
 					}
 					requests = append(requests, r.Method+" "+r.URL.Path)
-					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"status":"fixture"}`)), Header: make(http.Header)}, nil
-				})
+					w.Write([]byte(`{"status":"fixture"}`))
+				})}
+				go daemon.Serve(listener)
+				defer daemon.Close()
+				record := `{"url":"http://dashboard.fixture","local_url":"http://daemon.fixture","socket":"` + socket + `"}`
+				if err := os.WriteFile(filepath.Join(runtime, "daemon.json"), []byte(record), 0600); err != nil {
+					t.Fatal(err)
+				}
 				for _, spelling := range []string{state, alias} {
 					if got := aliasCommand(t, spelling, config, "status"); got["status"] != "fixture" {
 						t.Fatal(got)
 					}
 					got := aliasCommand(t, spelling, config, "dashboard", "open", "--print")
-					code, err := os.ReadFile(filepath.Join(runtime, "pairing-code"))
-					if err != nil || got["code"] != string(code) || got["url"] != "http://dashboard.fixture" {
-						t.Fatal(got, err)
+					if got["code"] != "fixture-code" || got["url"] != "http://dashboard.fixture" {
+						t.Fatal(got)
 					}
 					aliasCommand(t, spelling, config, "upgrade", "clear-rollback")
 				}

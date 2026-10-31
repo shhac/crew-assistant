@@ -64,7 +64,7 @@ func send(h http.Handler, auth *Auth, method, path string, body io.Reader, as ca
 	r := httptest.NewRequest(method, "http://127.0.0.1:8340"+path, body)
 	r.RemoteAddr = "127.0.0.1:4321"
 	if as.owner {
-		r.Header.Set("Authorization", "Bearer "+auth.admin)
+		r = fromTheOwnersSocket(r)
 	}
 	if as.csrf {
 		r.Header.Set("X-Requested-With", "crew-assistant")
@@ -385,10 +385,7 @@ func TestAPairedBrowserCannotChangeWhoIsAllowedIn(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w
 	}
-	code, err := Pair(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	code := auth.Pair()
 	login := send("POST", "/api/session", `{"token":"`+code+`"}`, nil)
 	cookies := login.Result().Cookies()
 	if login.Code != 200 || len(cookies) != 1 {

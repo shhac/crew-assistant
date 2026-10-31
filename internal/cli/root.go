@@ -3,10 +3,12 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -147,8 +149,20 @@ func (o *options) runtimeDir() string {
 type runtimeInfo struct {
 	URL      string `json:"url"`
 	LocalURL string `json:"local_url"`
-	PID      int    `json:"pid"`
-	Demo     bool   `json:"demo"`
+	// Socket is the owner's private channel to the daemon; see ownerSocket.
+	Socket string `json:"socket"`
+	PID    int    `json:"pid"`
+	Demo   bool   `json:"demo"`
+}
+
+// socketHost names the daemon in requests over its socket, which has no host.
+const socketHost = "http://crew-assistant"
+
+// socketTransport reaches the daemon through its owner socket.
+func socketTransport(socket string) http.RoundTripper {
+	return &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}
 }
 
 func (o *options) runtime() (runtimeInfo, error) {
@@ -195,9 +209,12 @@ func (o *options) requestBody(method, path string, value any, consume func(io.Re
 	if err != nil {
 		return err
 	}
-	token, err := os.ReadFile(filepath.Join(o.runtimeDir(), "admin-token"))
-	if err != nil {
-		return err
+	transport := o.transport
+	if transport == nil {
+		if info.Socket == "" {
+			return errors.New("the running daemon is an older version; restart crew-assistant serve")
+		}
+		transport = socketTransport(info.Socket)
 	}
 	var body io.Reader
 	if value != nil {
@@ -207,14 +224,13 @@ func (o *options) requestBody(method, path string, value any, consume func(io.Re
 		}
 		body = bytes.NewReader(b)
 	}
-	req, err := http.NewRequest(method, info.LocalURL+path, body)
+	req, err := http.NewRequest(method, socketHost+path, body)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+string(token))
 	req.Header.Set("X-Requested-With", "crew-assistant")
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Transport: o.transport, Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{Transport: transport, Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
 		return errors.New("could not reach daemon; check crew-assistant serve and the selected --state path")

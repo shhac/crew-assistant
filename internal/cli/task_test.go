@@ -19,10 +19,6 @@ func standInDaemon(t *testing.T, snap core.Snapshot) (*options, func() []string)
 	var asked []string
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer stand-in-token" {
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-			return
-		}
 		json.NewEncoder(w).Encode(snap)
 	})
 	mux.HandleFunc("GET /api/projects/{project}/tasks/{task}/place", func(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +27,7 @@ func standInDaemon(t *testing.T, snap core.Snapshot) (*options, func() []string)
 		mu.Unlock()
 		json.NewEncoder(w).Encode(work.TaskPlace{ProjectID: r.PathValue("project"), TaskID: r.PathValue("task"), Workspace: "/work/" + r.PathValue("task")})
 	})
-	o := standIn(t, mux, "stand-in-token")
+	o := standIn(t, mux)
 	return o, func() []string {
 		mu.Lock()
 		defer mu.Unlock()

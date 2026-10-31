@@ -125,7 +125,7 @@ func TestShutdownWaitsForHTTPApprovedCallback(t *testing.T) {
 				req := httptest.NewRequest("POST", fmt.Sprintf("http://127.0.0.1:8340/api/autopilot/actions/%s/approve", first.ID), strings.NewReader(`{"revision":1}`)).WithContext(requestCtx)
 				// Exercise the existing owner authentication and mutation middleware.
 				req.Header.Set("Content-Type", "application/json")
-				req.Header.Set("Authorization", "Bearer "+auth.admin)
+				req = fromTheOwnersSocket(req)
 				req.RemoteAddr = "127.0.0.1:4321"
 				req.Header.Set("X-Requested-With", "crew-assistant")
 				recorder := httptest.NewRecorder()

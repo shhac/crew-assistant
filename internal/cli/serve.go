@@ -207,21 +207,27 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 	if err != nil {
 		return err
 	}
+	owner, socket, removeOwner, err := listenOwner(o.runtimeDir())
+	if err != nil {
+		return fmt.Errorf("the daemon's private socket: %w", err)
+	}
+	defer removeOwner()
+	defer owner.Close()
 	url := localURL
 	if publicURL != "" {
 		url = publicURL
 	}
-	info := runtimeInfo{URL: url, LocalURL: localURL, PID: os.Getpid(), Demo: demo}
+	info := runtimeInfo{URL: url, LocalURL: localURL, Socket: socket, PID: os.Getpid(), Demo: demo}
 	b, _ := json.Marshal(info)
 	if err = statepath.WriteFileAtomic(filepath.Join(o.runtimeDir(), "daemon.json"), b); err != nil {
 		return err
 	}
 	defer os.Remove(filepath.Join(o.runtimeDir(), "daemon.json"))
-	httpServer := &http.Server{Handler: server.New(a, auth), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20, BaseContext: func(net.Listener) context.Context { return stop.Force }}
+	httpServer := &http.Server{Handler: server.New(a, auth), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20, BaseContext: func(net.Listener) context.Context { return stop.Force }, ConnContext: server.ConnContext}
 	if host.engine != nil {
 		host.wire(o, a.Config, store, auth, listener, httpServer)
 	}
-	errs := make(chan error, 1)
+	errs := make(chan error, 2)
 
 	if host.engine != nil {
 		if host.start.Failed {
@@ -237,6 +243,7 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 			}
 		}
 		go func() { errs <- httpServer.Serve(listener) }()
+		go func() { errs <- httpServer.Serve(owner) }()
 		if host.start.Recovery {
 			r, err := upgrade.ReadRecord(host.engine.Path)
 			if err != nil {
@@ -254,7 +261,7 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 				probe = probeUpgradeAPI
 			}
 			if err := host.engine.ConfirmRecovery(stop.Graceful, bound, func(ctx context.Context) error {
-				return probe(ctx, localURL, filepath.Join(o.runtimeDir(), "admin-token"))
+				return probe(ctx, socket)
 			}); err != nil {
 				if stop.Stopping() {
 					return errors.Join(upgradeStopResult(err), host.engine.StopProbation(), host.engine.Close())
@@ -281,7 +288,7 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 				probe = probeUpgradeAPI
 			}
 			if err = host.engine.CheckHealth(stop.Graceful, bound, func(ctx context.Context) error {
-				return probe(ctx, localURL, filepath.Join(o.runtimeDir(), "admin-token"))
+				return probe(ctx, socket)
 			}); err != nil {
 				return err
 			}
@@ -293,6 +300,7 @@ func serve(stop lifecycle.Stop, o *options, cfg config.Config, demo bool, sample
 		}
 	} else {
 		go func() { errs <- httpServer.Serve(listener) }()
+		go func() { errs <- httpServer.Serve(owner) }()
 	}
 	done := make(chan struct{})
 	loopErrors := make(chan error, 1)
@@ -397,14 +405,17 @@ func openDashboard(o *options, printOnly bool) error {
 	if err != nil {
 		return err
 	}
-	code, err := server.Pair(o.runtimeDir())
-	if err != nil {
+	var pairing struct {
+		Code    string `json:"code"`
+		Expires string `json:"expires"`
+	}
+	if err = o.requestInto("POST", "/api/pairing", nil, &pairing); err != nil {
 		return err
 	}
 	if printOnly {
-		return o.emit(map[string]string{"url": info.URL, "code": code, "expires": "5 minutes"})
+		return o.emit(map[string]string{"url": info.URL, "code": pairing.Code, "expires": pairing.Expires})
 	}
-	target := info.URL + "/#token=" + code
+	target := info.URL + "/#token=" + pairing.Code
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":

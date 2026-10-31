@@ -144,11 +144,11 @@ func TestServeRunsRealBackupInstallerAndSessionHandover(t *testing.T) {
 			}
 			var cookie *http.Cookie
 			if mode == "ask" {
-				code, err := server.Pair(o.runtimeDir())
-				if err != nil {
-					t.Fatal(err)
+				var pairing struct{ Code string }
+				if err := o.requestInto("POST", "/api/pairing", nil, &pairing); err != nil || pairing.Code == "" {
+					t.Fatal("no sign-in code over the owner's socket", err)
 				}
-				req, _ := http.NewRequest("POST", info.LocalURL+"/api/session", strings.NewReader(`{"token":"`+code+`"}`))
+				req, _ := http.NewRequest("POST", info.LocalURL+"/api/session", strings.NewReader(`{"token":"`+pairing.Code+`"}`))
 				req.Header.Set("X-Requested-With", "crew-assistant")
 				req.Header.Set("Content-Type", "application/json")
 				response, err := (&http.Client{Timeout: time.Second}).Do(req)
@@ -255,7 +255,7 @@ func TestServeFailedProbationRestoresBeforeExec(t *testing.T) {
 	}
 	defer h.lock.Unlock()
 	o.upgradeHost = h
-	h.probe = func(context.Context, string, string) error { return errors.New("fake API failure") }
+	h.probe = func(context.Context, string) error { return errors.New("fake API failure") }
 	executed := false
 	h.engine.Exec = func(binary string, args []string) error {
 		if binary != r.SavedBinary {

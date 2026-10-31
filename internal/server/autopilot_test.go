@@ -156,13 +156,13 @@ func TestAutopilotReadsRejectMalformedQueriesAndHideStorageErrors(t *testing.T) 
 			}
 		}
 	}
-	_, auth, h := newDashboard(t, config.Default())
+	_, _, h := newDashboard(t, config.Default())
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	for _, path := range []string{"/api/autopilot/history", "/api/autopilot/pending", "/api/autopilot/actions/synthetic"} {
 		r := httptest.NewRequest("GET", "http://127.0.0.1:8340"+path, nil).WithContext(ctx)
 		r.RemoteAddr = "127.0.0.1:4321"
-		r.Header.Set("Authorization", "Bearer "+auth.admin)
+		r = fromTheOwnersSocket(r)
 		response := httptest.NewRecorder()
 		h.ServeHTTP(response, r)
 		if response.Code != 500 || strings.Contains(response.Body.String(), "context") {

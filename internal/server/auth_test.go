@@ -1,6 +1,9 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -40,7 +43,7 @@ func TestPrivateAPIAndPairing(t *testing.T) {
 	if request("/api/state", "", "", nil).Code != 401 {
 		t.Fatal("anonymous read allowed")
 	}
-	code, _ := Pair(dir)
+	code := a.Pair()
 	body := `{"token":"` + code + `"}`
 	if request("/api/session", body, "http://evil.example", nil).Code != 403 {
 		t.Fatal("cross origin login")
@@ -119,22 +122,21 @@ func TestAuthRefusesWhatIsNotTheOwnersOwnDashboard(t *testing.T) {
 		return w.Code
 	}
 	dashboard := map[string]string{"X-Requested-With": "crew-assistant"}
-	admin := map[string]string{"Authorization": "Bearer " + a.admin}
-	if send("GET", "evil.example:8340", "127.0.0.1:1", "/api/state", "", admin, nil) != 403 {
+	if send("GET", "evil.example:8340", "127.0.0.1:1", "/api/state", "", nil, nil) != 403 {
 		t.Error("a request for another host name was served (DNS rebinding)")
 	}
-	if send("GET", "127.0.0.1:8340", "127.0.0.1:1", "/api/state", "", admin, nil) != 204 {
-		t.Error("the CLI's admin token was refused from this machine")
+	// Loopback is open to a role given localhost, so no header from it is a credential.
+	if send("GET", "127.0.0.1:8340", "127.0.0.1:1", "/api/state", "", map[string]string{"Authorization": "Bearer anything"}, nil) != 401 {
+		t.Error("a bearer token from loopback was accepted")
 	}
-	if send("GET", "127.0.0.1:8340", "100.64.0.9:1", "/api/state", "", admin, nil) != 401 {
-		t.Error("the admin token was accepted from another machine")
+	if send("POST", "127.0.0.1:8340", "127.0.0.1:1", "/api/pairing", "", dashboard, nil) != 401 {
+		t.Error("a sign-in code was issued to loopback")
 	}
-	code, _ := Pair(dir)
+	code := a.Pair()
 	if send("POST", "127.0.0.1:8340", "127.0.0.1:1", "/api/session", `{"token":"`+code+`"}`, nil, nil) != 403 {
 		t.Error("a write without the dashboard's header was accepted")
 	}
-	old := time.Now().Add(-6 * time.Minute)
-	os.Chtimes(filepath.Join(dir, "pairing-code"), old, old)
+	a.pairedAt = time.Now().Add(-6 * time.Minute)
 	if send("POST", "127.0.0.1:8340", "127.0.0.1:1", "/api/session", `{"token":"`+code+`"}`, dashboard, nil) != 401 {
 		t.Error("a sign-in code older than five minutes was accepted")
 	}
@@ -144,35 +146,99 @@ func TestAuthRefusesWhatIsNotTheOwnersOwnDashboard(t *testing.T) {
 	}
 }
 
-func TestNewAuthTightensRuntimeFilesLeftOpen(t *testing.T) {
+// Every role can read the owner's files, so none of them is a credential:
+// NewAuth tightens the runtime directory and removes what earlier versions
+// left there.
+func TestNewAuthTightensTheRuntimeDirectoryAndRemovesOldCredentials(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "runtime")
 	if err := os.Mkdir(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	token := filepath.Join(dir, "admin-token")
-	if err := os.WriteFile(token, []byte("stale"), 0644); err != nil {
+	if err := os.Chmod(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	for p, mode := range map[string]os.FileMode{dir: 0755, token: 0644} {
-		if err := os.Chmod(p, mode); err != nil {
+	for _, name := range []string{"admin-token", "pairing-code"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("stale"), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	a, err := NewAuth(dir, "http://127.0.0.1:8340", "", nil)
+	if _, err := NewAuth(dir, "http://127.0.0.1:8340", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0700 {
+		t.Fatalf("the runtime directory: %v %v", info, err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("credentials left in the runtime directory: %v %v", entries, err)
+	}
+}
+
+// fromTheOwnersSocket is r as it arrives through OwnerListener.
+func fromTheOwnersSocket(r *http.Request) *http.Request {
+	return r.WithContext(AsOwner(r.Context()))
+}
+
+// The owner's commands reach the daemon over a Unix socket, which is the only
+// way to be recognised without a paired browser, and the only way to get a
+// sign-in code.
+func TestOnlyTheOwnersSocketIsRecognisedWithoutPairing(t *testing.T) {
+	dir, err := os.MkdirTemp("", "crew-auth-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for p, want := range map[string]os.FileMode{dir: 0700, token: 0600} {
-		info, err := os.Stat(p)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	a, err := NewAuth(filepath.Join(dir, "runtime"), "http://127.0.0.1:8340", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(dir, "owner.sock")
+	l, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Skip("this environment refuses a Unix socket:", err)
+	}
+	tcp, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skip("this environment refuses a loopback listener:", err)
+	}
+	h := a.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+	srv := &http.Server{Handler: h, ConnContext: ConnContext}
+	go srv.Serve(OwnerListener(l))
+	go srv.Serve(tcp)
+	t.Cleanup(func() { srv.Close() })
+	viaSocket := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}}
+	get := func(c *http.Client, method, url string) *http.Response {
+		r, err := http.NewRequest(method, url, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := info.Mode().Perm(); got != want {
-			t.Errorf("%s has mode %o, want %o", p, got, want)
+		r.Header.Set("X-Requested-With", "crew-assistant")
+		resp, err := c.Do(r)
+		if err != nil {
+			t.Fatal(err)
 		}
+		t.Cleanup(func() { resp.Body.Close() })
+		return resp
 	}
-	if b, _ := os.ReadFile(token); string(b) != a.admin {
-		t.Error("the admin token was not replaced")
+	if resp := get(viaSocket, "GET", "http://crew-assistant/api/state"); resp.StatusCode != 204 {
+		t.Fatalf("the owner's socket was refused: %d", resp.StatusCode)
+	}
+	local := "http://127.0.0.1:8340"
+	byTCP := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", tcp.Addr().String())
+	}}}
+	if resp := get(byTCP, "GET", local+"/api/state"); resp.StatusCode != 401 {
+		t.Fatalf("loopback TCP was recognised without pairing: %d", resp.StatusCode)
+	}
+	if resp := get(byTCP, "POST", local+"/api/pairing"); resp.StatusCode != 401 {
+		t.Fatalf("loopback TCP was given a sign-in code: %d", resp.StatusCode)
+	}
+	resp := get(viaSocket, "POST", "http://crew-assistant/api/pairing")
+	var pairing struct{ Code string }
+	if resp.StatusCode != 200 || json.NewDecoder(resp.Body).Decode(&pairing) != nil || pairing.Code == "" || pairing.Code != a.pairing {
+		t.Fatalf("the owner's socket got no sign-in code: %d", resp.StatusCode)
 	}
 }
 
@@ -194,10 +260,7 @@ func TestTheSessionCookieIsSecureOnlyThroughThePublicHost(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			code, err := Pair(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
+			code := a.Pair()
 			r := httptest.NewRequest("POST", "http://"+tc.host+"/api/session", strings.NewReader(`{"token":"`+code+`"}`))
 			r.RemoteAddr = "127.0.0.1:1234"
 			r.Header.Set("X-Requested-With", "crew-assistant")

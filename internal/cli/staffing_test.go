@@ -17,7 +17,7 @@ import (
 // The repository, team and project commands do what the dashboard's
 // settings do, against the daemon.
 func TestRepositoryTeamAndProjectCommands(t *testing.T) {
-	o := standIn(t, nil, "unused")
+	o := standIn(t, nil)
 	o.globals = &libcli.Globals{Format: string(output.FormatNDJSON)}
 	store, err := core.Open(o.statePath)
 	if err != nil {

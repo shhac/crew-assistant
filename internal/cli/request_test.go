@@ -13,7 +13,7 @@ func replyingDaemon(t *testing.T, status int, body string) *options {
 	return standIn(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
-	}), "token")
+	}))
 }
 
 func TestRequestReportsTheDaemonsRefusal(t *testing.T) {

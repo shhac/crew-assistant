@@ -53,7 +53,7 @@ func TestEnginePauseCommands(t *testing.T) {
 					}
 				}
 				_, _ = w.Write([]byte(`{"paused":true}`))
-			}), "token")
+			}))
 			o.globals = &libcli.Globals{Format: "ndjson"}
 			root := &cobra.Command{Use: "test"}
 			registerEngine(root, o)
@@ -99,7 +99,7 @@ func TestEnginePauseCommands(t *testing.T) {
 }
 
 func TestEnginePauseRejectsConflictingTimesBeforeRequest(t *testing.T) {
-	o := standIn(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("request before validation") }), "token")
+	o := standIn(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("request before validation") }))
 	root := &cobra.Command{Use: "test"}
 	registerEngine(root, o)
 	root.SetArgs([]string{"engine", "pause", "claude", "--for", "1h", "--until", "18:00"})

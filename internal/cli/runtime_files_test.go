@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,7 +16,8 @@ import (
 )
 
 // A runtime directory and records left readable by others, say by an older
-// version or a hand edit, are made private again when the daemon starts.
+// version or a hand edit, are made private again when the daemon starts, and
+// an older version's admin token is removed: every role can read it.
 func TestServeTightensRuntimeFilesLeftOpen(t *testing.T) {
 	testutil.RequireLoopback(t)
 	dir := t.TempDir()
@@ -58,14 +60,11 @@ func TestServeTightensRuntimeFilesLeftOpen(t *testing.T) {
 			ready = err == nil && info.Mode().Perm() == 0600
 		}
 	}
-	for p, want := range map[string]os.FileMode{runtimeDir: 0700, token: 0600} {
-		info, err := os.Stat(p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := info.Mode().Perm(); got != want {
-			t.Errorf("%s has mode %o, want %o", p, got, want)
-		}
+	if info, err := os.Stat(runtimeDir); err != nil || info.Mode().Perm() != 0700 {
+		t.Errorf("the runtime directory: %v %v", info, err)
+	}
+	if _, err := os.Stat(token); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("an older version's admin token was left: %v", err)
 	}
 	cancel()
 	select {

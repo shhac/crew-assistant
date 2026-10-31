@@ -32,8 +32,8 @@ func TestAuthHandoverPreservesCookieAndExpiryOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !newAuth.sessions["paired-browser"].Equal(expiry) || newAuth.admin == old.admin {
-		t.Fatal("expiry changed or admin was not rotated")
+	if !newAuth.sessions["paired-browser"].Equal(expiry) {
+		t.Fatal("expiry changed")
 	}
 	for _, tc := range []struct {
 		token string

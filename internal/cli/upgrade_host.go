@@ -32,7 +32,7 @@ type upgradeHost struct {
 	listenerFile       *os.File
 	checker            *upgrade.Checker
 	startDetached      func(string, []string, string) error
-	probe              func(context.Context, string, string) error
+	probe              func(context.Context, string) error
 }
 
 func prepareUpgradeStart(o *options, stop lifecycle.Stop, demo bool) (_ *upgradeHost, resultErr error) {
@@ -344,17 +344,12 @@ func (h *upgradeHost) wire(o *options, cfg func() config.Config, store *core.Sto
 
 }
 
-func probeUpgradeAPI(ctx context.Context, url, tokenPath string) error {
-	token, err := os.ReadFile(tokenPath)
-	if err != nil {
-		return errors.New("health check could not read its admin token")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/state", nil)
+func probeUpgradeAPI(ctx context.Context, socket string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, socketHost+"/api/state", nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+string(token))
-	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{Transport: socketTransport(socket), Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(req)
 	if err != nil {
 		return errors.New("health check could not reach its API")

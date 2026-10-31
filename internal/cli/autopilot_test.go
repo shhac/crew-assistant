@@ -19,7 +19,7 @@ import (
 )
 
 func TestAutopilotCLIModeSavesThroughDaemonWithRuntimeOverrides(t *testing.T) {
-	o := standIn(t, nil, "unused")
+	o := standIn(t, nil)
 	o.configPath = filepath.Join(filepath.Dir(o.statePath), "config.json")
 	o.globals = &libcli.Globals{Format: string(output.FormatNDJSON)}
 	disk := config.Default()
@@ -119,8 +119,8 @@ func TestAutopilotCLIRequestsBindRevision(t *testing.T) {
 	var path string
 	var body map[string]any
 	o := standIn(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer synthetic-token" {
-			t.Error("missing owner authentication")
+		if r.Header.Get("Authorization") != "" {
+			t.Error("the CLI sent a credential; its socket is what makes it the owner")
 		}
 		path = r.URL.RequestURI()
 		if r.Body != nil {
@@ -128,7 +128,7 @@ func TestAutopilotCLIRequestsBindRevision(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"performed"}`))
-	}), "synthetic-token")
+	}))
 	o.globals = &libcli.Globals{Format: string(output.FormatNDJSON)}
 	for _, args := range [][]string{{"approve", "action-id", "3"}, {"cancel", "action-id", "3"}, {"undo", "action-id", "3"}, {"permission", "project-id", "true", "4"}, {"history", "--project", "project-id", "--forward", "--limit", "20"}} {
 		cmd := autopilotCommand(o)
@@ -164,7 +164,7 @@ func TestAutopilotCLISummaryReadsWithoutAcknowledging(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"from":0,"boundary":1,"groups":{},"counts":{},"decisions":[]}`))
-	}), "synthetic-token")
+	}))
 	o.globals = &libcli.Globals{Format: string(output.FormatNDJSON)}
 	cmd := autopilotCommand(o)
 	cmd.SetArgs([]string{"summary"})
