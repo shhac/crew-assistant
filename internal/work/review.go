@@ -454,7 +454,7 @@ func (lp *Loop) route(ctx context.Context, p core.Project, t core.Task, current 
 	if err != nil || parseErr != nil {
 		return next, ""
 	}
-	_ = lp.Core.RecordRoute(ctx, t.ID, seat.Name, nextWords[choice.Next], choice.Reason)
+	_ = lp.Core.RecordRoute(ctx, t.ID, seat.Name, nextWords(t, choice.Next), choice.Reason)
 	return choice.Next, ""
 }
 
@@ -492,9 +492,9 @@ func routePrompt(p core.Project, t core.Task, current []core.Verdict, options []
 			fmt.Fprintf(&b, "  recommends %s: %s\n", orDash(v.Next), orDash(v.Note))
 		}
 	}
-	b.WriteString("\nDecide where this task goes next. The checks on their own send it to " + nextWords[options[0]] + ", but a checker recommends otherwise. The steps you can choose:\n")
+	b.WriteString("\nDecide where this task goes next. The checks on their own send it to " + nextWords(t, options[0]) + ", but a checker recommends otherwise. The steps you can choose:\n")
 	for _, o := range options {
-		fmt.Fprintf(&b, "- %s: %s\n", o, nextWords[o])
+		fmt.Fprintf(&b, "- %s: %s\n", o, nextWords(t, o))
 	}
 	b.WriteString(`
 Weigh what each checker said and why. Do not build or approve anything yourself; the owner's approval rules still apply after you choose. Your tools can tidy tasks, link them, queue a split or a sibling and leave notes, if what you read calls for it.
@@ -511,10 +511,15 @@ func orDash(s string) string {
 	return s
 }
 
-var nextWords = map[string]string{
-	core.NextLand:     "approval or landing",
-	core.NextRevise:   "the implementer, to revise",
-	core.NextResearch: "the researcher, for more research",
+// nextWords is where a next step sends the task, naming its team's seats.
+func nextWords(t core.Task, next string) string {
+	switch next {
+	case core.NextRevise:
+		return core.SeatWords(t.Roles, core.RoleImplementer) + ", to revise"
+	case core.NextResearch:
+		return core.SeatWords(t.Roles, core.RoleResearcher) + ", for more research"
+	}
+	return "approval or landing"
 }
 
 func reviewDigest(verdicts []core.Verdict) string {

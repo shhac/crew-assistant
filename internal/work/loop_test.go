@@ -111,7 +111,7 @@ func (r *scriptedRunner) scripts() []scripted {
 		{markers: []string{"handed you this about the pull request"}, queue: &r.pmOnPR, fallback: always(`{}`)},
 		{markers: []string{"Decide where this task goes next"}, queue: &r.route, fallback: always("no choice")},
 		{markers: []string{"Judge what remains at the round limit"}, queue: &r.escalate, fallback: always("no judgement")},
-		{markers: []string{"Judge whether a requirement the implementer can't meet"}, queue: &r.ownerStep, fallback: always("no judgement")},
+		{markers: []string{"Judge whether a requirement that can't be met"}, queue: &r.ownerStep, fallback: always("no judgement")},
 		{markers: []string{"You keep the to-do list"}, queue: &r.pm, fallback: func(spec roles.Spec) string {
 			return fmt.Sprintf(`{"triage": %s, "order": [], "depends": [], "note": "", "questions": []}`, sendOn(spec.Prompt))
 		}},

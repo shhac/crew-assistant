@@ -213,7 +213,7 @@ The order is yours to set directly. Never ask the owner to approve or confirm an
 	pmTasks(&b, snap, p)
 	if pmTriage(&b, snap, p) {
 		b.WriteString(`
-Tasks in triage are new work from the owner or the assistant, waiting for you before the team takes them. For each one: tidy its title and requirements with edit_task so the researcher starts from a clear ask, and link it with link_tasks where it depends on or relates to other work. Then send it on to the team, "to": "research", which sends it towards the to-do list, where the order below may place it; or, only when you cannot shape it without the owner, keep it in triage and ask them, "to": "owner", with the question. If To do is full, a task sent on waits for room in Triage and its id is ignored in the order until it joins the queue. A task left out stays in triage until you next look.
+Tasks in triage are new work from the owner or the assistant, waiting for you before the team takes them. For each one: tidy its title and requirements with edit_task so ` + firstSeat(p) + ` starts from a clear ask, and link it with link_tasks where it depends on or relates to other work. Then send it on to the team, "to": "research", which sends it towards the to-do list, where the order below may place it; or, only when you cannot shape it without the owner, keep it in triage and ask them, "to": "owner", with the question. If To do is full, a task sent on waits for room in Triage and its id is ignored in the order until it joins the queue. A task left out stays in triage until you next look.
 `)
 	}
 	if pmPRChoices(&b, snap, p) {
@@ -225,6 +225,19 @@ The owner turned pull requests off for this project. Each task above under "Star
 Name each task by one id: its readable id, such as CA-3, or its canonical id. Reply with only this JSON object:
 {"triage": [{"task": "id of a task in triage", "to": "research or owner", "question": "for the owner only: what you need them to decide"}], "order": ["every queued task id, in the order they should start, with any you send on from triage"], "depends": [{"task": "id", "on": ["ids it must wait for; the full list, replacing what it has"]}], "pull_requests": [{"task": "id of a task that started with pull requests", "keep": true}], "note": "one line on what you changed and why", "questions": ["only decisions the owner must make, such as conflicting priorities; never approval of an order"]}`)
 	return b.String()
+}
+
+// firstSeat names who takes a task first: the researcher, or the
+// implementer on a team that doesn't research.
+func firstSeat(p core.Project) string {
+	var roles []core.Role
+	if p.Playbook != nil {
+		roles = p.Playbook.Roles
+	}
+	if slices.ContainsFunc(roles, func(r core.Role) bool { return r.Holds(core.RoleResearcher) }) {
+		return core.SeatWords(roles, core.RoleResearcher)
+	}
+	return core.SeatWords(roles, core.RoleImplementer)
 }
 
 // pmPRChoices lists the tasks whose pull requests the PM is to choose

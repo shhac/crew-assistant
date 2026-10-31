@@ -373,9 +373,9 @@ func escalationPrompt(snap core.Snapshot, p core.Project, t core.Task, current [
 		}
 	}
 	if passed {
-		b.WriteString("Every check QA ran passed.\n")
+		fmt.Fprintf(&b, "Every check %s ran passed.\n", core.SeatWords(t.Roles, core.RoleQA))
 	} else {
-		b.WriteString("A check QA ran failed.\n")
+		fmt.Fprintf(&b, "A check %s ran failed.\n", core.SeatWords(t.Roles, core.RoleQA))
 	}
 	b.WriteString("\nWhat earlier rounds raised:\n")
 	earlier := false
@@ -515,7 +515,7 @@ func (lp *Loop) proposeOwnerStep(ctx context.Context, p core.Project, t core.Tas
 	step := core.OwnerStep{Criterion: u.Criterion, Step: u.Criterion}
 	rec := "Make it an owner step if the team truly can't meet it from its sandbox; otherwise keep it for the team"
 	var b strings.Builder
-	fmt.Fprintf(&b, "The implementer can't meet this requirement from its sandbox:\n%s\n\nWhy: %s", u.Criterion, orDash(u.Why))
+	fmt.Fprintf(&b, "%s can't meet this requirement from its sandbox:\n%s\n\nWhy: %s", text.Capital(core.SeatWords(t.Roles, core.RoleImplementer)), u.Criterion, orDash(u.Why))
 	if seat, ok := p.PMSeat(); ok {
 		judged, busy := lp.judgeOwnerStep(ctx, p, t, seat, u)
 		if busy != "" {
@@ -637,10 +637,10 @@ func ownerStepPrompt(p core.Project, t core.Task, u core.Unreachable) string {
 	if len(t.Criteria) > 0 {
 		b.WriteString("Its criteria:\n" + numbered(t.Criteria))
 	}
-	fmt.Fprintf(&b, "\nThe implementer says it can't meet this requirement from its sandbox, which writes only to its workspace and has no general network or access to the owner's machine; browser access is available only when the owner allows it:\n%s\n\nWhy: %s\n", u.Criterion, orDash(u.Why))
+	fmt.Fprintf(&b, "\n%s says it can't meet this requirement from its sandbox, which writes only to its workspace and has no general network or access to the owner's machine; browser access is available only when the owner allows it:\n%s\n\nWhy: %s\n", text.Capital(core.SeatWords(t.Roles, core.RoleImplementer)), u.Criterion, orDash(u.Why))
 	b.WriteString(`
-The team can run the project's check through run_check in a daemon-hosted sandbox, with localhost, on any engine. A requirement that the check passes stays with the team; it is not an owner step. QA can use a daemon-hosted app when a run recipe and browser access are available.
-Judge whether a requirement the implementer can't meet from its sandbox is truly out of the team's reach, such as a live run on the owner's machine or in their browser, or whether the team could meet it after all, such as with a test or a fake. If it is out of reach, word it as one step the owner checks after the change lands. The owner decides. Only judge: do not change, queue or approve anything.
+The team can run the project's check through run_check in a daemon-hosted sandbox, with localhost, on any engine. A requirement that the check passes stays with the team; it is not an owner step. ` + text.Capital(core.SeatWords(t.Roles, core.RoleQA)) + ` can use a daemon-hosted app when a run recipe and browser access are available.
+Judge whether a requirement that can't be met from the sandbox is truly out of the team's reach, such as a live run on the owner's machine or in their browser, or whether the team could meet it after all, such as with a test or a fake. If it is out of reach, word it as one step the owner checks after the change lands. The owner decides. Only judge: do not change, queue or approve anything.
 
 Reply with only this JSON object:
 {"owner_step": true or false, "step": "what the owner checks after it lands, one line", "reason": "one short line the owner reads"}`)

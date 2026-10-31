@@ -237,3 +237,48 @@ func validLane(lane string) error {
 	}
 	return nil
 }
+
+// kindWords is how a prompt names a kind of role no seat holds, and a seat
+// named after its kind, as a template's seats are.
+var kindWords = map[string]string{
+	RolePM:          "the PM",
+	RoleResearcher:  "the researcher",
+	RoleDesigner:    "the designer",
+	RoleImplementer: "the implementer",
+	RoleReviewer:    "the reviewer",
+	RoleQA:          "QA",
+}
+
+// SeatWords names the seats holding any of kinds as a sentence lists them:
+// "Editor", "Editor and Publisher", "Ada, Bea and Cy". Seats filled alike
+// read once, and a seat named after its kind reads by it, as "the
+// implementer" or "QA". With no such seat it names the first kind.
+func SeatWords(roles []Role, kinds ...string) string {
+	var names []string
+	for _, r := range roles {
+		if !slices.ContainsFunc(kinds, r.Holds) {
+			continue
+		}
+		name := SeatBase(r.Name)
+		for _, kind := range r.Kinds {
+			if strings.EqualFold(name, kind) {
+				name = kindWords[kind]
+			}
+		}
+		if !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return kindWords[kinds[0]]
+	}
+	return JoinWords(names)
+}
+
+// JoinWords lists words as a sentence does: "A", "A and B", "A, B and C".
+func JoinWords(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
+}

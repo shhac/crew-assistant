@@ -162,7 +162,7 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string, fresh bool) stri
 		if code {
 			fmt.Fprintf(&b, "\nThe repository holds your previous attempt (draft %d). %s Improve it in place. The checks said:\n", last, repoInstructions)
 		} else {
-			fmt.Fprintf(&b, "\nThe working directory holds draft %d. Revise it in place. The reviewers said:\n", last)
+			fmt.Fprintf(&b, "\nThe working directory holds draft %d. Revise it in place. %s said:\n", last, text.Capital(core.SeatWords(t.Roles, core.RoleReviewer)))
 		}
 		b.WriteString(latestChecksText(t, last))
 		if len(p.Brief.Criteria) > 0 && t.Revisions[last-1].BriefVersion != p.Brief.Version {
@@ -392,13 +392,15 @@ func isCode(p core.Project, t core.Task) bool {
 // recommends the task goes next when that differs. Research is offered only
 // to a team with a researcher.
 func verdictFormat(t core.Task) string {
-	outcomes, research := `"pass" | "revise" | "question"`, ""
+	outcomes, research, steps := `"pass" | "revise" | "question"`, "", "pass goes on to approval or landing, revise back to "+core.SeatWords(t.Roles, core.RoleImplementer)
 	if _, ok := t.Researcher(); ok {
+		researcher := core.SeatWords(t.Roles, core.RoleResearcher)
 		outcomes = `"pass" | "revise" | "question" | "research"`
-		research = "\nUse \"research\" when the work needs more research before it can be judged or revised well, such as an approach no one has checked: the task goes back to the researcher with your question, then back to you."
+		research = "\nUse \"research\" when the work needs more research before it can be judged or revised well, such as an approach no one has checked: the task goes back to " + researcher + " with your question, then back to you."
+		steps += ", research to " + researcher
 	}
 	return research + allFindings + `
-Every checker judges every new draft. If you recommend a different next step from the one your outcome leads to (pass goes on to approval or landing, revise back to the implementer, research to the researcher), set "next" to "land", "revise" or "research" and "note" to one line on why, such as "I want to see it again after the tests pass". Otherwise leave both empty.
+Every new draft is judged by every checker: ` + core.SeatWords(t.Roles, core.RoleReviewer, core.RoleQA) + `. If you recommend a different next step from the one your outcome leads to (` + steps + `), set "next" to "land", "revise" or "research" and "note" to one line on why, such as "I want to see it again after the tests pass". Otherwise leave both empty.
 
 Reply with only this JSON object:
 {"outcome": ` + outcomes + `, "summary": "one or two sentences", "findings": [{"criterion": "...", "note": "..."}], "question": "for outcome question or research: what to ask, else empty", "next": "", "note": ""}`
@@ -412,8 +414,10 @@ Give every finding you have for this draft in this one verdict: do not stop at t
 // sandboxGuide keeps a checker's own sandbox from sending a draft round
 // after round: an implementer can't revise its way past a refusal it
 // doesn't share.
-const sandboxGuide = `
-If something fails only because your sandbox refused it, such as opening a port, writing outside the repository or reaching the network, say so in the finding and quote the refusal. Use "revise" only when the change could reasonably do without it, such as a test that could use an in-memory listener instead of a real one; otherwise use "question", saying what was refused, so the owner can decide rather than the implementer trying again.`
+func sandboxGuide(t core.Task) string {
+	return `
+If something fails only because your sandbox refused it, such as opening a port, writing outside the repository or reaching the network, say so in the finding and quote the refusal. Use "revise" only when the change could reasonably do without it, such as a test that could use an in-memory listener instead of a real one; otherwise use "question", saying what was refused, so the owner can decide rather than ` + core.SeatWords(t.Roles, core.RoleImplementer) + ` trying again.`
+}
 
 // checkerPrompt asks a reviewer to judge a revision, or QA to run the check.
 func checkerPrompt(p core.Project, t core.Task, r core.Revision, checker core.Role, playbook *core.Playbook) string {
@@ -440,8 +444,8 @@ func checkerPrompt(p core.Project, t core.Task, r core.Revision, checker core.Ro
 		}
 		b.WriteString(`Use "pass" only if it exits successfully without timing out. Otherwise use "revise", with one finding per failing test, build error or check, quoting the key lines of output in the note. If the check stopped at a failure before its later steps ran, add a finding naming the steps that did not run, so the next draft is checked against them too.
 Quote the total skip count, including zero, and every actual known skip with its test identity, reason, missing capability and upstream dependency. Required skips without an explicit known-skip exception require "revise"; an incomplete check cannot pass.
-Use "question" only if the check cannot run at all for a reason the implementer cannot fix (for example a missing tool), and say what is missing.`)
-		b.WriteString(sandboxGuide)
+Use "question" only if the check cannot run at all for a reason ` + core.SeatWords(t.Roles, core.RoleImplementer) + ` cannot fix (for example a missing tool), and say what is missing.`)
+		b.WriteString(sandboxGuide(t))
 		b.WriteString(verdictFormat(t))
 		return b.String()
 	}
@@ -453,7 +457,7 @@ Use "question" only if the check cannot run at all for a reason the implementer 
 		fmt.Fprintf(&b, "\nThis repository holds a proposed change for this task: the commits between %s and HEAD (run `git diff %s..HEAD` and read whatever else you need). %s Do not modify anything.\n", t.Base, t.Base, repoInstructions)
 		b.WriteString(byHandNote(r))
 		if playbook != nil && playbook.Check != "" {
-			fmt.Fprintf(&b, "QA runs `%s` separately, so you need not run it or report on it.\n", playbook.Check)
+			fmt.Fprintf(&b, "%s runs `%s` separately, so you need not run it or report on it.\n", text.Capital(core.SeatWords(t.Roles, core.RoleQA)), playbook.Check)
 		}
 		earlier := earlierFindings(t, r)
 		b.WriteString(earlier)
@@ -463,7 +467,7 @@ Review it as a careful senior engineer, against the task and every criterion abo
 - "revise" when something should change, with one finding per issue, naming the criterion or file it concerns;
 - "question" only when the task is genuinely ambiguous and you cannot judge without the owner.`)
 		b.WriteString(reviewDepth(earlier != "", true))
-		b.WriteString(sandboxGuide)
+		b.WriteString(sandboxGuide(t))
 		b.WriteString(verdictFormat(t))
 		return b.String()
 	}
@@ -759,22 +763,7 @@ func researcherPrompt(p core.Project, t core.Task, others []core.Task, projects 
 		b.WriteString("\nThe current directory is where this task's draft will be written.\n")
 	}
 	b.WriteString(replanText(t))
-	b.WriteString(`
-Plan this task before anything is written. Read what you need to, and change nothing. You may search the web for what the work in front of you can't tell you, such as a library's current behaviour; say in the plan which pages you relied on. Work out:
-- what already exists that the task can use or that it describes as missing, naming files and functions;
-- what will change, briefly;
-`)
-	if code {
-		b.WriteString(`- the failure paths: stopping during each step, a restart between two writes, concurrent callers, a partial failure, and what the record must say after each;
-- the tests that will show it works, including on those paths;
-`)
-	}
-	b.WriteString(`- what is out of scope, so the implementer does not drift;
-- what is unclear enough that the owner must answer before work starts. Ask only what you cannot reasonably decide; the implementer uses judgment for the rest;
-- which of the unfinished tasks below, from this or any other project, this one cannot start before, because it builds on what they will change;
-- whenever the plan narrows the task and leaves part of it for later, each part left over, under split_off with a title and requirements. Each is queued as a new task that waits for this one, so this task's implementer leaves it alone.
-If it needs more than about 10 changes or would touch more than about 30 files, it is too big to review well in one piece: ask the owner, in your questions, whether to split it, and say into what. Once the owner agrees, list the parts left over under split_off.
-`)
+	b.WriteString(researchAsks(code, core.SeatWords(t.Roles, core.RoleImplementer)))
 	var local, external strings.Builder
 	for _, other := range others {
 		if other.ProjectID == t.ProjectID {
@@ -856,6 +845,36 @@ If it needs more than about 10 changes or would touch more than about 30 files, 
 	}
 	b.WriteString("\nReply with only this JSON object:\n" + plan)
 	return b.String()
+}
+
+// researchAsks is what a researcher works out: for code, what the change
+// touches, its failure paths and tests; for written work, its sources and
+// outline. maker names who writes it.
+func researchAsks(code bool, maker string) string {
+	if !code {
+		return `
+Plan this piece of writing before any of it is written. Read what you need to, and change nothing. You may search the web for sources the brief and the working directory can't give you; say in the plan which sources you relied on and what each supports. Work out:
+- what already exists that the writing can draw on or that it must stay consistent with, such as earlier drafts, notes and sources, naming them;
+- the outline, as what will change: the parts the work will have, in order, and what each must say, briefly;
+- what is out of scope, so ` + maker + ` does not drift;
+- what is unclear enough that the owner must answer before writing starts, such as the voice, the reader or a fact only they know. Ask only what you cannot reasonably decide; ` + maker + ` uses judgment for the rest;
+- which of the unfinished tasks below, from this or any other project, this one cannot start before, because it builds on what they will write;
+- whenever the plan narrows the task and leaves part of it for later, each part left over, under split_off with a title and requirements. Each is queued as a new task that waits for this one, so ` + maker + ` leaves it alone here.
+If it is too long to judge well in one piece, such as several chapters or sections that each stand on their own, ask the owner, in your questions, whether to split it, and say into what. Once the owner agrees, list the parts left over under split_off.
+`
+	}
+	return `
+Plan this task before anything is written. Read what you need to, and change nothing. You may search the web for what the work in front of you can't tell you, such as a library's current behaviour; say in the plan which pages you relied on. Work out:
+- what already exists that the task can use or that it describes as missing, naming files and functions;
+- what will change, briefly;
+- the failure paths: stopping during each step, a restart between two writes, concurrent callers, a partial failure, and what the record must say after each;
+- the tests that will show it works, including on those paths;
+- what is out of scope, so ` + maker + ` does not drift;
+- what is unclear enough that the owner must answer before work starts. Ask only what you cannot reasonably decide; ` + maker + ` uses judgment for the rest;
+- which of the unfinished tasks below, from this or any other project, this one cannot start before, because it builds on what they will change;
+- whenever the plan narrows the task and leaves part of it for later, each part left over, under split_off with a title and requirements. Each is queued as a new task that waits for this one, so ` + maker + ` leaves it alone here.
+If it needs more than about 10 changes or would touch more than about 30 files, it is too big to review well in one piece: ask the owner, in your questions, whether to split it, and say into what. Once the owner agrees, list the parts left over under split_off.
+`
 }
 
 // byHandNote tells a reviewer a draft is the owner's own change.

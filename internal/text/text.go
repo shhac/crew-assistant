@@ -52,6 +52,15 @@ func Tail(text string, lines, limit int) string {
 	return text[cut:]
 }
 
+// Capital starts text with a capital letter, as a sentence does.
+func Capital(text string) string {
+	if text == "" {
+		return ""
+	}
+	first, size := utf8.DecodeRuneInString(text)
+	return strings.ToUpper(string(first)) + text[size:]
+}
+
 // secrets are the shapes of credentials that output can echo: GitHub,
 // cloud and chat tokens, authorization headers, and passwords in addresses.
 var secrets = regexp.MustCompile(`gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|(?i:authorization:[^\r\n]+)|(?i:bearer\s+[A-Za-z0-9._~+/=-]{8,})|https?://[^/\s]*:[^@\s]+@|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]+|sk-[A-Za-z0-9_-]{16,}|lin_(?:api|oauth)_[A-Za-z0-9_-]+|glpat-[A-Za-z0-9_-]{16,}|npm_[A-Za-z0-9]{30,}`)

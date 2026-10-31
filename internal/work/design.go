@@ -297,7 +297,7 @@ func designerPrompt(p core.Project, t core.Task, r core.DesignRequest, generates
 		b.WriteString("\nThe current directory is where this task's draft will be written.\n")
 	}
 	b.WriteString(designText(t))
-	fmt.Fprintf(&b, "\n%s, the task's %s, asks for your design input:\n%s\n", r.From, stepWord(r.Step), r.Question)
+	fmt.Fprintf(&b, "\n%s, %s, asks for your design input:\n%s\n", r.From, stepWord(r.Step), r.Question)
 	if r.Production == nil {
 		b.WriteString(`
 Give design input only: read what you need, change nothing, and do not commit, deliver, land or approve anything. Answer the question so the one who asked can go on, and say what you would choose and why.
@@ -326,7 +326,7 @@ While you work, attach_file keeps a mockup with your input: an SVG, HTML or Mark
 		b.WriteString(`Reply with only JSON: {"input":"handover notes", "current":"", "delivered":["asset name"], "provenance":[{"asset":"asset name", "prompt":"exact generation prompt", "generator":"tool and model", "settings":{}, "references":[]}], "escalate":null}. Give one provenance entry per delivered asset, including all settings and references (with hashes where available). Use an empty references list when none were used. The daemon computes the asset's SHA-256 and records the producing turn. To escalate use "escalate":{"evidence":"...","alternatives":["..."],"consequences":"...","recommendation":"..."}. To abandon an unfinished group, return empty delivered and provenance arrays together with a non-null escalation object containing your recommendation; its uncompleted attachments will be discarded. Empty arrays with escalate:null do not abandon attached assets: every attachment must have delivered provenance.`)
 		return b.String()
 	}
-	b.WriteString("\nSay which design is current after your answer: the one the implementer builds to and every checker judges against. \"this\" makes your input the current design; \"design N\" keeps or brings back an earlier design by its number; empty means your input is advice only, and the current design stays as it is. " + currentLine(t) + "\n")
+	b.WriteString("\nSay which design is current after your answer: the one " + core.SeatWords(t.Roles, core.RoleImplementer) + " builds to and every checker (" + core.SeatWords(t.Roles, core.RoleReviewer, core.RoleQA) + ") judges against. \"this\" makes your input the current design; \"design N\" keeps or brings back an earlier design by its number; empty means your input is advice only, and the current design stays as it is. " + currentLine(t) + "\n")
 	b.WriteString(`
 Reply with only this JSON object:
 {"input": "your design input", "current": "this", "escalate": null}
@@ -344,12 +344,12 @@ func currentLine(t core.Task) string {
 	return "There is no current design yet."
 }
 
-// stepWord names the role that works at a step.
+// stepWord says what the one asking is doing at a step.
 func stepWord(step string) string {
 	if step == core.TaskResearching {
-		return "researcher"
+		return "planning the task"
 	}
-	return "implementer"
+	return "doing the work"
 }
 
 // designText is the design input already given on the task, as everyone

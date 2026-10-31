@@ -87,7 +87,7 @@ func (lp *Loop) catchUpRound(ctx context.Context, t core.Task, c catcher, l line
 		}
 		dropLandingApproval(t)
 		t.Status, t.DecisionID, t.Detail = core.TaskWriting, "", "Catching up: "+l.What
-		return t.Objective + " conflicts with what landed: " + l.What + "; the implementer is resolving it", nil
+		return t.Objective + " conflicts with what landed: " + l.What + "; " + core.SeatWords(t.Roles, core.RoleImplementer) + " is resolving it", nil
 	})
 	return err
 }

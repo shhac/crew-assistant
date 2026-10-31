@@ -128,7 +128,7 @@ func (s *Service) SendTeamMessage(ctx context.Context, projectID, taskID, to, fr
 		}
 		kind := role.Working()
 		if kind == "" {
-			return fmt.Errorf("%s only %s, which a message doesn't reach; message the implementer instead: %w", role.Name, sideWork(role), ErrConflict)
+			return fmt.Errorf("%s only %s, which a message doesn't reach; message %s instead: %w", role.Name, sideWork(role), SeatWords(team, RoleImplementer), ErrConflict)
 		}
 		now := s.now().UTC()
 		out = TeamMessage{ID: uid(), To: role.Name, Kind: kind, From: from, Text: message, Status: MessageWaiting, At: now}
@@ -195,7 +195,7 @@ func addressee(team []Role, to string) (Role, error) {
 // waiting on the owner or on a pull request, otherwise in its next round.
 func direct(v *Snapshot, t *Task, m *TeamMessage, now time.Time) error {
 	if t.Status == TaskLanding && t.Delivering == nil && !t.PRMergePending() {
-		return fmt.Errorf("it is landing right now; message the implementer once it has landed or is waiting on its pull request: %w", ErrConflict)
+		return fmt.Errorf("it is landing right now; message %s once it has landed or is waiting on its pull request: %w", SeatWords(t.Roles, RoleImplementer), ErrConflict)
 	}
 	var open *Decision
 	if d := decision(v, t.DecisionID); t.Status == TaskWaiting && d != nil && d.Status == DecisionOpen {

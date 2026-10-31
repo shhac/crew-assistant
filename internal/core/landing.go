@@ -114,7 +114,7 @@ func signedOff(v *Snapshot, t Task) []string {
 		}
 	}
 	if t.DirectionPending > 0 {
-		out = append(out, "the implementer has not yet taken in the owner's direction")
+		out = append(out, SeatWords(t.Roles, RoleImplementer)+" has not yet taken in the owner's direction")
 	}
 	for _, d := range v.Decisions {
 		if d.TaskID == t.ID && d.Status == DecisionOpen {

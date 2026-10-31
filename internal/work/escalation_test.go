@@ -307,7 +307,7 @@ func sandboxRequirementBecomesAnOwnerStep(t *testing.T, first string) {
 		t.Fatalf("owner step decision %q: %s", d.Recommendation, d.Context)
 	}
 	assertTaskPMAccounting(t, a, task)
-	asked := turns(runner, "Judge whether a requirement the implementer can't meet")
+	asked := turns(runner, "Judge whether a requirement that can't be met")
 	if len(asked) != 1 || !strings.Contains(asked[0].Prompt, "There is no browser in my sandbox.") {
 		t.Fatalf("the PM should judge the requirement once: %d", len(asked))
 	}

@@ -128,11 +128,11 @@ func TestACheckerRaisesASandboxRefusalWithTheOwner(t *testing.T) {
 		"code reviewer": checkerPrompt(code, task, rev, core.Role{Name: "Reviewer", Kinds: []string{core.RoleReviewer}}, code.Playbook),
 		"QA":            checkerPrompt(code, task, rev, core.Role{Name: "QA", Kinds: []string{core.RoleQA}}, code.Playbook),
 	} {
-		if !strings.Contains(prompt, sandboxGuide) {
+		if !strings.Contains(prompt, sandboxGuide(task)) {
 			t.Fatalf("the %s prompt lacks the sandbox guide: %s", name, prompt)
 		}
 	}
-	if strings.Contains(reviewerPrompt(docs, task, rev), sandboxGuide) {
+	if strings.Contains(reviewerPrompt(docs, task, rev), sandboxGuide(task)) {
 		t.Fatal("a reviewer of documents runs nothing a sandbox could refuse")
 	}
 }
@@ -273,8 +273,15 @@ func TestTheResearcherPlansFailurePathsAndTestsAndFlagsASplit(t *testing.T) {
 			t.Fatalf("a code plan's prompt lacks %q: %s", want, c)
 		}
 	}
-	if !strings.Contains(d, split) || strings.Contains(d, "failure_paths") || strings.Contains(d, "the failure paths") {
-		t.Fatalf("a document's plan asks only for the split: %s", d)
+	if strings.Contains(d, split) || strings.Contains(d, "failure_paths") || strings.Contains(d, "the failure paths") || strings.Contains(d, "files and functions") {
+		t.Fatalf("a document's plan asks for code's paths, tests or split: %s", d)
+	}
+	// Written work is planned from its sources and outline, and split by
+	// the parts that stand on their own.
+	for _, want := range []string{"which sources you relied on", "the outline, as what will change", "before writing starts", "ask the owner, in your questions, whether to split it"} {
+		if !strings.Contains(d, want) {
+			t.Fatalf("a document's plan lacks %q: %s", want, d)
+		}
 	}
 }
 
