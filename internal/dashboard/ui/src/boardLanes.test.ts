@@ -52,6 +52,54 @@ const hasLane = (p: Project, tasks: Task[], stage: string) =>
   boardColumns(p, tasks).some((c) => c.lanes.some((l) => l.stage === stage));
 
 describe("the board's lanes", () => {
+  it("names its lanes as the team's seats do, the first seat's lane first", () => {
+    const book: Playbook = {
+      ...writing,
+      roles: [
+        {
+          name: "Muse",
+          kinds: ["researcher"],
+          engine: "claude",
+          lane: "Musing",
+        },
+        {
+          name: "Novelist",
+          kinds: ["implementer"],
+          engine: "claude",
+          lane: "Drafting",
+        },
+        {
+          name: "Editor",
+          kinds: ["reviewer"],
+          engine: "codex",
+          lane: "Editing",
+        },
+        {
+          name: "Publisher",
+          kinds: ["reviewer"],
+          engine: "codex",
+          lane: "Publishing",
+        },
+        { name: "Pim", kinds: ["pm"], engine: "claude", member: "pim" },
+      ],
+    };
+    expect(lanes(project(book))).toEqual([
+      ["To do", "Triage"],
+      ["Musing"],
+      ["Drafting"],
+      ["Editing"],
+    ]);
+    // A seat with no lane of its own leaves the board's name for it.
+    expect(
+      lanes(
+        project({
+          ...book,
+          roles: book.roles.slice(1, 2).concat(writing.roles[1]),
+        }),
+      ),
+    ).toEqual([["To do"], ["Drafting"], ["Reviewing"]]);
+  });
+
   it("names its columns for the kind of work and shows QA only when there is QA", () => {
     expect(lanes(project(code()))).toEqual([
       ["To do"],

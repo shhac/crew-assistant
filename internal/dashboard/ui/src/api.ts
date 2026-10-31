@@ -56,6 +56,8 @@ export interface Role {
   member?: string;
   /** Whether QA in this seat uses its engine's browser. */
   browser?: Browser;
+  /** What the board calls the lane this seat works in; empty is its own name. */
+  lane?: string;
 }
 /**
  * A member, QA or the assistant using the browser its engine ships: the
@@ -1416,6 +1418,13 @@ export function setSeat(projectID: string, kind: MemberKind, member: string) {
   return api<Project>(
     `${projectPath(projectID)}/team/${encodeURIComponent(kind)}`,
     { method: "PUT", body: JSON.stringify({ member }) },
+  );
+}
+/** Names the board lane a role works in; "" gives it back its own name. */
+export function setLane(projectID: string, kind: MemberKind, lane: string) {
+  return api<Project>(
+    `${projectPath(projectID)}/team/${encodeURIComponent(kind)}/lane`,
+    { method: "PUT", body: JSON.stringify({ lane }) },
   );
 }
 /** Adds a seat filled like the named one: Claudius gains Claudius #2. */

@@ -558,6 +558,54 @@ describe("the board", () => {
         project(writing),
       ),
     ).toBe("Waiting for room in Writing (2 of 2)");
+    // Lanes are named by the seats: a started request's own, else the project's.
+    const book: Playbook = {
+      ...writing,
+      roles: [
+        {
+          name: "Novelist",
+          kinds: ["implementer"],
+          engine: "claude",
+          lane: "Drafting",
+        },
+        {
+          name: "Editor",
+          kinds: ["reviewer"],
+          engine: "codex",
+          lane: "Editing",
+        },
+      ],
+    };
+    expect(
+      requestStep(
+        task({ status: "queued", waiting: full("implementing") }),
+        undefined,
+        undefined,
+        project(book),
+      ),
+    ).toBe("Waiting for room in Drafting (2 of 2)");
+    expect(
+      requestStep(
+        task({
+          status: "writing",
+          playbook: writing,
+          roles: book.roles,
+          waiting: full("reviewing", "implementing"),
+        }),
+        undefined,
+        undefined,
+        project(writing),
+      ),
+    ).toBe("Waiting for room in Editing (2 of 2)");
+  });
+
+  it("names the writer from the team when the request has none of its own", () => {
+    expect(
+      requestStep(task({ status: "writing" }), undefined, [], project(writing)),
+    ).toBe("With the writer");
+    expect(
+      requestStep(task({ status: "writing" }), undefined, [], project(code())),
+    ).toBe("With the implementer");
   });
 });
 

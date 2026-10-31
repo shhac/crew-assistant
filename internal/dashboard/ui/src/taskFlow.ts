@@ -1,6 +1,7 @@
 import type { Project, Role, State, Task } from "./api";
 import {
   holds,
+  laneOf,
   roleAtWork,
   taskRoles,
   workingKind,
@@ -106,7 +107,9 @@ export function stageFlow(
     ["reviewer", "Review"],
     ["qa", "QA"],
   ];
-  for (const [kind, label] of kinds) {
+  for (const [kind, own] of kinds) {
+    // A team that names the lane a kind works in names its step the same.
+    const label = laneOf(team, kind) || own;
     const seats = team.filter((r) => holds(r, kind));
     const step =
       kind === "implementer"

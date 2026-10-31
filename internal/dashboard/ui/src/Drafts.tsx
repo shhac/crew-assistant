@@ -1,13 +1,7 @@
 import { useEffect, useState } from "react";
 import { ConversationMarkdown } from "./ConversationMarkdown";
-import {
-  isCode,
-  nextStep,
-  roleName,
-  taskPlaybook,
-  verdictOutcome,
-} from "./stages";
-import { roleMember, taskRoles } from "./members";
+import { isCode, nextStep, taskPlaybook, verdictOutcome } from "./stages";
+import { roleMember, seatName, taskRoles } from "./members";
 import { Avatar } from "./Avatar";
 import { VerdictEvidence } from "./VerdictEvidence";
 import { ErrorNotice, Pill, dateLabel, useNewestInView } from "./ui";
@@ -130,9 +124,7 @@ function DraftDetail({
           ) : (
             !revision.clean_merge_of && (
               <>
-                <strong>
-                  {roleName(task, "implementer", "Implementer")}
-                </strong>{" "}
+                <strong>{seatName(task, "implementer", project)}</strong>{" "}
               </>
             )
           )}

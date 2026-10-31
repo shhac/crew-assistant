@@ -2589,6 +2589,25 @@ describe("the project's tabs", () => {
     );
     await removed("QA", "qa");
   });
+  it("names the board lane a role works in", async () => {
+    show(staffed(), { members: crew }, { tab: "team" });
+    const lane = within(seat("Reviewer")).getByLabelText(
+      "Reviewer lane on the board",
+    );
+    expect(lane).toHaveProperty("placeholder", "Reviewing (board lane)");
+    fireEvent.change(lane, { target: { value: " Editing " } });
+    fireEvent.click(
+      within(seat("Reviewer")).getByRole("button", { name: "Save lane" }),
+    );
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(writes()).toEqual([
+      {
+        path: "/api/projects/p1/team/reviewer/lane",
+        method: "PUT",
+        body: { lane: "Editing" },
+      },
+    ]);
+  });
   it("keeps the last implementer and reviewer, and removes one once there is another", async () => {
     show(staffed(), { members: crew }, { tab: "team" });
     const remove = (role: string, name: string) =>

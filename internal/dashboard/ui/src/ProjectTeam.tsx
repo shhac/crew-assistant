@@ -6,35 +6,47 @@ import { useState } from "react";
 import { href, memberHref, projectHref, requestHref } from "./router";
 import { isCode } from "./landing";
 import { boardColumns, boardRows } from "./boardLanes";
-import { finished, projectTasks } from "./stages";
-import { holds, kindLabel, kindsLabel, memberOf } from "./members";
+import { boardLabel, finished, projectTasks, stageKinds } from "./stages";
+import {
+  holds,
+  kindsLabel,
+  laneKind,
+  laneOf,
+  memberKinds,
+  memberOf,
+  roleTitle,
+} from "./members";
 import { Avatar } from "./Avatar";
 import { QABrowser } from "./QABrowser";
 import { ErrorNotice, useAction } from "./ui";
 import {
   addToRole,
+  setLane,
   removeFromRole,
   type Member,
   type MemberKind,
   type Playbook,
   type Project,
   type Role,
+  type Stage,
   type State,
   type Task,
 } from "./api";
 
-/** What a place on the team is called: a writing team's implementer writes. */
-const seatLabel = (kind: string, code: boolean) =>
-  kind === "implementer" && !code ? "Writer" : kindLabel(kind);
-
 /**
  * The roles a team has places for, in the order it works: a writing team
- * neither researches nor runs QA, and any team can have a designer and a PM.
+ * researches or runs QA only when one of its seats does, and any team can
+ * have a designer and a PM.
  */
-const seatKinds = (code: boolean): MemberKind[] =>
-  code
-    ? ["researcher", "designer", "implementer", "reviewer", "qa", "pm"]
-    : ["designer", "implementer", "reviewer", "pm"];
+const seatKinds = (playbook: Playbook): MemberKind[] =>
+  memberKinds
+    .map((k) => k.id)
+    .filter(
+      (kind) =>
+        isCode(playbook) ||
+        (kind !== "researcher" && kind !== "qa") ||
+        playbook.roles.some((r) => holds(r, kind)),
+    );
 
 /** What a role no member or template fills reads as. */
 const nobody: Partial<Record<MemberKind, string>> = {
@@ -105,8 +117,7 @@ function Roles({
   state: State;
   refresh: () => Promise<void>;
 }) {
-  const code = isCode(playbook);
-  const kinds = seatKinds(code);
+  const kinds = seatKinds(playbook);
   const [shown, setShown] = useState<MemberKind | "all">("all");
   const { busy, error, run } = useAction();
   const act = (change: () => Promise<unknown>) =>
@@ -129,7 +140,7 @@ function Roles({
             aria-pressed={shown === kind}
             onClick={() => setShown(kind)}
           >
-            {kind === "all" ? "All roles" : seatLabel(kind, code)}
+            {kind === "all" ? "All roles" : roleTitle(playbook.roles, kind)}
           </button>
         ))}
       </div>
@@ -140,7 +151,7 @@ function Roles({
             <RoleGroup
               key={kind}
               kind={kind}
-              label={seatLabel(kind, code)}
+              label={roleTitle(playbook.roles, kind)}
               project={project}
               playbook={playbook}
               state={state}
@@ -149,6 +160,7 @@ function Roles({
               onRemove={(seat) =>
                 act(() => removeFromRole(project.id, seat, kind))
               }
+              onLane={(lane) => act(() => setLane(project.id, kind, lane))}
             />
           ))}
       </ul>
@@ -197,6 +209,7 @@ function RoleGroup({
   busy,
   onAdd,
   onRemove,
+  onLane,
 }: {
   kind: MemberKind;
   label: string;
@@ -206,9 +219,12 @@ function RoleGroup({
   busy: boolean;
   onAdd: (member: string) => void;
   onRemove: (seat: string) => void;
+  onLane: (lane: string) => void;
 }) {
   const members = state.members;
   const seats = playbook.roles.filter((r) => r.kinds.includes(kind));
+  const stage = laneStage(kind);
+  const lane = laneOf(playbook.roles, kind);
   const eligible = members.filter((m) => holds(m, kind));
   const templated = kind !== "designer" && kind !== "pm";
   const required = kind === "implementer" || kind === "reviewer";
@@ -302,8 +318,66 @@ function RoleGroup({
             ))}
           </select>
         )}
+        {stage && seats.some((r) => laneKind(r) === kind) && (
+          <LaneName
+            key={lane}
+            label={label}
+            lane={lane}
+            fallback={boardLabel(stage, playbook)}
+            busy={busy}
+            onSave={onLane}
+          />
+        )}
       </div>
     </li>
+  );
+}
+
+/** The board stage a kind of role works in, if it has one of its own. */
+const laneStage = (kind: string) =>
+  (Object.keys(stageKinds) as Stage[]).find((s) => stageKinds[s] === kind);
+
+/**
+ * What the board calls the lane a role works in, such as "Drafting" for a
+ * book's writer; empty keeps the board's own name.
+ */
+function LaneName({
+  label,
+  lane,
+  fallback,
+  busy,
+  onSave,
+}: {
+  label: string;
+  lane: string;
+  fallback: string;
+  busy: boolean;
+  onSave: (lane: string) => void;
+}) {
+  const [value, setValue] = useState(lane);
+  return (
+    <form
+      className="role-lane"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSave(value.trim());
+      }}
+    >
+      <input
+        className="field"
+        aria-label={`${label} lane on the board`}
+        title="What the board calls this role's lane"
+        placeholder={`${fallback} (board lane)`}
+        maxLength={24}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      />
+      {value.trim() !== lane && (
+        <button type="submit" className="btn btn-sm" disabled={busy}>
+          Save lane
+        </button>
+      )}
+    </form>
   );
 }
 

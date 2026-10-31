@@ -42,6 +42,35 @@ const besideWork = new Set(["researcher", "designer", "pm"]);
 export const workingKind = (role: Role) =>
   role.kinds.find((k) => !besideWork.has(k)) ?? "";
 
+/** The kind whose board lane a seat's lane names, as the server reads it. */
+export const laneKind = (role: Role) =>
+  workingKind(role) ||
+  (role.kinds.find((k) => k === "researcher" || k === "designer") ?? "");
+
+/** What a team calls the lane a kind of role works in; "" for the board's own. */
+export const laneOf = (roles: readonly Role[], kind: string) =>
+  roles.find((r) => !!r.lane && laneKind(r) === kind)?.lane ?? "";
+
+/**
+ * What a team calls a kind of role: its template seat's name, as a writing
+ * team's "Writer", or else the kind's own.
+ */
+export function roleTitle(roles: readonly Role[], kind: string) {
+  const template = roles.find((r) => !r.member && holds(r, kind));
+  return template ? template.name.replace(/ #\d+$/, "") : kindLabel(kind);
+}
+
+/**
+ * The seat doing a kind of work on a request: from the team it started
+ * with, or else the project's; the kind itself when neither has one.
+ */
+export const seatName = (task: Task, kind: string, project?: Project) =>
+  [
+    ...(task.roles ?? []),
+    ...(task.playbook?.roles ?? []),
+    ...(project?.playbook?.roles ?? []),
+  ].find((r) => holds(r, kind))?.name ?? kindLabel(kind);
+
 /** "Researcher and implementer": the kinds held, in the order a team works. */
 export function kindsLabel(kinds: readonly string[]) {
   const rank = (kind: string) => {

@@ -1,10 +1,18 @@
 import { recordedTime } from "./ui";
 import { approveLabel, isCode } from "./landing";
 import { engineLabel } from "./engines";
-import { holds, pmSeat, taskPlaybook, workingSeats } from "./members";
+import {
+  holds,
+  laneOf,
+  pmSeat,
+  seatName,
+  taskPlaybook,
+  workingSeats,
+} from "./members";
 import {
   pendingDecisions,
   type Decision,
+  type MemberKind,
   type Observed,
   type Playbook,
   type Project,
@@ -254,8 +262,30 @@ export function seatWords(task: Task, name: string) {
 const personWords = (task: Task, wait: Wait) =>
   wait.member ? wait.seat! : seatWords(task, wait.seat ?? "");
 
-/** What the board calls a stage, as its lane does. */
-export function stageLabel(stage: Stage, playbook?: Playbook) {
+/** The kind of role that works each stage, whose seats can name its lane. */
+export const stageKinds: Partial<Record<Stage, MemberKind>> = {
+  researching: "researcher",
+  designing: "designer",
+  implementing: "implementer",
+  reviewing: "reviewer",
+  qa: "qa",
+};
+
+/**
+ * What the board calls a stage, as its lane does: the name the seats that
+ * work it give it, from roles, or else the board's own.
+ */
+export function stageLabel(
+  stage: Stage,
+  playbook?: Playbook,
+  roles: readonly Role[] = playbook?.roles ?? [],
+) {
+  const kind = stageKinds[stage];
+  return (kind && laneOf(roles, kind)) || boardLabel(stage, playbook);
+}
+
+/** The board's own name for a stage, before a team names its lane. */
+export function boardLabel(stage: Stage, playbook?: Playbook) {
   switch (stage) {
     case "todo":
       return "To do";
@@ -299,7 +329,11 @@ export const stageLimit = (playbook: Playbook | undefined, stage: Stage) =>
 export function waitingWords(task: Task, wait: Wait, project?: Project) {
   switch (wait.kind) {
     case "stage": {
-      const stage = stageLabel(wait.stage!, taskPlaybook(task, project));
+      const stage = stageLabel(
+        wait.stage!,
+        taskPlaybook(task, project),
+        task.roles?.length ? task.roles : undefined,
+      );
       return `Waiting for room in ${stage} (${wait.count} of ${wait.limit})${wait.on ? ` · held by ${wait.on}` : ""}`;
     }
     case "member": {
@@ -365,9 +399,7 @@ export function requestStep(
     case "designing":
       return `With ${task.checking || roleName(task, "designer", "the designer")} for design input`;
     case "writing": {
-      const writer =
-        seats[0]?.name ??
-        roleName(task, "implementer", code ? "Implementer" : "Writer");
+      const writer = seats[0]?.name ?? seatName(task, "implementer", project);
       const pr = task.proposal;
       if (pr?.answering && pr.number)
         return `${round}${writer} answering pull request #${pr.number}`;
