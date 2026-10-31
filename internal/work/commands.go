@@ -191,8 +191,41 @@ func (s *trackedCommands) Close() error {
 	defer s.loop.commandMu.Unlock()
 	for _, dir := range s.dirs {
 		delete(s.loop.liveCommands, dir)
+		if err == nil {
+			os.Remove(filepath.Join(s.loop.commandOwnersDir(), dir))
+		}
 	}
 	return err
+}
+
+// commandOwnersDir records, by command directory, the claim whose turn opened
+// it, so a restart that cannot reclaim the directory holds only that claim.
+func (lp *Loop) commandOwnersDir() string {
+	return filepath.Join(lp.Core.StateDirectory(), "commands", "owners")
+}
+
+// commandOwners are the claims owning command directories a sweep left
+// behind. known is false when any has no owner recorded, so nothing can be
+// said of which work it belongs to.
+func (lp *Loop) commandOwners() (owners map[string]bool, known bool) {
+	lp.commandMu.Lock()
+	defer lp.commandMu.Unlock()
+	entries, err := os.ReadDir(filepath.Join(lp.Core.StateDirectory(), "commands", "commands"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, false
+	}
+	owners = map[string]bool{}
+	for _, entry := range entries {
+		if !entry.IsDir() || lp.liveCommands[entry.Name()] {
+			continue
+		}
+		token, err := os.ReadFile(filepath.Join(lp.commandOwnersDir(), entry.Name()))
+		if err != nil || len(token) == 0 {
+			return nil, false
+		}
+		owners[string(token)] = true
+	}
+	return owners, true
 }
 
 // Serialize directory discovery with other opens and recovery. The harness
@@ -238,10 +271,16 @@ func (lp *Loop) openCommandsLocked(ctx context.Context, opts sandbox.Options) (c
 	if lp.liveCommands == nil {
 		lp.liveCommands = map[string]bool{}
 	}
+	_, token, fenced := core.FenceOf(ctx)
 	for _, entry := range after {
 		if entry.IsDir() && !known[entry.Name()] {
 			tracked.dirs = append(tracked.dirs, entry.Name())
 			lp.liveCommands[entry.Name()] = true
+			if fenced && os.MkdirAll(lp.commandOwnersDir(), 0700) == nil {
+				// Unrecorded, the directory's owner is unknown, and a restart
+				// that cannot reclaim it holds every claim that might own it.
+				_ = os.WriteFile(filepath.Join(lp.commandOwnersDir(), entry.Name()), []byte(token), 0600)
+			}
 		}
 	}
 	return tracked, nil
@@ -286,6 +325,7 @@ func (lp *Loop) sweepCommands(ctx context.Context) error {
 		if !os.IsNotExist(err) {
 			return errors.Join(errCommandRecovery, err)
 		}
+		os.Remove(filepath.Join(lp.commandOwnersDir(), entry.Name()))
 	}
 	return nil
 }

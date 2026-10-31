@@ -224,8 +224,19 @@ func (lp *Loop) resume(ctx context.Context) error {
 	}
 	if commandErr != nil {
 		lp.commandCleanup(commandErr)
-		// Command state is shared, so conservatively retain claims that may
-		// own a command copy. Ordinary writers and independent projects recover.
+		// Only the claims owning the commands left behind are held, where
+		// each is recorded; otherwise, conservatively, every claim that may
+		// own one. Other work, other projects and owner answers go on.
+		owners, known := lp.commandOwners()
+		keep := func(c core.Claim) {
+			if held[c.Token] != "" {
+				return
+			}
+			held[c.Token] = c.Held
+			if held[c.Token] == "" {
+				held[c.Token] = errCommandRecovery.Error()
+			}
+		}
 		for _, t := range snap.Tasks {
 			for _, c := range t.Claims {
 				// A claim held only because its finished turn's accounting
@@ -235,13 +246,16 @@ func (lp *Loop) resume(ctx context.Context) error {
 				if c.Held == accountingHold {
 					continue
 				}
-				if c.Step == core.StepValidateMerge || c.Step == core.TaskReviewing || c.Step == core.StepMessage || c.Held != "" || (t.Playbook != nil && t.Playbook.Medium == core.MediumGit) {
-					if held[c.Token] == "" {
-						held[c.Token] = c.Held
-						if held[c.Token] == "" {
-							held[c.Token] = errCommandRecovery.Error()
-						}
-					}
+				mayOwn := c.Step == core.StepValidateMerge || c.Step == core.TaskReviewing || c.Step == core.StepMessage || (t.Playbook != nil && t.Playbook.Medium == core.MediumGit)
+				if c.Held != "" || owners[c.Token] || (!known && mayOwn) {
+					keep(c)
+				}
+			}
+		}
+		for _, p := range snap.Projects {
+			for _, c := range p.Claims {
+				if owners[c.Token] {
+					keep(c)
 				}
 			}
 		}

@@ -15,6 +15,7 @@ import (
 	"github.com/shhac/lib-agent-harness/sandbox"
 
 	"github.com/shhac/crew-assistant/internal/checktest"
+	"github.com/shhac/crew-assistant/internal/core"
 )
 
 // checkRuns owns checks for the entire turn, not an individual MCP call.
@@ -71,7 +72,8 @@ func (r *checkRuns) call(ctx context.Context) (string, error) {
 	if run == nil || run.delivered {
 		run = &checkRun{done: make(chan struct{}), start: time.Now()}
 		r.current = run
-		go r.run(run)
+		// The check's commands belong to the turn's claim, as its tools do.
+		go r.run(core.FencedLike(r.ctx, ctx), run)
 	}
 	r.mu.Unlock()
 	timer := time.NewTimer(r.wait)
@@ -94,9 +96,9 @@ func (r *checkRuns) call(ctx context.Context) (string, error) {
 		return content, err
 	}
 }
-func (r *checkRuns) run(run *checkRun) {
+func (r *checkRuns) run(ctx context.Context, run *checkRun) {
 	defer close(run.done)
-	run.result, run.progress, run.err = r.lp.hostedCheck(r.ctx, r.medium, r.from, r.cache, r.medium.playbook.Check, func(err error, remove func()) {
+	run.result, run.progress, run.err = r.lp.hostedCheck(ctx, r.medium, r.from, r.cache, r.medium.playbook.Check, func(err error, remove func()) {
 		if r.retainCleanup != nil {
 			r.retainCleanup(err, remove)
 		}
