@@ -162,6 +162,9 @@ func (lp *Loop) recordLanded(ctx context.Context, t core.Task, r core.Revision, 
 // says so, with what the owner checks now that it has.
 func landedOn(t *core.Task, p *core.Project, r core.Revision, target, note string) string {
 	said := landedWords(t, p, r, target, note)
+	if d := t.DroppedRequirements(); d != "" {
+		said += "\n\n" + d
+	}
 	if c := t.OwnerChecklist(); c != "" {
 		said += "\n\n" + c
 	}

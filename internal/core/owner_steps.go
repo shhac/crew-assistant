@@ -91,6 +91,40 @@ func (t Task) OwnerChecklist() string {
 	return b.String()
 }
 
+// DroppedRequirements says which of the requirements a task started with the
+// team has since removed or reworded, and the owner hasn't put back. The team
+// may change anything it was given, which is how it keeps a task in shape;
+// this is so an approval never hides that it no longer checks what was asked.
+func (t Task) DroppedRequirements() string {
+	if len(t.Edits) == 0 {
+		return ""
+	}
+	var dropped []string
+	for _, c := range t.Edits[0].Before.Criteria {
+		if slices.Contains(t.Criteria, c) || slices.Contains(t.OwnerChecks, c) || slices.Contains(dropped, c) || t.ownerDropped(c) {
+			continue
+		}
+		dropped = append(dropped, c)
+	}
+	if len(dropped) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("The team changed what this was first asked to do; it no longer checks:")
+	for _, c := range dropped {
+		b.WriteString("\n- " + c)
+	}
+	b.WriteString("\nUndo the team's change in the task's notes if any still matters.")
+	return b.String()
+}
+
+// ownerDropped reports whether the owner took c out themselves.
+func (t Task) ownerDropped(c string) bool {
+	return slices.ContainsFunc(t.Edits, func(e TaskEdit) bool {
+		return e.Kind == FromOwner && slices.Contains(e.Before.Criteria, c) && !slices.Contains(e.After.Criteria, c)
+	})
+}
+
 // AcceptWithFollowUp accepts a task's draft at the owner's choice and queues
 // the follow-up the decision proposed, in one change. accept moves the task
 // on as any approval does and says what happened. The follow-up is the
