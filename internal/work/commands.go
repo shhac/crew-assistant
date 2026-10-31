@@ -161,8 +161,17 @@ func commandError(err error) error {
 	return err
 }
 
-// The standalone sandbox shares the workbench's ten-minute ceiling.
+// The standalone sandbox shares the workbench's ten-minute ceiling, except
+// for the project's check.
 const commandTimeout = 10 * time.Minute
+
+// checkTimeout bounds the project's whole check, which can legitimately run
+// past ten minutes: on 2026-10-31 crew-assistant's own make check took 8 to 12
+// minutes on a loaded machine, most of it internal/work's 13,000 or so real git
+// invocations. It sits above the check's own 30-minute Go test timeout, so
+// that timeout reports first, with its output, and well within the harness's
+// two-hour standalone ceiling.
+const checkTimeout = 35 * time.Minute
 
 func (lp *Loop) openCommands(ctx context.Context, opts sandbox.Options) (commandSandbox, error) {
 	lp.commandMu.Lock()
@@ -194,7 +203,9 @@ func (lp *Loop) openCommandsLocked(ctx context.Context, opts sandbox.Options) (c
 		return nil, err
 	}
 	opts.Write = true
-	opts.Timeout = commandTimeout
+	if opts.Timeout == 0 {
+		opts.Timeout = commandTimeout
+	}
 	opts.Env = roles.CommandEnv(opts.Env, opts.Read)
 	opts.Background = harness.Support(harness.OpenAICompatible, harness.Session, harness.Background).Usable()
 	base := filepath.Join(opts.RuntimeHome, "commands")

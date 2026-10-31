@@ -1,6 +1,7 @@
 package work
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -9,6 +10,7 @@ import (
 	"reflect"
 	"regexp"
 	"testing"
+	"time"
 
 	harness "github.com/shhac/lib-agent-harness"
 	"github.com/shhac/lib-agent-harness/sandbox"
@@ -119,5 +121,30 @@ func TestNoDeprecatedSessionCommandNames(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Only the project's check runs past the ten-minute command ceiling; every
+// other command the daemon hosts keeps it.
+func TestOnlyTheCheckGetsTheLongerTimeLimit(t *testing.T) {
+	t.Parallel()
+	lp := testLoop(t)
+	var got []sandbox.Options
+	lp.commands = func(_ context.Context, o sandbox.Options) (commandSandbox, error) {
+		got = append(got, o)
+		return &fakeCommands{}, nil
+	}
+	for _, opts := range []sandbox.Options{{WorkDir: t.TempDir()}, {WorkDir: t.TempDir(), Timeout: checkTimeout}} {
+		box, err := lp.openCommands(context.Background(), opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		box.Close()
+	}
+	if len(got) != 2 || got[0].Timeout != commandTimeout || got[1].Timeout != checkTimeout {
+		t.Fatalf("timeouts %v", []time.Duration{got[0].Timeout, got[1].Timeout})
+	}
+	if checkTimeout <= 30*time.Minute || checkTimeout > sandbox.MaxStandaloneTimeout {
+		t.Fatal("the check's limit must sit above its own 30-minute test timeout and within the harness ceiling")
 	}
 }

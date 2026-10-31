@@ -109,8 +109,8 @@ func TestRunCheckOnEveryEngineAndRole(t *testing.T) {
 				fake := &fakeCommands{result: sandbox.CommandResult{Stdout: "tests passed"}}
 				lp.commands = func(_ context.Context, o sandbox.Options) (commandSandbox, error) {
 					opts = o
-					if o.Timeout > 10*time.Minute {
-						return nil, errors.New("command timeout exceeds the v0.22.0 limit")
+					if o.Timeout > sandbox.MaxStandaloneTimeout {
+						return nil, errors.New("command timeout exceeds the harness's standalone limit")
 					}
 					body, err := os.ReadFile(filepath.Join(o.WorkDir, "uncommitted.txt"))
 					if err != nil || string(body) != "draft" {
@@ -136,7 +136,7 @@ func TestRunCheckOnEveryEngineAndRole(t *testing.T) {
 				if err != nil || result.IsError || !strings.Contains(result.Content, "tests passed") {
 					t.Fatalf("%+v %v", result, err)
 				}
-				if opts.WorkDir == source || opts.WorkDir == "" || !opts.Loopback || !opts.Write || opts.Timeout != commandTimeout {
+				if opts.WorkDir == source || opts.WorkDir == "" || !opts.Loopback || !opts.Write || opts.Timeout != checkTimeout {
 					t.Fatalf("sandbox options %+v", opts)
 				}
 				if !slices.Contains(opts.Env, "CREW_HOSTED_CHECK=1") {
