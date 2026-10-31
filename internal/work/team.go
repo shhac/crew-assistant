@@ -144,10 +144,10 @@ func fillRole(playbook *core.Playbook, kind, id string, snap core.Snapshot, curr
 		return nil
 	}
 	if slot < 0 {
-		playbook.Roles = append(playbook.Roles, memberSeat(m, []string{kind}, ""))
+		playbook.Roles = append(playbook.Roles, memberSeat(m, []string{kind}, core.Role{Lane: playbook.Lane(kind)}))
 		return nil
 	}
-	playbook.Roles[slot] = memberSeat(m, playbook.Roles[slot].Kinds, playbook.Roles[slot].Instructions)
+	playbook.Roles[slot] = memberSeat(m, playbook.Roles[slot].Kinds, playbook.Roles[slot])
 	return nil
 }
 
@@ -168,13 +168,14 @@ func memberFor(kind, id string, snap core.Snapshot) (core.Member, error) {
 }
 
 // memberSeat is a member in a seat holding kinds of role, after the
-// template's instructions for them, and how the member writes.
-func memberSeat(m core.Member, kinds []string, instructions string) core.Role {
-	instructions = strings.TrimSpace(instructions + "\n\n" + m.Instructions)
+// instructions of base, the template's seat for them, and how the member
+// writes. The seat keeps the lane base gives the board.
+func memberSeat(m core.Member, kinds []string, base core.Role) core.Role {
+	instructions := strings.TrimSpace(base.Instructions + "\n\n" + m.Instructions)
 	if m.Personality != "" {
 		instructions = strings.TrimSpace(instructions + "\n\nYour personality, which is how you write, never what you may do: " + m.Personality)
 	}
-	seat := core.Role{Name: m.Name, Kinds: kinds, Engine: m.Engine, Provider: m.Provider, Model: m.Model, Effort: m.Effort, Member: m.ID, Instructions: instructions}
+	seat := core.Role{Name: m.Name, Kinds: kinds, Engine: m.Engine, Provider: m.Provider, Model: m.Model, Effort: m.Effort, Member: m.ID, Instructions: instructions, Lane: base.Lane}
 	if seat.Holds(core.RoleQA) {
 		seat.Browser = m.Browser
 	}
@@ -234,8 +235,13 @@ func chosenTeam(in TeamChoice, snap core.Snapshot, p core.Project, current *core
 	// way again, as it did when the member was given its seat.
 	playbook.NameSeats()
 	// How much of the project's work runs at once is its own setting, and
-	// so is how much each stage holds.
+	// so is how much each stage holds, and what its lanes are called.
 	if p.Playbook != nil {
+		for k, r := range playbook.Roles {
+			if r.Lane == "" {
+				playbook.Roles[k].Lane = p.Playbook.Lane(r.LaneKind())
+			}
+		}
 		playbook.MaxActive = p.Playbook.MaxActive
 		playbook.DisabledBundledSkills = slices.Clone(p.Playbook.DisabledBundledSkills)
 		playbook.StageLimits = maps.Clone(p.Playbook.StageLimits)
@@ -354,7 +360,7 @@ func giveSeat(playbook *core.Playbook, kind, memberID string, snap core.Snapshot
 			filled = playbook.Roles[seat].Name
 			break
 		}
-		playbook.Roles = slices.Insert(playbook.Roles, at, memberSeat(m, []string{kind}, base.Instructions))
+		playbook.Roles = slices.Insert(playbook.Roles, at, memberSeat(m, []string{kind}, base))
 		playbook.NameSeats()
 		filled = playbook.Roles[slices.IndexFunc(playbook.Roles, func(r core.Role) bool { return r.Member == m.ID })].Name
 	}
@@ -427,7 +433,7 @@ func addToRole(pb *core.Playbook, kind, memberID string, snap core.Snapshot) err
 		joinSeat(pb, k, m, kind)
 		return nil
 	}
-	seat := memberSeat(m, []string{kind}, base.Instructions)
+	seat := memberSeat(m, []string{kind}, base)
 	seat.Name = pb.FreeName(-1, seat.Name)
 	pb.Roles = slices.Insert(slices.Clone(pb.Roles), after, seat)
 	pb.NameSeats()
@@ -476,6 +482,14 @@ func (lp *Loop) AddSeat(ctx context.Context, projectID, seat string) (core.Proje
 func (lp *Loop) RemoveSeat(ctx context.Context, projectID, seat string) (core.Project, error) {
 	return lp.changeSeats(ctx, projectID, func(playbook *core.Playbook) error {
 		return playbook.RemoveSeat(seat)
+	})
+}
+
+// SetLane names the board lane a kind of role works in, such as "Drafting"
+// for the implementer's, or with "" gives it back the board's own name.
+func (lp *Loop) SetLane(ctx context.Context, projectID, kind, lane string) (core.Project, error) {
+	return lp.editPlaybook(ctx, projectID, "", func(_ *core.Snapshot, _ *core.Project, pb *core.Playbook) error {
+		return pb.SetLane(kind, lane)
 	})
 }
 

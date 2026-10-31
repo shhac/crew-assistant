@@ -38,6 +38,9 @@ type Role struct {
 	Learnings []Learning `json:"learnings,omitempty"`
 	// Browser is whether QA in this seat uses its engine's own browser.
 	Browser Browser `json:"browser,omitzero"`
+	// Lane names the board lane for the seat's LaneKind, such as "Drafting";
+	// empty keeps the board's own name for it.
+	Lane string `json:"lane,omitempty"`
 }
 
 // roleKinds are the kinds of role a member or seat can hold, in the order a
@@ -303,6 +306,9 @@ func validateSeats(roles []Role, hasCheck bool) error {
 			return err
 		}
 		if err := validateBrowser(r.Browser, r.Engine, r.Holds(RoleQA)); err != nil {
+			return fmt.Errorf("role %s: %w", r.Name, err)
+		}
+		if err := validLane(r.Lane); err != nil {
 			return fmt.Errorf("role %s: %w", r.Name, err)
 		}
 		switch {

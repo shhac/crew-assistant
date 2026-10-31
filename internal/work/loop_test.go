@@ -498,7 +498,7 @@ func TestAPIMemberSeatAndBaseSpecKeepProvider(t *testing.T) {
 	cfg := lp.Config()
 	cfg.Engines.Providers = []config.Provider{{ID: "fixture-api", HTTPEngine: config.HTTPEngine{BaseURL: "http://127.0.0.1:1234/v1"}}}
 	lp.Config = func() config.Config { return cfg }
-	seat := memberSeat(core.Member{ID: "member", Name: "Rune", Engine: "openai-compatible", Provider: "fixture-api", Model: "tools-model"}, []string{core.RoleReviewer}, "Read carefully")
+	seat := memberSeat(core.Member{ID: "member", Name: "Rune", Engine: "openai-compatible", Provider: "fixture-api", Model: "tools-model"}, []string{core.RoleReviewer}, core.Role{Instructions: "Read carefully"})
 	spec := lp.baseSpec(seat, "/work", "Review")
 	if spec.AccountIdentity != "fixture-api:" {
 		t.Fatal("provider identity missing", spec.AccountIdentity)

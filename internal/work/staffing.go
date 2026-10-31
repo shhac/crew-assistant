@@ -101,7 +101,7 @@ func overridesFrom(choices []SeatOverrideChoice, snap core.Snapshot, base core.P
 			if err != nil {
 				return nil, err
 			}
-			seat = memberSeat(m, []string{c.Kind}, seat.Instructions)
+			seat = memberSeat(m, []string{c.Kind}, seat)
 		} else if !ok {
 			return nil, fmt.Errorf("no template fills the %s role; choose a member", c.Kind)
 		}

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // Unseat takes a kind of role from every seat that holds it; a seat goes if
@@ -106,7 +107,12 @@ func (p Playbook) TemplateInstructions(kinds []string) string {
 func (p *Playbook) Rekind(k int, kinds []string) {
 	r := &p.Roles[k]
 	own := p.ownInstructions(*r)
+	lane := r.LaneKind()
 	r.Kinds = kinds
+	// A lane names the board lane of one kind, so it goes with that kind.
+	if r.LaneKind() != lane {
+		r.Lane = ""
+	}
 	r.Instructions = strings.TrimSpace(p.TemplateInstructions(kinds) + "\n\n" + own)
 	// The browser is QA's, so it goes with the role.
 	if !r.Holds(RoleQA) {
@@ -154,6 +160,7 @@ func (p Playbook) TemplateSeat(kind string) (Role, bool) {
 	seat := template[t]
 	seat.Kinds = []string{kind}
 	seat.Name = p.FreeName(-1, seat.Name)
+	seat.Lane = p.Lane(kind)
 	return seat, true
 }
 
@@ -173,4 +180,60 @@ func (p Playbook) FreeName(k int, name string) string {
 		candidate = fmt.Sprintf("%s #%d", name, n)
 	}
 	return candidate
+}
+
+// LaneKind is the kind whose board lane the seat's Lane names: its working
+// kind, or else research or design. A seat that only keeps the list has
+// none.
+func (r Role) LaneKind() string {
+	if kind := r.Working(); kind != "" {
+		return kind
+	}
+	for _, kind := range r.Kinds {
+		if kind == RoleResearcher || kind == RoleDesigner {
+			return kind
+		}
+	}
+	return ""
+}
+
+// Lane is what the team calls the board lane of a kind of role: the first
+// lane a seat gives it, or "" for the board's own name.
+func (p Playbook) Lane(kind string) string {
+	for _, r := range p.Roles {
+		if r.Lane != "" && r.LaneKind() == kind {
+			return r.Lane
+		}
+	}
+	return ""
+}
+
+// SetLane names the board lane of a kind of role on every seat whose lane
+// it is; "" gives the lane back the board's own name.
+func (p *Playbook) SetLane(kind, lane string) error {
+	lane = strings.TrimSpace(lane)
+	if err := validLane(lane); err != nil {
+		return err
+	}
+	p.Roles = slices.Clone(p.Roles)
+	found := false
+	for i, r := range p.Roles {
+		if r.LaneKind() == kind {
+			p.Roles[i].Lane, found = lane, true
+		}
+	}
+	if !found {
+		return fmt.Errorf("no seat on the team has a %s lane of its own: %w", kind, ErrNotFound)
+	}
+	return nil
+}
+
+// maxLane is the longest a lane's name may be, so it fits a column header.
+const maxLane = 24
+
+func validLane(lane string) error {
+	if lane != strings.TrimSpace(lane) || strings.ContainsAny(lane, "\r\n\t") || utf8.RuneCountInString(lane) > maxLane {
+		return fmt.Errorf("a lane's name is one line of at most %d characters", maxLane)
+	}
+	return nil
 }

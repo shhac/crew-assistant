@@ -118,6 +118,16 @@ func registerProjectWork(mux *http.ServeMux, a *app.App) {
 		v, err := a.Work.SetSeat(r.Context(), r.PathValue("id"), r.PathValue("kind"), in.Member)
 		reply(w, 200, v, err)
 	})
+	mux.HandleFunc("PUT /api/projects/{id}/team/{kind}/lane", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Lane string `json:"lane"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Work.SetLane(r.Context(), r.PathValue("id"), r.PathValue("kind"), in.Lane)
+		reply(w, 200, v, err)
+	})
 	mux.HandleFunc("PUT /api/projects/{id}/team/qa/browser", func(w http.ResponseWriter, r *http.Request) {
 		var in core.Browser
 		if decode(w, r, &in) != nil {
