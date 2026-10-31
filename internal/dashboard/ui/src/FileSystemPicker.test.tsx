@@ -84,8 +84,8 @@ beforeEach(() => {
     y: 0,
     toJSON: () => ({}),
   });
-  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(342);
-  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(600);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(342);
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(600);
 });
 afterEach(() => {
   cleanup();
