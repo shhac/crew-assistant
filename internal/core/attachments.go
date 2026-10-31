@@ -393,8 +393,8 @@ func (s *Service) writeScreenshots(ctx context.Context, taskRef string, shots Sc
 	p := &pendingShots{shots: shots}
 	switch {
 	case len(shots.Files) == 0:
-	case len(shots.Files) > MaxScreenshots:
-		p.failed = fmt.Errorf("a check can keep at most %d screenshots", MaxScreenshots)
+	case len(shots.Files) > MaxScreenshots+1:
+		p.failed = fmt.Errorf("a check can keep at most %d screenshots and a recording", MaxScreenshots)
 	default:
 		p.kept, p.written, p.failed = s.writeFiles(ctx, taskRef, shots.Files)
 	}

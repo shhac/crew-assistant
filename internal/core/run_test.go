@@ -224,11 +224,11 @@ func TestQAScreenshotsAreKeptWithTheirVerdict(t *testing.T) {
 	}
 	// What can't be kept is said in the verdict, which is still recorded,
 	// with no id for screenshots it doesn't have.
-	five := make([]NewFile, MaxScreenshots+1)
-	for i := range five {
-		five[i] = NewFile{Name: "s.png", Data: shot}
+	tooMany := make([]NewFile, MaxScreenshots+2)
+	for i := range tooMany {
+		tooMany[i] = NewFile{Name: "s.png", Data: shot}
 	}
-	if got, v = check(Screenshots{By: "QA", Files: five}); v.ID != "" || len(got.Verdicts) != 2 || len(v.Evidence) != 1 || !strings.HasPrefix(v.Evidence[0].Text, "5 screenshots could not be kept: a check can keep at most") {
+	if got, v = check(Screenshots{By: "QA", Files: tooMany}); v.ID != "" || len(got.Verdicts) != 2 || len(v.Evidence) != 1 || !strings.HasPrefix(v.Evidence[0].Text, "6 screenshots could not be kept: a check can keep at most 4 screenshots and a recording") {
 		t.Fatalf("more screenshots than a check keeps: %+v", v)
 	}
 	if _, v = check(Screenshots{By: "QA", Files: []NewFile{{Name: "s.png", Data: []byte("not a picture")}}}); v.ID != "" || len(v.Evidence) != 1 || !strings.Contains(v.Evidence[0].Text, "it is not a PNG image") {

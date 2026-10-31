@@ -143,6 +143,9 @@ type screenshots struct {
 	mu      sync.Mutex
 	images  []session.Image
 	omitted int
+	// frames are the turn's screenshots for its recording, a longer run of
+	// them than the stills kept.
+	frames []session.Image
 }
 
 func (s *screenshots) Attempt(id string) {
@@ -175,6 +178,10 @@ func (s *screenshots) Saw(e session.Event) {
 		s.mu.Lock()
 		s.images = append(s.images, e.Images...)
 		s.omitted += e.ImagesOmitted
+		s.frames = append(s.frames, e.Images...)
+		if extra := len(s.frames) - maxRecordingFrames; extra > 0 {
+			s.frames = append([]session.Image(nil), s.frames[extra:]...)
+		}
 		// Only the last few are kept, so what came before is let go now.
 		if extra := len(s.images) - core.MaxScreenshots; extra > 0 {
 			s.images = append([]session.Image(nil), s.images[extra:]...)
@@ -203,19 +210,27 @@ func (s *screenshots) taken() ([]session.Image, int) {
 
 var imageExtensions = map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
 
-// files are the screenshots QA's turn took, as files to keep with its
-// verdict when it is recorded, and how many more it took that are not kept,
-// counting images of a type that can't be.
+// files are the screenshots QA's turn took, with a recording of them all,
+// as files to keep with its verdict when it is recorded, and how many more it
+// took that are not kept, counting images of a type that can't be.
 func (s *screenshots) files(by string) core.Screenshots {
 	images, omitted := s.taken()
 	out := core.Screenshots{By: by, Omitted: omitted}
+	s.mu.Lock()
+	frames := append([]session.Image(nil), s.frames...)
+	s.mu.Unlock()
+	if gif, ok := recording(frames); ok {
+		out.Files = append(out.Files, core.NewFile{Name: "recording.gif", Data: gif})
+	}
+	n := 0
 	for _, img := range images {
 		ext, ok := imageExtensions[img.MediaType]
 		if !ok {
 			out.Omitted++
 			continue
 		}
-		out.Files = append(out.Files, core.NewFile{Name: fmt.Sprintf("screenshot-%d%s", len(out.Files)+1, ext), Data: img.Data})
+		n++
+		out.Files = append(out.Files, core.NewFile{Name: fmt.Sprintf("screenshot-%d%s", n, ext), Data: img.Data})
 	}
 	return out
 }

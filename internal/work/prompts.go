@@ -490,7 +490,7 @@ func appPrompt(app appRun) string {
 			fmt.Fprintf(&b, "%d. Use the browser the Chrome extension connects by default; don't select or switch to another.\n", step)
 		}
 		step++
-		fmt.Fprintf(&b, "%d. Use the app in the browser at %s as the task's criteria need, and take a screenshot of each thing that shows whether it works. The browser is the owner's real Chrome, with their logins: open only the app's address, in tabs of your own; never sign in anywhere, visit other sites or change anything outside the app, and close the tabs you opened when you are done. Your last %d screenshots are kept with your verdict.\n", step, address, core.MaxScreenshots)
+		fmt.Fprintf(&b, "%d. Use the app in the browser at %s as the task's criteria need. Take a screenshot at each step of each flow you check, not only of the result: crew-assistant turns them, in order, into a recording kept with your verdict, along with your last %d as stills. The browser is the owner's real Chrome, with their logins: open only the app's address, in tabs of your own; never sign in anywhere, visit other sites or change anything outside the app, and close the tabs you opened when you are done.\n", step, address, core.MaxScreenshots)
 		step++
 		fmt.Fprintf(&b, "%d. Read the page's console messages and network requests for errors and failed requests.\n", step)
 	} else {
