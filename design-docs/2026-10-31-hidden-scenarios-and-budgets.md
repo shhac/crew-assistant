@@ -38,9 +38,15 @@ owner-in-the-loop system:
 
 ## Flow recordings (owner's ask, 2026-10-31)
 
-- Where a project has an app and QA has a browser, QA records each criterion's
-  or scenario's flow as it uses the app: a GIF through the browser extension's
-  recorder first, video later if a real run needs it.
+- Where a project has an app and QA has a browser, the daemon keeps every
+  screenshot QA takes while it uses the app (bounded, scaled down) and builds
+  one animated GIF of the turn from them, in order. QA is asked to take a
+  screenshot at each step of each flow it checks.
+- Not the browser extension's own recorder: as of Claude in Chrome on
+  2026-10-31, `gif_creator` exports only by downloading into the owner's
+  Downloads folder or dropping onto a page, never in the tool result, so the
+  daemon could not keep it reliably. Building from screenshots also works for
+  any engine whose browser returns them.
 - Recordings are verdict evidence beside screenshots: bounded in count and
   size, kept with the verdict, shown on the task's drafts in the dashboard,
   and attached to the pull request description when it lands.
