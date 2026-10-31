@@ -91,7 +91,7 @@ export function RequestAttachments({ task }: { task: Task }) {
     const verdict =
       a.verdict && (task.verdicts ?? []).find((v) => v.id === a.verdict);
     if (verdict)
-      return `${verdict.role}'s screenshot, checking draft ${verdict.revision}${when}`;
+      return `${verdict.role}'s ${a.name === "recording.gif" ? "recording" : "screenshot"}, checking draft ${verdict.revision}${when}`;
     return `Added by ${a.by}${when}`;
   }
   return (

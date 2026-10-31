@@ -10,8 +10,8 @@ const evidenceLabel: Record<string, string> = {
 };
 
 /**
- * What QA saw using the app, under its verdict: the screenshots it took,
- * kept with the request, and its page, console and network findings.
+ * What QA saw using the app, under its verdict: the screenshots it took and
+ * the recording made of them, kept with the request, and its page, console and network findings.
  */
 export function VerdictEvidence({
   task,

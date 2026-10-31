@@ -223,6 +223,49 @@ describe("a request's attachments", () => {
     expect(within(all).getByText("4 files attached")).toBeTruthy();
   });
 
+  it("says which of QA's files is its recording and which are screenshots", () => {
+    const qa = (id: string, name: string, type: string) => ({
+      id,
+      name,
+      type,
+      size: 2048,
+      by: "Quinn",
+      kind: "qa",
+      at: "",
+      verdict: "v1",
+    });
+    render(
+      <RequestAttachments
+        task={{
+          ...task,
+          notes: [],
+          design: [],
+          attachments: [
+            qa("a1", "recording.gif", "image/gif"),
+            qa("a2", "screenshot-1.png", "image/png"),
+          ],
+          verdicts: [
+            {
+              id: "v1",
+              revision: 2,
+              role: "Quinn",
+              brief_version: 1,
+              outcome: "pass",
+              summary: "Works.",
+            },
+          ],
+        }}
+      />,
+    );
+    const all = screen.getByRole("region", { name: "Attachments" });
+    expect(
+      within(all).getByText("Quinn's recording, checking draft 2"),
+    ).toBeTruthy();
+    expect(
+      within(all).getByText("Quinn's screenshot, checking draft 2"),
+    ).toBeTruthy();
+  });
+
   it("counts a 29-frame hand-over and its records without an ordinary ceiling", () => {
     const attachments = [
       ...Array.from({ length: 29 }, (_, i) => ({
