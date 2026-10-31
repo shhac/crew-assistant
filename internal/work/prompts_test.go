@@ -63,7 +63,8 @@ func TestAReviewerIsShownTheEarlierFindingsAndAskedForEverything(t *testing.T) {
 		for _, want := range []string{
 			"What the checks found on earlier drafts of this task:\n- Draft 2, Reviewer: [Handles errors] Gap 2\n- Draft 3, Reviewer: [Handles errors] Gap 3\n- Draft 4, Reviewer: [Handles errors] Gap 4\n- Draft 4, QA: The vet warning\n",
 			`Start by checking each earlier finding above against this draft: say in your summary which are fixed, and keep each one that is not as a finding marked "still open from draft N". Then review the whole`,
-			`This may be the last review: report every issue you find now, in one verdict, each tied to a criterion or plan item; mark minor ones "follow-up".`,
+			`This may be the last review: tie each issue to a criterion or plan item, and mark minor ones "follow-up".`,
+			allFindings,
 		} {
 			if !strings.Contains(prompt, want) {
 				t.Fatalf("the %s prompt lacks %q: %s", name, want, prompt)
@@ -88,6 +89,30 @@ func TestAReviewerIsShownTheEarlierFindingsAndAskedForEverything(t *testing.T) {
 	qa := checkerPrompt(code, task, rev, core.Role{Name: "QA", Kinds: []string{core.RoleQA}}, &core.Playbook{Medium: core.MediumGit, Check: "make check"})
 	if strings.Contains(qa, "Gap 4") || strings.Contains(qa, "This may be the last review") {
 		t.Fatalf("QA's check should be as it was: %s", qa)
+	}
+}
+
+// Every finding held back, or stopped short of, costs the task a round, so
+// every kind of checker is asked for all of them at once, and QA says what a
+// check that stopped early never ran.
+func TestEveryCheckerIsAskedForEveryFindingAtOnce(t *testing.T) {
+	t.Parallel()
+	code := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit, Check: "make check"}}
+	docs := core.Project{Brief: core.Brief{Goal: "Write notes"}}
+	task := reviewedTask()
+	rev := task.Revisions[4]
+	qa := checkerPrompt(code, task, rev, core.Role{Name: "QA", Kinds: []string{core.RoleQA}}, code.Playbook)
+	for name, prompt := range map[string]string{
+		"code reviewer": checkerPrompt(code, task, rev, core.Role{Name: "Reviewer", Kinds: []string{core.RoleReviewer}}, code.Playbook),
+		"reviewer":      reviewerPrompt(docs, task, rev),
+		"QA":            qa,
+	} {
+		if !strings.Contains(prompt, allFindings) {
+			t.Fatalf("the %s prompt lacks the all-findings rule: %s", name, prompt)
+		}
+	}
+	if !strings.Contains(qa, "If the check stopped at a failure before its later steps ran, add a finding naming the steps that did not run") {
+		t.Fatalf("QA should name the steps a stopped check never ran: %s", qa)
 	}
 }
 

@@ -397,12 +397,17 @@ func verdictFormat(t core.Task) string {
 		outcomes = `"pass" | "revise" | "question" | "research"`
 		research = "\nUse \"research\" when the work needs more research before it can be judged or revised well, such as an approach no one has checked: the task goes back to the researcher with your question, then back to you."
 	}
-	return research + `
+	return research + allFindings + `
 Every checker judges every new draft. If you recommend a different next step from the one your outcome leads to (pass goes on to approval or landing, revise back to the implementer, research to the researcher), set "next" to "land", "revise" or "research" and "note" to one line on why, such as "I want to see it again after the tests pass". Otherwise leave both empty.
 
 Reply with only this JSON object:
 {"outcome": ` + outcomes + `, "summary": "one or two sentences", "findings": [{"criterion": "...", "note": "..."}], "question": "for outcome question or research: what to ask, else empty", "next": "", "note": ""}`
 }
+
+// allFindings is in every checker's reply format, since each finding a checker
+// holds back, or stops short of, costs the task another round.
+const allFindings = `
+Give every finding you have for this draft in this one verdict: do not stop at the first problem, and hold nothing back for a later round. A later round should find nothing that was already there to see in this draft.`
 
 // sandboxGuide keeps a checker's own sandbox from sending a draft round
 // after round: an implementer can't revise its way past a refusal it
@@ -433,7 +438,7 @@ func checkerPrompt(p core.Project, t core.Task, r core.Revision, checker core.Ro
 			fmt.Fprintf(&b, "Run exactly this from the repository root, once:\n%s\n\n", playbook.Check)
 			b.WriteString("Do not change, fix or commit anything; only run the check and read its output.\n")
 		}
-		b.WriteString(`Use "pass" only if it exits successfully without timing out. Otherwise use "revise", with one finding per failing test, build error or check, quoting the key lines of output in the note.
+		b.WriteString(`Use "pass" only if it exits successfully without timing out. Otherwise use "revise", with one finding per failing test, build error or check, quoting the key lines of output in the note. If the check stopped at a failure before its later steps ran, add a finding naming the steps that did not run, so the next draft is checked against them too.
 Quote the total skip count, including zero, and every actual known skip with its test identity, reason, missing capability and upstream dependency. Required skips without an explicit known-skip exception require "revise"; an incomplete check cannot pass.
 Use "question" only if the check cannot run at all for a reason the implementer cannot fix (for example a missing tool), and say what is missing.`)
 		b.WriteString(sandboxGuide)
@@ -562,7 +567,7 @@ func reviewDepth(earlier, code bool) string {
 	if earlier {
 		fmt.Fprintf(&b, "\nStart by checking each earlier finding above against this draft: say in your summary which are fixed, and keep each one that is not as a finding marked \"still open from draft N\". Then review the whole %s, not only what changed since.", whole)
 	}
-	b.WriteString("\nThis may be the last review: report every issue you find now, in one verdict, each tied to a criterion or plan item; mark minor ones \"follow-up\".")
+	b.WriteString("\nThis may be the last review: tie each issue to a criterion or plan item, and mark minor ones \"follow-up\".")
 	if code {
 		b.WriteString(" Before replying, walk these paths through the change: stopping mid-step, a crash between two writes, concurrent callers, partial failure, state a model turn changed, and every other path that applies the same rule.")
 	}
