@@ -100,9 +100,10 @@ func heldClaimDecision(projectID, taskID, what string, c Claim) Decision {
 	} else {
 		b.WriteString(" Part of it may still be running. Restarting crew-assistant checks again and lets it go once it has stopped; let it go here only if you know it has.")
 	}
-	title := what + " has been held for over 30 minutes"
+	over := fmt.Sprintf("for over %d minutes", int(HeldNotice.Minutes()))
+	title := what + " has been held " + over
 	if c.Seat != "" {
-		title = c.Seat + " has been held on " + what + " for over 30 minutes"
+		title = c.Seat + " has been held on " + what + " " + over
 	}
 	return Decision{ProjectID: projectID, TaskID: taskID, Kind: DecisionHeldClaim, Claim: c.Token, Title: title, Context: b.String(), Recommendation: recommend, Choices: []string{ChoiceLetGo, ChoiceKeepWaiting}}
 }
