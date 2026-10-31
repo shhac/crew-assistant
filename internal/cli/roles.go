@@ -23,7 +23,7 @@ func roleSandboxChecks(ctx context.Context, cfg config.Config, statePath string)
 		return checks
 	}
 	defer os.RemoveAll(work)
-	for _, e := range harness.Engines() {
+	for _, e := range config.KnownEngines() {
 		engine := string(e)
 		if e.Transport() == harness.APITransport {
 			ok, reason := config.RoleSupport(engine)

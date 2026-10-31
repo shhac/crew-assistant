@@ -34,9 +34,12 @@ const (
 )
 
 // Supports says whether engine can be chosen for use. lib-agent-harness
-// says what each engine can do, so an engine it starts to support for
-// something is offered for it without a change here.
+// says what each engine crew can reach can do, so an engine it starts to
+// support for something is offered for it without a change here.
 func Supports(engine string, use Use) bool {
+	if !known(engine) {
+		return false
+	}
 	e := harness.Engine(engine)
 	switch use {
 	case UseAssistant:
@@ -73,6 +76,9 @@ var roleSupport = harness.Support
 // reaches the daemon's tools. API roles use proved commands for workspace
 // reads, searches and edits while workbench content tools are unavailable.
 func RoleSupport(engine string) (ok bool, reason string) {
+	if !known(engine) {
+		return false, fmt.Sprintf("%s isn't an engine team roles can use here.", EngineLabel(engine))
+	}
 	e := harness.Engine(engine)
 	features := []harness.Feature{harness.Sandbox, harness.Tools}
 	for _, feature := range features {
@@ -125,7 +131,7 @@ func CheckRoleEngine(engine string) error {
 		return nil
 	}
 	err := fmt.Errorf("engine must be %s", strings.Join(EnginesFor(UseRoles), " or "))
-	if harness.Engine(engine).Transport() == "" {
+	if !known(engine) {
 		return err
 	}
 	return fmt.Errorf("%w. %s", err, reason)

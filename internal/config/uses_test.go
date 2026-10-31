@@ -36,6 +36,16 @@ func TestEnginesAreOfferedForWhatTheHarnessSupports(t *testing.T) {
 	if !slices.Equal(CLIEngineNames, []string{"codex", "claude", "grok"}) {
 		t.Fatalf("CLI engines %v", CLIEngineNames)
 	}
+	if got := KnownEngines(); !slices.Equal(got, []harness.Engine{harness.Codex, harness.Claude, harness.Grok, harness.OpenAICompatible}) {
+		t.Fatalf("known engines %v", got)
+	}
+	for _, unset := range []harness.Engine{harness.CommandCode, harness.Antigravity, harness.Fx} {
+		for _, use := range []Use{UseAssistant, UseRoles, UseSmall, UseUsage, UseModels, UseEfforts} {
+			if Supports(string(unset), use) {
+				t.Errorf("%s was offered for %s without settings for it", unset, use)
+			}
+		}
+	}
 }
 
 func TestRolesOnAnAPIProviderFollowTheHarness(t *testing.T) {

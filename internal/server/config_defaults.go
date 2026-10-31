@@ -52,7 +52,7 @@ type engineChoice struct {
 
 func engineChoices() []engineChoice {
 	choices := []engineChoice{}
-	for _, e := range harness.Engines() {
+	for _, e := range config.KnownEngines() {
 		name := string(e)
 		roles, rolesReason := config.RoleSupport(name)
 		choices = append(choices, engineChoice{

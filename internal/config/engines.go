@@ -110,14 +110,26 @@ const (
 // CLIEngineNames are the engines reached through a native CLI and its login.
 var CLIEngineNames = cliEngineNames()
 
+// The harness knows more CLIs than crew keeps settings for, so CLIRef
+// decides which of them are offered.
 func cliEngineNames() []string {
 	var names []string
 	for _, e := range harness.Engines() {
-		if e.Transport() == harness.CLITransport {
+		if (&Engines{}).CLIRef(string(e)) != nil {
 			names = append(names, string(e))
 		}
 	}
 	return names
+}
+
+// KnownEngines are the harness's engines crew can reach, in the harness's
+// order: every API, and the CLIs it keeps settings for.
+func KnownEngines() []harness.Engine {
+	return slices.DeleteFunc(harness.Engines(), func(e harness.Engine) bool { return !known(string(e)) })
+}
+
+func known(engine string) bool {
+	return harness.Engine(engine).Transport() == harness.APITransport || (&Engines{}).CLIRef(engine) != nil
 }
 
 const (
