@@ -86,7 +86,7 @@ func TestCommandsDiscoverDaemonAndUpgradeThroughAliases(t *testing.T) {
 				if err := os.MkdirAll(runtime, 0700); err != nil {
 					t.Fatal(err)
 				}
-				sockets, err := os.MkdirTemp("", "crew-alias-")
+				sockets, err := os.MkdirTemp("", "c")
 				if err != nil {
 					t.Fatal(err)
 				}

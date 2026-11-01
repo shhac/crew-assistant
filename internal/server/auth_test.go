@@ -183,7 +183,7 @@ func fromTheOwnersSocket(r *http.Request) *http.Request {
 // way to be recognised without a paired browser, and the only way to get a
 // sign-in code.
 func TestOnlyTheOwnersSocketIsRecognisedWithoutPairing(t *testing.T) {
-	dir, err := os.MkdirTemp("", "crew-auth-")
+	dir, err := os.MkdirTemp("", "c")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -32,7 +32,7 @@ func TestAnAccountingHoldGoesAtStartupEvenWhenTheSweepFails(t *testing.T) {
 	if err := a.Core.HoldClaim(ctx, claim.Task.ID, p.ID, claim.Claim.Token, accountingHold); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(a.Core.StateDirectory(), "commands", "commands", "interrupted"), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Join(a.commandsHome(), "commands", "interrupted"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	a.commands = func(context.Context, sandbox.Options) (commandSandbox, error) {
@@ -76,7 +76,7 @@ func TestAnAccountingHoldGoesOnceItsAccountingIsRecorded(t *testing.T) {
 				return lp.Core.FinishTeamTurn(ctx, id, end)
 			}
 			if sweepFails {
-				if err := os.MkdirAll(filepath.Join(lp.Core.StateDirectory(), "commands", "commands", "interrupted"), 0700); err != nil {
+				if err := os.MkdirAll(filepath.Join(lp.commandsHome(), "commands", "interrupted"), 0700); err != nil {
 					t.Fatal(err)
 				}
 				lp.commands = func(context.Context, sandbox.Options) (commandSandbox, error) {

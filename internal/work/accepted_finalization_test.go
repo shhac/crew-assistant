@@ -249,7 +249,7 @@ func TestStartupCommandHoldAllowsAnswersAndIndependentWork(t *testing.T) {
 	if _, err := lp.Core.ClaimTask(ctx, task.ID, core.StepValidateMerge); err != nil {
 		t.Fatal(err)
 	}
-	stale := filepath.Join(lp.Core.StateDirectory(), "commands", "commands", "unreclaimed")
+	stale := filepath.Join(lp.commandsHome(), "commands", "unreclaimed")
 	if err := os.MkdirAll(stale, 0700); err != nil {
 		t.Fatal(err)
 	}

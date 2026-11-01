@@ -46,7 +46,7 @@ func TestAnUnreclaimableCommandHoldsOnlyItsOwnTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A's check opened a command whose cleanup could not be confirmed.
-	left := filepath.Join(lp.Core.StateDirectory(), "commands", "commands", "a-check")
+	left := filepath.Join(lp.commandsHome(), "commands", "a-check")
 	lp.commands = func(context.Context, sandbox.Options) (commandSandbox, error) {
 		if err := os.MkdirAll(left, 0700); err != nil {
 			t.Fatal(err)

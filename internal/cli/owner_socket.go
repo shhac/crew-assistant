@@ -20,7 +20,7 @@ const maxSocketPath = 100
 func listenOwner(runtimeDir string) (listener net.Listener, path string, remove func(), err error) {
 	dir, remove := runtimeDir, func() {}
 	if len(filepath.Join(dir, "owner.sock")) > maxSocketPath {
-		if dir, err = os.MkdirTemp("", "crew-"); err != nil {
+		if dir, err = os.MkdirTemp("", "c-"); err != nil {
 			return nil, "", nil, err
 		}
 		remove = func() { _ = os.RemoveAll(dir) }

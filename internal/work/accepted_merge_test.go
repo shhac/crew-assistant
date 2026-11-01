@@ -998,7 +998,7 @@ func TestCommandRecoveryHoldsAcceptedValidationWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stale := filepath.Join(lp.Core.StateDirectory(), "commands", "commands", "interrupted")
+	stale := filepath.Join(lp.commandsHome(), "commands", "interrupted")
 	if err = os.MkdirAll(stale, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -1045,7 +1045,7 @@ func TestAcceptedCommandCloseFailureHoldsImmediateOwnerAnswers(t *testing.T) {
 			a, _, _, task, _, source := acceptedCode(t, choiceAcceptFollowUp, false, &reopen)
 			ownerCommits(t, source, "owner.go", "package main\n", "owner work")
 			task = stepUntil(t, a, task.ID, func(t core.Task) bool { return len(t.Revisions) == 2 })
-			stale := filepath.Join(a.Core.StateDirectory(), "commands", "commands", "unconfirmed")
+			stale := filepath.Join(a.commandsHome(), "commands", "unconfirmed")
 			var workspace string
 			a.commands = func(_ context.Context, o sandbox.Options) (commandSandbox, error) {
 				if workspace == "" {

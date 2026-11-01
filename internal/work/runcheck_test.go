@@ -527,7 +527,7 @@ func TestStartupReclaimsStaleCommandsWithoutRunningWorkspaceContent(t *testing.T
 	if opened != 0 {
 		t.Fatal("opened a sandbox with no stale commands")
 	}
-	stale := filepath.Join(lp.Core.StateDirectory(), "commands", "commands", "old-run")
+	stale := filepath.Join(lp.commandsHome(), "commands", "old-run")
 	if err := os.MkdirAll(stale, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -562,7 +562,7 @@ func TestCommandStartErrorRetainsSettledDiagnosticsAndNoHandle(t *testing.T) {
 
 func TestCommandRecoveryExcludesLiveSandbox(t *testing.T) {
 	lp := testLoop(t)
-	base := filepath.Join(lp.Core.StateDirectory(), "commands", "commands")
+	base := filepath.Join(lp.commandsHome(), "commands")
 	live := filepath.Join(base, "live")
 	entered, finish := make(chan struct{}), make(chan struct{})
 	stale := filepath.Join(base, "stale")

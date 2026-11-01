@@ -210,9 +210,13 @@ func (lp *Loop) commandOwnersDir() string {
 func (lp *Loop) commandOwners() (owners map[string]bool, known bool) {
 	lp.commandMu.Lock()
 	defer lp.commandMu.Unlock()
-	entries, err := os.ReadDir(filepath.Join(lp.Core.StateDirectory(), "commands", "commands"))
-	if err != nil && !os.IsNotExist(err) {
-		return nil, false
+	var entries []os.DirEntry
+	for _, home := range lp.commandsHomes() {
+		found, err := os.ReadDir(filepath.Join(home, "commands"))
+		if err != nil && !os.IsNotExist(err) {
+			return nil, false
+		}
+		entries = append(entries, found...)
 	}
 	owners = map[string]bool{}
 	for _, entry := range entries {
@@ -231,9 +235,14 @@ func (lp *Loop) commandOwners() (owners map[string]bool, known bool) {
 // Serialize directory discovery with other opens and recovery. The harness
 // preserves live sandboxes through their lifetime locks during its own sweep.
 func (lp *Loop) openCommandsLocked(ctx context.Context, opts sandbox.Options) (commandSandbox, error) {
-	opts.RuntimeHome = filepath.Join(lp.Core.StateDirectory(), "commands")
-	if err := os.MkdirAll(opts.RuntimeHome, 0700); err != nil {
-		return nil, err
+	if opts.RuntimeHome == "" {
+		opts.RuntimeHome = lp.commandsHome()
+	}
+	// A stand-in sandbox makes nothing, so tests leave nothing under /tmp.
+	if lp.commands == nil {
+		if err := privateHome(opts.RuntimeHome); err != nil {
+			return nil, err
+		}
 	}
 	opts.Write = true
 	if opts.Timeout == 0 {
@@ -291,7 +300,19 @@ func (lp *Loop) openCommandsLocked(ctx context.Context, opts sandbox.Options) (c
 func (lp *Loop) sweepCommands(ctx context.Context) error {
 	lp.commandMu.Lock()
 	defer lp.commandMu.Unlock()
-	entries, err := os.ReadDir(filepath.Join(lp.Core.StateDirectory(), "commands", "commands"))
+	for _, home := range lp.commandsHomes() {
+		if err := lp.sweepHome(ctx, home); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sweepHome reclaims what earlier runs left in one home. The caller holds
+// commandMu.
+func (lp *Loop) sweepHome(ctx context.Context, home string) error {
+	base := filepath.Join(home, "commands")
+	entries, err := os.ReadDir(base)
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -303,7 +324,7 @@ func (lp *Loop) sweepCommands(ctx context.Context) error {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	box, err := lp.openCommandsLocked(ctx, sandbox.Options{WorkDir: dir})
+	box, err := lp.openCommandsLocked(ctx, sandbox.Options{WorkDir: dir, RuntimeHome: home})
 	if err != nil {
 		return err
 	}
@@ -321,7 +342,7 @@ func (lp *Loop) sweepCommands(ctx context.Context) error {
 		if !entry.IsDir() || lp.liveCommands[entry.Name()] {
 			continue
 		}
-		_, err := os.Lstat(filepath.Join(lp.Core.StateDirectory(), "commands", "commands", entry.Name()))
+		_, err := os.Lstat(filepath.Join(base, entry.Name()))
 		if !os.IsNotExist(err) {
 			return errors.Join(errCommandRecovery, err)
 		}

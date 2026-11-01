@@ -65,7 +65,7 @@ func TestAcceptedQACleanupHoldsValidationAndResources(t *testing.T) {
 				}
 				qr := &cleanupQARunner{codeRunner: runner, hosted: kind == "hosted"}
 				a.runner = qr
-				stale := filepath.Join(a.Core.StateDirectory(), "commands", "commands", "uncertain-qa")
+				stale := filepath.Join(a.commandsHome(), "commands", "uncertain-qa")
 				var workspace string
 				fake := &fakeCommands{result: sandbox.CommandResult{Stdout: "known QA command result"}, closeErr: errors.New("QA cleanup uncertain"), onClose: func() {
 					if err := os.MkdirAll(stale, 0700); err != nil {
