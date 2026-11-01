@@ -21,6 +21,7 @@ import (
 // as the next draft.
 func registerTask(root *cobra.Command, o *options) {
 	cmd := &cobra.Command{Use: "task", Short: "Look at a task's work, or change its draft by hand"}
+	registerTaskChecks(cmd, o)
 
 	var project string
 	var all bool

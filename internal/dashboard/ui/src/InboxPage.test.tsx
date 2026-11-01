@@ -59,6 +59,40 @@ const state = normalizeState({
 const renderInbox = () =>
   render(<InboxPage state={state} refresh={async () => {}} onNew={() => {}} />);
 
+it("keeps the after-landing backlog outside needs you and updates its count", () => {
+  const check = {
+    task_id: "t4",
+    project_id: "p2",
+    project: "Assistant",
+    ref: "CA-1",
+    objective: "Landed long ago",
+    step: "Live check",
+    landed_at: "2020-01-01T12:00:00Z",
+  };
+  const view = render(
+    <InboxPage
+      state={{ ...state, after_landing: [check] }}
+      refresh={async () => {}}
+      onNew={() => {}}
+    />,
+  );
+  const section = screen.getByRole("region", { name: "After landing" });
+  expect(within(section).getByText("1 check outstanding")).toBeTruthy();
+  expect(within(section).getByRole("link").getAttribute("href")).toBe(
+    requestHref("p2", "t4"),
+  );
+  expect(screen.queryByRole("region", { name: "Needs you" })).toBeNull();
+  expect(screen.getByText("Nothing needs you")).toBeTruthy();
+  view.rerender(
+    <InboxPage
+      state={{ ...state, after_landing: [] }}
+      refresh={async () => {}}
+      onNew={() => {}}
+    />,
+  );
+  expect(screen.queryByRole("region", { name: "After landing" })).toBeNull();
+});
+
 describe("what landed today in the inbox", () => {
   it("sums up by project and keeps the titles out of the way", () => {
     renderInbox();

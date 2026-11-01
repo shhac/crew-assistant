@@ -1,4 +1,5 @@
 import { ReleasedMeta } from "./ReleaseSettings";
+import { ProjectChecks } from "./AfterLanding";
 import { PMChat, NoPM } from "./PMChat";
 import { pmSeat } from "./members";
 import { Board } from "./Board";
@@ -54,6 +55,9 @@ export function ProjectPage({
   const { busy, error, run } = useAction();
   const tasks = projectTasks(project, state.tasks);
   const waiting = tasks.filter(needsYou).length;
+  const checks = (state.after_landing ?? []).filter(
+    (c) => c.project_id === project.id,
+  );
   const code = isCode(project.playbook);
   const tab = route.tab;
   const request = route.request ? findRequest(tasks, route.request) : undefined;
@@ -69,6 +73,12 @@ export function ProjectPage({
         <div className="page-header page-header-actions">
           <div className="project-title-row">
             <h1>{project.title}</h1>
+            <ProjectChecks
+              key={project.id}
+              project={project.id}
+              checks={checks}
+              refresh={refresh}
+            />
             {project.paused && (
               <Pill tone="needs" dot>
                 Paused

@@ -125,6 +125,47 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("counts only this project's after-landing checks and updates after marks", () => {
+  const p = project();
+  const check = {
+    task_id: "t1",
+    project_id: p.id,
+    project: p.title,
+    ref: "CA-1",
+    objective: "Build",
+    step: "Live check",
+    landed_at: "2020-01-01T12:00:00Z",
+  };
+  const state = normalizeState({
+    projects: [p],
+    after_landing: [check, { ...check, project_id: "other", task_id: "t2" }],
+  });
+  const route = { page: "project" as const, id: p.id, tab: "board" as const };
+  const view = render(
+    <ProjectPage project={p} route={route} state={state} refresh={refresh} />,
+  );
+  const pill = screen.getByText("1 check outstanding");
+  expect(pill.querySelector(".tone-needs")).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Clear outstanding checks" }),
+  ).toBeTruthy();
+  expect(screen.queryByText("Live check")).toBeNull();
+  expect(screen.queryByRole("region", { name: "After landing" })).toBeNull();
+  expect(pill.closest("a")).toBeNull();
+  view.rerender(
+    <ProjectPage
+      project={p}
+      route={route}
+      state={{ ...state, after_landing: [] }}
+      refresh={refresh}
+    />,
+  );
+  expect(screen.queryByText("0 checks outstanding")).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Clear outstanding checks" }),
+  ).toBeNull();
+});
+
 function show(
   p: Project,
   extra: {

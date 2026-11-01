@@ -173,6 +173,10 @@ func landedOn(t *core.Task, p *core.Project, r core.Revision, target, note strin
 
 // landedWords records the landing as landedOn does, saying where it went.
 func landedWords(t *core.Task, p *core.Project, r core.Revision, target, note string) string {
+	now := time.Now().UTC()
+	if t.LandedAt.IsZero() {
+		t.LandedAt = now
+	}
 	t.Status, t.DecisionID, t.DeliveredTo, t.CatchUps, t.LandingFailures = core.TaskDelivered, "", target, 0, nil
 	t.Delivering = nil
 	t.PRSwitchBy = ""
@@ -182,7 +186,7 @@ func landedWords(t *core.Task, p *core.Project, r core.Revision, target, note st
 	// Where it went is said by the stage; the detail keeps only a note.
 	t.Detail = note
 	if r.Ref != "" {
-		p.Landed = &core.Landing{TaskID: t.ID, Objective: t.Objective, Commit: r.Ref, Branch: target, At: time.Now().UTC()}
+		p.Landed = &core.Landing{TaskID: t.ID, Objective: t.Objective, Commit: r.Ref, Branch: target, At: now}
 	}
 	if t.Playbook != nil && t.Playbook.Land.Way() != core.LandBranch {
 		t.Status = core.TaskLanded
@@ -426,6 +430,7 @@ func (lp *Loop) LandTask(ctx context.Context, projectID, taskID string) (core.Ta
 		return core.Task{}, fmt.Errorf("this project lands changes as new branches; set where they land first: %w", core.ErrConflict)
 	}
 	pinned := *t.Playbook
+	firstLanding := t.LandedAt
 	pinned.Land = p.Playbook.Land
 	m, err := lp.gitMediumFor(ctx, p, &pinned)
 	if err != nil {
@@ -462,6 +467,9 @@ func (lp *Loop) LandTask(ctx context.Context, projectID, taskID string) (core.Ta
 			return "", core.ErrConflict
 		}
 		t.Playbook = &pinned
+		if t.LandedAt.IsZero() {
+			t.LandedAt = firstLanding
+		}
 		if t.Acceptance == nil {
 			t.Approved = t.Revisions[len(t.Revisions)-1].N
 		}

@@ -182,7 +182,7 @@ func TestARoleCallsExactlyTheToolsItIsOffered(t *testing.T) {
 		"answering PM":         a.answerTools(p.ID, core.Role{}),
 		"proposing answering":  a.answerTools(p.ID, core.Role{}).proposing(code),
 	}
-	all := []string{"no_such_tool"}
+	all := []string{"no_such_tool", "mark_owner_check", "list_owner_checks"}
 	for _, tools := range variants {
 		for _, name := range toolNames(tools) {
 			if !slices.Contains(all, name) {

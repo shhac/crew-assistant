@@ -290,6 +290,7 @@ type Snapshot struct {
 	Repositories      []Repository       `json:"repositories"`
 	Teams             []Team             `json:"teams"`
 	Tasks             []Task             `json:"tasks"`
+	AfterLanding      []OutstandingCheck `json:"after_landing,omitempty"` // Derived on service reads; never stored.
 	Decisions         []Decision         `json:"decisions"`
 	Messages          []Message          `json:"messages"`
 	Memories          []Memory           `json:"memories"`

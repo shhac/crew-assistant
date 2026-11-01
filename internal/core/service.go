@@ -95,6 +95,7 @@ func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 		}
 	}
 	sort.Slice(v.PendingOperations, func(i, j int) bool { return v.PendingOperations[i].ID < v.PendingOperations[j].ID })
+	deriveOwnerChecks(&v)
 	sortActivity(v.Activity)
 	return v, err
 }

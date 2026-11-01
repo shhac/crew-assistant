@@ -722,7 +722,51 @@ export interface NextTaker {
   did?: string;
   others?: string[];
 }
+export type OwnerCheckStatus = "outstanding" | "done" | "skipped";
+export interface OwnerCheckMark {
+  step: string;
+  status: OwnerCheckStatus;
+  note?: string;
+  by: string;
+  at: string;
+  bulk?: boolean;
+}
+export interface OwnerCheckItem {
+  step: string;
+  status: OwnerCheckStatus;
+  mark?: OwnerCheckMark;
+  history?: OwnerCheckMark[];
+}
+export interface OutstandingCheck {
+  project_id: string;
+  project: string;
+  task_id: string;
+  ref: string;
+  objective: string;
+  step: string;
+  landed_at: string;
+}
+export function markOwnerCheck(
+  project: string,
+  task: string,
+  step: string,
+  status: OwnerCheckStatus,
+  note = "",
+) {
+  return api<Task>(
+    `/api/projects/${encodeURIComponent(project)}/tasks/${encodeURIComponent(task)}/owner-checks`,
+    { method: "POST", body: JSON.stringify({ step, status, note }) },
+  );
+}
+export function clearOwnerChecks(project: string, note: string) {
+  return api<{ cleared: number }>(
+    `/api/projects/${encodeURIComponent(project)}/owner-checks/clear`,
+    { method: "POST", body: JSON.stringify({ note }) },
+  );
+}
 export interface Task {
+  checklist?: OwnerCheckItem[];
+  landed_at?: string;
   owner_checks?: string[];
   takes?: NextTaker[];
   blockers?: Blocker[];
@@ -1074,6 +1118,7 @@ export interface RollbackStatus {
   clear: string;
 }
 export interface State {
+  after_landing?: OutstandingCheck[];
   upgrade?: UpgradeProgress;
   rollback?: RollbackStatus;
   engine_pauses?: Record<string, EnginePause>;
@@ -1186,6 +1231,7 @@ export async function api<T>(
 }
 export function normalizeState(raw: Partial<State>): State {
   return {
+    after_landing: raw.after_landing ?? [],
     update: raw.update,
     upgrade: raw.upgrade,
     rollback: raw.rollback,

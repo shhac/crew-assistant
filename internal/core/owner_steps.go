@@ -80,12 +80,7 @@ func (t Task) OwnerChecklist() string {
 	}
 	var b strings.Builder
 	b.WriteString("After it lands, check:")
-	seen := map[string]bool{}
-	for _, s := range append(slices.Clone(t.OwnerChecks), t.OwnerSteps...) {
-		if seen[s] {
-			continue
-		}
-		seen[s] = true
+	for _, s := range t.ownerSteps() {
 		b.WriteString("\n- [ ] " + s)
 	}
 	return b.String()

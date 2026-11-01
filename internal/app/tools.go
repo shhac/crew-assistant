@@ -78,6 +78,38 @@ func (a *App) stacks(ctx context.Context, projectID, said string) (bool, error) 
 }
 
 var toolActions = map[string]toolAction{
+	"list_owner_checks": with(func(a *App, ctx context.Context, in struct {
+		ProjectID string `json:"project_id"`
+	}) (any, error) {
+		v, err := a.Core.Snapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := []core.OutstandingCheck{}
+		for _, check := range v.AfterLanding {
+			if in.ProjectID == "" || check.ProjectID == in.ProjectID {
+				out = append(out, check)
+			}
+		}
+		return out, nil
+	}),
+	"mark_owner_check": with(func(a *App, ctx context.Context, in struct {
+		ProjectID string `json:"project_id"`
+		TaskID    string `json:"task_id"`
+		Step      string `json:"step"`
+		Status    string `json:"status"`
+		Note      string `json:"note"`
+	}) (any, error) {
+		v, err := a.Core.Snapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		t, ok := v.FindTask(in.TaskID)
+		if !ok || t.ProjectID != in.ProjectID {
+			return nil, core.ErrNotFound
+		}
+		return a.Core.MarkOwnerCheck(ctx, in.ProjectID, t.ID, in.Step, in.Status, in.Note, core.FromAssistant)
+	}),
 	"lin": func(a *App, ctx context.Context, raw json.RawMessage) (any, error) { return a.runLinTool(ctx, raw) },
 	"list_connections": func(a *App, ctx context.Context, raw json.RawMessage) (any, error) {
 		return a.runConnectionTool(ctx, "list_connections", raw)

@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { DecisionCard } from "./DecisionCard";
+import { InboxAfterLanding } from "./AfterLanding";
 import { projectHref, requestHref } from "./router";
 import { requestStep, requestTone, underWay } from "./stages";
 import {
@@ -140,6 +141,10 @@ export function InboxPage({
         </section>
       )}
       {landed.length > 0 && <LandedToday tasks={landed} project={project} />}
+      <InboxAfterLanding
+        checks={state.after_landing ?? []}
+        empty={!landed.length && !past.length}
+      />
       {past.length > 0 && <PastDecisions decisions={past} state={state} />}
     </div>
   );

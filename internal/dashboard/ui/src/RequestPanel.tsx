@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { DecisionCard } from "./DecisionCard";
+import { RequestChecks } from "./AfterLanding";
 import { Drafts } from "./Drafts";
 import { pmLandingLine, wayOf } from "./landing";
 import { MemberPanel } from "./MemberPanel";
@@ -178,6 +179,7 @@ export function RequestPanel({
               full
             />
           )}
+          <RequestChecks key={task.id} task={task} refresh={refresh} />
           <TeamFlow
             project={project}
             task={task}

@@ -150,11 +150,12 @@ func numberTask(p *Project, t *Task) {
 }
 
 // withoutRefs is tasks as they are stored: a copy without derived readable
-// IDs, wait pointers or prerequisite decision status.
+// IDs, owner checklists, wait pointers or prerequisite decision status.
 func withoutRefs(tasks []Task) []Task {
 	out := slices.Clone(tasks)
 	for i := range out {
 		out[i].Ref = ""
+		out[i].Checklist = nil
 		out[i].WaitingOn = nil
 		out[i].Blockers = slices.Clone(out[i].Blockers)
 		for j := range out[i].Blockers {

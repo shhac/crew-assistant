@@ -270,6 +270,7 @@ func (s *Store) updateTransaction(ctx context.Context, fn func(*Snapshot, *sql.C
 		return err
 	}
 	stored := state
+	stored.AfterLanding = nil
 	stored.Tasks = withoutRefs(state.Tasks)
 	stored.Projects = withoutPlaybooks(state.Projects)
 	data, err := json.Marshal(diskState{PMChats: state.PMChats, Schema: stateSchema, ChatCheckpoint: state.ChatCheckpoint, ChatSession: state.ChatSession, ConversationID: state.ConversationID, Conversations: state.Conversations, ChatTurns: state.ChatTurns, ChatHold: state.ChatHold, ChatQueueRevision: state.ChatQueueRevision, Snapshot: stored, ModelCalls: state.ModelCalls, ModelWindows: state.ModelWindows, Events: state.Events})

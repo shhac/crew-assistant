@@ -23,12 +23,15 @@ type Task struct {
 	// Ref is the task's readable ID, such as CA-12: its project's prefix and
 	// its number. Derived with Stage, so it follows a renamed prefix, and
 	// never stored.
-	Ref         string   `json:"ref,omitempty"`
-	Objective   string   `json:"objective"`
-	Criteria    []string `json:"criteria"`
-	OwnerChecks []string `json:"owner_checks,omitempty"`
-	Status      string   `json:"status"`
-	PRSwitchBy  string   `json:"pr_switch_by,omitempty"` // Deferred until the recorded PR delivery is reconciled.
+	Ref         string           `json:"ref,omitempty"`
+	Objective   string           `json:"objective"`
+	Criteria    []string         `json:"criteria"`
+	OwnerChecks []string         `json:"owner_checks,omitempty"`
+	CheckMarks  []OwnerCheckMark `json:"check_marks,omitempty"`
+	Checklist   []OwnerCheckItem `json:"checklist,omitempty"` // Derived on service reads; never stored.
+	LandedAt    time.Time        `json:"landed_at,omitzero"`
+	Status      string           `json:"status"`
+	PRSwitchBy  string           `json:"pr_switch_by,omitempty"` // Deferred until the recorded PR delivery is reconciled.
 	// SentOn is a triaged task waiting for room in To do, never triaged again.
 	SentOn bool `json:"sent_on,omitempty"`
 	// Stage is where the task sits on its project's board, derived from the

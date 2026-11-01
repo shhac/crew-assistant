@@ -11,6 +11,28 @@ import (
 // registerProjectTasks serves the outcomes the owner asks of a project, and
 // what those produced.
 func registerProjectTasks(mux *http.ServeMux, a *app.App) {
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/owner-checks", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Step   string `json:"step"`
+			Status string `json:"status"`
+			Note   string `json:"note"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		v, err := a.Core.MarkOwnerCheck(r.Context(), r.PathValue("id"), r.PathValue("task"), in.Step, in.Status, in.Note, core.FromOwner)
+		reply(w, 200, v, err)
+	})
+	mux.HandleFunc("POST /api/projects/{id}/owner-checks/clear", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Note string `json:"note"`
+		}
+		if decode(w, r, &in) != nil {
+			return
+		}
+		n, err := a.Core.ClearOwnerChecks(r.Context(), r.PathValue("id"), in.Note, core.FromOwner)
+		reply(w, 200, map[string]int{"cleared": n}, err)
+	})
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/linear", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			ConnectionID string `json:"connection_id"`
