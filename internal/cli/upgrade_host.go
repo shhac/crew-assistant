@@ -246,20 +246,8 @@ func (h *upgradeHost) request(o *options, address string, version string, automa
 // Pin exec honors the current startup flags (including --no-dispatch), while
 // watchdog restart uses these same arguments recorded for that process. Make
 // file paths absolute so an owner's later terminal CWD cannot select new state.
+// Set state and config once, replacing existing flags so handovers never grow argv.
 func upgradeProcessArgs(o *options, args []string) []string {
-	out := upgradeServeArgs(args)
-	for i, arg := range out {
-		if arg == "--env-file" && i+1 < len(out) {
-			if path, err := filepath.Abs(out[i+1]); err == nil {
-				out[i+1] = path
-			}
-		}
-		if strings.HasPrefix(arg, "--env-file=") {
-			if path, err := filepath.Abs(strings.TrimPrefix(arg, "--env-file=")); err == nil {
-				out[i] = "--env-file=" + path
-			}
-		}
-	}
 	state, config := o.statePath, o.configPath
 	if path, err := filepath.Abs(state); err == nil {
 		state = path
@@ -267,7 +255,56 @@ func upgradeProcessArgs(o *options, args []string) []string {
 	if path, err := filepath.Abs(config); err == nil {
 		config = path
 	}
-	return append(out, "--state", state, "--config", config)
+	args = upgradeServeArgs(args)
+	out := []string{}
+	stateSet, configSet := false, false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			out = append(out, args[i:]...)
+			break
+		}
+		if arg == "--state" || strings.HasPrefix(arg, "--state=") {
+			if !stateSet {
+				out = append(out, "--state", state)
+				stateSet = true
+			}
+			if arg == "--state" && i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		if arg == "--config" || strings.HasPrefix(arg, "--config=") {
+			if !configSet {
+				out = append(out, "--config", config)
+				configSet = true
+			}
+			if arg == "--config" && i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		if arg == "--env-file" && i+1 < len(args) {
+			out = append(out, arg)
+			i++
+			arg = args[i]
+			if path, err := filepath.Abs(arg); err == nil {
+				arg = path
+			}
+		} else if strings.HasPrefix(arg, "--env-file=") {
+			if path, err := filepath.Abs(strings.TrimPrefix(arg, "--env-file=")); err == nil {
+				arg = "--env-file=" + path
+			}
+		}
+		out = append(out, arg)
+	}
+	if !stateSet {
+		out = append(out, "--state", state)
+	}
+	if !configSet {
+		out = append(out, "--config", config)
+	}
+	return out
 }
 
 func upgradeServeArgs(args []string) []string {
