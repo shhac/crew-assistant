@@ -675,8 +675,9 @@ func TestSeveralPeopleInOneRoleWorkWithinTheCap(t *testing.T) {
 }
 
 // A task held by something outside the team, with nothing of it running,
-// leaves its place under the cap to the next task, as CA-77 did not; one held
-// only at landing, or with a step still running, keeps it.
+// leaves its place under the cap to the next task, as CA-77, held at landing
+// with its rounds done, did not. One held only at landing while still in its
+// rounds, or with a step still running, keeps it.
 func TestATaskHeldFromOutsideLeavesItsPlaceUnderTheCap(t *testing.T) {
 	s, _ := fixture(t)
 	// Checked and waiting for the PM to land it.
@@ -695,15 +696,15 @@ func TestATaskHeldFromOutsideLeavesItsPlaceUnderTheCap(t *testing.T) {
 	if next, err = s.UpdateTask(testContext, next.ID, func(t *Task, _ *Project) (string, error) { t.Status = TaskQueued; return "", nil }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetBlocker(testContext, BlockerInput{Project: p.ID, Task: held.ID, Kind: BlockerManual, Description: "a library change", By: FromOwner}); err != nil {
+	if _, err := s.SetBlocker(testContext, BlockerInput{Project: p.ID, Task: held.ID, Kind: BlockerManual, Description: "a library change", LandingOnly: true, By: FromOwner}); err != nil {
 		t.Fatal(err)
 	}
 	got := claimed(t, s)
 	if !slices.Contains(got, "Next: writing by Implementer") {
 		t.Fatalf("the next task should take the held one's place: %v, waiting %+v", got, waiting(t, s, next.ID))
 	}
-	if heldOutside(Task{Blockers: []Blocker{{Description: "a release window", LandingOnly: true}}}) {
-		t.Fatal("a task held only at landing is still worked and keeps its place")
+	if heldOutside(Task{Status: TaskReviewing, Blockers: []Blocker{{Description: "a release window", LandingOnly: true}}}) {
+		t.Fatal("a task held only at landing, still in its rounds, is still worked and keeps its place")
 	}
 	if heldOutside(Task{Claims: []Claim{{Token: "t"}}, Blockers: []Blocker{{Description: "a library change"}}}) {
 		t.Fatal("a held task with a step still running keeps its place")

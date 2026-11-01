@@ -637,10 +637,12 @@ func offer(v *Snapshot, t *Task, busy map[string]busyWork, admit Admit, now time
 
 // heldOutside reports a task held by something outside the team, with
 // nothing of it running. It takes none of the team's capacity, so it doesn't
-// count against the project's cap: CA-77, held for weeks on a library change,
-// otherwise kept one of two places from every other task.
+// count against the project's cap: CA-77, held for weeks at landing on a
+// library change, otherwise kept one of two places from every other task. A
+// hold on landing alone still leaves a task in its rounds to be worked.
 func heldOutside(t Task) bool {
-	return len(t.Claims) == 0 && slices.ContainsFunc(t.Blockers, func(b Blocker) bool { return b.ClearedAt == nil && !b.LandingOnly })
+	atLanding := t.Status == TaskDeciding || t.Status == TaskLanding
+	return len(t.Claims) == 0 && slices.ContainsFunc(t.Blockers, func(b Blocker) bool { return b.ClearedAt == nil && (!b.LandingOnly || atLanding) })
 }
 
 // startQueued starts a project's queued tasks in queue order, skipping
