@@ -324,6 +324,7 @@ func TestApprovedCleanCatchUpLandsWithoutAnotherDecision(t *testing.T) {
 	source := ownerRepo(t)
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: passes(12)}}
 	a, p := pushProjectApp(t, runner, source)
+	shadowParity(t, a)
 	task := queue(t, a, p, "Add Feature")
 	settle(t, a)
 	task = taskByID(t, a, task.ID)

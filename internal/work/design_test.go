@@ -100,6 +100,7 @@ func writerTurns(r *scriptedRunner) []roles.Spec {
 func TestTheResearcherHandsTheTaskToTheDesignerAndGetsItBack(t *testing.T) {
 	t.Parallel()
 	a, runner, p := plannedCode(t, 6, `{"design": "Tabs or a sidebar?"}`)
+	shadowParity(t, a)
 	seatDesigner(t, a, p.ID)
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add A"})
 	task = stepUntil(t, a, task.ID, withDesigner)
@@ -162,6 +163,7 @@ func TestTheImplementerHandsTheTaskToTheDesignerAndGetsItBack(t *testing.T) {
 	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{pass}, writerReplies: []string{askDesign}}
 	a, p, task := loopApp(t, runner, "")
+	shadowParity(t, a)
 	seatDesigner(t, a, p.ID)
 	held := stepUntil(t, a, task.ID, withDesigner)
 	advanceDesignPlace(t, a)

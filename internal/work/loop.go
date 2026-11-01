@@ -120,6 +120,11 @@ type Loop struct {
 	slept func(start time.Time) time.Duration
 	// parked is told a turn is waiting for the owner's use to end. Set in tests.
 	parked func()
+	// flowShadow is what the flows, running beside the loop, have reported.
+	flowShadow flowShadow
+	// shadowed, when set, is told every disagreement the flow shadow finds
+	// on each pass, reported before or not. Set in tests.
+	shadowed func([]core.FlowDisagreement)
 }
 
 func New(s *core.Service, cfg func() config.Config, demo bool) *Loop {

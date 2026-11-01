@@ -36,6 +36,7 @@ func taskNow(t *testing.T, a *Loop, id string) core.Task {
 func TestATaskIsPlannedReadOnlyAndEveryoneWorksFromThePlan(t *testing.T) {
 	t.Parallel()
 	a, runner, p := plannedCode(t, 6, `{"summary": "Add Feature beside main.", "exists": ["main.go has main"], "changes": ["add feature.go"], "out_of_scope": ["the CLI"], "questions": [], "depends_on": []}`)
+	shadowParity(t, a)
 	task, _ := a.Core.QueueTask(context.Background(), p.ID, core.TaskInput{Objective: "Add A"})
 	task = taskNow(t, a, task.ID)
 	if task.Plan == nil || task.Plan.Summary != "Add Feature beside main." || task.Plan.Role != "Researcher" || task.Round != 1 {

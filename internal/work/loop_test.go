@@ -224,7 +224,7 @@ func testLoop(t *testing.T, reopen ...*func(*Loop) *Loop) *Loop {
 				t.Fatal(err)
 			}
 			fresh := New(core.NewService(s, old.Config()), old.Config, false)
-			fresh.runner, fresh.meter, fresh.stacker = old.runner, old.meter, old.stacker
+			fresh.runner, fresh.meter, fresh.stacker, fresh.shadowed = old.runner, old.meter, old.stacker, old.shadowed
 			after, err := fresh.Core.Snapshot(context.Background())
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("SQLite reopen changed record: %v", err)
@@ -239,6 +239,9 @@ func testLoop(t *testing.T, reopen ...*func(*Loop) *Loop) *Loop {
 	t.Cleanup(func() { _ = os.RemoveAll(lp.tmpHome()); _ = os.RemoveAll(lp.tempHome()) })
 	// No test runs the owner's own g2g; one that stacks gives a fake.
 	lp.stacker = g2gTool{find: func(context.Context) (string, string) { return "", "" }}
+	if shadowEverywhere {
+		shadowParity(t, lp)
+	}
 	return lp
 }
 
@@ -305,6 +308,7 @@ func TestLoopRevisesUntilReviewersPassThenDeliversOnApproval(t *testing.T) {
 	runner := &scriptedRunner{reviews: []string{revise, pass}}
 	dest := t.TempDir()
 	a, p, _ := loopApp(t, runner, dest)
+	shadowParity(t, a)
 	task := settle(t, a)
 	if task.Status != core.TaskWaiting || len(task.Revisions) != 2 || task.Round != 2 {
 		t.Fatalf("task %+v", task)
@@ -343,6 +347,7 @@ func TestOwnerChangesQuestionsAndRoundLimits(t *testing.T) {
 	t.Parallel()
 	runner := &scriptedRunner{reviews: []string{ask, revise, revise, revise, revise, pass}}
 	a, _, _ := loopApp(t, runner, "")
+	shadowParity(t, a)
 	ctx := context.Background()
 	task := settle(t, a)
 	d := openDecision(t, a, task)

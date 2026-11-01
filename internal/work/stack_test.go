@@ -308,6 +308,7 @@ func (s *stackScenario) files(t *testing.T, commit string) []string {
 func TestAStackedTaskMergesAfterTheOneBelowIt(t *testing.T) {
 	t.Parallel()
 	s := newStackScenario(t)
+	shadowParity(t, s.a)
 	parent, child := s.opened(t)
 
 	s.ready(t, child.Proposal.Number)

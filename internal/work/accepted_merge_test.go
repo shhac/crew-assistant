@@ -99,6 +99,7 @@ func TestAcceptedFindingsSurviveCleanCatchUps(t *testing.T) {
 				t.Run(fmt.Sprintf("%s/%d/qa=%v", choice, count, qa), func(t *testing.T) {
 					var reopen func(*Loop) *Loop
 					a, runner, _, task, d, source := acceptedCode(t, choice, qa, &reopen)
+					shadowParity(t, a)
 					reviews, qas := roleCalls(runner, core.RoleReviewer), roleCalls(runner, core.RoleQA)
 					escalations := len(turns(&runner.scriptedRunner, "Judge what remains at the round limit"))
 					round := task.Round

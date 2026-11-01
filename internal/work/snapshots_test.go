@@ -249,7 +249,7 @@ func handoffAt(t *testing.T) (*Loop, core.Project, core.Task, gitMedium, core.Ha
 func restart(t *testing.T, a *Loop) *Loop {
 	t.Helper()
 	again := New(a.Core, a.Config, false)
-	again.runner, again.meter = a.runner, a.meter
+	again.runner, again.meter, again.shadowed = a.runner, a.meter, a.shadowed
 	if err := again.resume(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -294,6 +294,7 @@ func TestARestartMidHandoffNeitherLosesNorRepeatsADraft(t *testing.T) {
 	t.Run("before publishing", func(t *testing.T) {
 		t.Parallel()
 		a, p, task, _, h := handoffAt(t)
+		shadowParity(t, a)
 		a = restart(t, a)
 		recorded(t, a, p, task, h)
 		recorded(t, restart(t, a), p, task, h)
@@ -301,6 +302,7 @@ func TestARestartMidHandoffNeitherLosesNorRepeatsADraft(t *testing.T) {
 	t.Run("after publishing", func(t *testing.T) {
 		t.Parallel()
 		a, p, task, m, h := handoffAt(t)
+		shadowParity(t, a)
 		if err := m.publish(ctx, task, h.Revision.Ref, h.Name); err != nil {
 			t.Fatal(err)
 		}
@@ -309,6 +311,7 @@ func TestARestartMidHandoffNeitherLosesNorRepeatsADraft(t *testing.T) {
 	t.Run("after recording", func(t *testing.T) {
 		t.Parallel()
 		a, p, task, m, h := handoffAt(t)
+		shadowParity(t, a)
 		if err := m.publish(ctx, task, h.Revision.Ref, h.Name); err != nil {
 			t.Fatal(err)
 		}
@@ -320,6 +323,7 @@ func TestARestartMidHandoffNeitherLosesNorRepeatsADraft(t *testing.T) {
 	t.Run("with the draft lost", func(t *testing.T) {
 		t.Parallel()
 		a, p, task, m, _ := handoffAt(t)
+		shadowParity(t, a)
 		if err := m.repo.RemoveTask(task.ID); err != nil {
 			t.Fatal(err)
 		}
@@ -328,6 +332,7 @@ func TestARestartMidHandoffNeitherLosesNorRepeatsADraft(t *testing.T) {
 	t.Run("with the ref taken", func(t *testing.T) {
 		t.Parallel()
 		a, p, task, m, h := handoffAt(t)
+		shadowParity(t, a)
 		if err := m.repo.Publish(ctx, m.repo, task.Base, h.Name); err != nil {
 			t.Fatal(err)
 		}
@@ -336,6 +341,7 @@ func TestARestartMidHandoffNeitherLosesNorRepeatsADraft(t *testing.T) {
 	t.Run("before the intent was stored", func(t *testing.T) {
 		t.Parallel()
 		a, p, task, _, h := handoffAt(t)
+		shadowParity(t, a)
 		a.dropHandoff(ctx, task.ID, h.Name)
 		rerun(t, restart(t, a), p, task)
 	})
@@ -572,6 +578,7 @@ func docsTaskWithQA(t *testing.T, reviews ...string) (*Loop, *scriptedRunner, co
 func TestDocumentQAChecksACopyThatHoldsStill(t *testing.T) {
 	t.Parallel()
 	a, scripted, p, task := docsTaskWithQA(t, pass)
+	shadowParity(t, a)
 	docs, err := localdocs.Open(p.ScratchDirectory)
 	if err != nil {
 		t.Fatal(err)

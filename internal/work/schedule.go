@@ -73,6 +73,7 @@ func (lp *Loop) passWhile(stop lifecycle.Stop, waited bool) (bool, []<-chan any,
 	if err != nil {
 		return false, nil, err
 	}
+	lp.shadowFlows(&snap)
 	// Cleanup outlives runnable authority, including Stop. A failed sweep holds
 	// only the affected work; owner answers and independent projects still run.
 	pending := map[string]commandCleanupObligation{}

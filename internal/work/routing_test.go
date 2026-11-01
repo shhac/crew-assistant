@@ -66,6 +66,7 @@ func TestAReviewerSendsTheTaskBackForResearchAndGetsItBack(t *testing.T) {
 	t.Parallel()
 	research := `{"outcome":"research","summary":"The approach is unchecked.","findings":[],"question":"Does the v2 API cover this?"}`
 	a, runner, p := plannedCode(t, 0, plainPlan, `{"summary": "v2 covers it; use it.", "changes": ["use v2"]}`)
+	shadowParity(t, a)
 	runner.reviews = []string{research, pass, pass}
 	ctx := context.Background()
 	task, _ := a.Core.QueueTask(ctx, p.ID, core.TaskInput{Objective: "Add A"})

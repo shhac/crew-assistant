@@ -237,6 +237,7 @@ func TestCodeTaskRunsInACloneAndDeliversALocalBranch(t *testing.T) {
 	runner := &codeRunner{scriptedRunner: scriptedRunner{reviews: []string{pass, qaFail, pass, pass}}}
 	a, _, _ := loopApp(t, &runner.scriptedRunner, "")
 	a.runner = runner
+	shadowParity(t, a)
 	ctx := context.Background()
 	canonical, _ := filepath.EvalSymlinks(source)
 	p, err := a.Core.CreateProject(ctx, core.ProjectInput{Title: "Service", Directories: []string{source}, Brief: core.BriefInput{Goal: "Add a feature"}})
