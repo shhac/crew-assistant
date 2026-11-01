@@ -719,6 +719,22 @@ func TestACheckoutHoldsTheRevisionAndItsBaseOnly(t *testing.T) {
 	if diff := git(t, c.Dir, "diff", "--name-only", base, "HEAD"); diff != "a.go\nsub/b.go" {
 		t.Fatalf("diff against the base in the checkout: %q", diff)
 	}
+	write(t, filepath.Join(a.Workspace(), "a.go"), "package main // two\n")
+	a2, _, err := a.Snapshot(ctx, base, a1, "a draft 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.Publish(ctx, a, a2, TaskRef("a", 1, 2)); err != nil {
+		t.Fatal(err)
+	}
+	second, err := r.Checkout(ctx, a2, base, false, a1, strings.Repeat("0", 40))
+	if err != nil {
+		t.Fatal("an earlier draft the clone lacks stopped the check:", err)
+	}
+	defer second.Remove()
+	if diff := git(t, second.Dir, "diff", "--name-only", a1, "HEAD"); diff != "a.go" {
+		t.Fatalf("diff against the previous draft in the checkout: %q", diff)
+	}
 	env := strings.Join(c.Env, "\n")
 	if !strings.Contains(env, "CREW_BASE="+base) {
 		t.Fatalf("the check isn't told its base: %v", c.Env)

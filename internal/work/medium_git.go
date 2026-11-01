@@ -261,11 +261,13 @@ func (m gitMedium) published(ctx context.Context, t core.Task, h core.Handoff) (
 // folder that holds its caches and temporary files, and reads the checkout,
 // or, where the team's check has to write into the tree it runs in, runs in
 // a writable copy of it there. QA that runs the app gets that copy too, for
-// its setup and start commands to build in, whichever the check runs in.
+// its setup and start commands to build in, whichever the check runs in. The
+// checkout holds the previous draft too, which the review is asked to diff
+// against.
 func (m gitMedium) check(ctx context.Context, t core.Task, r core.Revision, qa, app bool) (checkout, error) {
 	defer m.locked()()
 	inCopy := qa && m.playbook.CheckInCopy
-	c, err := m.repo.Checkout(ctx, r.Ref, t.Base, inCopy || (qa && app))
+	c, err := m.repo.Checkout(ctx, r.Ref, t.Base, inCopy || (qa && app), previousRef(t, r))
 	if err != nil {
 		return checkout{}, err
 	}

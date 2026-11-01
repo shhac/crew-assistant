@@ -37,8 +37,10 @@ func (r Repo) checksDir() string { return filepath.Join(r.root, "checks") }
 // a writable copy of it in the scratch folder to run in. base, when set, is
 // the commit the change was made on: the checkout holds it too, for a diff
 // against it, and the check is told it and the files the change touches,
-// so a check of a large repository can check only what changed.
-func (r Repo) Checkout(ctx context.Context, commit, base string, tree bool) (Checkout, error) {
+// so a check of a large repository can check only what changed. The
+// checkout also holds each of earlier, for a diff against it, where the
+// project's clone still has it.
+func (r Repo) Checkout(ctx context.Context, commit, base string, tree bool, earlier ...string) (Checkout, error) {
 	if err := os.MkdirAll(r.checksDir(), 0700); err != nil {
 		return Checkout{}, err
 	}
@@ -58,7 +60,7 @@ func (r Repo) Checkout(ctx context.Context, commit, base string, tree bool) (Che
 	if base == commit {
 		base = ""
 	}
-	if err = r.checkOut(ctx, c, base, tree); err != nil {
+	if err = r.checkOut(ctx, c, base, tree, earlier); err != nil {
 		c.Remove()
 		return Checkout{}, err
 	}
@@ -100,7 +102,7 @@ func changeEnv(dir string) []string {
 	return []string{"CREW_BASE=" + string(base), "CREW_CHANGED_FILES=" + filepath.Join(dir, ".git", changedFile)}
 }
 
-func (r Repo) checkOut(ctx context.Context, c Checkout, base string, tree bool) error {
+func (r Repo) checkOut(ctx context.Context, c Checkout, base string, tree bool, earlier []string) error {
 	if _, err := run(ctx, filepath.Dir(c.Dir), "init", "--quiet", "--template=", filepath.Base(c.Dir)); err != nil {
 		return err
 	}
@@ -112,6 +114,14 @@ func (r Repo) checkOut(ctx context.Context, c Checkout, base string, tree bool) 
 	}
 	if _, err := run(ctx, c.Dir, append(append(fetchQuietly, "--depth=1", "--no-write-fetch-head", r.Workspace()), commits...)...); err != nil {
 		return fmt.Errorf("the revision could not be fetched from the project's clone: %w", err)
+	}
+	for _, commit := range earlier {
+		if commit == "" || commit == c.commit || commit == base {
+			continue
+		}
+		// An earlier draft only helps the check judge what is new; one the
+		// clone no longer has must not stop the check.
+		_, _ = run(ctx, c.Dir, append(append(fetchQuietly, "--depth=1", "--no-write-fetch-head", r.Workspace()), commit)...)
 	}
 	if _, err := run(ctx, c.Dir, "checkout", "--quiet", "--force", "--no-recurse-submodules", "--detach", c.commit); err != nil {
 		return err
