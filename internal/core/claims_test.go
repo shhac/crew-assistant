@@ -674,6 +674,42 @@ func TestSeveralPeopleInOneRoleWorkWithinTheCap(t *testing.T) {
 	}
 }
 
+// A task held by something outside the team, with nothing of it running,
+// leaves its place under the cap to the next task, as CA-77 did not; one held
+// only at landing, or with a step still running, keeps it.
+func TestATaskHeldFromOutsideLeavesItsPlaceUnderTheCap(t *testing.T) {
+	s, _ := fixture(t)
+	// Checked and waiting for the PM to land it.
+	p, held := pmLandingTask(t, s, VerdictPass, VerdictPass)
+	playbook := *p.Playbook
+	playbook.MaxActive = 1
+	p, err := s.SetPlaybook(testContext, p.ID, playbook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := s.QueueTask(testContext, p.ID, TaskInput{Objective: "Next"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Past the PM's triage, which a project with a PM sends new work to.
+	if next, err = s.UpdateTask(testContext, next.ID, func(t *Task, _ *Project) (string, error) { t.Status = TaskQueued; return "", nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetBlocker(testContext, BlockerInput{Project: p.ID, Task: held.ID, Kind: BlockerManual, Description: "a library change", By: FromOwner}); err != nil {
+		t.Fatal(err)
+	}
+	got := claimed(t, s)
+	if !slices.Contains(got, "Next: writing by Implementer") {
+		t.Fatalf("the next task should take the held one's place: %v, waiting %+v", got, waiting(t, s, next.ID))
+	}
+	if heldOutside(Task{Blockers: []Blocker{{Description: "a release window", LandingOnly: true}}}) {
+		t.Fatal("a task held only at landing is still worked and keeps its place")
+	}
+	if heldOutside(Task{Claims: []Claim{{Token: "t"}}, Blockers: []Blocker{{Description: "a library change"}}}) {
+		t.Fatal("a held task with a step still running keeps its place")
+	}
+}
+
 // A step whose person is free but whose turn admit refuses says what holds
 // it back: an engine's safety cap, or the owner's own use.
 func TestAStepSaysWhatHoldsItsTurnBack(t *testing.T) {

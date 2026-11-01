@@ -635,6 +635,14 @@ func offer(v *Snapshot, t *Task, busy map[string]busyWork, admit Admit, now time
 	return whole(t.Status, Role{})
 }
 
+// heldOutside reports a task held by something outside the team, with
+// nothing of it running. It takes none of the team's capacity, so it doesn't
+// count against the project's cap: CA-77, held for weeks on a library change,
+// otherwise kept one of two places from every other task.
+func heldOutside(t Task) bool {
+	return len(t.Claims) == 0 && slices.ContainsFunc(t.Blockers, func(b Blocker) bool { return b.ClearedAt == nil && !b.LandingOnly })
+}
+
 // startQueued starts a project's queued tasks in queue order, skipping
 // those that wait for unfinished work, while the project is below its cap,
 // its first stage has room and a seat is free for the first step. A queued
@@ -648,7 +656,7 @@ func startQueued(v *Snapshot, p *Project, busy map[string]busyWork, admit Admit,
 	}
 	active := 0
 	for _, t := range v.Tasks {
-		if t.ProjectID == p.ID && t.Active() {
+		if t.ProjectID == p.ID && t.Active() && !heldOutside(t) {
 			active++
 		}
 	}
