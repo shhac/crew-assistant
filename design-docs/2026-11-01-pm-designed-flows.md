@@ -167,3 +167,38 @@ delivery reconciliation or a recorded result.
 
 PM-defined loops, expressions, scripts, conditions that read prose, stages
 after delivery begins, or per-stage tool or sandbox choices.
+
+## What step 1a found
+
+Step 1a (`internal/core/flow.go`, `flow_shadow.go`; the daemon's shadow in
+`internal/work/flow_shadow.go`) agreed with the engine on every pass of every
+work test. Writing it found these differences between this design and the
+engine, each to settle before the evaluator takes over a transition:
+
+1. **Research is skipped when a task already has a plan**
+   (`next_task.go` `startTask`, `claims.go` `startQueued`). Entering stages
+   needs a `has_plan` fact, or an implicit rule.
+2. **Researcher and designer stages follow role kinds on every medium**, not
+   only on code: a documents team with a researcher researches. The default
+   flows are derived from kinds; the medium names only the make stage.
+3. **A checks stage with no checkers passes straight through**
+   (`review.go`). The default flow keeps an empty checks stage; `propose_flow`
+   validation must decide whether to allow one.
+4. **Carry-over copies reviewer verdicts by role kind on a clean catch-up**
+   (`handoff.go`), and QA is always due again. Scopes must replace that
+   copying, not add to it.
+5. **Owner acceptance waives the reading checks only**; checks by running
+   stay due on merged revisions (`acceptance.go` `AcceptanceCheckers`).
+6. **Delivery sends tasks back to the make stage**: answering a pull request
+   and integrating landing assets move a task from delivery or deciding to
+   writing. The evaluator places these at the landing position, within the
+   make stage; delivery keeps its own columns.
+7. **The engine has two notions of outstanding checkers** while an accepted
+   draft's merge check is pending (`seat_preference.go` `nextTakers` drops QA;
+   `nextChecker` and `offer` keep it). One must win before 1b.
+8. **Some owner decisions show in the last check's column** before anything
+   is written (`stage.go`, escalation and similar). A board quirk, left as is.
+9. **A card's column can lag its flow position for stage capacity**
+   (`stage.go` `Place`). Flow position and capacity stay separate in 1b.
+10. **The board shows the checks batch in sequence** although its checks run
+    together; the flow expresses that as a rule over the batch.
