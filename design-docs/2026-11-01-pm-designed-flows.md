@@ -114,6 +114,26 @@ first move and keeps its current behaviour.
 - A move counts as a round. Repeated moves between the same stages are a loop
   signal for the PM's loop policies (CA-131), not a new mechanism.
 
+## Sessions
+
+Each stage says whether its turns **resume** the seat's own native session
+from one round to the next or start **fresh**, set by the PM when it designs
+the flow (owner, 2026-11-01, replacing CA-77):
+
+- Defaults keep today's behaviour: make stages resume, which keeps the
+  implementer's working memory and is where the prompt cache saves most;
+  checks and advise stages start fresh, so each review is independent of
+  the last. A First Reader meant to read as a newcomer stays fresh; an Editor
+  tracking a manuscript across drafts may resume.
+- A stage whose instructions change starts fresh, whatever it says: a
+  member's changed learnings or attachments cost one cache miss rather than
+  risking a session working from stale instructions.
+- A resumed session starts fresh after a bound on turns or context, with a
+  hand-over drawn from the record, so a long task's context does not degrade.
+
+Before building this, measure what resuming saves today from the per-turn
+cache-read share the daemon already records.
+
 ## Done, and delivery
 
 What "done" means differs by repository, and only the owner knows it: a pull
@@ -150,7 +170,8 @@ cannot run, a seat the team lacks, or an unknown fact.
    batch, each only once shadow runs agree.
 3. **Ordered and repeated stages, conditions and scopes.**
 4. **Moves**, beyond today's design request.
-5. **`propose_flow`** and its decision; then custom roles.
+5. **`propose_flow`** and its decision, with each stage's session setting;
+   then custom roles.
 
 Phase 1 is done outside the crew: it changes the engine the crew builds itself
 with. Phases 3 to 5 can be crew tasks once 1b has landed.
