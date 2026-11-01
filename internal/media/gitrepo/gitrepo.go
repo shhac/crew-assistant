@@ -230,12 +230,14 @@ func (r Repo) taskDir(taskID string) string {
 }
 
 // Ready makes a task's clone if it has none: a local clone of the project's,
-// configured as the project's is, with the prepared folders copied in. A
+// configured as the project's is, with the prepared folders copied in. One
+// it already has gets prepared folders copied again where the owner's have
+// changed since. A
 // task whose clone was removed gets a new one, and fetches its revisions
 // from the project's clone as it needs them.
 func (r Repo) Ready(ctx context.Context) error {
 	if _, err := os.Stat(filepath.Join(r.Workspace(), ".git")); err == nil {
-		return nil
+		return r.copyPrepared(ctx, r.Workspace())
 	}
 	if r.records == "" {
 		return errors.New("only a task's clone is made on demand")
@@ -315,13 +317,18 @@ func configure(ctx context.Context, dir string) error {
 }
 
 // copyPrepared copies ignored dependencies, such as node_modules, from the
-// owner's checkout into a fresh clone or checkout at dir, so roles can build
-// without the network.
+// owner's checkout into a clone or checkout at dir, so roles can build
+// without the network. A folder already there is copied again when the
+// owner's lockfiles beside it have changed since: a task's clone lives as
+// long as the task, and a copy older than its lockfile builds what the
+// lockfile no longer says, with no network to put it right.
 func (r Repo) copyPrepared(ctx context.Context, dir string) error {
 	paths, err := r.preparedPaths(ctx)
 	if err != nil {
 		return err
 	}
+	stamps := readStamps(dir)
+	changed := false
 	for _, rel := range paths {
 		clean := filepath.Clean(rel)
 		if filepath.IsAbs(clean) || clean == "." || strings.HasPrefix(clean, "..") {
@@ -331,8 +338,19 @@ func (r Repo) copyPrepared(ctx context.Context, dir string) error {
 		if _, err := os.Stat(from); err != nil {
 			continue
 		}
-		if _, err := os.Lstat(to); err == nil {
+		// Copied again after roles have worked here, so never through a
+		// folder one of them replaced with a link.
+		if !insideReal(dir, to) {
 			continue
+		}
+		now := lockStamp(r.source, clean)
+		if _, err := os.Lstat(to); err == nil {
+			if now == "" || stamps[clean] == now {
+				continue
+			}
+			if err := media.RemoveReadOnly(to); err != nil {
+				return fmt.Errorf("replacing %s, older than the owner's: %w", clean, err)
+			}
 		}
 		if err := os.MkdirAll(filepath.Dir(to), 0700); err != nil {
 			return err
@@ -340,6 +358,12 @@ func (r Repo) copyPrepared(ctx context.Context, dir string) error {
 		if err := copyTree(from, to); err != nil {
 			return fmt.Errorf("copying %s into the clone: %w", clean, err)
 		}
+		if now != "" {
+			stamps[clean], changed = now, true
+		}
+	}
+	if changed {
+		return writeStamps(dir, stamps)
 	}
 	return nil
 }

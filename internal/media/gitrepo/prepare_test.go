@@ -107,3 +107,85 @@ func TestARemovedCheckoutIsGoneAtOnceAndDeletedBehind(t *testing.T) {
 	}
 	t.Fatal("the removed checkouts were never deleted")
 }
+
+// A task's clone lives as long as the task. When the owner installs again
+// for a changed lockfile, the clone's copy follows at its next step; with
+// the lockfile unchanged, the copy is left as it is.
+func TestAPreparedFolderFollowsTheOwnersLockfile(t *testing.T) {
+	source := ownerRepo(t)
+	lock := filepath.Join(source, "package-lock.json")
+	write(t, lock, `{"v":1}`)
+	git(t, source, "add", "package-lock.json")
+	git(t, source, "commit", "-q", "-m", "lock")
+	r, err := Open(ctx, t.TempDir(), source, []string{"node_modules"}, SignAsOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := r.Task("a")
+	if err := task.Ready(ctx); err != nil {
+		t.Fatal(err)
+	}
+	dep := filepath.Join(task.Workspace(), "node_modules", "dep", "index.js")
+	read := func() string {
+		b, err := os.ReadFile(dep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	if read() != "module.exports = 1\n" {
+		t.Fatal("the first copy")
+	}
+	// A file the clone's copy alone has shows whether a step copied it again.
+	mine := filepath.Join(task.Workspace(), "node_modules", "dep", "built.js")
+	write(t, mine, "made in the clone\n")
+	if err := task.Ready(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(mine); err != nil {
+		t.Fatal("an unchanged lockfile copied the folder again")
+	}
+	write(t, filepath.Join(source, "node_modules", "dep", "index.js"), "module.exports = 2\n")
+	write(t, lock, `{"v":2}`)
+	if err := task.Ready(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if read() != "module.exports = 2\n" {
+		t.Fatalf("the clone kept dependencies older than the owner's lockfile: %q", read())
+	}
+	if _, err := os.Stat(mine); !os.IsNotExist(err) {
+		t.Fatal("the stale copy was merged into rather than replaced")
+	}
+}
+
+// A folder a role replaced with a link is never followed out of the clone.
+func TestAFreshCopyNeverFollowsALinkOutOfTheClone(t *testing.T) {
+	source := ownerRepo(t)
+	write(t, filepath.Join(source, "web", "package-lock.json"), `{"v":1}`)
+	write(t, filepath.Join(source, "web", "node_modules", "dep", "index.js"), "1\n")
+	git(t, source, "add", "web/package-lock.json")
+	git(t, source, "commit", "-q", "-m", "web")
+	r, err := Open(ctx, t.TempDir(), source, []string{"web/node_modules"}, SignAsOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := r.Task("a")
+	if err := task.Ready(ctx); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	web := filepath.Join(task.Workspace(), "web")
+	if err := os.Rename(web, filepath.Join(t.TempDir(), "moved")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, web); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(source, "web", "package-lock.json"), `{"v":2}`)
+	if err := task.Ready(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatalf("the copy followed a link out of the clone: %v", entries)
+	}
+}
