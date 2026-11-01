@@ -92,6 +92,30 @@ func TestAReviewerIsShownTheEarlierFindingsAndAskedForEverything(t *testing.T) {
 	}
 }
 
+// A fresh review of unchanged work finds new things each round. A reviewer
+// is shown what changed since the previous draft, and what it finds in work
+// that didn't change blocks only for correctness, security or data loss.
+func TestALateFindingInUnchangedWorkIsAFollowUp(t *testing.T) {
+	t.Parallel()
+	code := core.Project{Brief: core.Brief{Goal: "Add features"}, Playbook: &core.Playbook{Medium: core.MediumGit}}
+	docs := core.Project{Brief: core.Brief{Goal: "Write notes"}}
+	task := reviewedTask()
+	task.Revisions[3].Ref = "d4ref"
+	reviewer := core.Role{Name: "Reviewer", Kinds: []string{core.RoleReviewer}}
+	later := checkerPrompt(code, task, task.Revisions[4], reviewer, code.Playbook)
+	for _, want := range []string{"`git diff d4ref..HEAD`", `mark it "present since draft N"`, "only if it is a correctness, security or data-loss problem"} {
+		if !strings.Contains(later, want) {
+			t.Fatalf("a later code review lacks %q: %s", want, later)
+		}
+	}
+	if written := reviewerPrompt(docs, task, task.Revisions[4]); !strings.Contains(written, "what changed since the previous draft") || strings.Contains(written, "git diff") {
+		t.Fatalf("a later written review: %s", written)
+	}
+	if first := checkerPrompt(code, task, task.Revisions[0], reviewer, code.Playbook); strings.Contains(first, "present since draft") {
+		t.Fatalf("a first review has nothing earlier to compare with: %s", first)
+	}
+}
+
 // Every finding held back, or stopped short of, costs the task a round, so
 // every kind of checker is asked for all of them at once, and QA says what a
 // check that stopped early never ran.

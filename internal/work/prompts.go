@@ -466,7 +466,7 @@ Review it as a careful senior engineer, against the task and every criterion abo
 - "pass" only when you would merge it as it is;
 - "revise" when something should change, with one finding per issue, naming the criterion or file it concerns;
 - "question" only when the task is genuinely ambiguous and you cannot judge without the owner.`)
-		b.WriteString(reviewDepth(earlier != "", true))
+		b.WriteString(reviewDepth(earlier != "", true, previousRef(t, r)))
 		b.WriteString(sandboxGuide(t))
 		b.WriteString(verdictFormat(t))
 		return b.String()
@@ -523,7 +523,7 @@ Judge the draft strictly against the goal, audience, constraints and every crite
 - "pass" only when every criterion is met and nothing important is wrong;
 - "revise" when something should change, with one finding per issue, naming the criterion it concerns;
 - "question" only when the brief is genuinely ambiguous and you cannot judge without the owner.`)
-	b.WriteString(reviewDepth(earlier != "", false))
+	b.WriteString(reviewDepth(earlier != "", false, ""))
 	b.WriteString(verdictFormat(t))
 	return b.String()
 }
@@ -562,7 +562,7 @@ func earlierFindings(t core.Task, r core.Revision) string {
 
 // reviewDepth asks a reviewer to settle the earlier findings and to report
 // everything now: each issue left for a later review costs the task a round.
-func reviewDepth(earlier, code bool) string {
+func reviewDepth(earlier, code bool, since string) string {
 	var b strings.Builder
 	whole := "draft"
 	if code {
@@ -570,12 +570,35 @@ func reviewDepth(earlier, code bool) string {
 	}
 	if earlier {
 		fmt.Fprintf(&b, "\nStart by checking each earlier finding above against this draft: say in your summary which are fixed, and keep each one that is not as a finding marked \"still open from draft N\". Then review the whole %s, not only what changed since.", whole)
+		b.WriteString(lateFindings(since))
 	}
 	b.WriteString("\nThis may be the last review: tie each issue to a criterion or plan item, and mark minor ones \"follow-up\".")
 	if code {
 		b.WriteString(" Before replying, walk these paths through the change: stopping mid-step, a crash between two writes, concurrent callers, partial failure, state a model turn changed, and every other path that applies the same rule.")
 	}
 	return b.String()
+}
+
+// lateFindings keeps a reviewer from sending a draft back for what it could
+// have raised on an earlier one: a fresh review of unchanged work finds new
+// things each time, and each costs the task a round (CA-131's third round
+// found what had been there since its first draft).
+func lateFindings(since string) string {
+	changed := "what changed since the previous draft"
+	if since != "" {
+		changed = fmt.Sprintf("what changed since the previous draft (`git diff %s..HEAD`)", since)
+	}
+	return fmt.Sprintf(" For each new finding, not one of the earlier ones, check whether what it concerns is in %s. If it is not, it was there to see before: mark it \"present since draft N\", and make it a blocking finding only if it is a correctness, security or data-loss problem; otherwise mark it \"follow-up\".", changed)
+}
+
+// previousRef is the commit of the draft before r, if there was one.
+func previousRef(t core.Task, r core.Revision) string {
+	for _, rev := range t.Revisions {
+		if rev.N == r.N-1 {
+			return rev.Ref
+		}
+	}
+	return ""
 }
 
 // decodeReply reads the JSON object a role was asked to reply with,
