@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	harness "github.com/shhac/lib-agent-harness"
@@ -105,7 +106,11 @@ type Loop struct {
 	// accountingRetries are held claims' accounting, by token; see retryAccounting.
 	accountingRetries sync.Map
 	commandMu         sync.Mutex
-	liveCommands      map[string]bool
+	// tmpRefused is set once /tmp refused the commands home; tmpRoot stands in
+	// for /tmp in tests.
+	tmpRefused   atomic.Bool
+	tmpRoot      string
+	liveCommands map[string]bool
 	// checked, when set, is told a checker's turn is over, before its
 	// verdict is recorded. Set in tests.
 	checked func(taskID, checker string)

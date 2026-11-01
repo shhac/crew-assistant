@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,6 +18,7 @@ import (
 func TestTheCommandsHomeLeavesRoomForASocket(t *testing.T) {
 	t.Parallel()
 	lp := testLoop(t)
+	lp.tmpRoot = ""
 	home := lp.commandsHome()
 	if !strings.HasPrefix(home, "/tmp/") && !strings.HasPrefix(home, "/private/tmp/") {
 		t.Fatalf("home %s", home)
@@ -25,7 +27,9 @@ func TestTheCommandsHomeLeavesRoomForASocket(t *testing.T) {
 	if len(deepest) > 100 {
 		t.Fatalf("a socket in a command's scratch takes %d bytes: %s", len(deepest), deepest)
 	}
-	if other := testLoop(t).commandsHome(); other == home {
+	other := testLoop(t)
+	other.tmpRoot = ""
+	if other.commandsHome() == home {
 		t.Fatal("two states share one home")
 	}
 }
@@ -34,7 +38,7 @@ func TestTheCommandsHomeLeavesRoomForASocket(t *testing.T) {
 // refused rather than used.
 func TestACommandsHomeMustBePrivate(t *testing.T) {
 	t.Parallel()
-	root, err := os.MkdirTemp("/tmp", "h")
+	root, err := os.MkdirTemp("", "h")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,5 +94,35 @@ func TestASweepReclaimsTheHomeEarlierVersionsUsed(t *testing.T) {
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatal("the earlier home's leftover is still there", err)
+	}
+}
+
+// Inside another sandbox only its own scratch can be written: when /tmp
+// refuses the home, a real sandbox opens in the system's temporary directory
+// instead, and keeps to it.
+func TestTheCommandsHomeMovesWhenTmpIsRefused(t *testing.T) {
+	t.Parallel()
+	lp := testLoop(t)
+	locked, err := os.MkdirTemp("", "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o700); os.RemoveAll(locked) })
+	if err := os.Chmod(locked, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	lp.tmpRoot = locked
+	home, err := lp.makeCommandsHome()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if home != lp.tempHome() || lp.commandsHome() != home || !strings.HasPrefix(home, os.TempDir()) {
+		t.Fatalf("home %s, commandsHome %s", home, lp.commandsHome())
+	}
+	if st, err := os.Stat(home); err != nil || st.Mode().Perm() != 0o700 {
+		t.Fatalf("home %v %v", st, err)
+	}
+	if !slices.Contains(lp.commandsHomes(), lp.tmpHome()) || !slices.Contains(lp.commandsHomes(), home) {
+		t.Fatalf("a sweep would miss a home: %v", lp.commandsHomes())
 	}
 }

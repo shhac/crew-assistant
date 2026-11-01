@@ -233,8 +233,10 @@ func testLoop(t *testing.T, reopen ...*func(*Loop) *Loop) *Loop {
 		}
 	}
 	lp := New(core.NewService(s, cfg), func() config.Config { return cfg }, false)
-	// Hosted commands keep their scratch under /tmp, named for this state.
-	t.Cleanup(func() { _ = os.RemoveAll(lp.commandsHome()) })
+	// Hosted commands keep their scratch under /tmp, named for this state. A
+	// test may itself run in a sandbox that can write only its own scratch.
+	lp.tmpRoot = os.TempDir()
+	t.Cleanup(func() { _ = os.RemoveAll(lp.tmpHome()); _ = os.RemoveAll(lp.tempHome()) })
 	// No test runs the owner's own g2g; one that stacks gives a fake.
 	lp.stacker = g2gTool{find: func(context.Context) (string, string) { return "", "" }}
 	return lp

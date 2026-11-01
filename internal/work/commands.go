@@ -235,11 +235,19 @@ func (lp *Loop) commandOwners() (owners map[string]bool, known bool) {
 // Serialize directory discovery with other opens and recovery. The harness
 // preserves live sandboxes through their lifetime locks during its own sweep.
 func (lp *Loop) openCommandsLocked(ctx context.Context, opts sandbox.Options) (commandSandbox, error) {
-	if opts.RuntimeHome == "" {
-		opts.RuntimeHome = lp.commandsHome()
-	}
-	// A stand-in sandbox makes nothing, so tests leave nothing under /tmp.
-	if lp.commands == nil {
+	switch {
+	case lp.commands != nil:
+		// A stand-in sandbox makes nothing, so tests leave nothing under /tmp.
+		if opts.RuntimeHome == "" {
+			opts.RuntimeHome = lp.commandsHome()
+		}
+	case opts.RuntimeHome == "":
+		home, err := lp.makeCommandsHome()
+		if err != nil {
+			return nil, err
+		}
+		opts.RuntimeHome = home
+	default:
 		if err := privateHome(opts.RuntimeHome); err != nil {
 			return nil, err
 		}
