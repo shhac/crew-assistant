@@ -194,6 +194,7 @@ func writerPrompt(p core.Project, t core.Task, caughtUp string, fresh bool) stri
 		b.WriteString("\nIf kept requirements still can't be met from your sandbox, report them too. Keep quoting them in the owner-step block with why; the loop reports them in your hand-over instead of opening another escalation.\n")
 	}
 	if playbook := taskPlaybook(p, t); isCode(p, t) && playbook != nil && playbook.Check != "" {
+		b.WriteString(scopedCheckGuide(playbook))
 		b.WriteString("\nUse run_check for the project's check before handing over; repeat while it says still running. The project's check, including tests that start local servers, is within reach through run_check and is never an owner step.")
 	}
 	b.WriteString("\nIf a requirement needs something outside your sandbox, such as the owner's machine, their browser or the network, do everything else it asks, then end your reply with a ```owner-step block holding a JSON list: [{\"requirement\": \"the requirement, quoted\", \"why\": \"why you can't meet it from here\"}]. It goes to the owner to check after the change lands, instead of another round.\n")
@@ -435,7 +436,8 @@ func checkerPrompt(p core.Project, t core.Task, r core.Revision, checker core.Ro
 			b.WriteString(strings.TrimPrefix(notes, "\n") + "\n")
 		}
 		if playbook.Medium == core.MediumGit && playbook.Check != "" {
-			fmt.Fprintf(&b, "Use run_check for the project check (%s), once. Repeat calls while it says still running; they wait for the same run. Judge the exit code, timed_out flag and output it returns.\n\n", playbook.Check)
+			b.WriteString(scopedCheckGuide(playbook))
+			fmt.Fprintf(&b, "Use run_check for the project check (%s), once. Repeat calls while it says still running; they wait for the same run. Judge the exit code, timed_out flag and output it returns.\n\n", roundCheckCommand(playbook))
 			b.WriteString("Do not change, fix or commit anything; only use run_check and read its output.\n")
 			b.WriteString("When coverage.more is true, collect all remaining run_check pages before judging; those pages belong to the same check.\n")
 		} else {
@@ -457,7 +459,8 @@ Use "question" only if the check cannot run at all for a reason ` + core.SeatWor
 		fmt.Fprintf(&b, "\nThis repository holds a proposed change for this task: the commits between %s and HEAD (run `git diff %s..HEAD` and read whatever else you need). %s Do not modify anything.\n", t.Base, t.Base, repoInstructions)
 		b.WriteString(byHandNote(r))
 		if playbook != nil && playbook.Check != "" {
-			fmt.Fprintf(&b, "%s runs `%s` separately, so you need not run it or report on it.\n", text.Capital(core.SeatWords(t.Roles, core.RoleQA)), playbook.Check)
+			b.WriteString(scopedCheckGuide(playbook))
+			fmt.Fprintf(&b, "%s runs `%s` separately, so you need not run it or report on it.\n", text.Capital(core.SeatWords(t.Roles, core.RoleQA)), roundCheckCommand(playbook))
 		}
 		earlier := earlierFindings(t, r)
 		b.WriteString(earlier)
@@ -917,4 +920,18 @@ func prerequisiteContext(id, what, outcome string, settlements []core.Prerequisi
 		out += fmt.Sprintf("; %s by %s at %s, source %s, owner answer: %q", settled.Outcome, settled.By, settled.At.Format(time.RFC3339), settled.Source, settled.Answer)
 	}
 	return out
+}
+
+func scopedCheckGuide(pb *core.Playbook) string {
+	if pb == nil || pb.Medium != core.MediumGit || pb.ScopedCheck == "" {
+		return ""
+	}
+	return "\nDuring rounds run_check runs the scoped check (" + pb.ScopedCheck + ") for this draft’s changed files. The full project check runs separately before approval; a scoped pass never replaces it.\n"
+}
+
+func roundCheckCommand(pb *core.Playbook) string {
+	if pb.Medium == core.MediumGit && pb.ScopedCheck != "" {
+		return pb.ScopedCheck
+	}
+	return pb.Check
 }

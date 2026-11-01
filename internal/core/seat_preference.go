@@ -201,6 +201,9 @@ func (t Task) nextTakers(brief int) []NextTaker {
 			out = append(out, next)
 		}
 	}
+	if t.FullCheckPending(brief) {
+		return out
+	}
 	for _, g := range t.CheckerGroups() {
 		if t.AcceptanceStands(brief) && (!g.Seats[0].Holds(RoleQA) || t.MergeCheckPending(brief)) {
 			continue

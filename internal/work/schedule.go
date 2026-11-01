@@ -300,7 +300,7 @@ func (lp *Loop) step(ctx context.Context, s core.Scheduled) error {
 		return lp.answerMessage(ctx, p, t, s)
 	}
 	// The task moved on since the step was claimed.
-	if t.Status != s.Claim.Step && !(s.Claim.Step == core.StepValidateMerge && t.Status == core.TaskReviewing) {
+	if t.Status != s.Claim.Step && !((s.Claim.Step == core.StepValidateMerge || s.Claim.Step == core.StepFullCheck) && t.Status == core.TaskReviewing) {
 		return nil
 	}
 	playbook := taskPlaybook(p, t)
@@ -313,9 +313,12 @@ func (lp *Loop) step(ctx context.Context, s core.Scheduled) error {
 	}
 	// A check runs beside the task's other checks and never moves the task;
 	// direction that arrived meanwhile waits for them to end.
-	if s.Claim.Step == core.StepValidateMerge {
+	if s.Claim.Step == core.StepValidateMerge || s.Claim.Step == core.StepFullCheck {
 		if len(t.Revisions) == 0 || t.Revisions[len(t.Revisions)-1].N != s.Claim.Revision {
 			return core.ErrStale
+		}
+		if s.Claim.Step == core.StepFullCheck {
+			return lp.validateFullCheck(ctx, p, t, m)
 		}
 		return lp.validateAcceptedMerge(ctx, p, t, m)
 	}

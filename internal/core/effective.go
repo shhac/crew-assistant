@@ -41,6 +41,7 @@ func (v Snapshot) basePlaybook(p Project) (Playbook, bool) {
 	}
 	pb := clonePlaybook(*p.Settings)
 	if r := v.Repository(firstRepository(p)); r != nil {
+		pb.ScopedCheck = r.ScopedCheck
 		pb.Repo, pb.Check, pb.Prepare = r.Path, r.Check, slices.Clone(r.Prepare)
 		pb.CheckInCopy, pb.Run, pb.Tools = r.CheckInCopy, cloneRun(r.Run), slices.Clone(r.Tools)
 	}
@@ -184,6 +185,8 @@ func placePlaybook(v *Snapshot, p *Project, after Playbook) (repoID, teamID stri
 		p.Scope = Scope{Repositories: []ScopeRepository{{ID: r.ID}}}
 	}
 	if r != nil {
+		r.ScopedCheck = after.ScopedCheck
+		own.ScopedCheck = ""
 		r.Path, r.Check, r.Prepare = after.Repo, after.Check, slices.Clone(after.Prepare)
 		r.CheckInCopy, r.Run, r.Tools = after.CheckInCopy, cloneRun(after.Run), slices.Clone(after.Tools)
 		own.Repo, own.Check, own.Prepare, own.CheckInCopy, own.Run, own.Tools = "", "", nil, false, nil, nil

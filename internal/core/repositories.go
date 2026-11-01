@@ -23,8 +23,9 @@ type Repository struct {
 	// lands on by default, when the owner has said; empty leaves it to the
 	// landing settings, as before.
 	DefaultBranch string `json:"default_branch,omitempty"`
-	// Check is the full check QA and releases run.
-	Check string `json:"check,omitempty"`
+	// Check is the full project check. Rounds use ScopedCheck when configured.
+	Check       string `json:"check,omitempty"`
+	ScopedCheck string `json:"scoped_check,omitempty"`
 	// Prepare is the ignored paths, or patterns such as **/node_modules,
 	// copied into a private copy.
 	Prepare []string `json:"prepare,omitempty"`
@@ -72,6 +73,7 @@ type RepositoryInput struct {
 	Path          string     `json:"path"`
 	DefaultBranch string     `json:"default_branch"`
 	Check         string     `json:"check"`
+	ScopedCheck   string     `json:"scoped_check"`
 	Prepare       []string   `json:"prepare"`
 	CheckInCopy   bool       `json:"check_in_copy"`
 	Run           *RunRecipe `json:"run"`
@@ -80,7 +82,7 @@ type RepositoryInput struct {
 }
 
 func (in RepositoryInput) repository(id, path string) Repository {
-	r := Repository{ID: id, Name: strings.TrimSpace(in.Name), Path: path, DefaultBranch: strings.TrimSpace(in.DefaultBranch), Check: strings.TrimSpace(in.Check), CheckInCopy: in.CheckInCopy}
+	r := Repository{ID: id, Name: strings.TrimSpace(in.Name), Path: path, DefaultBranch: strings.TrimSpace(in.DefaultBranch), Check: strings.TrimSpace(in.Check), ScopedCheck: strings.TrimSpace(in.ScopedCheck), CheckInCopy: in.CheckInCopy}
 	for _, p := range in.Prepare {
 		if p = strings.TrimSpace(p); p != "" {
 			r.Prepare = append(r.Prepare, p)
@@ -113,6 +115,9 @@ func (in RepositoryInput) repository(id, path string) Repository {
 // validate checks a repository on its own; each project working in it
 // checks the rest with its playbook.
 func (r Repository) validate() error {
+	if err := validateScopedCheck(r.Check, r.ScopedCheck); err != nil {
+		return err
+	}
 	if !filepath.IsAbs(r.Path) {
 		return errors.New("a repository needs the absolute path of its local clone")
 	}
@@ -277,4 +282,14 @@ func (s *Service) DeleteRepository(ctx context.Context, id string) error {
 		record(v, s.now().UTC(), "", "repository.deleted", "Repository "+name+" removed")
 		return nil
 	})
+}
+
+func validateScopedCheck(full, scoped string) error {
+	if len([]rune(scoped)) > 500 || strings.ContainsAny(scoped, "\r\n") {
+		return errors.New("scoped check must be one line of at most 500 characters")
+	}
+	if strings.TrimSpace(scoped) != "" && strings.TrimSpace(full) == "" {
+		return errors.New("a scoped check needs a full check")
+	}
+	return nil
 }

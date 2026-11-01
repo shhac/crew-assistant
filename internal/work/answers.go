@@ -139,6 +139,14 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 		return lp.stopTask(ctx, t, "You closed it")
 	}
 	answer := strings.TrimSpace(d.Answer)
+	accept := acceptAfterFullCheck(core.Project{}, d.BriefVersion)
+	if t.Playbook == nil && d.Kind == core.DecisionEscalation && d.Disposition == core.DispositionChoice && (answer == choiceAcceptDraft || answer == choiceAcceptFollowUp) {
+		_, p, _, err := lp.lookUp(ctx, t.ProjectID, t.ID)
+		if err != nil {
+			return err
+		}
+		accept = acceptAfterFullCheck(p, d.BriefVersion)
+	}
 	// Only a choice the owner picked acts on the task. Their own words are
 	// direction, even when they spell "approve" or "stop".
 	chose := func(choice string) bool {
@@ -156,11 +164,11 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 	case d.Approves() && chose(choiceApprove):
 		return lp.approve(ctx, t)
 	case d.Kind == core.DecisionEscalation && chose(choiceAcceptDraft):
-		_, _, err := lp.Core.AcceptDraft(ctx, t.ID, d.ID, false, approveLatest)
+		_, _, err := lp.Core.AcceptDraft(ctx, t.ID, d.ID, false, accept)
 		return err
 	// The follow-up queued is the one the owner was shown.
 	case d.Kind == core.DecisionEscalation && d.FollowUp != nil && chose(choiceAcceptFollowUp):
-		_, _, err := lp.Core.AcceptWithFollowUp(ctx, t.ID, d.ID, approveLatest)
+		_, _, err := lp.Core.AcceptWithFollowUp(ctx, t.ID, d.ID, accept)
 		return err
 	case d.OwnerStep != nil && d.Split != nil && chose(choiceSplit):
 		_, err := lp.Core.SplitOwnerStep(ctx, t.ID, d.ID)
@@ -186,6 +194,14 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 			// The owner's retry starts the count of catch-ups afresh.
 			t.Failures, t.RetryAt, t.DecisionID, t.Detail, t.CatchUps = 0, time.Time{}, "", "Trying again", 0
 			t.LandingFailures = nil
+			if t.FullCheck != nil && t.Acceptance != nil && t.Status == core.TaskReviewing {
+				for i := range t.Claims {
+					t.Claims[i].Revoked = true
+				}
+				validation := *t.FullCheck
+				validation.Checked, validation.Failure, validation.Evidence = false, "", ""
+				t.FullCheck = &validation
+			}
 			if t.MergeValidation != nil && t.Acceptance != nil && t.Status == core.TaskReviewing {
 				// Superseded turns retain their scheduling hold until they end,
 				// but may no longer write results into this new attempt.
@@ -221,6 +237,7 @@ func (lp *Loop) applyAnswer(ctx context.Context, t core.Task, d core.Decision) e
 				t.Proposal.MergeApproved = 0
 			}
 		}
+		t.FullCheck = nil
 		t.Acceptance, t.MergeValidation = nil, nil
 		// The owner stepped in: landings the PM approved count afresh.
 		t.LandingFailures = nil
@@ -302,4 +319,21 @@ func sandboxProofCode(code string) bool {
 		return true
 	}
 	return false
+}
+
+// Owner acceptance keeps its authority while the full check still precedes
+// landing approval. No second acceptance decision is needed after a pass.
+func acceptAfterFullCheck(p core.Project, brief int) func(*core.Task) string {
+	return func(t *core.Task) string {
+		pb := taskPlaybook(p, *t)
+		if pb != nil && pb.Medium == core.MediumGit && pb.ScopedCheck != "" && !t.FullCheckPassed(brief) {
+			activity := approveLatest(t)
+			if t.Status != core.TaskLanding {
+				return activity
+			}
+			t.Status, t.DecisionID, t.ResumeStatus, t.Detail = core.TaskDeciding, "", "", "Checking the accepted draft before approval"
+			return t.Detail
+		}
+		return approveLatest(t)
+	}
 }

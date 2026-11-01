@@ -176,6 +176,7 @@ func (s *Service) AcceptDraft(ctx context.Context, taskID, decisionID string, fo
 				t.Proposal.MergeApproved = 0
 			}
 			t.DecisionID, t.ResumeStatus = "", ""
+			t.FullCheck = nil
 			t.Acceptance, t.MergeValidation, t.Approved = nil, nil, 0
 			t.Status = TaskReviewing
 			if len(t.Revisions) == 0 || t.DirectionPending > 0 {
@@ -190,6 +191,7 @@ func (s *Service) AcceptDraft(ctx context.Context, taskID, decisionID string, fo
 		}
 		now := s.now().UTC()
 		t.Acceptance = &DraftAcceptance{Revision: t.Revisions[len(t.Revisions)-1].N, Decision: d.ID, BriefVersion: p.Brief.Version, TextVersion: t.TextVersion}
+		t.FullCheck = nil
 		t.MergeValidation = nil
 		d.Applied = true
 		activity := accept(t)

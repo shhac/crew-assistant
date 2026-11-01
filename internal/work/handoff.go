@@ -144,6 +144,7 @@ func applyHandoff(t *core.Task, p *core.Project, h core.Handoff) string {
 					t.Proposal.MergeApproved = 0
 				}
 			}
+			t.FullCheck = nil
 			t.Acceptance, t.MergeValidation = nil, nil
 		}
 		return fmt.Sprintf("%s caught up cleanly: %s", t.Objective, c.What)
@@ -246,7 +247,7 @@ func (lp *Loop) resume(ctx context.Context) error {
 				if c.Held == accountingHold {
 					continue
 				}
-				mayOwn := c.Step == core.StepValidateMerge || c.Step == core.TaskReviewing || c.Step == core.StepMessage || (t.Playbook != nil && t.Playbook.Medium == core.MediumGit)
+				mayOwn := c.Step == core.StepValidateMerge || c.Step == core.StepFullCheck || c.Step == core.TaskReviewing || c.Step == core.StepMessage || (t.Playbook != nil && t.Playbook.Medium == core.MediumGit)
 				if c.Held != "" || owners[c.Token] || (!known && mayOwn) {
 					keep(c)
 				}

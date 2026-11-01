@@ -236,6 +236,11 @@ func (r Repo) RemoveChecks() error {
 // CopyForCheck copies uncommitted and prepared files into a disposable writable
 // tree. cache optionally names QA's cache outside its read-only checkout.
 func (r Repo) CopyForCheck(from string, cache ...string) (Checkout, error) {
+	return r.CopyForCheckBase(context.Background(), from, "", cache...)
+}
+
+// CopyForCheckBase adds a draft change record only when the source has none.
+func (r Repo) CopyForCheckBase(ctx context.Context, from, base string, cache ...string) (Checkout, error) {
 	if err := os.MkdirAll(r.checksDir(), 0700); err != nil {
 		return Checkout{}, err
 	}
@@ -255,6 +260,21 @@ func (r Repo) CopyForCheck(from string, cache ...string) (Checkout, error) {
 		c.Remove()
 		return Checkout{}, err
 	}
+	if len(changeEnv(c.Dir)) == 0 && base != "" {
+
+		// Discovery is optional: an unavailable base or git failure leaves no
+		// record, so hostedCheck chooses the full command for this copy.
+		if files, discoveryErr := workingChange(ctx, c.Dir, base); discoveryErr == nil {
+			if err = os.WriteFile(filepath.Join(c.Dir, ".git", changedFile), []byte(files), 0600); err == nil {
+				err = os.WriteFile(filepath.Join(c.Dir, ".git", baseFile), []byte(base), 0600)
+			}
+			if err != nil {
+				c.Remove()
+				return Checkout{}, err
+			}
+		}
+	}
+
 	dest := filepath.Join(c.Dir, cacheDir)
 	if len(cache) > 0 && cache[0] != "" && cache[0] != filepath.Join(from, cacheDir) {
 		if _, err := os.Stat(cache[0]); err == nil {
@@ -274,6 +294,19 @@ func (r Repo) CopyForCheck(from string, cache ...string) (Checkout, error) {
 			return Checkout{}, err
 		}
 	}
+
 	c.Env = append(envAt(dest), changeEnv(c.Dir)...)
 	return c, nil
+}
+
+func workingChange(ctx context.Context, dir, base string) (string, error) {
+	names, err := run(ctx, dir, "diff", "--name-only", "--no-renames", base)
+	if err != nil {
+		return "", err
+	}
+	untracked, err := run(ctx, dir, "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(names + "\n" + untracked), nil
 }

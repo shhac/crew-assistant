@@ -97,6 +97,7 @@ func (f *repositoryFlags) add(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.in.Name, "name", "", "Name it is shown by")
 	cmd.Flags().StringVar(&f.in.Path, "path", "", "Absolute path of the local clone")
 	cmd.Flags().StringVar(&f.in.DefaultBranch, "default-branch", "", "The branch work starts from and lands on by default")
+	cmd.Flags().StringVar(&f.in.ScopedCheck, "scoped-check", "", "Optional check for draft changes; the full check runs before approval")
 	cmd.Flags().StringVar(&f.in.Check, "check", "", "The full check QA and releases run")
 	cmd.Flags().StringSliceVar(&f.in.Prepare, "prepare", nil, "Ignored paths or patterns, such as **/node_modules, copied into each private copy")
 	cmd.Flags().BoolVar(&f.in.CheckInCopy, "check-in-copy", false, "Run the check in a writable copy of the revision")
@@ -110,11 +111,12 @@ func (f *repositoryFlags) add(cmd *cobra.Command) {
 
 // over is the repository's settings with the flags given laid over them.
 func (f *repositoryFlags) over(cmd *cobra.Command, r core.Repository) (core.RepositoryInput, error) {
-	in := core.RepositoryInput{Name: r.Name, Path: r.Path, DefaultBranch: r.DefaultBranch, Check: r.Check, Prepare: r.Prepare, CheckInCopy: r.CheckInCopy, Run: r.Run, Areas: r.Areas}
+	in := core.RepositoryInput{Name: r.Name, Path: r.Path, DefaultBranch: r.DefaultBranch, Check: r.Check, ScopedCheck: r.ScopedCheck, Prepare: r.Prepare, CheckInCopy: r.CheckInCopy, Run: r.Run, Areas: r.Areas}
 	changed := cmd.Flags().Changed
 	for flag, apply := range map[string]func(){
 		"name": func() { in.Name = f.in.Name }, "path": func() { in.Path = f.in.Path }, "default-branch": func() { in.DefaultBranch = f.in.DefaultBranch },
-		"check": func() { in.Check = f.in.Check }, "prepare": func() { in.Prepare = f.in.Prepare }, "check-in-copy": func() { in.CheckInCopy = f.in.CheckInCopy },
+		"scoped-check": func() { in.ScopedCheck = f.in.ScopedCheck },
+		"check":        func() { in.Check = f.in.Check }, "prepare": func() { in.Prepare = f.in.Prepare }, "check-in-copy": func() { in.CheckInCopy = f.in.CheckInCopy },
 	} {
 		if changed(flag) {
 			apply()
@@ -160,7 +162,7 @@ func repositoryCommand(o *options) *cobra.Command {
 		}
 		users := used(snap, true)
 		for _, r := range snap.Repositories {
-			if err := o.emit(map[string]any{"id": r.ID, "name": r.Name, "path": r.Path, "check": r.Check, "projects": users[r.ID]}); err != nil {
+			if err := o.emit(map[string]any{"id": r.ID, "name": r.Name, "path": r.Path, "check": r.Check, "scoped_check": r.ScopedCheck, "projects": users[r.ID]}); err != nil {
 				return err
 			}
 		}
@@ -190,7 +192,7 @@ func repositoryCommand(o *options) *cobra.Command {
 	}}
 	added.add(add)
 	var set repositoryFlags
-	change := &cobra.Command{Use: "set <repository>", Short: "Change a repository for every project working in it", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	change := &cobra.Command{Use: "set <repository>", Aliases: []string{"update"}, Short: "Change a repository for every project working in it", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, _, err := o.findRepository(args[0])
 		if err != nil {
 			return err

@@ -45,6 +45,7 @@ type Claim struct {
 
 const (
 	// StepMessage answers a message to a reviewer or QA with a check.
+	StepFullCheck     = "full-check"
 	StepValidateMerge = "validate-merge"
 	StepMessage       = "message"
 	// StepAdopt is the owner handing the task a draft of their own.
@@ -247,6 +248,7 @@ func (s *Service) Schedule(ctx context.Context, admit Admit, deferred ...string)
 			if t.Proposal != nil {
 				t.Proposal.MergeApproved = 0
 			}
+			t.FullCheck = nil
 			t.Acceptance, t.MergeValidation = nil, nil
 			for j := range t.Claims {
 				t.Claims[j].Revoked = true
@@ -541,7 +543,7 @@ func offer(v *Snapshot, t *Task, busy map[string]busyWork, admit Admit, now time
 			useHandOn(v, t, kind, "", seat, now)
 		}
 		claim := Claim{Step: step, Seat: seat.Name}
-		if step == StepValidateMerge {
+		if step == StepValidateMerge || step == StepFullCheck {
 			claim.Revision = t.Revisions[len(t.Revisions)-1].N
 		}
 		c := newClaim(t, claim, now)
@@ -569,6 +571,12 @@ func offer(v *Snapshot, t *Task, busy map[string]busyWork, admit Admit, now time
 		}
 		latest := t.Revisions[len(t.Revisions)-1].N
 		brief := briefVersion(v, *t)
+		if t.FullCheckPending(brief) {
+			if len(t.Claims) > 0 {
+				return nil, nil
+			}
+			return whole(StepFullCheck, Role{})
+		}
 		if t.MergeCheckPending(brief) || (t.AcceptanceStands(brief) && t.MergeValidation != nil && t.MergeValidation.Failure != "") {
 			if len(t.Claims) > 0 {
 				return nil, nil

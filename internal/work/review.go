@@ -19,6 +19,16 @@ import (
 // as a step of their own, side by side; see check.
 func (lp *Loop) review(ctx context.Context, p core.Project, t core.Task) error {
 	r := t.Revisions[len(t.Revisions)-1]
+	if t.FullCheckPending(p.Brief.Version) {
+		m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
+		if err != nil {
+			return err
+		}
+		return lp.validateFullCheck(ctx, p, t, m)
+	}
+	if t.FullCheckCurrent(p.Brief.Version) && t.FullCheck.Checked && t.FullCheck.Failure != "" && t.AcceptanceStands(p.Brief.Version) {
+		return lp.acceptedMergeFailure(ctx, t, t.FullCheck.Failure)
+	}
 	if t.MergeCheckPending(p.Brief.Version) {
 		m, err := lp.mediumFor(ctx, p, taskPlaybook(p, t))
 		if err != nil {
@@ -283,6 +293,25 @@ func (lp *Loop) decide(ctx context.Context, p core.Project, t core.Task) error {
 			// judge again against them.
 			return lp.setStatus(ctx, t.ID, core.TaskReviewing, "Checking again against the updated brief or requirements")
 		}
+	}
+	if t.FullCheckCurrent(p.Brief.Version) && t.FullCheck.Checked && t.FullCheck.Failure != "" {
+		finding := core.Verdict{Revision: r.N, Ref: r.Ref, BriefVersion: p.Brief.Version, TextVersion: t.TextVersion, Role: "Project check", Outcome: core.VerdictRevise, Summary: t.FullCheck.Failure}
+		if t.AcceptanceStands(p.Brief.Version) {
+			return lp.acceptedMergeFailure(ctx, t, finding.Summary)
+		}
+		if t.Round >= t.MaxRounds {
+			return lp.escalate(ctx, p, t, append(current, finding), []core.Verdict{finding})
+		}
+		_, err := lp.updateOpen(ctx, t.ID, func(now *core.Task, current *core.Project) (string, error) {
+			if !now.FullCheckCurrent(current.Brief.Version) || now.FullCheck.Ref != r.Ref {
+				return "", core.ErrStale
+			}
+			now.Verdicts = append(now.Verdicts, finding)
+			now.NextRound()
+			now.Status, now.Detail = core.TaskWriting, "Revising after the full project check failed"
+			return now.Detail, nil
+		})
+		return err
 	}
 	if t.AcceptanceStands(p.Brief.Version) {
 		if r.N == t.Acceptance.Revision {

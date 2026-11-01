@@ -62,13 +62,18 @@ func (s *Service) FailAcceptedCatchUp(ctx context.Context, taskID string, revisi
 			if t.Proposal != nil {
 				t.Proposal.MergeApproved = 0
 			}
+			t.FullCheck = nil
 			t.Acceptance, t.MergeValidation, t.Approved = nil, nil, 0
 			t.ResumeStatus = TaskWriting
 		} else {
-			if t.MergeValidation == nil || t.MergeValidation.Revision != revision {
-				return ErrStale
+			if t.FullCheckCurrent(brief) && t.FullCheck.Revision == revision {
+				t.FullCheck.Failure = in.Context
+			} else {
+				if t.MergeValidation == nil || t.MergeValidation.Revision != revision {
+					return ErrStale
+				}
+				t.MergeValidation.Failure = in.Context
 			}
-			t.MergeValidation.Failure = in.Context
 			t.ResumeStatus = TaskReviewing
 		}
 		out = openTaskDecision(v, t, DecisionFailure, in, s.now().UTC())
@@ -97,6 +102,7 @@ func retireStaleDelivery(v *Snapshot, t *Task, now time.Time) bool {
 	dismiss(v, d, now, "The work or requirements changed; checking again")
 	t.DecisionID, t.ResumeStatus = "", ""
 	t.Status, t.Detail = TaskReviewing, "Checking again after the work or requirements changed"
+	t.FullCheck = nil
 	t.Approved, t.Acceptance, t.MergeValidation, t.LandDecision = 0, nil, nil, nil
 	for i := range t.Claims {
 		t.Claims[i].Revoked = true
@@ -119,6 +125,7 @@ func (s *Service) ApplyDeliveryApproval(ctx context.Context, taskID, decisionID 
 			if t.Proposal != nil {
 				t.Proposal.MergeApproved = 0
 			}
+			t.FullCheck = nil
 			t.Approved, t.Acceptance, t.MergeValidation = 0, nil, nil
 			t.Status, t.Detail = TaskWriting, "Integrate delivered assets and provenance in a new draft"
 			if t.NeedsLandingAssetReply() {
@@ -204,4 +211,27 @@ func (t Task) AcceptedMergeReady(brief int) bool {
 		}
 	}
 	return true
+}
+
+// FullCheckCurrent binds evidence to the exact draft and requirements checked.
+func (t Task) FullCheckCurrent(brief int) bool {
+	if len(t.Revisions) == 0 || t.FullCheck == nil {
+		return false
+	}
+	r, v := t.Revisions[len(t.Revisions)-1], t.FullCheck
+	return v.Revision == r.N && v.Ref == r.Ref && v.BriefVersion == brief && v.TextVersion == t.TextVersion
+}
+func (t Task) FullCheckPending(brief int) bool {
+	return t.FullCheckCurrent(brief) && !t.FullCheck.Checked
+}
+func (t Task) FullCheckPassed(brief int) bool {
+	if len(t.Revisions) == 0 {
+		return false
+	}
+	r := t.Revisions[len(t.Revisions)-1]
+	v := t.MergeValidation
+	if v != nil && v.Revision == r.N && v.Ref == r.Ref && v.BriefVersion == brief && v.TextVersion == t.TextVersion && v.Checked && v.Failure == "" {
+		return true
+	}
+	return t.FullCheckCurrent(brief) && t.FullCheck.Checked && t.FullCheck.Failure == ""
 }

@@ -312,6 +312,10 @@ Automatic checks of accepted catch-ups retain revision-bound coverage summaries 
 
 ## Development
 
+Repositories can opt into a scoped round check with `crew-assistant repo update <id> --scoped-check "make check-scoped"`. The full `check` remains required and runs on the exact draft before landing approval. During rounds, `run_check` reports which scope ran; a missing change record falls back to the full check. `CREW_CHANGED_FILES` names a newline-separated file list relative to the repository root, and `CREW_BASE` identifies the task base.
+
+In this repository, `make check-scoped` vets and tests changed Go packages and their transitive importers, including test imports. Dashboard changes add the dashboard checks. Top-level Markdown, LICENSE and design documents select no checks; config.example.json selects internal/config and its importers. Check infrastructure changes, other unknown paths, missing lists and failed package discovery use the full check. An empty file list completes without running commands. Required-skip reporting still applies to both scopes.
+
 The binary bundles two prose-only skills: `sprite-atlas` for designer turns and
 `sprite-atlas-pipeline` for implementer turns. Designers generate and visually
 review art through the existing production hand-off; implementers slice, clean,

@@ -254,6 +254,7 @@ func chosenTeam(in TeamChoice, snap core.Snapshot, p core.Project, current *core
 		// Choosing a team never changes where its work lands or how QA runs
 		// the app; those are settings of their own.
 		if p.Playbook != nil && p.Playbook.Medium == core.MediumGit {
+			playbook.ScopedCheck = p.Playbook.ScopedCheck
 			playbook.Land = p.Playbook.Land
 			playbook.Run = p.Playbook.Run
 			if in.CheckInCopy == "" {

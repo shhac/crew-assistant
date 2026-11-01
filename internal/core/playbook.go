@@ -118,6 +118,7 @@ type Playbook struct {
 	Repo         string   `json:"repo,omitempty"`
 	BranchPrefix string   `json:"branch_prefix,omitempty"`
 	Check        string   `json:"check,omitempty"`
+	ScopedCheck  string   `json:"scoped_check,omitempty"`
 	Prepare      []string `json:"prepare,omitempty"`
 	// CheckInCopy has QA run the check in a writable copy of the revision in
 	// its scratch folder, for a check that writes into the tree it runs in.
@@ -214,6 +215,9 @@ func (p Playbook) Validate() error {
 	}
 	switch p.Medium {
 	case MediumDocuments:
+		if p.ScopedCheck != "" {
+			return errors.New("scoped checks are for code repositories")
+		}
 		if !p.Land.Unset() {
 			return errors.New("landing policies are for code teams")
 		}
@@ -259,6 +263,9 @@ func (p Playbook) Validate() error {
 	}
 	if p.DeliverTo != "" && !filepath.IsAbs(p.DeliverTo) {
 		return errors.New("deliver_to must be an absolute folder")
+	}
+	if err := validateScopedCheck(p.Check, p.ScopedCheck); err != nil {
+		return err
 	}
 	if err := validateSeats(p.Roles, strings.TrimSpace(p.Check) != ""); err != nil {
 		return err

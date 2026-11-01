@@ -352,6 +352,9 @@ func (lp *Loop) roleSpec(t core.Task, r core.Role, workDir string, write bool, m
 			from, env = checkCopy.checkDir, checkCopy.env
 		}
 		tools.checks = newCheckRuns(lp, g, from, env)
+		if g.playbook.ScopedCheck != "" {
+			tools.checks.base = t.Base
+		}
 	}
 	lp.withTools(&spec, tools)
 	spec.Observer = lp.watchTurn(t, kind, r, workDir, write)

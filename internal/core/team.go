@@ -69,6 +69,7 @@ func (t *Task) NextRound() {
 	if len(t.Revisions) == 0 {
 		return
 	}
+	t.FullCheck = nil
 	t.Round++
 	t.MaxRounds = max(t.MaxRounds, t.Round)
 }

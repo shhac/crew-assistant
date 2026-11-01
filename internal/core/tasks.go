@@ -201,6 +201,7 @@ type Task struct {
 	// only merged it cleanly with landed work keeps that approval.
 	Approved        int              `json:"approved,omitempty"`
 	Acceptance      *DraftAcceptance `json:"acceptance,omitempty"`
+	FullCheck       *MergeValidation `json:"full_check,omitempty"`
 	MergeValidation *MergeValidation `json:"merge_validation,omitempty"`
 	// LandDecision is the PM's latest decision to land or hold the change,
 	// on a project where the PM decides; see landing.go.

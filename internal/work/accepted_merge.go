@@ -27,15 +27,64 @@ func (lp *Loop) validateAcceptedMerge(ctx context.Context, p core.Project, t cor
 		return nil
 	}
 	r := t.Revisions[len(t.Revisions)-1]
+	evidence, failure, checkErr := lp.runRevisionCheck(ctx, p, t, m)
+
+	if checkErr != nil {
+		if taskPlaybook(p, t).ScopedCheck != "" {
+			if errors.Is(checkErr, errCommandRecovery) {
+				_, err := lp.updateOpen(ctx, t.ID, func(now *core.Task, current *core.Project) (string, error) {
+					if !now.MergeCheckPending(current.Brief.Version) || current.Brief.Version != p.Brief.Version || now.TextVersion != t.TextVersion || now.MergeValidation.Ref != r.Ref || now.MergeValidation.Revision != r.N {
+						return "", core.ErrStale
+					}
+					pending := *now.MergeValidation
+					pending.Evidence = text.Clip(failure, 2000)
+					now.MergeValidation = &pending
+					now.Detail = "Project check cleanup is unconfirmed"
+					return now.Detail, nil
+				})
+				return errors.Join(checkErr, err)
+			}
+			return lp.retryProjectCheck(ctx, t, checkErr)
+		}
+		// Repositories without scoped checks retain their existing accepted-merge
+		// failure decisions, including the cleanup hold.
+		if errors.Is(checkErr, errCommandRecovery) {
+			return errors.Join(checkErr, lp.acceptedMergeFailure(ctx, t, failure))
+		}
+		failure = checkErr.Error()
+	}
+
+	_, err := lp.updateOpen(ctx, t.ID, func(now *core.Task, current *core.Project) (string, error) {
+		if !now.AcceptanceStands(current.Brief.Version) || now.TextVersion != t.TextVersion || current.Brief.Version != p.Brief.Version || len(now.Revisions) == 0 || now.Revisions[len(now.Revisions)-1].Ref != r.Ref || now.MergeValidation == nil || now.MergeValidation.Revision != r.N {
+			return "", core.ErrStale
+		}
+		if taskPlaybook(p, t).ScopedCheck != "" {
+			now.Failures, now.RetryAt = 0, time.Time{}
+		}
+		now.MergeValidation = &core.MergeValidation{Revision: r.N, Ref: r.Ref, BriefVersion: p.Brief.Version, TextVersion: t.TextVersion, Checked: true, Failure: text.Clip(failure, 2000), Evidence: evidence}
+		return fmt.Sprintf("Checked accepted draft %d of %s after catch-up", r.N, now.Objective), nil
+	})
+	if err != nil {
+		return err
+	}
+	if failure != "" {
+		return lp.acceptedMergeFailure(ctx, t, text.Clip(failure, 2000))
+	}
+	return nil
+}
+
+// runRevisionCheck is shared by accepted catch-up validation and the pre-approval gate.
+func (lp *Loop) runRevisionCheck(ctx context.Context, p core.Project, t core.Task, m medium) (string, string, error) {
+	r := t.Revisions[len(t.Revisions)-1]
 	evidence, failure := "No project check configured.", ""
 	if command := taskPlaybook(p, t).Check; strings.TrimSpace(command) != "" {
 		gm, ok := m.(gitMedium)
 		if !ok {
-			return errors.New("accepted merge validation requires a git workspace")
+			return "", "", errors.New("project validation requires a git workspace")
 		}
 		c, err := gm.check(ctx, t, r, false, false)
 		if err != nil {
-			failure = err.Error()
+			return "", "", err
 		} else {
 			cleanupHeld := false
 			defer func() {
@@ -47,8 +96,12 @@ func (lp *Loop) validateAcceptedMerge(ctx context.Context, p core.Project, t cor
 			var cleanupCopy func()
 			var coverageErr error
 			batch := 0
+			label := "Accepted merged draft"
+			if t.FullCheckPending(p.Brief.Version) {
+				label = "Full check of draft"
+			}
 			turn := fmt.Sprintf("accepted-check-%d-%d", r.N, time.Now().UnixNano())
-			result, _, runErr := lp.hostedCheck(ctx, gm, c.checkDir, "", gm.playbook.Check, func(err error, remove func()) {
+			result, progress, runErr := lp.hostedCheck(ctx, gm, c.checkDir, "", gm.playbook.Check, func(err error, remove func()) {
 				cleanupErr, cleanupCopy = err, remove
 				lp.commandCleanup(err)
 			}, func(progress *checktest.Progress, status string) {
@@ -59,7 +112,7 @@ func (lp *Loop) validateAcceptedMerge(ctx context.Context, p core.Project, t cor
 					coverageErr = errors.Join(coverageErr, lp.Core.RecordTurnStep(noteCtx, core.TurnStep{
 						TaskID: t.ID, Seat: "Project check", Role: core.RoleQA, Turn: turn,
 						Item: fmt.Sprint(batch), Kind: core.StepNote, At: time.Now().UTC(),
-						Text: fmt.Sprintf("Accepted merged draft %d (%s), brief %d, requirements %d.\n%s", r.N, r.Ref, p.Brief.Version, t.TextVersion, note),
+						Text: fmt.Sprintf("%s %d (%s), brief %d, requirements %d.\n%s", label, r.N, r.Ref, p.Brief.Version, t.TextVersion, note),
 					}))
 				})
 			})
@@ -72,35 +125,22 @@ func (lp *Loop) validateAcceptedMerge(ctx context.Context, p core.Project, t cor
 					}
 				})
 				failure = "Project check cleanup is unconfirmed: " + cleanupErr.Error()
-				if err := lp.acceptedMergeFailure(ctx, t, failure); err != nil {
-					return errors.Join(errCommandRecovery, err)
-				}
-				return errors.Join(errCommandRecovery, cleanupErr)
+				return evidence, failure, errors.Join(errCommandRecovery, cleanupErr)
 			}
 			evidence, _ = commandResultJSON(result)
 			if err := errors.Join(runErr, cleanupErr, coverageErr); err != nil {
-				failure = err.Error()
-			} else if result.ExitCode != 0 || result.TimedOut {
+				return evidence, "", err
+			} else if result.ExitCode != 0 || result.TimedOut || (gm.playbook.ScopedCheck != "" && !fullCoveragePassed(progress)) {
 				diagnostic, _ := commandTail(result.Stderr, 900)
 				output, _ := commandTail(result.Stdout, 500)
+				if gm.playbook.ScopedCheck != "" && !fullCoveragePassed(progress) {
+					diagnostic += " Full check coverage is missing, incomplete, or has required skips."
+				}
 				failure = fmt.Sprintf("Project check failed: exit_code=%d timed_out=%t\nDiagnostic: %s\nOutput: %s", result.ExitCode, result.TimedOut, diagnostic, output)
 			}
 		}
 	}
-	_, err := lp.updateOpen(ctx, t.ID, func(now *core.Task, current *core.Project) (string, error) {
-		if !now.AcceptanceStands(current.Brief.Version) || now.TextVersion != t.TextVersion || current.Brief.Version != p.Brief.Version || len(now.Revisions) == 0 || now.Revisions[len(now.Revisions)-1].Ref != r.Ref || now.MergeValidation == nil || now.MergeValidation.Revision != r.N {
-			return "", core.ErrStale
-		}
-		now.MergeValidation = &core.MergeValidation{Revision: r.N, Ref: r.Ref, BriefVersion: p.Brief.Version, TextVersion: t.TextVersion, Checked: true, Failure: text.Clip(failure, 2000), Evidence: evidence}
-		return fmt.Sprintf("Checked accepted draft %d of %s after catch-up", r.N, now.Objective), nil
-	})
-	if err != nil {
-		return err
-	}
-	if failure != "" {
-		return lp.acceptedMergeFailure(ctx, t, text.Clip(failure, 2000))
-	}
-	return nil
+	return evidence, failure, nil
 }
 
 // Persist the reason before opening its decision, so recovery cannot fall
@@ -131,4 +171,30 @@ func acceptedVerdictFailure(v core.Verdict) string {
 	}
 	fmt.Fprintf(&b, "\nNote: %s", text.Clip(v.Note, 200))
 	return b.String()
+}
+
+func fullCoveragePassed(p *checktest.Progress) bool {
+	// Generic checks need not implement crew coverage reporting. When present,
+	// the report must establish complete coverage without required skips.
+	if p == nil {
+		return true
+	}
+	if !p.Done || p.Stage != "complete" || !p.Report.Complete || p.Report.Failed {
+		return false
+	}
+	for _, skip := range p.Report.Skips {
+		if skip.Exception == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// Infrastructure retries do not consume draft rounds. Cleanup retains its
+// claim until the existing recovery loop confirms that commands have settled.
+func (lp *Loop) retryProjectCheck(ctx context.Context, t core.Task, err error) error {
+	if errors.Is(err, errCommandRecovery) || errors.Is(err, core.ErrStale) || ctx.Err() != nil {
+		return err
+	}
+	return lp.roleFailed(ctx, t, "The project check", err)
 }

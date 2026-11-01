@@ -25,6 +25,7 @@ type checkRuns struct {
 	lp            *Loop
 	medium        gitMedium
 	from, cache   string
+	base          string
 	ctx           context.Context
 	cancel        context.CancelFunc
 	wait          time.Duration
@@ -35,14 +36,15 @@ type checkRuns struct {
 	closed        bool
 }
 type checkRun struct {
-	done       chan struct{}
-	start      time.Time
-	result     sandbox.CommandResult
-	err        error
-	delivered  bool
-	progress   *checktest.Progress
-	skipOffset int
-	noted      bool
+	done             chan struct{}
+	start            time.Time
+	result           sandbox.CommandResult
+	err              error
+	delivered        bool
+	progress         *checktest.Progress
+	skipOffset       int
+	noted            bool
+	scope, scopeNote string
 }
 
 func newCheckRuns(lp *Loop, m gitMedium, from string, env []string) *checkRuns {
@@ -91,6 +93,16 @@ func (r *checkRuns) call(ctx context.Context) (string, error) {
 			return "", fmt.Errorf("the check could not be run: %w", run.err)
 		}
 		content, next, err := checkResultJSON(run.result, run.progress, run.skipOffset)
+		if run.scopeNote != "" && err == nil {
+			var reply map[string]json.RawMessage
+			if err = json.Unmarshal([]byte(content), &reply); err == nil {
+				reply["scope"], _ = json.Marshal(run.scope)
+				reply["scope_note"], _ = json.Marshal(run.scopeNote)
+				var encoded []byte
+				encoded, err = json.Marshal(reply)
+				content = string(encoded)
+			}
+		}
 		run.skipOffset = next
 		run.delivered = run.progress == nil || next >= len(run.progress.Report.Skips)
 		return content, err
@@ -114,10 +126,20 @@ func (r *checkRuns) run(ctx context.Context, run *checkRun) {
 			run.noted = true
 			r.mu.Unlock()
 		}
-	})
+	}, &roundCheck{base: r.base, scoped: r.medium.playbook.ScopedCheck, selected: func(scope, note string) { run.scope, run.scopeNote = scope, note }})
 }
-func (lp *Loop) hostedCheck(ctx context.Context, m gitMedium, from, cache, command string, cleanupError func(error, func()), note func(*checktest.Progress, string)) (result sandbox.CommandResult, progress *checktest.Progress, runErr error) {
-	copy, err := m.repo.CopyForCheck(from, cache)
+
+type roundCheck struct {
+	base, scoped string
+	selected     func(string, string)
+}
+
+func (lp *Loop) hostedCheck(ctx context.Context, m gitMedium, from, cache, command string, cleanupError func(error, func()), note func(*checktest.Progress, string), round ...*roundCheck) (result sandbox.CommandResult, progress *checktest.Progress, runErr error) {
+	base := ""
+	if len(round) > 0 {
+		base = round[0].base
+	}
+	copy, err := m.repo.CopyForCheckBase(ctx, from, base, cache)
 	if err != nil {
 		return result, nil, err
 	}
@@ -127,6 +149,21 @@ func (lp *Loop) hostedCheck(ctx context.Context, m gitMedium, from, cache, comma
 			copy.Remove()
 		}
 	}()
+	if len(round) > 0 && round[0].scoped != "" {
+		choice := round[0]
+		scope, note := "full", "No changed-file record; running the full check: "+command
+		for _, env := range copy.Env {
+			if path, ok := strings.CutPrefix(env, "CREW_CHANGED_FILES="); ok {
+				if files, err := os.ReadFile(path); err == nil {
+					command = choice.scoped
+					scope = "scoped"
+					count := len(strings.FieldsFunc(string(files), func(r rune) bool { return r == 10 }))
+					note = fmt.Sprintf("Running scoped check %q for %d changed files. The full check runs separately before approval.", command, count)
+				}
+			}
+		}
+		choice.selected(scope, note)
+	}
 	progressFile, err := os.CreateTemp(copy.Dir, ".crew-check-progress-")
 	if err != nil {
 		runErr = err

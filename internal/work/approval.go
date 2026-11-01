@@ -163,6 +163,17 @@ func (lp *Loop) askForDelivery(ctx context.Context, p core.Project, t core.Task,
 	if l != nil {
 		return lp.catchUpRound(ctx, t, c, *l)
 	}
+	if pb := taskPlaybook(p, t); pb != nil && pb.Medium == core.MediumGit && pb.ScopedCheck != "" && !t.FullCheckPassed(p.Brief.Version) {
+		_, err := lp.updateOpen(ctx, t.ID, func(now *core.Task, current *core.Project) (string, error) {
+			if current.Brief.Version != p.Brief.Version || now.TextVersion != t.TextVersion || len(now.Revisions) == 0 || now.Revisions[len(now.Revisions)-1].N != r.N || now.Revisions[len(now.Revisions)-1].Ref != r.Ref || now.DirectionPending > 0 {
+				return "", core.ErrStale
+			}
+			now.FullCheck = &core.MergeValidation{Revision: r.N, Ref: r.Ref, BriefVersion: p.Brief.Version, TextVersion: t.TextVersion}
+			now.Status, now.Detail = core.TaskReviewing, "Running the full check before approval"
+			return now.Detail, nil
+		})
+		return err
+	}
 	if proposed(t) {
 		return lp.askToMerge(ctx, p, t, r, m)
 	}

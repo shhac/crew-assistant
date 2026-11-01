@@ -6,10 +6,55 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shhac/crew-assistant/internal/media"
 )
+
+func TestCopyForCheckRecordsWorkingDraftFromBase(t *testing.T) {
+	source := ownerRepo(t)
+	base := git(t, source, "rev-parse", "HEAD")
+	git(t, source, "config", "core.quotePath", "false")
+	os.WriteFile(filepath.Join(source, "committed.go"), []byte("package main\n"), 0600)
+	git(t, source, "add", "committed.go")
+	git(t, source, "commit", "-m", "committed draft")
+	os.WriteFile(filepath.Join(source, "main.go"), []byte("package main // uncommitted\n"), 0600)
+	os.WriteFile(filepath.Join(source, "untracked.go"), []byte("package main\n"), 0600)
+	os.WriteFile(filepath.Join(source, ".gitignore"), []byte("ignored\n"), 0600)
+	os.WriteFile(filepath.Join(source, "ignored"), []byte("ignored"), 0600)
+	repo, err := Open(context.Background(), t.TempDir(), source, nil, SignNever)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := repo.CopyForCheckBase(context.Background(), source, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Remove()
+	files, err := os.ReadFile(filepath.Join(c.Dir, ".git", changedFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"committed.go", "main.go", "untracked.go"} {
+		if !strings.Contains(string(files), name) {
+			t.Fatalf("missing %s: %s", name, files)
+		}
+	}
+	if strings.Contains(string(files), "ignored") {
+		t.Fatal(string(files))
+	}
+	// A revision checkout's authoritative record survives another copy.
+	copy, err := repo.CopyForCheckBase(context.Background(), c.Dir, "not-a-commit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer copy.Remove()
+	kept, _ := os.ReadFile(filepath.Join(copy.Dir, ".git", changedFile))
+	if string(kept) != string(files) {
+		t.Fatal("existing record changed")
+	}
+}
 
 func TestCopyForCheckKeepsDraftAndCachesWithoutChangingSource(t *testing.T) {
 	source := ownerRepo(t)

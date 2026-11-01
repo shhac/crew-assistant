@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,8 @@ import (
 
 func main() { os.Exit(run()) }
 func run() int {
+	scoped := flag.Bool("scoped", false, "Check changed packages and their importers")
+	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var save func(string, checktest.Report, bool) error
@@ -30,7 +33,11 @@ func run() int {
 			return checktest.SaveProgress(path, checktest.Progress{Invocation: invocation, Stage: stage, Report: report, Done: done})
 		}
 	}
-	return runContextProgress(ctx, exec.Command, os.Stdout, os.Stderr, save)
+	var scope *checkScope
+	if *scoped {
+		scope = scopedCheck(func(name string, args ...string) *exec.Cmd { return exec.CommandContext(ctx, name, args...) }, os.Stdout, os.Getenv("CREW_CHANGED_FILES"))
+	}
+	return runScopeProgress(ctx, exec.Command, os.Stdout, os.Stderr, save, scope)
 }
 
 func runWith(newCommand func(string, ...string) *exec.Cmd, stdout, stderr io.Writer) int {
@@ -42,6 +49,10 @@ func runContext(ctx context.Context, newCommand func(string, ...string) *exec.Cm
 }
 
 func runContextProgress(ctx context.Context, newCommand func(string, ...string) *exec.Cmd, stdout, stderr io.Writer, save func(string, checktest.Report, bool) error) (code int) {
+	return runScopeProgress(ctx, newCommand, stdout, stderr, save, nil)
+}
+
+func runScopeProgress(ctx context.Context, newCommand func(string, ...string) *exec.Cmd, stdout, stderr io.Writer, save func(string, checktest.Report, bool) error, scope *checkScope) (code int) {
 	factory := newCommand
 	newCommand = func(name string, args ...string) *exec.Cmd {
 		cmd := factory(name, args...)
@@ -92,53 +103,65 @@ func runContextProgress(ctx context.Context, newCommand func(string, ...string) 
 		cmd.Stderr = stderr
 		return cmd.Run()
 	}
-	if err := command("go", "vet", "./..."); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	packages, frontend := []string{"./..."}, true
+	if scope != nil {
+		packages, frontend = scope.packages, scope.frontend
 	}
-	stage = "Go tests"
-	timeout := os.Getenv("TEST_TIMEOUT")
-	if timeout == "" {
-		timeout = "30m"
-	}
-	if err := checkpoint(false); err != nil {
-		fmt.Fprintln(stderr, "save check progress:", err)
-		return 1
-	}
-	cmd := newCommand("go", "test", "-json", "./...", "-count=1", "-timeout", timeout)
-	cmd.Stderr = stderr
-	pipe, err := cmd.StdoutPipe()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if err = cmd.Start(); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	report, err = checktest.ReadProgress(pipe, runtime.GOOS, func(observed checktest.Report) error {
-		report = observed
-		return checkpoint(false)
-	})
-	if err != nil {
-		_ = pipe.Close()
-		_ = cmd.Cancel()
-	}
-	waitErr := cmd.Wait()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-	}
-	if waitErr != nil {
-		fmt.Fprintln(stderr, waitErr)
-	}
-	if err != nil || waitErr != nil || report.Failed {
-		return 1
-	}
-	for _, target := range []string{"check-ui-types", "check-ui-bundle", "check-ui-tests"} {
-		stage = "frontend " + target
-		if err := command("make", target); err != nil {
+	if len(packages) > 0 {
+		if err := command("go", append([]string{"vet"}, packages...)...); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
+		}
+		stage = "Go tests"
+		timeout := os.Getenv("TEST_TIMEOUT")
+		if timeout == "" {
+			timeout = "30m"
+		}
+		if err := checkpoint(false); err != nil {
+			fmt.Fprintln(stderr, "save check progress:", err)
+			return 1
+		}
+		args := append([]string{"test", "-json"}, packages...)
+		args = append(args, "-count=1", "-timeout", timeout)
+		cmd := newCommand("go", args...)
+		cmd.Stderr = stderr
+		pipe, err := cmd.StdoutPipe()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if err = cmd.Start(); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		report, err = checktest.ReadProgress(pipe, runtime.GOOS, func(observed checktest.Report) error {
+			report = observed
+			return checkpoint(false)
+		})
+		if err != nil {
+			_ = pipe.Close()
+			_ = cmd.Cancel()
+		}
+		waitErr := cmd.Wait()
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+		}
+		if waitErr != nil {
+			fmt.Fprintln(stderr, waitErr)
+		}
+		if err != nil || waitErr != nil || report.Failed {
+			return 1
+		}
+	} else {
+		report.Complete = true
+	}
+	if frontend {
+		for _, target := range []string{"check-ui-types", "check-ui-bundle", "check-ui-tests"} {
+			stage = "frontend " + target
+			if err := command("make", target); err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
 		}
 	}
 	stage = "complete"
