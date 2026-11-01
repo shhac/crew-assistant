@@ -445,7 +445,11 @@ func (lp *Loop) route(ctx context.Context, p core.Project, t core.Task, current 
 	spec.ProjectID, spec.Role = p.ID, core.RolePM
 	spec.TaskID = t.ID
 	spec.Observer = lp.watchTurn(t, core.RolePM, seat, dir, false)
-	lp.withTools(&spec, lp.managerTools(p.ID, seat))
+	// A routing prompt shows only this task, not a queue snapshot on which
+	// a duplicate judgement could safely rely.
+	tools := lp.managerTools(p.ID, seat)
+	tools.duplicateTasks = nil
+	lp.withTools(&spec, tools)
 	var choice routeChoice
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
 		choice, err = parseRoute(reply, options)

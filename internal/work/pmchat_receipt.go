@@ -30,6 +30,11 @@ func (r roleTools) recordChatChange(ctx context.Context, name string, raw json.R
 	case "order_tasks", "queue_task":
 		// These tools record their exact committed result directly.
 		return
+	case "close_duplicate":
+		change.Kind = "closed_duplicate"
+		title := add(in["task_id"])
+		target := add(in["duplicate_of"])
+		change.Summary = "Closed “" + title + "” as a duplicate of “" + target + "”"
 	case "link_tasks":
 		change.Kind = "linked"
 		a, b := add(in["task_id"]), add(in["other_task_id"])

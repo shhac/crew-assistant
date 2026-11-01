@@ -11,6 +11,11 @@ import (
 // registerProjectTasks serves the outcomes the owner asks of a project, and
 // what those produced.
 func registerProjectTasks(mux *http.ServeMux, a *app.App) {
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/pm-actions/{action}/undo", func(w http.ResponseWriter, r *http.Request) {
+		v, err := a.Core.UndoPMAction(r.Context(), r.PathValue("id"), r.PathValue("task"), r.PathValue("action"), core.FromOwner)
+		reply(w, 200, v, err)
+	})
+
 	mux.HandleFunc("POST /api/projects/{id}/tasks/{task}/owner-checks", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Step   string `json:"step"`

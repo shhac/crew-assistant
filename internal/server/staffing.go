@@ -12,6 +12,20 @@ import (
 // them each project works in and is staffed by. Both are listed in the
 // state; several projects may share one.
 func registerStaffing(mux *http.ServeMux, a *app.App) {
+	for _, scope := range []string{"team", "project"} {
+		mux.HandleFunc("PUT /api/"+scope+"s/{id}/pm-policies/{policy}", func(w http.ResponseWriter, r *http.Request) {
+			var in struct {
+				On       *bool  `json:"on"`
+				Revision uint64 `json:"revision"`
+			}
+			if decode(w, r, &in) != nil {
+				return
+			}
+			err := a.Core.SetPMPolicy(r.Context(), scope, r.PathValue("id"), r.PathValue("policy"), in.On, in.Revision, core.FromOwner)
+			reply(w, 200, map[string]bool{"updated": err == nil}, err)
+		})
+	}
+
 	mux.HandleFunc("POST /api/repositories", func(w http.ResponseWriter, r *http.Request) {
 		var in core.RepositoryInput
 		if decode(w, r, &in) != nil {

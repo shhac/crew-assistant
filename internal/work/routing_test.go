@@ -127,8 +127,14 @@ func TestThePMChoosesWhereATaskGoesWhenACheckerRecommendsOtherwise(t *testing.T)
 			if c.pm && (!strings.Contains(asked[0].Prompt, "I want the closing warmer") || asked[0].Write) {
 				t.Fatalf("the PM's read-only turn should carry the recommendation: %s", asked[0].Prompt)
 			}
-			if c.pm && strings.Join(specTools(asked[0]), " ") != pmToolNames {
+			if c.pm && strings.Join(specTools(asked[0]), " ") != pmRoutingToolNames {
 				t.Fatalf("the PM choosing a route should have its task tools: %v", specTools(asked[0]))
+			}
+			if c.pm {
+				result, err := asked[0].Handler.CallTool(context.Background(), session.ToolCall{Name: "close_duplicate", Arguments: []byte(`{"task_id":"` + task.ID + `","duplicate_of":"` + task.ID + `","reason":"Same"}`)})
+				if err != nil || !result.IsError || !strings.Contains(result.Content, "no tool") {
+					t.Fatalf("routing admitted duplicate closure: %+v %v", result, err)
+				}
 			}
 			if c.drafts == 2 {
 				writers := writerTurns(runner)
@@ -293,8 +299,9 @@ func TestRolesReadEveryNoteAPageAtATime(t *testing.T) {
 	}
 }
 
-// pmToolNames are the tools of every PM turn that decides something.
-const pmToolNames = "list_tasks read_task read_notes set_blocker clear_blocker edit_task link_tasks unlink_tasks queue_task add_note"
+// Routing and landing turns cannot close duplicates; queue looks and PM chat can.
+const pmRoutingToolNames = "list_tasks read_task read_notes set_blocker clear_blocker edit_task link_tasks unlink_tasks queue_task add_note"
+const pmToolNames = pmRoutingToolNames + " close_duplicate"
 
 // specTools names the tools a turn was given.
 func specTools(spec roles.Spec) []string {

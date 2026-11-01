@@ -109,6 +109,9 @@ func (r roleTools) guideTools() string {
 func (r roleTools) Definitions() []session.ToolDefinition {
 
 	defs := r.definitions()
+	if r.manages && !r.notesOnly && r.duplicateTasks != nil {
+		defs = append(defs, session.ToolDefinition{Name: "close_duplicate", Description: "Close a queued, never-started task as a duplicate of a named unfinished task in this project (at most 3 per look). Stopped or duplicate targets, pending messages/wakes and tasks whose duplicate closure the owner undid are refused. Owner policy, holds and dependants are checked live. Every closure is logged and the owner can undo it.", Schema: schema([]string{"task_id", "duplicate_of", "reason"})})
+	}
 	if r.checks != nil {
 		defs = append(defs, session.ToolDefinition{Name: "run_check", Description: "Run the project's check in a fresh workspace copy in a daemon-hosted sandbox. Each call waits at most 45 seconds; while still running, call again to wait for the same run. If coverage.more is true, call again to collect the remaining skip evidence from that same check. A call after the final result page starts a new check.", Schema: schema([]string{})})
 	}

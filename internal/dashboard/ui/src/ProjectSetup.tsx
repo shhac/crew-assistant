@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { holds, kindLabel, memberKinds } from "./members";
+import { PMPolicies } from "./StaffingSettings";
 import { isCode } from "./landing";
 import { projectRepository, projectTeam, sharedWith } from "./staffing";
 import { ErrorNotice, useAction } from "./ui";
@@ -147,6 +148,15 @@ export function ProjectSetupCard({
           )}
           <ErrorNotice error={making.error} />
         </>
+      )}
+      {!team && project.playbook && (
+        <PMPolicies
+          scope="project"
+          id={project.id}
+          choices={project.playbook.pm_policies}
+          revision={project.playbook.pm_policies_revision}
+          refresh={refresh}
+        />
       )}
       {project.playbook && (
         <SeatOverrides project={project} state={state} refresh={refresh} />

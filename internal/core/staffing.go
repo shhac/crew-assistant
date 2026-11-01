@@ -13,8 +13,10 @@ import (
 // the PM must escalate. Projects it staffs take its seats, adjusted by their
 // own seat overrides. A member busy in any project is busy in all of them.
 type Team struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	PMPolicies         map[string]bool `json:"pm_policies,omitempty"`
+	PMPoliciesRevision uint64          `json:"pm_policies_revision,omitempty"`
+	ID                 string          `json:"id"`
+	Name               string          `json:"name"`
 	// Template is the template its seats were made from, which a seat given
 	// back to no member returns to.
 	Template  string `json:"template"`
@@ -169,6 +171,7 @@ func (s *Service) CreateTeam(ctx context.Context, in TeamInput) (Team, error) {
 				return errors.New("choose a team first")
 			}
 			t.Template, t.Roles, t.MaxRounds = pb.Template, pb.Roles, pb.MaxRounds
+			t.PMPolicies, t.PMPoliciesRevision = pb.PMPolicies, pb.PMPoliciesRevision
 		} else {
 			template, ok := Templates[t.Template]
 			if !ok {

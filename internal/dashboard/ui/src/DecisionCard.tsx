@@ -157,10 +157,37 @@ export function DecisionCard({
           {decision.context}
         </p>
       )}
-      {!!decision.recommendation && kind.recommend && (
-        <p className="decision-recommendation">
-          <span className="label">Recommended</span> {decision.recommendation}
-        </p>
+      {!!decision.recommendation &&
+        (kind.recommend || !!decision.loop_report) && (
+          <p className="decision-recommendation">
+            <span className="label">Recommended</span> {decision.recommendation}
+          </p>
+        )}
+      {full && decision.loop_report && (
+        <details>
+          <summary>Loop evidence</summary>
+          <p>
+            {decision.loop_report.rounds} rounds used versus limit{" "}
+            {decision.loop_report.limit}; {decision.loop_report.attempts}{" "}
+            handoff attempts.
+          </p>
+          {decision.loop_report.signals.map((signal, index) => (
+            <div className="plan-part" key={index}>
+              <p>
+                {signal.summary} (count {signal.count}; threshold{" "}
+                {signal.threshold})
+              </p>
+              <ul>
+                {signal.sources.map((source, sourceIndex) => (
+                  <li key={sourceIndex}>
+                    {source.kind} {source.id} · {source.at}
+                    {source.text && `: ${source.text}`}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </details>
       )}
       {splitting ? (
         <form className="decision-answer" onSubmit={submitSplit}>

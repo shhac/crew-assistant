@@ -58,7 +58,28 @@ func TestRepositoryTeamAndProjectCommands(t *testing.T) {
 	run(repositoryCommand(o), "set", "Mono", "--check-in-copy", "--run-start", "npm start", "--run-url", "http://127.0.0.1:{port}/")
 	run(teamCommand(o), "add", "Core")
 	run(teamCommand(o), "set", "core", "--max-rounds", "5")
+	run(teamCommand(o), "pm-policy", "team", "Core", "close_duplicate", "off")
+	run(teamCommand(o), "pm-policy", "team", "Core", "rescope", "on")
+	run(teamCommand(o), "pm-policy", "team", "Core", "close_duplicate", "default")
+	_, err = a.Core.CreateProject(t.Context(), core.ProjectInput{Title: "Own", Template: "draft", Brief: core.BriefInput{Goal: "Works"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(teamCommand(o), "pm-policy", "project", "Own", "change_approach", "off")
 	run(projectCommand(o), "setup", "Web", "--team", "Core", "--repository", "Mono", "--area", "web")
+	first, e := a.Core.QueueTask(t.Context(), p.ID, core.TaskInput{Objective: "Duplicate", Criteria: []string{"Works"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	second, e := a.Core.QueueTask(t.Context(), p.ID, core.TaskInput{Objective: "Original", Criteria: []string{"Works"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	action, e := a.Core.CloseDuplicate(t.Context(), p.ID, first.ID, second.ID, "Same outcome", "PM", first)
+	if e != nil {
+		t.Fatal(e)
+	}
+	run(teamCommand(o), "undo-pm-action", "Web", first.ID, action.ID)
 	run(projectCommand(o), "overrides", "Web", "--exclude", "researcher", "--add", "reviewer=Ada")
 	snap, err := a.Core.Snapshot(t.Context())
 	if err != nil {

@@ -161,3 +161,98 @@ describe("splitting an unreachable requirement", () => {
     });
   });
 });
+
+it("keeps loop evidence out of the inbox and behind a full-view disclosure", () => {
+  const loopDecision: Decision = {
+    ...decision,
+    kind: "escalation",
+    context:
+      "This is the 4th identical escalation.\n\nThe same requirement is unresolved.",
+    recommendation: "Choose a smaller scope. No automatic action was taken.",
+    loop_report: {
+      task_id: task.id,
+      rounds: 4,
+      limit: 4,
+      attempts: 8,
+      risk: false,
+      signals: [
+        {
+          kind: "identical_decisions",
+          count: 4,
+          threshold: 2,
+          tripped: true,
+          summary: "4 identical escalations",
+          sources: [
+            {
+              kind: "decision",
+              id: "internal-decision-source",
+              at: "2026-11-01T12:00:00Z",
+              text: "Original source",
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const { container, rerender } = render(
+    <DecisionCard
+      decision={loopDecision}
+      task={task}
+      refresh={async () => {}}
+    />,
+  );
+  expect(container.textContent).toContain("4th identical escalation");
+  expect(container.textContent).not.toContain("internal-decision-source");
+  expect(container.textContent).not.toContain("handoff attempts");
+  expect(screen.queryByText("Loop evidence")).toBeNull();
+  rerender(
+    <DecisionCard
+      decision={loopDecision}
+      task={task}
+      refresh={async () => {}}
+      full
+    />,
+  );
+  const disclosure = screen.getByText("Loop evidence").closest("details")!;
+  expect(disclosure.open).toBe(false);
+  fireEvent.click(screen.getByText("Loop evidence"));
+  expect(disclosure.open).toBe(true);
+  expect(disclosure.textContent).toContain("internal-decision-source");
+  expect(disclosure.textContent).toContain("2026-11-01T12:00:00Z");
+  expect(disclosure.textContent).toContain("8 handoff attempts");
+  const ownerContext = container.querySelector(".decision-context")!;
+  expect(ownerContext.textContent).not.toContain("internal-decision-source");
+  expect(ownerContext.textContent).not.toContain("handoff");
+});
+
+it.each(["question", "failure", "escalation"])(
+  "shows one loop recommendation for an owner %s decision",
+  (kind) => {
+    const value: Decision = {
+      ...decision,
+      kind,
+      context: "The team has repeated the same research 3 times.",
+      recommendation: "Choose a smaller scope. No automatic action was taken.",
+      loop_report: {
+        task_id: task.id,
+        rounds: 1,
+        limit: 3,
+        attempts: 3,
+        risk: false,
+        signals: [],
+      },
+    };
+    const { container } = render(
+      <DecisionCard decision={value} task={task} refresh={async () => {}} />,
+    );
+    expect(
+      screen.getByText(
+        "Choose a smaller scope. No automatic action was taken.",
+      ),
+    ).toBeTruthy();
+    expect(container.querySelectorAll(".decision-recommendation")).toHaveLength(
+      1,
+    );
+    expect(screen.queryByText("Loop evidence")).toBeNull();
+  },
+);

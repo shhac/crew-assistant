@@ -168,6 +168,8 @@ export interface ReleaseRecord {
   note?: string;
 }
 export interface Playbook {
+  pm_policies?: Record<string, boolean>;
+  pm_policies_revision?: number;
   disabled_bundled_skills?: string[];
   release?: ReleasePolicy;
   template: string;
@@ -365,6 +367,8 @@ export interface CodeArea {
 export type RepositoryInput = Omit<Repository, "id">;
 /** Default seats by kind of role, a PM among them, and rounds. */
 export interface Team {
+  pm_policies?: Record<string, boolean>;
+  pm_policies_revision?: number;
   id: string;
   name: string;
   template: string;
@@ -815,6 +819,16 @@ export interface Task {
   current_design?: string;
   research?: ResearchRequest[];
   edits?: TaskEdit[];
+  pm_actions?: {
+    id: string;
+    policy: string;
+    reason: string;
+    by: string;
+    status: string;
+    at: string;
+    effects: { duplicate_of?: string; duplicate_label?: string };
+  }[];
+  duplicate_of?: string;
   notes?: Note[];
   attachments?: Attachment[];
   /** Ids of the tasks that must land before this one starts. */
@@ -873,7 +887,23 @@ export interface OwnerSplit {
   team: string;
   owner: string;
 }
+export interface LoopReport {
+  task_id: string;
+  rounds: number;
+  limit: number;
+  attempts: number;
+  risk: boolean;
+  signals: {
+    kind: string;
+    count: number;
+    threshold: number;
+    tripped: boolean;
+    summary: string;
+    sources: { kind: string; id: string; at: string; text?: string }[];
+  }[];
+}
 export interface Decision {
+  loop_report?: LoopReport;
   owner_step?: { criterion: string; step: string };
   split?: OwnerSplit;
   answer?: string;
@@ -2049,4 +2079,27 @@ export function setSeatOverrides(
     method: "PUT",
     body: JSON.stringify({ overrides }),
   });
+}
+
+export function setPMPolicy(
+  scope: "team" | "project",
+  id: string,
+  policy: string,
+  on: boolean | null,
+  revision: number,
+) {
+  return api(
+    `/api/${scope}s/${encodeURIComponent(id)}/pm-policies/${encodeURIComponent(policy)}`,
+    { method: "PUT", body: JSON.stringify({ on, revision }) },
+  );
+}
+export function undoPMAction(
+  projectID: string,
+  taskID: string,
+  actionID: string,
+) {
+  return api<Task>(
+    `${projectPath(projectID)}/tasks/${encodeURIComponent(taskID)}/pm-actions/${encodeURIComponent(actionID)}/undo`,
+    { method: "POST", body: "{}" },
+  );
 }

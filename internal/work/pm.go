@@ -112,7 +112,7 @@ func (lp *Loop) pmTurn(ctx context.Context, projectID string, seat core.Role) er
 	spec := lp.baseSpec(seat, dir, base)
 	spec.ProjectID, spec.Role = p.ID, core.RolePM
 	spec.Observer = lp.watchTurn(core.Task{ProjectID: p.ID}, core.RolePM, seat, dir, false)
-	lp.withTools(&spec, lp.managerTools(p.ID, seat).proposing(p.Playbook))
+	lp.withTools(&spec, lp.managerTools(p.ID, seat, snap).proposing(p.Playbook))
 	var answer core.PMAnswer
 	var questions []string
 	_, _, parseErr, err := lp.askForJSON(ctx, spec, func(reply string) (err error) {
@@ -199,7 +199,7 @@ func pmPrompt(snap core.Snapshot, p core.Project) string {
 	b.WriteString(pmTeamLine(p))
 	b.WriteString("For work needing raster illustrations, name a designer who can generate images in the requirements you tidy with edit_task.\n")
 	b.WriteString(`
-The order is yours to set directly. Never ask the owner to approve or confirm an order. Ask only for decisions only the owner can make, such as conflicting priorities in the brief or their words. Decide the order the queued tasks start in, and what each unfinished task has to wait for. A task waits for another when it builds on what the other will change; without stacking, a task never starts before what it waits for has landed. Put first what unblocks the most, then what the owner most needs. Keep the tasks themselves in order too: where a title or requirements are messy, tidy them; where a task should be split or needs a sibling, queue it; where one task depends on another, link them. Do not plan or build anything yourself, and do not direct, stop or land anyone's work.
+The order is yours to set directly. Never ask the owner to approve or confirm an order. Ask only for decisions only the owner can make, such as conflicting priorities in the brief or their words. Decide the order the queued tasks start in, and what each unfinished task has to wait for. A task waits for another when it builds on what the other will change; without stacking, a task never starts before what it waits for has landed. Put first what unblocks the most, then what the owner most needs. Keep the tasks themselves in order too: where a title or requirements are messy, tidy them; where a task should be split or needs a sibling, queue it; where one task depends on another, link them. Do not plan or build anything yourself, and do not direct, stop started work or land anyone's work. You may use close_duplicate, when offered, to close never-started queued duplicates of a named existing task.
 `)
 	switch p.OrderedBy {
 	case core.OrderedByOwner, core.OrderedByAssistant:
@@ -270,6 +270,9 @@ func pmTasks(b *strings.Builder, snap core.Snapshot, p core.Project) {
 			continue
 		}
 		fmt.Fprintf(b, "- %s (%s): %s\n", t.Label(), t.Status, text.Clip(t.Objective, 300))
+		if report := core.LoopSignals(snap, t.ID); report.Looping() {
+			fmt.Fprintf(b, "  %s\n%s\n", report.Summary(), strings.SplitN(report.Recommend(snap, p.ID), "\n", 2)[0])
+		}
 		if t.Plan != nil {
 			fmt.Fprintf(b, "  plan: %s\n", text.Clip(t.Plan.Summary, 400))
 			if len(t.Plan.Changes) > 0 {

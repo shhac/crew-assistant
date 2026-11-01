@@ -364,6 +364,9 @@ func escalationPrompt(snap core.Snapshot, p core.Project, t core.Task, current [
 	if len(t.Criteria) > 0 {
 		b.WriteString("Its criteria:\n" + numbered(t.Criteria))
 	}
+	if report := core.LoopSignals(snap, t.ID); report.Looping() {
+		fmt.Fprintf(&b, "\n%s\n%s\n", report.Explain(), report.Recommend(snap, p.ID))
+	}
 	r := t.Revisions[len(t.Revisions)-1]
 	fmt.Fprintf(&b, "\nIt has had %d rounds, its limit, and the checks of draft %d still send it back:\n", t.Round, r.N)
 	for _, v := range current {

@@ -140,9 +140,9 @@ func (lp *Loop) pmChatTurn(ctx context.Context, projectID string, m core.PMChatM
 	pmTasks(&b, snap, p)
 	pmTriage(&b, snap, p)
 	b.WriteString("\nRecent project conversation:\n" + pmChatHistory(snap, p.ID, m.ID, 20))
-	fmt.Fprintf(&b, "\nThe owner asks:\n%s\n\nReply in plain words about this project. You may tidy tasks, link them, queue siblings, add notes and order the queued list with order_tasks. Do not build, direct, stop or land work. Do not send triage tasks on; your next look handles that. Explain what you changed and why. This conversation is owner-initiated even when work is paused; your changes start no work while paused.", m.Text)
+	fmt.Fprintf(&b, "\nThe owner asks:\n%s\n\nReply in plain words about this project. You may tidy tasks, link them, queue siblings, add notes and order the queued list with order_tasks. You may use close_duplicate, when offered, to close never-started queued duplicates of a named existing task. Do not build, direct, stop started work or land work. Do not send triage tasks on; your next look handles that. Explain what you changed and why. This conversation is owner-initiated even when work is paused; your changes start no work while paused.", m.Text)
 	changes := &pmChatChanges{}
-	tools := lp.managerTools(p.ID, seat).proposing(p.Playbook)
+	tools := lp.managerTools(p.ID, seat, snap).proposing(p.Playbook)
 	tools.chat = changes
 	spec := lp.baseSpec(seat, dir, b.String())
 	spec.ProjectID, spec.Role = p.ID, core.RolePM

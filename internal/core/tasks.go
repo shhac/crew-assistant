@@ -15,8 +15,10 @@ import (
 // copied from the playbook when it starts, so a playbook change never reshapes
 // work already under way.
 type Task struct {
-	ID        string `json:"id"`
-	ProjectID string `json:"project_id"`
+	PMActions   []PMAction `json:"pm_actions,omitempty"`
+	DuplicateOf string     `json:"duplicate_of,omitempty"`
+	ID          string     `json:"id"`
+	ProjectID   string     `json:"project_id"`
 	// Number is the task's place in its project's creation order, from
 	// which its readable ID is made; see refs.go.
 	Number int `json:"number,omitempty"`
@@ -839,11 +841,28 @@ func (in DecisionInput) validTaskDecision() error {
 
 // openTaskDecision holds a task for a decision, within a change.
 func openTaskDecision(v *Snapshot, t *Task, kind string, in DecisionInput, now time.Time) Decision {
+	if existing := decision(v, t.DecisionID); (kind == DecisionEscalation || kind == DecisionFailure || kind == DecisionQuestion) && t.Status == TaskWaiting && existing != nil && existing.Status == DecisionOpen && existing.Kind == kind && existing.Title == in.Title && (existing.Context == in.Context || originalDecisionContext(*existing) == in.Context) && slices.Equal(existing.Choices, in.Choices) && existing.matchesWork(t, briefVersion(v, *t)) {
+		return *existing
+	}
+
 	d := Decision{ID: uid(), Kind: kind, TaskID: t.ID, ProjectID: t.ProjectID, Title: in.Title, Context: in.Context, Recommendation: in.Recommendation, Choices: in.Choices, FollowUp: in.FollowUp, OwnerStep: in.OwnerStep, Status: DecisionOpen, CreatedAt: now, Revision: len(t.Revisions), BriefVersion: briefVersion(v, *t), TextVersion: t.TextVersion}
-	t.Status = TaskWaiting
-	t.DecisionID = d.ID
-	t.UpdatedAt = now
+	// Include the new decision in recurrence counts while retaining the
+	// task's pre-hold landing state for acceptance checks.
 	v.Decisions = append(v.Decisions, d)
+	if kind == DecisionEscalation || kind == DecisionFailure || kind == DecisionQuestion {
+		report := LoopSignals(*v, t.ID)
+		relevant := kind != DecisionQuestion || in.LoopEvidence || slices.ContainsFunc(report.Signals, func(s LoopSignal) bool {
+			return s.Kind == "owner_questions" && s.Tripped && slices.ContainsFunc(s.Sources, func(source LoopSource) bool { return source.ID == d.ID })
+		})
+		if report.Looping() && relevant {
+			d.LoopReport = &report
+			d.Context = report.OwnerExplanation() + "\n\n" + in.Context
+			d.Recommendation = report.annotateRecommendation(*v, t.ProjectID, in.Recommendation)
+			v.Decisions[len(v.Decisions)-1] = d
+		}
+	}
+
+	t.Status, t.DecisionID, t.UpdatedAt = TaskWaiting, d.ID, now
 	recordTask(v, now, t, "decision.opened", in.Title)
 	return d
 }

@@ -99,11 +99,13 @@ const (
 // schema, not a workflow language; a field is added only when a real project
 // needs it.
 type Playbook struct {
-	DisabledBundledSkills []string `json:"disabled_bundled_skills,omitempty"`
-	Template              string   `json:"template"`
-	Medium                string   `json:"medium"`
-	Roles                 []Role   `json:"roles"`
-	MaxRounds             int      `json:"max_rounds"`
+	PMPolicies            map[string]bool `json:"pm_policies,omitempty"`
+	PMPoliciesRevision    uint64          `json:"pm_policies_revision,omitempty"`
+	DisabledBundledSkills []string        `json:"disabled_bundled_skills,omitempty"`
+	Template              string          `json:"template"`
+	Medium                string          `json:"medium"`
+	Roles                 []Role          `json:"roles"`
+	MaxRounds             int             `json:"max_rounds"`
 	// Deliver names who approves an outward delivery. Only the owner does, for
 	// now: trust is extended per playbook once there is evidence to extend it.
 	Deliver string `json:"deliver"`

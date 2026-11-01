@@ -151,15 +151,21 @@ func (s *Service) AskResearch(ctx context.Context, taskID string, ask ResearchAs
 		now := s.now().UTC()
 		r := ResearchRequest{ID: uid(), From: ask.From, Round: t.Round, Revision: ask.Revision, Question: text.Clip(ask.Question, 4000), At: now}
 		researcher, ok := t.Researcher()
-		if !ok || t.ResearchThisRound() >= ResearchLimit {
-			d := openTaskDecision(v, t, DecisionQuestion, ask.Owner, now)
+		researchLimit := t.ResearchThisRound() >= ResearchLimit
+		atLimit := !ok || researchLimit
+		// Include the request that reaches the limit in the owner's loop evidence.
+		t.Research = append(t.Research, r)
+		if atLimit {
+			in := ask.Owner
+			in.LoopEvidence = researchLimit
+			d := openTaskDecision(v, t, DecisionQuestion, in, now)
 			r.Decision = d.ID
 			t.Asker = &Asker{Decision: d.ID, From: ask.From, Step: TaskReviewing, Revision: ask.Revision}
 		} else {
 			t.Status, t.Detail = TaskResearching, "With "+researcher.Name+" for more research"
 			recordTask(v, now, t, "task.researching", fmt.Sprintf("%s sent %s back to %s for more research", ask.From, t.Objective, researcher.Name))
 		}
-		t.Research = append(t.Research, r)
+		t.Research[len(t.Research)-1] = r
 		t.Failures, t.RetryAt = 0, time.Time{}
 		t.UpdatedAt = now
 		derive(v, t)

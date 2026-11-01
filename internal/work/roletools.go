@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/shhac/lib-agent-harness/session"
 
@@ -42,9 +43,12 @@ type roleTools struct {
 	relations []string
 	// manages is the PM looking after the whole list: it names the task in
 	// every change, and may queue new ones, at most maxPMQueued a look.
-	manages bool
-	queued  *int
-	chat    *pmChatChanges
+	manages        bool
+	queued         *int
+	duplicates     *int
+	duplicateTasks map[string]core.Task
+	duplicateMu    *sync.Mutex
+	chat           *pmChatChanges
 	// notesOnly limits the PM to leaving notes, for a turn that answers a
 	// question and so changes nothing else.
 	notesOnly bool
@@ -123,8 +127,26 @@ func relationsFor(kind string) []string {
 // change lands. It looks across the list rather than working on one task,
 // and may tidy any unfinished task's title and requirements, link tasks,
 // queue a split or a sibling task, and leave notes.
-func (lp *Loop) managerTools(projectID string, seat core.Role) roleTools {
+func (lp *Loop) managerTools(projectID string, seat core.Role, shown ...core.Snapshot) roleTools {
 	r := roleTools{lp: lp, projectID: projectID, by: core.LinkedByPM, name: seatName(seat, core.RolePM), kind: core.RolePM, manages: true, queued: new(int)}
+	r.duplicates = new(int)
+	r.duplicateMu = new(sync.Mutex)
+	var snap core.Snapshot
+	var err error
+	if len(shown) > 0 {
+		snap = shown[0]
+	} else {
+		snap, err = lp.Core.Snapshot(context.Background())
+	}
+	if err == nil && core.PMPolicyOn(snap, projectID, "close_duplicate") {
+		r.duplicateTasks = map[string]core.Task{}
+		for _, t := range snap.Tasks {
+			if t.ProjectID == projectID {
+				r.duplicateTasks[t.ID] = t
+				r.duplicateTasks[t.Ref] = t
+			}
+		}
+	}
 	r.lin = lp.linBinding(projectID)
 	r.stacks = lp.stacking(projectID)
 	return r
@@ -184,6 +206,23 @@ func (r roleTools) execute(ctx context.Context, name string, raw json.RawMessage
 		taskID, while = in["task_id"], ""
 	}
 	switch name {
+	case "close_duplicate":
+		if r.duplicateMu != nil {
+			r.duplicateMu.Lock()
+			defer r.duplicateMu.Unlock()
+		}
+		if r.duplicates == nil || *r.duplicates >= 3 {
+			return "", errors.New("at most 3 duplicate closures per look")
+		}
+		seen, ok := r.duplicateTasks[taskID]
+		if !ok {
+			return "", errNoTask
+		}
+		_, err := r.lp.Core.CloseDuplicate(ctx, r.projectID, taskID, in["duplicate_of"], in["reason"], r.name, seen)
+		if err == nil {
+			*r.duplicates++
+		}
+		return changed("Closed queued duplicate.", hideProjects(err))
 	case "run_check":
 		return r.checks.call(ctx)
 	case "order_tasks":

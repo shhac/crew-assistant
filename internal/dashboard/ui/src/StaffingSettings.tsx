@@ -10,6 +10,7 @@ import {
 } from "./staffing";
 import { ErrorNotice, useAction } from "./ui";
 import {
+  setPMPolicy,
   addTeamSeat,
   createRepository,
   createTeam,
@@ -492,6 +493,13 @@ function TeamCard({
     <section className="tab-panel card settings-panel" aria-label={t.name}>
       <h2>{t.name}</h2>
       <UsedBy users={users} what="team" />
+      <PMPolicies
+        scope="team"
+        id={t.id}
+        choices={t.pm_policies}
+        revision={t.pm_policies_revision}
+        refresh={refresh}
+      />
       <ul className="rows" aria-label="Seats">
         {t.roles.map((r) => (
           <li key={r.name} className="integration">
@@ -630,5 +638,95 @@ function TeamCard({
         </div>
       </div>
     </section>
+  );
+}
+
+const pmPolicies = [
+  [
+    "rescope",
+    "Split secondary requirements",
+    "Preserve the core purpose and keep every moved requirement in a follow-up.",
+  ],
+  [
+    "accept_leftovers",
+    "Accept narrow leftovers",
+    "Only safe leftovers, with no P1, security or data-loss issue.",
+  ],
+  [
+    "pause_loop",
+    "Consolidate a looping task",
+    "Bring one decision with loop evidence and a smaller scope.",
+  ],
+  [
+    "change_approach",
+    "Propose a new approach",
+    "After two failures, propose an alternative; you confirm any stop.",
+  ],
+  [
+    "close_duplicate",
+    "Close queued duplicates",
+    "Only never-started tasks with no unfinished dependants. Every closure has undo.",
+  ],
+] as const;
+
+/** Existing form controls, independently owned by the owner, not Geoffrey. */
+export function PMPolicies({
+  scope,
+  id,
+  choices,
+  revision,
+  refresh,
+}: {
+  scope: "team" | "project";
+  id: string;
+  choices?: Record<string, boolean>;
+  revision?: number;
+  refresh: () => Promise<void>;
+}) {
+  const { busy, error, run } = useAction();
+  return (
+    <fieldset className="form">
+      <legend>PM policies</legend>
+      <p className="hint">
+        Separate from assistant automation. All five default On. The first four
+        explain and recommend for now.
+      </p>
+      {pmPolicies.map(([key, label, caption]) => (
+        <label key={key}>
+          {label}
+          <select
+            className="field"
+            aria-label={label}
+            disabled={busy}
+            value={
+              choices?.[key] === undefined
+                ? "default"
+                : choices[key]
+                  ? "on"
+                  : "off"
+            }
+            onChange={(e) => {
+              const value = e.target.value;
+              void run(async () => {
+                await setPMPolicy(
+                  scope,
+                  id,
+                  key,
+                  value === "default" ? null : value === "on",
+                  revision ?? 0,
+                );
+                await refresh();
+              });
+            }}
+          >
+            <option value="default">Default (On)</option>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+          <span className="hint">{caption}</span>
+        </label>
+      ))}
+      <ErrorNotice error={error} />
+    </fieldset>
   );
 }

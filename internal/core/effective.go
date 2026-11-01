@@ -46,6 +46,7 @@ func (v Snapshot) basePlaybook(p Project) (Playbook, bool) {
 	}
 	if t := v.Team(p.Team); t != nil {
 		pb.Roles, pb.MaxRounds = cloneRoles(t.Roles), t.MaxRounds
+		pb.PMPolicies, pb.PMPoliciesRevision = maps.Clone(t.PMPolicies), t.PMPoliciesRevision
 	}
 	return pb, true
 }
@@ -112,6 +113,7 @@ func withoutPlaybooks(projects []Project) []Project {
 }
 
 func clonePlaybook(p Playbook) Playbook {
+	p.PMPolicies = maps.Clone(p.PMPolicies)
 	p.Roles = cloneRoles(p.Roles)
 	p.Prepare = slices.Clone(p.Prepare)
 	p.Tools = slices.Clone(p.Tools)
@@ -159,6 +161,12 @@ func cloneRoles(roles []Role) []Role {
 // repository and team it wrote, if any.
 func placePlaybook(v *Snapshot, p *Project, after Playbook) (repoID, teamID string) {
 	own := clonePlaybook(after)
+	// PM authority has its own owner-only, revision-checked operation. A
+	// playbook replacement must neither reset explicit choices nor grant it.
+	own.PMPolicies, own.PMPoliciesRevision = nil, 0
+	if p.Settings != nil {
+		own.PMPolicies, own.PMPoliciesRevision = maps.Clone(p.Settings.PMPolicies), p.Settings.PMPoliciesRevision
+	}
 	r := v.Repository(firstRepository(*p))
 	switch {
 	case after.Medium != MediumGit:

@@ -37,7 +37,7 @@ func TestPMChatRepliesInProjectWhilePaused(t *testing.T) {
 				t.Fatal(err)
 			}
 			lp.runner = pmChatRunner{run: func(_ context.Context, s roles.Spec) (roles.Result, error) {
-				for _, want := range []string{p.Brief.Goal, first.Objective, "Team: ", "Pim (pm)", "New question"} {
+				for _, want := range []string{p.Brief.Goal, first.Objective, "Team: ", "Pim (pm)", "New question", "close_duplicate, when offered", "never-started queued duplicates", "Do not build, direct, stop started work or land work"} {
 					if !strings.Contains(s.Prompt, want) {
 						t.Errorf("prompt lacks %q", want)
 					}

@@ -165,6 +165,9 @@ const (
 )
 
 type Decision struct {
+	// LoopReport is the evidence shown for this decision, not detector history.
+	LoopReport *LoopReport `json:"loop_report,omitempty"`
+
 	// Acceptance applies only to the work shown when the decision opened.
 	// Applied and FollowUpID make applying that choice replay-safe.
 	Revision         int    `json:"revision,omitempty"`
@@ -320,6 +323,8 @@ type ProjectInput struct {
 }
 
 type DecisionInput struct {
+	// LoopEvidence marks a research-limit decision, not an ordinary new question.
+	LoopEvidence bool `json:"-"`
 	// Against fences a checked continuation before stamping current versions.
 	Against        *DecisionVersions `json:"-"`
 	ProjectID      string            `json:"project_id,omitempty"`

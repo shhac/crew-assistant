@@ -220,7 +220,12 @@ export function RequestPanel({
               )}
             </section>
           )}
-          <RequestEdits task={task} closed={finished(task)} refresh={refresh} />
+          <RequestEdits
+            task={task}
+            closed={finished(task)}
+            refresh={refresh}
+            tasks={state.tasks}
+          />
           <RequestRelations
             project={project}
             projects={state.projects}
@@ -230,7 +235,10 @@ export function RequestPanel({
             refresh={refresh}
           />
           <TaskLinear project={project} task={task} refresh={refresh} />
-          <TeamTurnHistory scope={{ project: project.id, task: task.id }} state={state} />
+          <TeamTurnHistory
+            scope={{ project: project.id, task: task.id }}
+            state={state}
+          />
         </div>
       )}
       {task && seat && (

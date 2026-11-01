@@ -157,7 +157,7 @@ func TestThePMLandsASignedOffChangeOnAPushProject(t *testing.T) {
 	if w.asked() != 1 {
 		t.Fatalf("the PM was asked %d times", w.asked())
 	}
-	if got := w.landingTools(); got != pmToolNames {
+	if got := w.landingTools(); got != pmRoutingToolNames {
 		t.Fatalf("the PM deciding a landing should have its task tools: %s", got)
 	}
 	for _, spec := range w.runner.seen {

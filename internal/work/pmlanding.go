@@ -88,7 +88,9 @@ func (lp *Loop) pmLanding(ctx context.Context, p core.Project, t core.Task, r co
 	spec.ProjectID, spec.Role = p.ID, core.RolePM
 	spec.TaskID = t.ID
 	spec.Observer = lp.watchTurn(t, core.RolePM, seat, dir, false)
-	lp.withTools(&spec, lp.managerTools(p.ID, seat))
+	tools := lp.managerTools(p.ID, seat, snap)
+	tools.duplicateTasks = nil // Landing judges this deliverable, not queue housekeeping.
+	lp.withTools(&spec, tools)
 	var decided core.LandDecision
 	var sendBack string
 

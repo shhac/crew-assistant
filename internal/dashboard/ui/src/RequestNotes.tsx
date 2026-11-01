@@ -12,6 +12,7 @@ import { AttachmentList } from "./RequestAttachments";
 import {
   addNote,
   undoTaskEdit,
+  undoPMAction,
   type Note,
   type Task,
   type TaskEdit,
@@ -174,19 +175,55 @@ export function RequestEdits({
   task,
   closed,
   refresh,
+  tasks = [],
 }: {
   task: Task;
   closed: boolean;
   refresh: () => Promise<void>;
+  tasks?: Task[];
 }) {
   const { busy, error, run } = useAction();
   const box = useNewestInView<HTMLDivElement>("top");
   const edits: TaskEdit[] = [...(task.edits ?? [])].reverse();
-  if (!edits.length) return null;
+  if (!edits.length && !task.pm_actions?.length) return null;
   return (
     <section className="section" aria-label="Changes to what was asked">
       <h3>Changes to what was asked</h3>
       <div className="bounded" {...box}>
+        {task.pm_actions?.map((a) => {
+          const target = tasks.find((t) => t.id === a.effects.duplicate_of);
+          const label =
+            target?.ref || a.effects.duplicate_label || target?.objective;
+          const description =
+            a.policy === "close_duplicate"
+              ? `Closed as a duplicate${label ? ` of ${label}` : ""}`
+              : "Team action";
+          return (
+            <div key={a.id} className="plan-part">
+              <p className="label">
+                {a.by} · {a.status === "undone" ? "Undone" : "Done"}
+              </p>
+              <p>{description}</p>
+              <p>{a.reason}</p>
+              {a.status === "performed" && (
+                <button
+                  type="button"
+                  className="link-button small"
+                  disabled={busy}
+                  aria-label="Undo PM duplicate closure"
+                  onClick={() =>
+                    void run(async () => {
+                      await undoPMAction(task.project_id, task.id, a.id);
+                      await refresh();
+                    })
+                  }
+                >
+                  Undo
+                </button>
+              )}
+            </div>
+          );
+        })}
         {edits.map((e) => (
           <div key={e.id} className="plan-part">
             <p className="label">

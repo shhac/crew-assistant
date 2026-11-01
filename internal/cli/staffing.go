@@ -306,7 +306,7 @@ func teamCommand(o *options) *cobra.Command {
 		}
 		return o.emit(v)
 	}}
-	cmd.AddCommand(add, set, seat, &cobra.Command{Use: "remove <team>", Short: "Remove a team no project is staffed by", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd.AddCommand(pmPolicyCommand(o), undoPMActionCommand(o), add, set, seat, &cobra.Command{Use: "remove <team>", Short: "Remove a team no project is staffed by", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		t, _, err := o.findTeam(args[0])
 		if err != nil {
 			return err
@@ -413,4 +413,59 @@ func projectCommand(o *options) *cobra.Command {
 	overrides.Flags().Bool("clear", false, "Take every override away")
 	cmd.AddCommand(setup, overrides)
 	return cmd
+}
+
+// pmPolicyCommand uses the current policy revision, so concurrent controls fail
+// visibly rather than overwriting the owner's other choice.
+func pmPolicyCommand(o *options) *cobra.Command {
+	return &cobra.Command{Use: "pm-policy <team|project> <name> <policy> <on|off|default>", Short: "Set an owner PM policy independently of assistant automation", Args: cobra.ExactArgs(4), RunE: func(cmd *cobra.Command, args []string) error {
+		var on *bool
+		switch args[3] {
+		case "on", "off":
+			value := args[3] == "on"
+			on = &value
+		case "default":
+		default:
+			return fmt.Errorf("choose on, off or default")
+		}
+		var id string
+		var revision uint64
+		switch args[0] {
+		case "team":
+			t, _, err := o.findTeam(args[1])
+			if err != nil {
+				return err
+			}
+			id, revision = t.ID, t.PMPoliciesRevision
+		case "project":
+			p, _, err := o.findProject(args[1])
+			if err != nil {
+				return err
+			}
+			id = p.ID
+			if p.Settings != nil {
+				revision = p.Settings.PMPoliciesRevision
+			}
+		default:
+			return fmt.Errorf("choose team or project")
+		}
+		v, err := o.request("PUT", "/api/"+args[0]+"s/"+url.PathEscape(id)+"/pm-policies/"+url.PathEscape(args[2]), map[string]any{"on": on, "revision": revision})
+		if err != nil {
+			return err
+		}
+		return o.emit(v)
+	}}
+}
+func undoPMActionCommand(o *options) *cobra.Command {
+	return &cobra.Command{Use: "undo-pm-action <project> <task> <action>", Short: "Undo a checked PM action", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
+		p, _, err := o.findProject(args[0])
+		if err != nil {
+			return err
+		}
+		v, err := o.request("POST", "/api/projects/"+url.PathEscape(p.ID)+"/tasks/"+url.PathEscape(args[1])+"/pm-actions/"+url.PathEscape(args[2])+"/undo", nil)
+		if err != nil {
+			return err
+		}
+		return o.emit(v)
+	}}
 }
